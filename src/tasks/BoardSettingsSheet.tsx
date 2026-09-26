@@ -23,6 +23,8 @@ type BoardSettingsSheetProps = {
   showAllLevels: boolean;
   onShowAllLevels: (value: boolean) => void;
   onClose: () => void;
+  /** A dialog is open over the sheet (Complete sprint): it handles Escape, and the sheet waits. */
+  suspended?: boolean;
   /** The owner's actions that open their own dialogs. */
   onRename: () => void;
   onShare: () => void;
@@ -52,7 +54,7 @@ export function structurePreview(structure: BoardStructure) {
  * 390 px and a right-hand panel on desktop; the board's dialog guard closes it on Back (D69). Only
  * the owner edits; everyone sees the structure and the per-viewer display option.
  */
-export function BoardSettingsSheet({ board, owner, showAllLevels, onShowAllLevels, onClose, onRename, onShare, onDelete, onAddColumn, onStructureSaved, notify, sprintsSection }: BoardSettingsSheetProps) {
+export function BoardSettingsSheet({ board, owner, showAllLevels, onShowAllLevels, onClose, onRename, onShare, onDelete, onAddColumn, onStructureSaved, notify, sprintsSection, suspended = false }: BoardSettingsSheetProps) {
   const saved = structureOf(board);
   const [draft, setDraft] = useState<BoardStructure>(saved);
   const [error, setError] = useState<string | null>(null);
@@ -64,13 +66,13 @@ export function BoardSettingsSheet({ board, owner, showAllLevels, onShowAllLevel
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || event.defaultPrevented) return;
+      if (event.key !== "Escape" || event.defaultPrevented || suspended) return;
       event.preventDefault();
       onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, suspended]);
 
   const update = (next: BoardStructure) => {
     setDraft(next);
