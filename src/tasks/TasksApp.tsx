@@ -6,7 +6,7 @@ import { ReadOnlyBanner, useRole } from "../team/roleAccess";
 import { readHistoryDepth } from "../appShellNavigation";
 import { popStateClosedDialog } from "../historyDialogs";
 import { formatRoute, locationUrl, routeFromLocation, type Route } from "../router";
-import { fullPageAction, tasksBackAction, tasksHomeRoute, tasksRoute, withFromDialogHint, type TasksRoute } from "../tasksRoute";
+import { cardCloseAction, createTasksEntryLog, fullPageAction, tasksBackAction, tasksHomeRoute, tasksRoute, withFromDialogHint, type TasksRoute } from "../tasksRoute";
 import { TasksHome } from "./home/TasksHome";
 import type { TasksHome as TasksHomeRoute } from "./home/homeUrl";
 import { BoardView } from "./BoardView";
@@ -57,22 +57,33 @@ export function TasksApp({ userId, displayName, navigate, onHome, onBin, onSetti
   // App's navigate is recreated on every render; read it through a ref so effects run once.
   const navigateRef = useRef(navigate);
   navigateRef.current = navigate;
+  // The entries this visit wrote or landed on (review L6): closing a card steps back only onto one.
+  const entryLogRef = useRef(createTasksEntryLog());
+  const noteEntry = useCallback((wrote: boolean) => {
+    entryLogRef.current.note(readHistoryDepth(window.history.state), locationUrl(window.location), wrote);
+  }, []);
+  useEffect(() => { noteEntry(false); }, [noteEntry]);
 
   useEffect(() => {
     const onPopState = (event: PopStateEvent) => {
       if (popStateClosedDialog(event)) return;
       const next = routeFromLocation(window.location);
-      if (next.app === "tasks") setRoute(next);
+      if (next.app !== "tasks") return;
+      setRoute(next);
+      noteEntry(false);
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
-  }, []);
+  }, [noteEntry]);
 
 
   const go = useCallback((next: TasksRoute, replace = false) => {
     setRoute(next);
-    if (formatRoute(next) !== locationUrl(window.location) || replace) navigateRef.current(next, { replace });
-  }, []);
+    if (formatRoute(next) !== locationUrl(window.location) || replace) {
+      navigateRef.current(next, { replace });
+      noteEntry(true);
+    }
+  }, [noteEntry]);
 
   const back = useCallback(() => {
     const action = tasksBackAction(routeRef.current, readHistoryDepth(window.history.state));
@@ -82,7 +93,8 @@ export function TasksApp({ userId, displayName, navigate, onHome, onBin, onSetti
   }, [go, onHome]);
 
   // A card is a view with its own entry: opening pushes it, and closing steps back to the board
-  // (or replaces a deep-linked card entry with its board). The card's URL carries the board's
+  // (or replaces the entry with its board when the entry below is not one this visit saw: a deep
+  // link, a reload, or a card opened from Notifications or another app, review L6). The card's URL carries the board's
   // query, so closing it returns to the same view and filters (D112).
   const openCard = useCallback((cardId: string) => {
     const { boardId, query } = routeRef.current;
@@ -97,7 +109,10 @@ export function TasksApp({ userId, displayName, navigate, onHome, onBin, onSetti
     window.history.replaceState(withFromDialogHint(window.history.state), "", `${window.location.pathname}${window.location.search}`);
   }, [go]);
   const leaveFullPage = useCallback((action: "collapse" | "close") => {
-    const step = fullPageAction(action, routeRef.current, window.history.state, readHistoryDepth(window.history.state));
+    const depth = readHistoryDepth(window.history.state);
+    // The Expand hint counts only when this visit saw the entries it points back to (not after a reload).
+    const seen = entryLogRef.current.urlAt(depth - (action === "collapse" ? 1 : 2)) !== undefined;
+    const step = fullPageAction(action, routeRef.current, seen ? window.history.state : null, depth);
     if (step.kind === "history") window.history.go(step.delta);
     else go(step.route, true);
   }, [go]);
@@ -105,9 +120,13 @@ export function TasksApp({ userId, displayName, navigate, onHome, onBin, onSetti
   const closeCard = useCallback(() => {
     const current = routeRef.current;
     if (!current.cardId) return;
-    if (current.full) leaveFullPage("close");
-    else if (readHistoryDepth(window.history.state) > 0) window.history.back();
-    else go(tasksRoute(current.boardId, null, false, current.query), true);
+    if (current.full) {
+      leaveFullPage("close");
+      return;
+    }
+    const step = cardCloseAction(current, readHistoryDepth(window.history.state), entryLogRef.current);
+    if (step.kind === "history") window.history.back();
+    else go(step.route, true);
   }, [go, leaveFullPage]);
 
   // The board's view and filters live in the URL query (D112): switching the view pushes an
