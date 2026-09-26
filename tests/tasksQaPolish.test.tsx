@@ -1,6 +1,8 @@
 import { expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { PRESETS } from "../shared/boardStructure";
+import { focusIntoDialog } from "../src/files/Dialog";
 import { addOnce, SubtasksSection } from "../src/tasks/CardHierarchySection";
 import type { BoardColumn, CardDetail, CardSummary } from "../src/tasks/tasksApi";
 import type { CardHierarchyContext } from "../src/tasks/useBoardHierarchy";
@@ -39,4 +41,26 @@ test("the inline add keeps its input enabled and refuses a second add while one 
   // Free again once the first add settles, even when it fails.
   await expect(addOnce(flag, async () => { throw new Error("offline"); })).rejects.toThrow("offline");
   expect(await addOnce(flag, async () => false)).toBe(false);
+});
+
+test("a modal takes focus on open unless a child already has it; the board settings sheet uses it (QA FAIL-5)", () => {
+  const focused: string[] = [];
+  const element = (name: string, hidden = false) => ({ name, hasAttribute: (attribute: string) => attribute === "hidden" && hidden, focus: () => { focused.push(name); } });
+  const close = element("close");
+  const container = (children: ReturnType<typeof element>[], inside: unknown[] = []) => ({
+    contains: (node: unknown) => inside.includes(node), querySelectorAll: () => children, focus: () => { focused.push("container"); }
+  }) as unknown as Parameters<typeof focusIntoDialog>[0];
+  const gear = { name: "gear" } as unknown as Element;
+  focusIntoDialog(container([element("skip", true), close]), gear);
+  expect(focused).toEqual(["close"]);
+  // An autoFocus child already inside keeps focus.
+  focusIntoDialog(container([close], [close]), close as unknown as Element);
+  expect(focused).toEqual(["close"]);
+  focusIntoDialog(container([]), gear);
+  expect(focused).toEqual(["close", "container"]);
+  const sheet = readFileSync(new URL("../src/tasks/BoardSettingsSheet.tsx", import.meta.url), "utf8");
+  expect(sheet).toContain("useDialogFocus(panelRef);");
+  expect(sheet).toMatch(/<aside ref=\{panelRef\} tabIndex=\{-1\}[^>]*role="dialog" aria-modal="true"[^>]*onKeyDown=\{trapTabKey\}/);
+  const dialog = readFileSync(new URL("../src/files/Dialog.tsx", import.meta.url), "utf8");
+  expect(dialog).toContain("useDialogFocus(sectionRef);");
 });

@@ -84,6 +84,8 @@
 /* Centred with inset + auto margins, not a transform: a transform would become the containing block
    of the fixed dropdown popups inside the dialog (Wave 13 §4.1). */
 .file-dialog { position: fixed; z-index: 41; inset: 0; margin: auto; width: min(460px, calc(100vw - 32px)); height: fit-content; max-height: min(640px, calc(100dvh - 48px)); display: flex; flex-direction: column; overflow: hidden; border: 1px solid #36363b; border-radius: 16px; background: #141416; box-shadow: 0 32px 110px rgb(0 0 0 / 68%); }
+/* A dialog that takes focus itself (no focusable child yet) shows no ring on its whole box. */
+.file-dialog:focus, .side-panel:focus { outline: none; }
 .file-dialog-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 18px 16px 10px 20px; }
 .file-dialog-header > div { min-width: 0; }
 .file-dialog-header h2 { margin: 4px 0 0; overflow: hidden; color: #f2f2f3; font-size: 1.1rem; letter-spacing: -.02em; text-overflow: ellipsis; white-space: nowrap; }
