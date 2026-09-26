@@ -3,7 +3,7 @@ import { Bookmark, Lock, Plus, RotateCcw, Share2, TriangleAlert, Users } from "l
 import { taskErrorMessage } from "../tasksApi";
 import { listViews, type TaskView, type ViewLists } from "../home/homeApi";
 import { useRole } from "../../team/roleAccess";
-import { viewRoleAccess, viewVisibilityLabel } from "./viewActions";
+import { onViewsChanged, viewRoleAccess, viewVisibilityLabel } from "./viewActions";
 
 type ViewsListProps = {
   onOpen: (view: TaskView) => void;
@@ -33,6 +33,8 @@ export function ViewsList({ onOpen, onNew }: ViewsListProps) {
     }
   }, []);
   useEffect(() => { void load(); }, [load]);
+  // A view restored by Undo (from the toast, after its page has gone) shows without a reload.
+  useEffect(() => onViewsChanged(() => { void load(); }), [load]);
 
   const row = (view: TaskView) => <li key={view.id} className="task-board-row task-view-row">
     <button className="task-board-open" onClick={() => onOpen(view)}>
