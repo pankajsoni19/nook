@@ -7,7 +7,7 @@ on:
       - "site/**"
       - "public/social-preview.png"
       - "public/favicon.svg"
-      - "docs/images/dashboard-dark.png"
+      - "docs/images/**"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -32,7 +32,8 @@ jobs:
           cp -R site/. _site/
           cp public/social-preview.png _site/social-preview.png
           cp public/favicon.svg _site/favicon.svg
-          cp docs/images/dashboard-dark.png _site/dashboard-dark.png
+          mkdir -p _site/images
+          cp docs/images/*.png _site/images/
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
