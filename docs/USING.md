@@ -4,7 +4,7 @@ This guide covers the apps a signed-in user sees. For installing, configuring, b
 
 ## Home and URLs
 
-Signing in lands on **Home**, which is also **Today** (below): a row of app links (Notes, Files, Tasks, Collections), with the Bin next to Settings and Sign out at the top (a small count shows when it holds items); each app's Home control (the app name at the top of its sidebar) leads back. Each view has a real URL, and reloading or opening a link resumes that view (a signed-out visit shows the login screen first, then continues to the requested page):
+Signing in lands on **Home**, which is also **Today** (below): a row of app links (Notes, Files, Tasks, Collections, Calendar) under the greeting. The account row at the top of Today, Tasks, Collections, Calendar, the Bin, and Team holds your name, **Settings**, **Bin** (with a small count when it holds items), **Team**, **Sign out**, and the notification bell. Notes and Files keep Settings, Bin, and Sign out in the sidebar footer instead, and Files has the bell in the file list header next to **Upload**. Each app's **Home** control leads back. Each view has a real URL, and reloading or opening a link resumes that view (a signed-out visit shows the login screen first, then continues to the requested page):
 
 | URL | View |
 | --- | --- |
@@ -17,15 +17,22 @@ Signing in lands on **Home**, which is also **Today** (below): a row of app link
 | `/files/folder/<folder-id>` | Files in one folder |
 | `/files/shared` | Files shared with you |
 | `/files/<file-id>` | One file's preview and details |
-| `/tasks` | Tasks: your boards and boards shared with you |
-| `/tasks/<board-id>` | One board |
+| `/tasks` | Tasks home, Boards: your boards and boards shared with you |
+| `/tasks/my` | Tasks home, My work: cards assigned to you on every board |
+| `/tasks/views`, `/tasks/views/<view-id>` | Tasks home, Views: your saved views, and one view |
+| `/tasks/<board-id>` | One board (the view, grouping, sort, filters, and sprint ride along in the query) |
 | `/tasks/<board-id>/card/<card-id>` | One card, open over its board |
 | `/tasks/<board-id>/card/<card-id>/full` | One card as a full page |
 | `/collections` | Collections: yours and those shared with you |
 | `/collections/<collection-id>` | One collection's table (a card list on phones) |
 | `/collections/<collection-id>/view/<view-id>` | A saved view of a collection |
 | `/collections/<collection-id>/row/<row-id>` | One row (a side pane on desktop, a full screen on phones) |
+| `/calendar` | Calendar agenda |
+| `/calendar/month/<yyyy-mm>` | One month |
+| `/calendar/event/<event-id>` | One event |
+| `/notifications` | Your notifications |
 | `/bin` | Bin |
+| `/team`, `/team/<user-id>` | Team, and one person's page |
 
 Unknown paths open Home. A link to a note or file you cannot read (or that is missing or in the Bin) falls back to the list with a message. On phones, Back steps from the editor or preview to the list, then to the folders, then to Home, without leaving the site; in Tasks it steps from a card to its board, to the board list, then to Home. With a dialog or sheet open, Back only closes it.
 
@@ -76,7 +83,7 @@ The search box at the top of the note list searches the text of your notes, not 
 
 ## Files
 
-Files lists documents in the same folders as your notes. Each app shows only its own item type.
+Files lists documents in the same folders as your notes. Each app shows only its own item type. The file list header holds the file count, the List / Grid toggle, sort, the notification bell, and **Upload** (hidden for viewers and guests); Settings, Bin, and Sign out are in the sidebar footer, as in Notes.
 
 - **Upload** with the Upload button, by dropping files from your computer onto the list, or on phones from the upload sheet. Uploads run two at a time with a progress bar, and can be cancelled or retried. Each file may be up to `MAX_UPLOAD_BYTES` (100 MiB by default) and counts towards `USER_STORAGE_QUOTA_BYTES` (see [OPERATIONS.md](OPERATIONS.md#configuration)).
 - **List and grid views.** The List / Grid toggle next to sort switches between rows and responsive tiles with image thumbnails and type icons. The choice is remembered per user in this browser. Sort by name, date, or size, and filter by name.
@@ -129,7 +136,7 @@ Tasks holds kanban boards. **New board** asks for a name and a template: **Simpl
 
 ## Collections
 
-Collections are typed tables for anything you track: a home inventory, subscriptions, expenses, recipes, contacts. Open them from **Collections** in Today's launcher, or `/collections`.
+Collections are typed tables for anything you track: a home inventory, subscriptions, expenses, recipes, contacts. Open them from the **Collections** link on Today, or at `/collections`. The Collections page lists your collections and those shared with you; on your own, the buttons next to the name **Rename**, **Share**, or **Move to Bin** it, as on the Tasks board list.
 
 - **New collection.** Start blank (a Name and a Notes field) or from a template: Home inventory, Subscriptions, Expenses, Recipes, or Contacts. A template is copied, so changing your collection never changes the template. **Create and import CSV** starts the import right away.
 - **Fields.** The owner edits fields with **Fields**: up to 50, each a text, number (with decimals and a unit), date, checkbox, select, multi-select, link (`http` or `https`), note, or files field. The first field is the row's title everywhere and is always text. Fields can be renamed, reordered, made required, and given options with colours. A text field can become a link and back, and a select can become a multi-select; other type changes are refused. Removing a field hides its values at once; each row drops them the next time it changes.
@@ -145,7 +152,18 @@ Collections are typed tables for anything you track: a home inventory, subscript
 - **CSV export.** **Export CSV** downloads the rows and fields of the current view as UTF-8 for spreadsheets. Text that a spreadsheet would run as a formula (starting with `=`, `+`, `-`, `@`, or a tab) is prefixed with `'`; importing the file again removes it.
 - **Bin.** Deleted rows and collections go to the Bin for 30 days. A row is listed for the collection owner and for whoever deleted it; either can restore it while they can still edit the collection, but only the owner deletes it forever. A row whose collection is itself in the Bin can be restored only after the collection.
 
-## Calendar feeds
+## Calendar
+
+Calendar (`/calendar`) shows your calendars and the ones shared with you as an **Agenda** (the next 60 days) or a **Month** grid (`/calendar/month/<yyyy-mm>`). Opening an event gives it its own address (`/calendar/event/<id>`), and Back returns to where you were.
+
+- **Calendars.** **Calendars** lists them with their colours, lets you hide some from view, creates new ones, and shares one with selected people or everyone signed in as **Can view** (see events; only you and editors change them) or **Can edit events** (add, change, and remove events; only you manage the calendar). Viewers and guests always get Can view.
+- **Events.** **New event** takes a title, a time with a time zone (or **All day**), a location, a description, and **Repeat** (daily, weekly on chosen days, monthly, or yearly, ending never, on a date, or after a number of times). A repeating event's **Skip <date>** leaves one date out. **Link a note** attaches what the event needs, such as an agenda or a packing list; a linked note, card, or row shows as restricted to people who cannot open it. **Undo last change** puts back the previous values once.
+- **Tasks due.** Cards with a due date on boards you can open appear in the agenda and the month as **Tasks due** (they stay cards; change them in Tasks). Turn them off in **Calendars**.
+- **Reminders.** Under **My reminders** on an event, **Add reminder** sets one for you only ("15 minutes before", "At the start", "9:00 the day before"). When it is due it appears under the bell and at `/notifications` (**Mark all read** clears the count).
+- **Push.** On an HTTPS origin, **Settings → Notifications** turns on push for this device, lists your devices, and has **Send test**. A push carries no content: the device fetches the notification from Nook. On `http://localhost` or a LAN address, reminders appear in the bell only.
+- **Bin.** Deleting a calendar or an event moves it to the Bin for 30 days, like everything else.
+
+### Calendar feeds
 
 A feed link lets a phone or desktop calendar app (Apple Calendar, Google Calendar, Outlook, Thunderbird) subscribe to one of your Nook calendars, read-only. In Calendar, open **Calendars** and choose the subscribe button (the feed icon) next to a calendar; you can do this for your own calendars and for any calendar shared with you.
 
@@ -162,7 +180,7 @@ Things to know:
 
 ## Bin
 
-Deleting a note, a file, a card, a board, a collection, or a row moves it to the shared **Bin** (the **Bin** button next to Settings on Home, the **Bin** entry in the Notes and Files sidebar footers, or `/bin`) for exactly **30 days**. The retention period is fixed. The Bin lists only your own deleted items, newest first, with the days left for each; filter by notes, files, tasks, or collections (collections and their rows; see [Collections](#collections) for who sees a binned row).
+Deleting a note, a file, a card, a board, a collection, a row, a calendar, or an event moves it to the shared **Bin** (the **Bin** button in the account row, the **Bin** entry in the Notes and Files sidebar footers, or `/bin`) for exactly **30 days**. The retention period is fixed. The Bin lists your own deleted items, newest first, with the days left for each; the chips filter by Notes, Files, Tasks (cards and boards), Collections (collections and their rows; see [Collections](#collections) for who sees a binned row), or Calendar (calendars and events). Viewers and guests cannot restore or empty the Bin; their items leave after 30 days.
 
 - **Cards and boards.** A deleted board is listed for its owner. A deleted card is listed for the board's owner and for the person who deleted it (while they can still open the board); either can restore it, but only the owner can delete it forever. A restored card returns to the bottom of its column, or of the first column if its column was deleted. A card on a deleted board can be restored only after the board. Deleting a card or a board from Tasks offers **Undo** in the toast.
 - **Attachments.** When a card or board is deleted forever, or a file is removed from the last card that used it, the file moves to its uploader's Bin, labelled as a card attachment. Restoring it puts it in Files, in your Default folder.
@@ -191,7 +209,7 @@ Open **Settings → Modules** to choose which parts of Nook you see. Each module
 
 ## Team
 
-**Team** lists everyone with an account on this Nook and their **team role**. Open it with the **Team** button next to Bin in the account row (on Today and in each app's header), at `/team`, or, for admins, from **Settings → Manage team**. Each person has their own page at `/team/<id>`.
+**Team** lists everyone with an account on this Nook and their **team role**. Open it with the **Team** button next to Bin in the account row (on Today and in the Tasks, Collections, Calendar, and Bin headers), at `/team`, or, for admins, from **Settings → Manage team**. Each person has their own page at `/team/<id>`.
 
 - **Roles.** An **Admin** can do everything a member can, and manages the team. A **Member** creates, edits, and shares notes, files, tasks, collections, and events, as before. The first account created on a new Nook is the admin; when an existing Nook upgrades, the oldest account becomes the admin and everyone else a member (the operator can change it, see [OPERATIONS.md](OPERATIONS.md#team-admins-and-blocking)). A **Viewer** reads everything shared with them or with everyone, but creates, edits, shares, and uploads nothing. A **Guest** reads only what is shared with them by name: items shared with "Everyone here" are not shown to guests. New accounts are guests unless the operator chose otherwise (`SIGNUP_ROLE`). The team role is separate from the "View only" and "Can edit rows" choices when you share a collection or calendar: a viewer or guest always gets View only, even where others can edit.
 - **Viewers and guests.** Each app shows a **View only · Team role: Viewer** (or Guest) banner and hides the create, edit, share, upload, and delete controls, also on items the person created before their role changed (those stay theirs and stay shared). They can still read, download, search, use Today, run task filters (guests: only "Assigned to me"), set their own reminders on events they can read, manage their notifications, push devices, two-factor, and Modules, and sign out. Viewers can save, rename, duplicate, and delete private task views (**New view**, **Save as view**) but cannot share them; guests save no views and see only views shared with them by name. They cannot restore or empty the Bin (items leave after 30 days) or create calendar subscribe links. In MCP settings a viewer can create keys with read permissions only, and a guest cannot create keys. Guests have no Team button. When you share with people, the list marks recipients who will only read with **Guest** or **Viewer**.
