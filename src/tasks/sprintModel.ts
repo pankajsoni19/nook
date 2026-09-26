@@ -2,7 +2,7 @@
 // progress, and the words for it. Pure, no DOM access, so it is unit tested.
 import type { FilterTerm, TaskState } from "../../shared/taskQuery";
 import type { BoardStructure } from "../../shared/boardStructure";
-import { nextSprintDates, nextSprintName, sprintDaysBetween } from "../../shared/sprintPlan";
+import { nextSprintDates, nextSprintName, sprintDatesAfterCompleting, sprintDaysBetween } from "../../shared/sprintPlan";
 import type { BoardColumn, CardSummary, SprintSummary } from "./tasksApi";
 
 /** What the switcher shows: one sprint, the backlog (no sprint), or every card. */
@@ -154,7 +154,8 @@ export function progressLabel(progress: SprintProgress, plural: string) {
 
 /** What the New sprint form starts with: the next name and dates after the latest sprint (§7.5). */
 export function newSprintDefaults(sprints: readonly SprintSummary[], today: string) {
-  const latest = [...sprints].sort((a, b) => (b.end_on ?? "").localeCompare(a.end_on ?? "") || b.position - a.position)[0] ?? null;
+  // Only an open sprint is followed; after sprints completed early the next one starts today (QA 0.9.0).
+  const latest = sprints.filter((sprint) => sprint.state !== "completed").sort((a, b) => (b.end_on ?? "").localeCompare(a.end_on ?? "") || b.position - a.position)[0] ?? null;
   const byName = [...sprints].sort((a, b) => b.created_at.localeCompare(a.created_at))[0] ?? null;
   const dates = nextSprintDates(latest && latest.end_on && latest.end_on >= today ? latest : null, today);
   return { name: nextSprintName(byName?.name ?? null, sprints.map((sprint) => sprint.name)), startOn: dates.startOn, endOn: dates.endOn };
@@ -162,5 +163,5 @@ export function newSprintDefaults(sprints: readonly SprintSummary[], today: stri
 
 /** The close dialog's "New sprint" choice: named (skipping the board's other names) and dated after the sprint being completed, as the server does. */
 export function carryOverSprint(sprint: Pick<SprintSummary, "name" | "start_on" | "end_on">, today: string, taken: readonly string[] = []) {
-  return { name: nextSprintName(sprint.name, taken), ...nextSprintDates(sprint, today) };
+  return { name: nextSprintName(sprint.name, taken), ...sprintDatesAfterCompleting(sprint, today) };
 }

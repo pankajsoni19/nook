@@ -15,6 +15,7 @@ import { boardSprints, EFFECTIVE_SPRINT_SQL, sprintOfBoard } from "./sprintData"
 import { addSprintDays, SPRINT_DEFAULT_DAYS } from "../../shared/sprintPlan";
 import { flagsForBoard, flagsForCard, listBoardTags, replaceCardFlags, replaceCardTags, requireCardTags, tagIdsForBoard, tagIdsForCard, type CardFlag } from "./tags";
 import { audienceAllUsersFor } from "../team/roles";
+import { dateInZone, validTimeZone } from "../today/registry";
 
 /**
  * Task Boards services (WAVES_7-9.md §3). Routes are thin adapters over these
@@ -212,7 +213,7 @@ export function requireOwnedBoard(boardId: string, userId: string) {
 }
 
 /** Creates a board from a template (D136; default Simple kanban): its columns and states, its structure, and any tags. Never cards. */
-export function createBoard(userId: string, name: string, templateId: BoardTemplateId = "kanban") {
+export function createBoard(userId: string, name: string, templateId: BoardTemplateId = "kanban", tz?: string) {
   const template = TEMPLATES[templateId];
   return db.transaction(() => {
     const owned = (db.query("SELECT COUNT(*) AS count FROM boards WHERE owner_id = ? AND deleted_at IS NULL").get(userId) as { count: number }).count;
@@ -228,9 +229,11 @@ export function createBoard(userId: string, name: string, templateId: BoardTempl
     });
     const insertTag = db.query("INSERT INTO board_tags (id, board_id, name, color, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)");
     for (const tag of template.tags ?? []) insertTag.run(crypto.randomUUID(), id, tag.name, tag.color, userId, timestamp, timestamp);
-    // The Scrum template starts with a planned first sprint of two weeks from today (UTC, §7.4).
+    // The Scrum template starts with a planned first sprint of two weeks from today (§7.4): the
+    // creator's today in their zone when the client sends one (QA 0.9.0), else UTC's.
     if (template.firstSprint) {
-      const startOn = timestamp.slice(0, 10);
+      const zone = tz ? validTimeZone(tz) : null;
+      const startOn = zone ? dateInZone(new Date(timestamp), zone) : timestamp.slice(0, 10);
       db.query("INSERT INTO board_sprints (id, board_id, name, start_on, end_on, state, position, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'planned', 1024, ?, ?, ?)")
         .run(crypto.randomUUID(), id, template.firstSprint, startOn, addSprintDays(startOn, SPRINT_DEFAULT_DAYS - 1), userId, timestamp, timestamp);
     }

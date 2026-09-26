@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createUser, db, request, type Session } from "./support/harness";
+import { addSprintDays, sprintDatesAfterCompleting } from "../shared/sprintPlan";
 
 /** Board sprints (research 2026-09-26 §6, D124, D131, D132, D135, T118): the lifecycle, card assignment, and carry-over. */
 
@@ -137,6 +138,12 @@ describe("sprint lifecycle", () => {
     expect(sprints[0]).toMatchObject({ name: "Sprint 1", state: "planned", start_on: today, end_on: end });
     const kanban = await call(owner, "POST", "/boards", { name: "Plain" });
     expect((await boardOf(owner, kanban.body.board.id)).sprints).toEqual([]);
+    // The creator's zone dates Sprint 1 from their today, not UTC's (QA NOTE-a).
+    const zone = "Pacific/Kiritimati";
+    const local = new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+    const zoned = await call(owner, "POST", "/boards", { name: "Kiritimati", template: "scrum", tz: zone });
+    expect((await boardOf(owner, zoned.body.board.id)).sprints[0]).toMatchObject({ start_on: local, end_on: addSprintDays(local, 13) });
+    expect((await call(owner, "POST", "/boards", { name: "Bad zone", template: "scrum", tz: "Mars/Olympus" })).status).toBe(400);
   });
 });
 
@@ -295,7 +302,9 @@ describe("completing a sprint", () => {
     expect((await call(fresh.owner, "POST", `/sprints/${fresh.sprint.id}/complete`, { carryTo: "backlog", name: "X" })).status).toBe(400);
     expect((await call(fresh.owner, "POST", `/sprints/${fresh.sprint.id}/complete`, { carryTo: "later" })).status).toBe(400);
     const made = await call(fresh.owner, "POST", `/sprints/${fresh.sprint.id}/complete`, { carryTo: "new" });
-    expect(made.body).toMatchObject({ carried: 2, created: true, target: { name: "Sprint 13", state: "planned", start_on: "2026-10-05", end_on: "2026-10-18", card_count: 2 } });
+    // Completed before its end date: the new sprint starts today, as long as this one (QA NOTE-a).
+    const expected = sprintDatesAfterCompleting({ start_on: "2026-09-21", end_on: "2026-10-04" }, new Date().toISOString().slice(0, 10));
+    expect(made.body).toMatchObject({ carried: 2, created: true, target: { name: "Sprint 13", state: "planned", start_on: expected.startOn, end_on: expected.endOn, card_count: 2 } });
     expect(lastAudit("task.sprint_create")).toEqual({ boardId: fresh.boardId, sprintId: made.body.target.id });
     // A new sprint skips names the board already uses: Sprint 13 is taken, so it is Sprint 14.
     const taken = await running("Carry new taken");
