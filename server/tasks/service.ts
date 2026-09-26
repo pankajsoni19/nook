@@ -10,7 +10,7 @@ import { insertRelation } from "./cardRelations";
 import { descriptionExcerpt } from "./excerpt";
 import type { RelationType } from "./relations";
 import { boardStructure, liveChildCount, parentRow, rollupFor, rollupsForBoard, type Rollup } from "./hierarchy";
-import { HIERARCHY_LIMITS, parseStructure, TEMPLATES, type BoardStructure, type BoardTemplateId } from "../../shared/boardStructure";
+import { HIERARCHY_LIMITS, levelInUseMessage, parseStructure, TEMPLATES, type BoardStructure, type BoardTemplateId } from "../../shared/boardStructure";
 import { boardSprints, EFFECTIVE_SPRINT_SQL, sprintOfBoard } from "./sprintData";
 import { addSprintDays, SPRINT_DEFAULT_DAYS } from "../../shared/sprintPlan";
 import { flagsForBoard, flagsForCard, listBoardTags, replaceCardFlags, replaceCardTags, requireCardTags, tagIdsForBoard, tagIdsForCard, type CardFlag } from "./tags";
@@ -260,12 +260,17 @@ export function setBoardStructure(userId: string, boardId: string, structure: Bo
   return withBoardLock(boardId, () => {
     requireOwnedBoard(boardId, userId);
     const current = boardStructure(boardId);
-    const removed = db.query("SELECT COUNT(*) AS count, MIN(level) AS level, SUM(deleted_at IS NOT NULL) AS binned FROM cards WHERE board_id = ? AND level >= ?")
-      .get(boardId, structure.levels.length) as { count: number; level: number | null; binned: number | null };
-    if (removed.count > 0) {
-      const binned = removed.binned ?? 0;
-      throw new TaskError(409, `${removed.count === 1 ? "1 card is" : `${removed.count} cards are`} ${current.levels[removed.level!]?.plural ?? "at that level"}${binned ? ` (${binned} in the Bin)` : ""}. Move or change them before removing this level.`,
-        "LEVEL_IN_USE", { level: removed.level, cardCount: removed.count, binnedCount: binned });
+    // Per removed level (QA 0.9.0): "8 cards are Stories and 6 are Subtasks", not one level's name with the total.
+    const removedLevels = db.query("SELECT level, COUNT(*) AS count, SUM(deleted_at IS NOT NULL) AS binned FROM cards WHERE board_id = ? AND level >= ? GROUP BY level ORDER BY level")
+      .all(boardId, structure.levels.length) as Array<{ level: number; count: number; binned: number | null }>;
+    if (removedLevels.length) {
+      const cardCount = removedLevels.reduce((sum, row) => sum + row.count, 0);
+      const binned = removedLevels.reduce((sum, row) => sum + (row.binned ?? 0), 0);
+      const levels = removedLevels.map((row) => ({ level: row.level, name: current.levels[row.level]?.name ?? "Card", plural: current.levels[row.level]?.plural ?? "Cards", cardCount: row.count }));
+      throw new TaskError(409, levelInUseMessage(levels, binned), "LEVEL_IN_USE", {
+        level: removedLevels[0]!.level, cardCount, binnedCount: binned,
+        levels: levels.map(({ level, name, cardCount: count }) => ({ level, name, cardCount: count }))
+      });
     }
     if (!structure.sprints && current.sprints) {
       const open = (db.query("SELECT COUNT(*) AS count FROM board_sprints WHERE board_id = ? AND state IN ('planned', 'active')").get(boardId) as { count: number }).count;

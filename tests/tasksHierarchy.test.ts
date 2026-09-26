@@ -271,7 +271,12 @@ describe("board structure (D122, T120)", () => {
     const subtask = await addCard(member, boardId, todo, "Subtask", { parentId: story.id });
     const twoLevels = { levels: EPICS.levels.slice(0, 2), workLevel: 1, sprints: false };
     expect(await call(owner, "PATCH", `/boards/${boardId}`, { structure: twoLevels }))
-      .toMatchObject({ status: 409, body: { code: "LEVEL_IN_USE", level: 2, cardCount: 1, binnedCount: 0 } });
+      .toMatchObject({ status: 409, body: { code: "LEVEL_IN_USE", level: 2, cardCount: 1, binnedCount: 0, levels: [{ level: 2, name: "Subtask", cardCount: 1 }] } });
+    // Two levels removed: per-level counts, not one level's name with the total (QA FAIL-4).
+    await addCard(member, boardId, todo, "Second story", { parentId: epic.id });
+    const oneLevel = await call(owner, "PATCH", `/boards/${boardId}`, { structure: { levels: EPICS.levels.slice(0, 1), workLevel: 0, sprints: false } });
+    expect(oneLevel).toMatchObject({ status: 409, body: { code: "LEVEL_IN_USE", level: 1, cardCount: 3, levels: [{ level: 1, name: "Story", cardCount: 2 }, { level: 2, name: "Subtask", cardCount: 1 }] } });
+    expect(oneLevel.body.error).toBe("2 cards are Stories and 1 is a Subtask. Move or change them before removing these levels.");
     expect((await call(member, "DELETE", `/cards/${subtask.id}`)).status).toBe(200);
     expect(await call(owner, "PATCH", `/boards/${boardId}`, { structure: twoLevels }))
       .toMatchObject({ status: 409, body: { code: "LEVEL_IN_USE", cardCount: 1, binnedCount: 1 } });

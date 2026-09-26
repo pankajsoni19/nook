@@ -538,7 +538,7 @@ type BoardStructure = {
 
 | Endpoint | Who | Success | Errors |
 | --- | --- | --- | --- |
-| `PATCH /boards/:b { name?, structure? }` | owner | 200 `{ board }`; at least one field | 400 (an invalid structure, with `details`), 403, 404, 409 `LEVEL_IN_USE { level, cardCount, binnedCount }` (a card, live or in the Bin, sits at a level being removed), 409 `SPRINTS_IN_USE` (sprints turned off while sprints are open, or the work level moved while cards carry a sprint) |
+| `PATCH /boards/:b { name?, structure? }` | owner | 200 `{ board }`; at least one field | 400 (an invalid structure, with `details`), 403, 404, 409 `LEVEL_IN_USE { level, cardCount, binnedCount, levels: [{ level, name, cardCount }] }` (a card, live or in the Bin, sits at a level being removed), 409 `SPRINTS_IN_USE` (sprints turned off while sprints are open, or the work level moved while cards carry a sprint) |
 
 Audit: `task.board_structure { boardId, levels, workLevel, sprints }` (counts only, no names).
 

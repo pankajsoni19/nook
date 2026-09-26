@@ -106,6 +106,22 @@ export function structureLabel(structure: BoardStructure) {
   return [...(structure.sprints ? ["Sprint"] : []), ...structure.levels.map((level) => level.name)].join(" › ");
 }
 
+/**
+ * The 409 LEVEL_IN_USE message (T120), naming each removed level's count: "8 cards are Stories and
+ * 6 are Subtasks (2 in the Bin). Move or change them before removing this level."
+ */
+export function levelInUseMessage(levels: ReadonlyArray<{ name: string; plural: string; cardCount: number }>, binnedCount = 0) {
+  const total = levels.reduce((sum, level) => sum + level.cardCount, 0);
+  const phrase = (level: { name: string; plural: string; cardCount: number }, first: boolean) => level.cardCount === 1
+    ? `1 ${first ? "card " : ""}is ${/^[aeiou]/i.test(level.name) ? "an" : "a"} ${level.name}`
+    : `${level.cardCount} ${first ? "cards " : ""}are ${level.plural}`;
+  const parts = levels.map((level, index) => phrase(level, index === 0));
+  const list = parts.length < 2 ? parts.join("") : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+  const those = total === 1 ? "it" : "them";
+  const which = levels.length > 1 ? "these levels" : "this level";
+  return `${list}${binnedCount ? ` (${binnedCount} in the Bin)` : ""}. Move or change ${those} before removing ${which}.`;
+}
+
 /** Hierarchy limits (D135): direct children per card; three levels are `MAX_LEVELS`. */
 export const HIERARCHY_LIMITS = { childrenPerCard: 100 } as const;
 
