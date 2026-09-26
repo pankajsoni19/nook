@@ -4,7 +4,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { PRESETS } from "../shared/boardStructure";
 import { focusIntoDialog } from "../src/files/Dialog";
 import { addOnce, CardBreadcrumb, SubtasksSection } from "../src/tasks/CardHierarchySection";
-import type { BoardColumn, CardDetail, CardSummary } from "../src/tasks/tasksApi";
+import { boardData, treeRows } from "../src/tasks/boardQuery";
+import { activeFilterCount } from "../src/tasks/home/HomeResultsPane";
+import { movedMessage } from "../src/tasks/home/ResultMoveSheet";
+import { SprintCompleteDialog } from "../src/tasks/SprintCompleteDialog";
+import { sprintFilterConflict } from "../src/tasks/sprintModel";
+import type { BoardColumn, CardDetail, CardSummary, SprintSummary } from "../src/tasks/tasksApi";
 import type { CardHierarchyContext } from "../src/tasks/useBoardHierarchy";
 
 // The v0.9.0 delegated-QA polish findings, rendered with react-dom/server and pure helpers.
@@ -79,4 +84,58 @@ test("a modal takes focus on open unless a child already has it; the board setti
   expect(sheet).toMatch(/<aside ref=\{panelRef\} tabIndex=\{-1\}[^>]*role="dialog" aria-modal="true"[^>]*onKeyDown=\{trapTabKey\}/);
   const dialog = readFileSync(new URL("../src/files/Dialog.tsx", import.meta.url), "utf8");
   expect(dialog).toContain("useDialogFocus(sectionRef);");
+});
+
+const source = (file: string) => readFileSync(new URL(file, import.meta.url), "utf8");
+const sprintRow = (id: string, name: string, state: SprintSummary["state"]): SprintSummary => ({
+  id, board_id: "b", name, goal: "", start_on: null, end_on: null, state, is_active: state === "active", position: 1024,
+  completed_at: null, card_count: 0, done_count: 0, created_at: "", updated_at: ""
+});
+
+test("polish: Move-to toast, tree toggle counts, action toasts, titles, and the nested Set-parent guard", () => {
+  expect(movedMessage("Done", "Done")).toBe("Moved to Done");
+  expect(movedMessage("Review", "In progress")).toBe("Moved to Review (In progress)");
+  const data = boardData({ columns, cards, board: { structure: epics } });
+  expect(treeRows(data.cards).map((row) => [row.card.id, row.childCount, row.descendantCount])).toEqual([["e", 1, 2], ["s", 1, 1], ["t", 0, 0]]);
+  expect(source("../src/tasks/BoardTable.tsx")).toContain("the ${descendantCount} ${descendantCount === 1 ? \"card\" : \"cards\"} under");
+  expect(source("../src/tasks/TasksApp.tsx")).toContain("toast.action ? 15000 : 3200");
+  expect(source("../src/tasks/BoardView.tsx")).toContain("useTasksTitle(board ? `${openCardTitle ? `${openCardTitle} · ` : \"\"}${board.name} · Tasks` : null);");
+  expect(source("../src/tasks/MoveCardSheet.tsx")).toContain("useHistoryDialogGuard(picking, () => setPicking(false));");
+  expect(source("../src/tasks/home/home.css")).toContain(".task-view-actions .primary-button:disabled {");
+});
+
+test("polish: the empty sprint's Complete dialog says so and focuses Cancel", () => {
+  const empty = sprintRow("11111111-1111-4111-8111-111111111111", "Sprint 1", "active");
+  const html = renderToStaticMarkup(<SprintCompleteDialog sprint={empty} sprints={[empty]} cards={[]} columns={columns} workLevel={0}
+    name="Task" plural="Tasks" childPlural={null} today="2026-09-27" onComplete={async () => undefined} onCancel={() => undefined} />);
+  expect(html).toContain("This sprint has no tasks.");
+  expect(html).not.toContain("Every task in it is done");
+  expect(html).toMatch(/<button type="button" class="secondary-button"[^>]*>Cancel<\/button>/);
+  expect(source("../src/tasks/SprintCompleteDialog.tsx")).toContain('className="secondary-button" autoFocus onClick={onCancel}');
+});
+
+test("polish: a sprint filter that disagrees with the header switcher is explained", () => {
+  const one = sprintRow("11111111-1111-4111-8111-111111111111", "Sprint 1", "active");
+  const two = sprintRow("22222222-2222-4222-8222-222222222222", "Sprint 2", "planned");
+  const term = (values: string[], negate = false) => [{ key: "sprint" as const, negate, values }];
+  const selection = { kind: "sprint" as const, sprint: one };
+  expect(sprintFilterConflict(term([two.id]), selection, [one, two])).toBe("Showing Sprint 2 cards within Sprint 1 — clear one");
+  expect(sprintFilterConflict(term(["next"]), selection, [one, two])).toBe("Showing Sprint 2 cards within Sprint 1 — clear one");
+  expect(sprintFilterConflict(term(["current"]), selection, [one, two])).toBeNull();
+  expect(sprintFilterConflict(term([one.id, two.id]), selection, [one, two])).toBeNull();
+  expect(sprintFilterConflict(term([one.id]), { kind: "backlog" }, [one, two])).toBe("Showing Sprint 1 cards within the backlog — clear one");
+  expect(sprintFilterConflict(term([two.id]), { kind: "all" }, [one, two])).toBeNull();
+  expect(sprintFilterConflict(term([two.id], true), selection, [one, two])).toBeNull();
+});
+
+test("polish: My work folds group, sort, and filters behind one Filters button on phones (friction 7)", () => {
+  expect(activeFilterCount([{ key: "assignee" }, { key: "state" }, { key: "board" }, { key: "tag" }], ["assignee"], ["state"])).toBe(2);
+  const pane = source("../src/tasks/home/HomeResultsPane.tsx");
+  expect(pane).toContain('className="secondary-button task-home-filters-toggle" aria-expanded={filtersOpen}');
+  expect(pane.indexOf("{above}")).toBeLessThan(pane.indexOf("<BoardViewSwitch"));
+  const css = source("../src/tasks/home/home.css");
+  const [desktop, phone] = [css.split("@media (max-width: 760px)")[0]!, css.split("@media (max-width: 760px)").slice(1).join("")];
+  expect(desktop).toContain(".task-home-filters-toggle { display: none; }");
+  expect(phone).toContain(".task-home-pane:not(.filters-open) .task-home-collapsible { display: none; }");
+  expect(phone).toContain(".task-home-states { flex: 1 1 0; min-width: 0; flex-wrap: nowrap; overflow-x: auto;");
 });

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ArrowDownToLine, ArrowUpToLine, Check, ChevronLeft, Columns3, Layers } from "lucide-react";
 import { ModalDialog } from "../files/Dialog";
+import { useHistoryDialogGuard } from "../ui/useHistoryDialogGuard";
 import { canEnterColumn } from "./taskActions";
 import type { BoardColumn, CardSummary } from "./tasksApi";
 
@@ -28,6 +29,8 @@ type MoveCardSheetProps = {
 // A column at its WIP limit is listed but disabled.
 export function MoveCardSheet({ card, columns, cards = [], onMove, onCancel, parentPicker }: MoveCardSheetProps) {
   const [picking, setPicking] = useState(false);
+  // Back on the "Set epic…" list returns to Move to… (as its Back to columns button does), not the board.
+  useHistoryDialogGuard(picking, () => setPicking(false));
   const [chosen, setChosen] = useState<string | null>(null);
   const [place, setPlace] = useState<MovePlace>("bottom");
   const [busy, setBusy] = useState(false);

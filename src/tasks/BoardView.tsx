@@ -6,7 +6,7 @@ import { useBoardSprints } from "./useBoardSprints";
 import { SprintBar } from "./SprintBar";
 import { SprintCompleteDialog } from "./SprintCompleteDialog";
 import { SprintSettingsSection } from "./SprintSettingsSection";
-import { withLocalCounts } from "./sprintModel";
+import { sprintFilterConflict, withLocalCounts } from "./sprintModel";
 import { binConfirmMessage, type TaskNotify } from "./taskActions";
 import { ApiError } from "../api";
 import { ConfirmDialog, ModalDialog } from "../files/Dialog";
@@ -36,6 +36,7 @@ import { hasBoardFilter, withBoardQuery, type BoardQuery } from "./boardUrl";
 import { localDateString, viewerTimeZone } from "./taskActions";
 import { FilterBar } from "./FilterBar";
 import { KeyboardMoveHint } from "./boardViewParts";
+import { useTasksTitle } from "./home/HomeSegments";
 import { BoardCalendar } from "./BoardCalendar";
 import { displayedDay, displayedTime, dueAnnouncement, shiftedDueAt } from "./calendarPlacement";
 import { daysBetween } from "../calendarRoute";
@@ -183,6 +184,9 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
 
   const board = detail?.board ?? null;
   const owner = board?.is_owner === 1;
+  // The tab names the board, and the open card before it (QA 0.9.0).
+  const openCardTitle = openCardId ? detail?.cards.find((card) => card.id === openCardId)?.title ?? null : null;
+  useTasksTitle(board ? `${openCardTitle ? `${openCardTitle} · ` : ""}${board.name} · Tasks` : null);
   const cardPage = Boolean(openCardId && openCardFull && board);
   // Back on the board from the full page: the phone track shows the column this entry was on.
   useEffect(() => {
@@ -219,6 +223,7 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
   });
 
   const shownLane = hierarchy.visible(laneCards, filtered);
+  const sprintConflict = sprintFilterConflict(query.filter.terms, sprints.selection, sprints.sprints);
   const showAllLevels = () => {
     hierarchy.setShowAll(true);
     notify("Showing all levels. Turn it off in Board settings.");
@@ -520,6 +525,7 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
     {!loadError && !detail && <p className="bin-loading task-board-state" role="status">Loading the board…</p>}
     {detail && data && result && <FilterBar board={data} context={viewContext} filter={query.filter} shown={result.cards.length} total={scopedTotal}
       onChange={(filter) => onQueryChange(withBoardQuery(query, { filter }))} />}
+    {detail && sprintConflict && <p className="task-sprint-conflict" role="status">{sprintConflict}</p>}
     {detail && data && result && view === "table" && <div className="task-view-body">
       <BoardTable board={data} cards={result.cards} sort={query.sort} today={viewContext.today} filtered={filtered}
         onSort={(sort) => onQueryChange(withBoardQuery(query, { sort }))}

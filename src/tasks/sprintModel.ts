@@ -60,6 +60,24 @@ export function selectionTerm(selection: SprintSelection | null): FilterTerm | n
   return { key: "sprint", negate: false, values: [selection.kind === "sprint" ? selection.sprint.id : "none"] };
 }
 
+/**
+ * The filter bar's sprint filter against the header switcher (QA 0.9.0): when both are set and
+ * name different sprints, the board shows nothing, so say why: "Showing Sprint 2 cards within
+ * Sprint 1 — clear one". Null when they agree or either is unset.
+ */
+export function sprintFilterConflict(terms: readonly FilterTerm[], selection: SprintSelection | null, sprints: readonly SprintSummary[]) {
+  if (!selection || selection.kind === "all") return null;
+  const term = terms.find((item) => item.key === "sprint" && !item.negate);
+  if (!term || !term.values.length) return null;
+  const pointers = sprintPointers(sprints);
+  const resolve = (value: string) => value === "current" ? pointers.current : value === "next" ? pointers.next : value;
+  const selected = selection.kind === "sprint" ? selection.sprint.id : "none";
+  if (term.values.some((value) => resolve(value) === selected)) return null;
+  const name = (value: string) => value === "none" ? "backlog" : sprints.find((sprint) => sprint.id === resolve(value))?.name
+    ?? (value === "current" ? "current sprint" : value === "next" ? "next sprint" : "older sprint");
+  return `Showing ${term.values.map(name).join(" or ")} cards within ${selection.kind === "sprint" ? selection.sprint.name : "the backlog"} — clear one`;
+}
+
 /** `sprint:current` and `sprint:next` for the in-memory matcher. */
 export function sprintPointers(sprints: readonly SprintSummary[]) {
   return { current: activeSprint(sprints)?.id ?? null, next: plannedSprints(sprints)[0]?.id ?? null };

@@ -43,13 +43,14 @@ export function TasksApp({ userId, displayName, navigate, onHome, onBin, onSetti
   const [route, setRoute] = useState<TasksRoute>(currentTasksRoute);
   const { readOnly } = useRole();
   const binCount = useBinCount(Boolean(onBin));
-  // Tasks keeps its own toast so a message can carry an action (Undo after moving to the Bin).
+  // Tasks keeps its own toast so a message can carry an action (Undo after moving to the Bin). One
+  // with an action (Undo, Move, Open, View) stays 15 s so there is time to reach it (QA 0.9.0).
   const [toast, setToast] = useState<{ id: number; message: string; action?: { label: string; run: () => void } } | null>(null);
   const toastIdRef = useRef(0);
   const notify = useCallback<TaskNotify>((message, action) => setToast({ id: ++toastIdRef.current, message, action }), []);
   useEffect(() => {
     if (!toast) return;
-    const timer = window.setTimeout(() => setToast((current) => current?.id === toast.id ? null : current), toast.action ? 8000 : 3200);
+    const timer = window.setTimeout(() => setToast((current) => current?.id === toast.id ? null : current), toast.action ? 15000 : 3200);
     return () => window.clearTimeout(timer);
   }, [toast]);
   const routeRef = useRef(route);

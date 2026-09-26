@@ -22,6 +22,9 @@
 .task-home-state { min-height: 32px; border: 1px solid #303035; border-radius: 999px; padding: 0 12px; background: #151517; color: #b7b7bd; font: inherit; font-size: .8rem; font-weight: 600; cursor: pointer; }
 .task-home-state.active { border-color: #6f5928; background: #2b271d; color: #f5cf79; }
 .task-home-state:focus-visible { outline: 2px solid var(--yellow); outline-offset: 1px; }
+/* Phones fold group, sort, and the filter bar behind "Filters" (QA 0.9.0); wider screens always show them. */
+.task-home-filters-toggle { display: none; }
+.task-home-sorts { display: contents; }
 
 .task-home-results { display: grid; gap: 12px; min-width: 0; }
 .task-home-place { min-width: 0; overflow: hidden; color: #9a9aa1; text-overflow: ellipsis; white-space: nowrap; }
@@ -43,6 +46,7 @@
 .task-view-dirty { border: 1px solid #4a3f24; border-radius: 999px; padding: 3px 10px; background: #17150f; color: #f5cf79; font-size: .74rem; font-weight: 650; }
 .task-view-actions { display: inline-flex; align-items: center; gap: 6px; }
 .task-view-actions .icon-button svg { width: 17px; }
+.task-view-actions .primary-button:disabled { background: #2a2a2f; color: #8d8d94; opacity: 1; }
 
 /* Column state in the owner's column menu (BoardView) */
 .task-column-state { min-height: 52px; display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; gap: 12px; border-radius: 10px; padding: 4px 4px 4px 12px; color: #d6d6d9; font-size: .9rem; }
@@ -54,6 +58,16 @@
   .task-home-segments { display: flex; width: 100%; }
   .task-home-segments button { flex: 1; min-height: 44px; padding: 0 6px; }
   .task-home-action, .task-home-state, .task-home-more .secondary-button { min-height: 44px; }
+  /* State chips and the layout switch share one row; the chips scroll sideways when they do not fit. */
+  .task-home-toolbar { gap: 8px 6px; }
+  .task-home-states { flex: 1 1 0; min-width: 0; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .task-home-states::-webkit-scrollbar { display: none; }
+  .task-home-state { flex: none; padding: 0 10px; }
+  .task-home-filters-toggle { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; margin: 0; padding: 0 12px; }
+  .task-home-filters-toggle svg { width: 16px; flex: none; }
+  .task-home-filters-toggle[aria-expanded="true"] { border-color: #6f5928; color: #f5cf79; }
+  .task-home-sorts { display: flex; flex-wrap: wrap; gap: 6px; width: 100%; }
+  .task-home-pane:not(.filters-open) .task-home-collapsible { display: none; }
   .task-home-actions { margin-left: 0; }
   .task-home-toolbar .task-view-switch { order: 0; }
   .task-home-lanes { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: 86%; overflow-x: auto; scroll-snap-type: x mandatory; overscroll-behavior-x: contain; padding-bottom: 4px; }

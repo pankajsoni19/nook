@@ -375,7 +375,8 @@ export function sortBoardCards(cards: readonly BoardCard[], board: BoardData, so
   });
 }
 
-export type TreeRow = { card: BoardCard; depth: number; childCount: number };
+/** `childCount`: direct children; `descendantCount`: every card under it (children and theirs). */
+export type TreeRow = { card: BoardCard; depth: number; childCount: number; descendantCount: number };
 
 /**
  * The table's tree (research 2026-09-26 §8): each card followed by its children, in the order the
@@ -392,7 +393,8 @@ export function treeRows(cards: readonly BoardCard[], collapsed: ReadonlySet<str
   const rows: TreeRow[] = [];
   const visit = (card: BoardCard, depth: number) => {
     const kids = children.get(card.id) ?? [];
-    rows.push({ card, depth, childCount: kids.length });
+    const below = (id: string): number => (children.get(id) ?? []).reduce((sum, kid) => sum + 1 + below(kid.id), 0);
+    rows.push({ card, depth, childCount: kids.length, descendantCount: below(card.id) });
     // Depth is at most 2 (D121), so this never recurses further than that.
     if (!collapsed.has(card.id) && depth < 2) for (const kid of kids) visit(kid, depth + 1);
   };
