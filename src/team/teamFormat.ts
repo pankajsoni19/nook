@@ -1,6 +1,6 @@
 /**
  * Pure helpers for the Team app: filtering, labels, and the activity copy. No DOM, so they are
- * unit-tested directly (tests/teamClient.test.ts).
+ * unit-tested directly (tests/teamClient.test.tsx).
  */
 import type { TeamEvent, TeamMember } from "./teamApi";
 import { ROLE_LABELS, type Role } from "./teamRoles";

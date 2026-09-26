@@ -1,5 +1,5 @@
 /**
- * Team roles as the client shows them. Mirrors server/team/roles.ts (tests/teamClient.test.ts keeps
+ * Team roles as the client shows them. Mirrors server/team/roles.ts (tests/teamClient.test.tsx keeps
  * them in step). The platform role is always labelled "Team role" in copy, so it never reads like
  * the per-item "View only" share role of Collections and Calendar (plan §2.4).
  */
