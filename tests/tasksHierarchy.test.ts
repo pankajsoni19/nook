@@ -236,11 +236,19 @@ describe("Bin subtrees (D129, D130, T114)", () => {
     const { sweepTaskBin } = await import("../server/tasks/bin");
     expect(await sweepTaskBin(new Date().toISOString(), 50)).toBeGreaterThanOrEqual(1);
     expect(db.query("SELECT id FROM cards WHERE id = ?").get(t.storyB.id)).toBeNull();
-    // Its parent is gone, so Sub B1 was detached by the FK and restores as a loose subtask.
+    // Its parent is gone, so Sub B1 was detached by the FK and restores as a loose subtask, and says so.
     const restored = await call(t.member, "POST", `/bin/card/${t.subB1.id}/restore`, {});
+    expect(restored).toMatchObject({ status: 200, body: { ok: true, detached: true } });
+    expect(JSON.parse(lastAudit("task.card_restore")!.metadata_json)).toMatchObject({ cardId: t.subB1.id, detached: true });
+    expect((await boardCards(t.owner, t.boardId)).find((card) => card.id === t.subB1.id)).toMatchObject({ parent_card_id: null, level: 2 });
+  });
+
+  test("a top-level card never restores detached", async () => {
+    const t = await tree("Bin top level");
+    expect((await call(t.member, "DELETE", `/cards/${t.epic.id}`)).status).toBe(200);
+    const restored = await call(t.member, "POST", `/bin/card/${t.epic.id}/restore`, {});
     expect(restored.status).toBe(200);
     expect(restored.body.detached).toBeUndefined();
-    expect((await boardCards(t.owner, t.boardId)).find((card) => card.id === t.subB1.id)).toMatchObject({ parent_card_id: null, level: 2 });
   });
 });
 

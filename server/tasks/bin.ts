@@ -42,7 +42,7 @@ export type TaskBinRow = {
 
 type CardBinRow = {
   id: string; board_id: string; column_id: string | null; title: string; deleted_at: string | null; deleted_by: string | null; purge_started_at: string | null;
-  parent_card_id: string | null; bin_root_id: string | null;
+  parent_card_id: string | null; bin_root_id: string | null; level: number;
 };
 type BoardBinRow = { id: string; owner_id: string; name: string; visibility: string; deleted_at: string | null; purge_started_at: string | null };
 
@@ -90,7 +90,7 @@ export type TaskRestoreOutcome =
 const boardOfCard = (cardId: string) => (db.query("SELECT board_id FROM cards WHERE id = ?").get(cardId) as { board_id: string } | null)?.board_id ?? null;
 
 function cardAccess(cardId: string, userId: string) {
-  return db.query(`SELECT k.id, k.board_id, k.column_id, k.title, k.deleted_at, k.deleted_by, k.purge_started_at, k.parent_card_id, k.bin_root_id,
+  return db.query(`SELECT k.id, k.board_id, k.column_id, k.title, k.deleted_at, k.deleted_by, k.purge_started_at, k.parent_card_id, k.bin_root_id, k.level,
       b.owner_id, b.name AS board_name, b.deleted_at AS board_deleted_at
     FROM cards k JOIN boards b ON b.id = k.board_id
     WHERE k.id = $cardId AND (b.owner_id = $userId OR ((k.deleted_by = $userId OR k.deleted_at IS NULL) AND ${boardAudience}))`).get({ cardId, userId }) as
@@ -137,7 +137,10 @@ export async function restoreTaskItem(type: TaskBinType, id: string, userId: str
     const parentLive = card.parent_card_id
       ? Boolean(db.query("SELECT 1 FROM cards WHERE id = ? AND board_id = ? AND deleted_at IS NULL").get(card.parent_card_id, card.board_id))
       : false;
-    const detached = card.parent_card_id !== null && !parentLive;
+    // Detached (D130) when the parent is binned, or when it was purged (the FK already set the parent
+    // to NULL, so a child-level card has none): it keeps its level with no parent, which the 019
+    // triggers allow.
+    const detached = card.parent_card_id === null ? card.level > 0 : !parentLive;
     // The requested column when it is on this board, else its own column if it still exists, else
     // the first one. After the requested neighbour when it is still live there, else at the bottom.
     const boardColumn = (columnId: string | null | undefined) => (columnId ? db.query("SELECT id, name FROM board_columns WHERE id = ? AND board_id = ?").get(columnId, card.board_id) : null) as { id: string; name: string } | null;
