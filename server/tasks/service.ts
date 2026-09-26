@@ -254,7 +254,7 @@ export function renameBoard(userId: string, boardId: string, name: string) {
  * Replaces the board's structure (owner only, D122, T120). Refused while it would hide cards:
  * 409 LEVEL_IN_USE when a card (live or in the Bin, which would restore at a missing level) sits
  * at a level being removed, and 409 SPRINTS_IN_USE when turning sprints off with open sprints or
- * moving the work level while cards carry a sprint (17B).
+ * moving the work level while cards are in an open sprint (17B; completed sprints never block).
  */
 export function setBoardStructure(userId: string, boardId: string, structure: BoardStructure) {
   return withBoardLock(boardId, () => {
@@ -272,7 +272,10 @@ export function setBoardStructure(userId: string, boardId: string, structure: Bo
       if (open) throw new TaskError(409, "Complete or delete the open sprints before turning sprints off", "SPRINTS_IN_USE", { sprintCount: open });
     }
     if (structure.workLevel !== current.workLevel) {
-      const assigned = (db.query("SELECT COUNT(*) AS count FROM cards WHERE board_id = ? AND sprint_id IS NOT NULL").get(boardId) as { count: number }).count;
+      // Only sprints still open count: cards in completed sprints keep their sprint as history and
+      // must not block the change (with sprints off there is no way to take them out).
+      const assigned = (db.query(`SELECT COUNT(*) AS count FROM cards k JOIN board_sprints s ON s.id = k.sprint_id
+        WHERE k.board_id = ? AND s.state <> 'closed'`).get(boardId) as { count: number }).count;
       if (assigned) throw new TaskError(409, "Take the cards out of their sprints before changing where new cards are created", "SPRINTS_IN_USE", { cardCount: assigned });
     }
     db.transaction(() => {
