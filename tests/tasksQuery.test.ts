@@ -314,3 +314,51 @@ describe("POST /api/tasks/query: paging, sorting, grouping, limits", () => {
     expect((await request("/tasks/query", { method: "POST", body: "{}", headers: { "X-CSRF-Token": "wrong" } }, user)).status).toBe(403);
   });
 });
+
+describe("user refs for read-only roles (review L1)", () => {
+  beforeEach(() => resetTaskQueryRateLimit());
+  const setRole = (session: Session, role: string) => db.query("UPDATE users SET role = ? WHERE id = ?").run(role, session.userId);
+  const userRef = (result: { body: Record<string, any> }, id: string) => (result.body.refs.users as Array<{ id: string }>).find((ref) => ref.id === id);
+
+  test("viewers and guests resolve only themselves, card people on the page, and readers of their boards", async () => {
+    const owner = await createUser("Refs owner");
+    const colleague = await createUser("Refs colleague");
+    const stranger = await createUser("Refs stranger");
+    const hiddenGuest = await createUser("Refs hidden guest");
+    const viewer = await createUser("Refs viewer");
+    const guest = await createUser("Refs guest");
+    setRole(viewer, "viewer");
+    setRole(guest, "guest");
+    setRole(hiddenGuest, "guest");
+    const shared = await board(owner, "Refs shared");
+    expect((await call(owner, "PUT", `/boards/${shared.id}/sharing`, { visibility: "selected", userIds: [viewer.userId, guest.userId, colleague.userId] })).status).toBe(200);
+    await card(owner, shared, "Refs card", 0, { assigneeIds: [guest.userId] });
+
+    // A member still resolves anyone, as GET /api/users would.
+    expect(userRef(await query(owner, { q: `creator:${stranger.userId}` }), stranger.userId)).toEqual({ id: stranger.userId, display_name: "Refs stranger" });
+
+    // A guest: self, the board's owner and readers resolve; a stranger does not.
+    for (const [target, name] of [[guest, "Refs guest"], [owner, "Refs owner"], [colleague, "Refs colleague"]] as const) {
+      expect(userRef(await query(guest, { q: `assignee:me creator:${target.userId}` }), target.userId)).toEqual({ id: target.userId, display_name: name });
+    }
+    expect(userRef(await query(guest, { q: `assignee:me creator:${stranger.userId}` }), stranger.userId)).toEqual({ id: stranger.userId, unknown: true });
+
+    // A viewer: the same rule. A guest on no board the viewer reads stays unknown.
+    expect(userRef(await query(viewer, { q: `creator:${owner.userId}` }), owner.userId)).toEqual({ id: owner.userId, display_name: "Refs owner" });
+    expect(userRef(await query(viewer, { q: `creator:${hiddenGuest.userId}` }), hiddenGuest.userId)).toEqual({ id: hiddenGuest.userId, unknown: true });
+  });
+
+  test("a person on a card of the page resolves for a guest although they no longer read the board", async () => {
+    const owner = await createUser("Refs page owner");
+    const former = await createUser("Refs former reader");
+    const guest = await createUser("Refs page guest");
+    setRole(guest, "guest");
+    const shared = await board(owner, "Refs page board");
+    expect((await call(owner, "PUT", `/boards/${shared.id}/sharing`, { visibility: "selected", userIds: [former.userId, guest.userId] })).status).toBe(200);
+    await card(former, shared, "Made by former", 0, { assigneeIds: [guest.userId] });
+    expect((await call(owner, "PUT", `/boards/${shared.id}/sharing`, { visibility: "selected", userIds: [guest.userId] })).status).toBe(200);
+    const result = await query(guest, { q: `assignee:me creator:${former.userId}` });
+    expect(titles(result)).toEqual(["Made by former"]);
+    expect(userRef(result, former.userId)).toEqual({ id: former.userId, display_name: "Refs former reader" });
+  });
+});
