@@ -147,6 +147,10 @@ The product is a private workspace (Notes, Files, Bin, Tasks next), so "MyNotes"
 - [x] Hotfix `5ce3bc4` (411 without Content-Length, 30 s inactivity watchdog with 408, explicit staging-handle close; three real-server regression tests; the reproduction script no longer crashes a scratch server) and `479d58a` (error logs print class and errno, not messages). 196 tests.
 - [x] **Released v0.4.1 (2026-09-25):** bump `d1fdb31`, pushed, deployed (no migration, no backup needed); healthy; `/api/about` reports `0.4.1` / `d1fdb31bb3ecededc5123fd61893bff18711eb3b`. **Wave 6 complete.**
 
+## Released v0.9.0 (2026-09-27) — Viewer/guest roles, task hierarchy, sprints, Tasks home and saved views
+
+Release SHA `1fc4b7d`; pushed; Docker verify 1087 pass; forced backup before deploy; deployed; healthy; `/api/about` reports `0.9.0`; migration 019 applied on first boot. Contents: Wave 15 (viewer/guest enforcement, write gate over 100 mutating routes, guest audience exclusion + grep guard, MCP scopes by role, `SIGNUP_ROLE`), 17A hierarchy (migration 019, presets, templates, subtasks, roll-ups, Bin subtree cascade), 17B sprints, 17C Tasks home / My work / saved views + column state, D113 payload trim (1.15 MB worst case), closing docs pass (feature-led README, 13 screenshots, site + guides), review fixes (2 MEDIUM + 7 LOW) and delegated-QA fixes (6 + polish). Independent review: no HIGH. **Open:** real-device push/feed checks (operator); Wave 16 invites (unscheduled); QA-instance leftovers are throwaway accounts only.
+
 ## Released v0.8.1 (2026-09-27) — Board views, filter bar, composer, tags/flags/relations UI, saved views API
 
 Release SHA `598fb1e`; pushed; Docker verify 968 pass; forced backup before deploy; deployed; healthy; `/api/about` reports `0.8.1`; migration 020 applied on first boot. Contents: 13C UI, 13D UI, 13E (column/table/grouped/calendar views, FilterBar on the shared grammar, URL state), 17C server (cross-board query, saved views, column state, MCP `list_views`/`query_cards`), test-reliability hardening, review fixes (composer Back handover, MCP query rate limit, signed cursors, view revision on sharing), delegated-QA fixes (8 bugs + polish). Independent review: no HIGH. **Next:** v0.9.0 = Wave 15 viewer/guest + 17A hierarchy + 17B sprints + 17C UI Tasks home + D113 payload trim, with review + delegated QA.
@@ -202,9 +206,9 @@ Merged so far: 9, 8, Bin placement, 10 (+ review fixes `27cbad6`…`ddfd30f`), 1
 - [x] `/collections` list: inline rename / share / Move to Bin actions like the board list (merged `fdac35c`, ships in v0.8.0). (observation or change request?).
 
 ### Closing docs pass (after Waves 13, 14, 17 ship)
-- [ ] Rewrite `README.md` to lead with features (Today, Notes, Files, Tasks with views/hierarchy/sprints, Collections, Calendar + reminders, Search, Team, MCP, Modules), concise, details on the docs site.
-- [ ] Replace `docs/images/dashboard-dark.png` with fresh screenshots of the current product (Today dashboard + a task board; dark and light if cheap), taken from an isolated QA instance with seeded placeholder data only — never real user data.
-- [ ] Refresh `site/index.html` and `docs/USING.md` for every feature shipped in v0.8–v0.10.
+- [x] Rewrite `README.md` to lead with features (Today, Notes, Files, Tasks with views/hierarchy/sprints, Collections, Calendar + reminders, Search, Team, MCP, Modules), concise, details on the docs site.
+- [x] Replace `docs/images/dashboard-dark.png` with fresh screenshots of the current product (Today dashboard + a task board; dark and light if cheap), taken from an isolated QA instance with seeded placeholder data only — never real user data.
+- [x] Refresh `site/index.html` and `docs/USING.md` for every feature shipped in v0.8–v0.9.
 
 ## Backlog — candidate modules and enhancements (for later picking)
 
