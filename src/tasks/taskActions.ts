@@ -250,6 +250,22 @@ export function wipCountLabel(count: number, limit: number | null | undefined) {
 }
 
 /**
+ * A column's count badge (QA 0.9.0): the number of cards on screen (hierarchy levels, the sprint,
+ * and filters applied), with the column's full count in the label. A WIP limit keeps counting
+ * every live card (the server's rule), so a limited column shows "8 / 10", or "3 · 8 / 10" when
+ * only 3 of them are on screen.
+ */
+export function columnBadge(shown: number, total: number, limit: number | null | undefined) {
+  const wip = wipState(total, limit);
+  const partial = shown !== total;
+  const text = wip ? `${partial ? `${shown} · ` : ""}${total} / ${limit}` : String(shown);
+  const label = wip
+    ? `${partial ? `${shown} shown; ` : ""}${wipCountLabel(total, limit)}`
+    : partial ? `${shown} shown of ${cardCountLabel(total)}` : cardCountLabel(total);
+  return { text, label, wip };
+}
+
+/**
  * Whether a card may come into a column: always within its own column (reordering) and without a
  * limit; otherwise only while the column holds fewer cards than its limit. The server decides (409
  * COLUMN_FULL); this only refuses a drop or a key move early.

@@ -42,6 +42,53 @@ export function visibleOnBoard<T extends HierarchyCard>(cards: readonly T[], str
   });
 }
 
+export type HiddenLevel = { level: number; count: number };
+
+/**
+ * The cards of a column's lane that the column does not show (D126), counted by level: `above`
+ * the work level (epics, shown with "Show all levels" or in Table and List) and `below` it
+ * (subtasks inside their parents). Levels top first.
+ */
+export function hiddenLevels(lane: readonly HierarchyCard[], shown: readonly HierarchyCard[], structure: BoardStructure) {
+  const shownIds = new Set(shown.map((card) => card.id));
+  const counts = new Map<number, number>();
+  for (const card of lane) if (!shownIds.has(card.id)) counts.set(levelOf(card), (counts.get(levelOf(card)) ?? 0) + 1);
+  const entries = [...counts].sort((a, b) => a[0] - b[0]).map(([level, count]) => ({ level, count }));
+  return { above: entries.filter((entry) => entry.level < structure.workLevel), below: entries.filter((entry) => entry.level > structure.workLevel) };
+}
+
+/** "1 epic", "2 stories": a count with the level's name, lower case. */
+export function levelCountPhrase(structure: BoardStructure, level: number, count: number) {
+  const entry = structure.levels[level];
+  const name = entry ? (count === 1 ? entry.name : entry.plural) : count === 1 ? "card" : "cards";
+  return `${count} ${name.toLowerCase()}`;
+}
+
+const joinAnd = (parts: string[]) => parts.length < 2 ? parts.join("") : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+const hiddenTotal = (entries: readonly HiddenLevel[]) => entries.reduce((sum, entry) => sum + entry.count, 0);
+const levelPhrases = (structure: BoardStructure, entries: readonly HiddenLevel[]) => joinAnd(entries.map((entry) => levelCountPhrase(structure, entry.level, entry.count)));
+
+/** The column's "1 epic not shown" note, or null when no card above the work level is hidden. */
+export function hiddenAboveNote(structure: BoardStructure, above: readonly HiddenLevel[]) {
+  return above.length ? `${levelPhrases(structure, above)} not shown` : null;
+}
+
+/**
+ * Why an empty column has cards, by level: "2 epics are shown in Table and List views",
+ * "3 subtasks sit inside their parents", or both. Null when nothing is hidden.
+ */
+export function hiddenColumnHint(structure: BoardStructure, hidden: { above: readonly HiddenLevel[]; below: readonly HiddenLevel[] }) {
+  const parts: string[] = [];
+  if (hidden.above.length) parts.push(`${levelPhrases(structure, hidden.above)} ${hiddenTotal(hidden.above) === 1 ? "is" : "are"} shown in Table and List views`);
+  if (hidden.below.length) {
+    const phrase = levelPhrases(structure, hidden.below);
+    parts.push(hiddenTotal(hidden.below) === 1 ? `${phrase} sits inside its parent` : `${phrase} sit inside their parents`);
+  }
+  if (!parts.length) return null;
+  const sentence = parts.join("; ");
+  return sentence.charAt(0).toUpperCase() + sentence.slice(1);
+}
+
 /** The card's live children in checklist order: column position, then card position (§13 Q6). */
 export function childrenOf<T extends HierarchyCard>(cards: readonly T[], columns: readonly BoardColumn[], cardId: string): T[] {
   const index = new Map([...columns].sort(byPosition).map((column, at) => [column.id, at]));

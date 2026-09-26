@@ -77,7 +77,7 @@ test("a filtered lane keeps the column's real WIP count and says no card matches
     onCardMenu: () => undefined, onOpenCard: () => undefined, onColumnMenu: () => undefined, onMoveColumn: () => undefined, onAddCard: async () => undefined
   };
   const filtered = renderToStaticMarkup(<BoardColumnView {...props} cards={[]} totalCount={2} />);
-  expect(filtered).toContain('aria-label="2 of 3 cards"');
+  expect(filtered).toContain('aria-label="0 shown; 2 of 3 cards" title="WIP limit 3">0 · 2 / 3</b>');
   expect(filtered).toContain("No matching cards");
   const plain = renderToStaticMarkup(<BoardColumnView {...props} cards={[]} />);
   expect(plain).toContain("No cards yet");

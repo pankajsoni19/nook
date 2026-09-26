@@ -2,7 +2,7 @@ import { useCallback, useMemo, useRef, useState, type Dispatch, type MutableRefO
 import { childName, levelName, type BoardStructure } from "../../shared/boardStructure";
 import { columnCards } from "./boardOrder";
 import { applyCardDetail } from "./cardTags";
-import { canNest, checklistColumn, childrenOf, hasLevels, levelOf, newChildColumn, parentCandidates, rollupMap, structureOf, visibleOnBoard, type Rollup } from "./hierarchyModel";
+import { canNest, checklistColumn, childrenOf, hasLevels, hiddenAboveNote, hiddenColumnHint, hiddenLevels, levelOf, newChildColumn, parentCandidates, rollupMap, structureOf, visibleOnBoard, type Rollup } from "./hierarchyModel";
 import type { TaskNotify } from "./taskActions";
 import { createCard, taskErrorCode, taskErrorMessage, updateCard, type BoardDetail, type CardDetail, type CardSummary } from "./tasksApi";
 
@@ -181,6 +181,14 @@ export function useBoardHierarchy({ detail, detailRef, setDetail, move, notify, 
     setShowAll,
     /** The lane cards (D126); a filtered board shows every match whatever its level. */
     visible: (laneCards: CardSummary[], filtered: boolean) => filtered ? laneCards : visibleOnBoard(laneCards, structure, showAll),
+    /**
+     * A column's hidden levels (QA 0.9.0): the "1 epic not shown" note (with "Show all levels")
+     * and the empty column's level-aware hint. `lane` is the column's cards in scope, `shown` the listed ones.
+     */
+    hiddenIn: (lane: readonly CardSummary[], shown: readonly CardSummary[]) => {
+      const hidden = hiddenLevels(lane, shown, structure);
+      return { note: showAll ? null : hiddenAboveNote(structure, hidden.above), hint: hiddenColumnHint(structure, hidden) };
+    },
     nesting,
     dialog,
     parentPicker,

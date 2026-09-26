@@ -23,7 +23,7 @@ import { isMobileViewport } from "../mobileNavigation";
 import { formatRoute } from "../router";
 import { tasksRoute } from "../tasksRoute";
 import { columnIndexFor, createTasksHistoryState } from "../tasksNavigation";
-import { addCardRefusal, canEnterColumn, cardCountLabel, columnFullMessage, validateBoardName, validateColumnName, wipCountLabel, wipState } from "./taskActions";
+import { addCardRefusal, canEnterColumn, cardCountLabel, columnBadge, columnFullMessage, validateBoardName, validateColumnName } from "./taskActions";
 import { WipLimitDialog } from "./WipLimitDialog";
 import { ColumnStateField } from "./views/ColumnStateField";
 import { columnState } from "./home/homeApi";
@@ -217,6 +217,12 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
     move: (cardId, columnId, afterCardId) => move(cardId, columnId, afterCardId),
     openComposer: ({ parentId }) => setComposer({ columnId: null, parentId })
   });
+
+  const shownLane = hierarchy.visible(laneCards, filtered);
+  const showAllLevels = () => {
+    hierarchy.setShowAll(true);
+    notify("Showing all levels. Turn it off in Board settings.");
+  };
 
   const setCards = (change: (cards: CardSummary[]) => CardSummary[]) =>
     setDetail((current) => current ? { ...current, cards: change(current.cards) } : current);
@@ -532,21 +538,26 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
     </div>}
     {detail && view === "board" && <nav className="task-column-tabs" aria-label="Columns">
       {columns.map((column, index) => {
-        const count = columnCards(cards, column.id).length;
-        const wip = wipState(count, column.wip_limit);
+        // The cards on screen; a WIP limit counts every live card (QA 0.9.0).
+        const badge = columnBadge(columnCards(shownLane, column.id).length, columnCards(cards, column.id).length, column.wip_limit);
         return <button key={column.id} id={`task-tab-${column.id}`} className={index === shownColumn ? "active" : ""} aria-current={index === shownColumn ? "true" : undefined} onClick={() => showColumn(index)}>
-          <span>{column.name}</span><b className={wip ? `task-wip ${wip}` : undefined} aria-label={wipCountLabel(count, column.wip_limit)}>{wip ? `${count} / ${column.wip_limit}` : count}</b>
+          <span>{column.name}</span><b className={badge.wip ? `task-wip ${badge.wip}` : undefined} aria-label={badge.label}>{badge.text}</b>
         </button>;
       })}
       {owner && columns.length < MAX_COLUMNS && <button className="task-tab-add" onClick={(event) => openDialog({ kind: "addColumn" }, event.currentTarget)} aria-haspopup="dialog" aria-label="Add column"><Plus /></button>}
     </nav>}
     {detail && view === "board" && <div className="task-columns" ref={trackRef} onScroll={onTrackScroll}>
-      {columns.map((column, index) => <BoardColumnView
+      {columns.map((column, index) => {
+        const lane = columnCards(laneCards, column.id);
+        const shown = columnCards(shownLane, column.id);
+        const hidden = hierarchy.hiddenIn(lane, shown);
+        return <BoardColumnView
         key={column.id}
         column={column}
-        cards={columnCards(hierarchy.visible(laneCards, filtered), column.id)}
+        cards={shown}
         totalCount={columnCards(cards, column.id).length}
-        emptyText={filtered ? "No matching cards" : sprintScoped ? (sprints.selection?.kind === "backlog" ? "Nothing from the backlog here" : "Nothing from this sprint here") : "Its cards sit inside their parents"}
+        hiddenNote={hidden.note ? { text: hidden.note, onShowAll: showAllLevels } : undefined}
+        emptyText={filtered ? "No matching cards" : sprintScoped && !lane.length ? (sprints.selection?.kind === "backlog" ? "Nothing from the backlog here" : "Nothing from this sprint here") : hidden.hint ?? "No matching cards"}
         nesting={hierarchy.nesting}
         tags={detail.tags}
         owner={owner}
@@ -570,7 +581,8 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
           const refusal = addCardRefusal(cards, column);
           if (refusal) { notify(refusal); setAnnouncement(refusal); } else setComposer({ columnId: column.id });
         }}
-      />)}
+      />;
+      })}
       {owner && columns.length < MAX_COLUMNS && <button className="task-add-column" onClick={(event) => openDialog({ kind: "addColumn" }, event.currentTarget)} aria-haspopup="dialog"><Plus />Add column</button>}
     </div>}
     </>}
