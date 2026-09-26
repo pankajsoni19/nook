@@ -65,13 +65,14 @@ export function SprintCompleteDialog({ sprint, sprints, cards, columns, workLeve
           <label id={`${id}-target`}>Move the {open === 1 ? `unfinished ${noun(1)}` : `${open} unfinished ${noun(open)}`} to</label>
           <Select labelledBy={`${id}-target`} label="Move the unfinished cards to" value={target} options={options} disabled={busy} onChange={setTarget} searchable={false} />
         </div>
-        : <p className="task-settings-note">Every {noun(1)} in it is done.</p>}
+        : <p className="task-settings-note">{progress.total ? `Every ${noun(1)} in it is done.` : `This sprint has no ${plural.toLowerCase()}.`}</p>}
       <p className="task-settings-note">{childPlural ? `${childPlural} follow their ${plural.toLowerCase()}. ` : ""}Done {plural.toLowerCase()} stay in {sprint.name}.</p>
       {error && <p className="file-dialog-error" role="alert">{error}</p>}
     </div>
     <footer className="file-dialog-actions">
-      <button type="button" className="secondary-button" onClick={onCancel} disabled={busy}>Cancel</button>
-      <button type="button" className="primary-button" autoFocus onClick={() => { void submit(); }} disabled={busy}>{busy ? "Completing…" : "Complete sprint"}</button>
+      {/* Focus starts on Cancel (QA 0.9.0): Enter on open never completes the sprint by accident. */}
+      <button type="button" className="secondary-button" autoFocus onClick={onCancel} disabled={busy}>Cancel</button>
+      <button type="button" className="primary-button" onClick={() => { void submit(); }} disabled={busy}>{busy ? "Completing…" : "Complete sprint"}</button>
     </footer>
   </ModalDialog>;
 }

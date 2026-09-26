@@ -5,7 +5,7 @@ import { applyBoardQuery, boardData, FILTER_FIELDS, treeRows, type BoardContext 
 import { formatBoardSearch, parseBoardSearch } from "../src/tasks/boardUrl";
 import { binConfirmMessage } from "../src/tasks/taskActions";
 import { cardFaceLabel } from "../src/tasks/CardFace";
-import { ancestorsOf, canNest, checklistColumn, childrenOf, newChildColumn, parentCandidates, rollupMap, visibleOnBoard } from "../src/tasks/hierarchyModel";
+import { ancestorsOf, canNest, checklistColumn, childrenOf, hiddenAboveNote, hiddenColumnHint, hiddenLevels, newChildColumn, parentCandidates, rollupMap, visibleOnBoard } from "../src/tasks/hierarchyModel";
 import { structurePreview } from "../src/tasks/BoardSettingsSheet";
 import { createBody, emptyDraft } from "../src/tasks/composerDraft";
 import type { BoardColumn, CardSummary } from "../src/tasks/tasksApi";
@@ -40,6 +40,25 @@ describe("hierarchy model", () => {
     expect(visibleOnBoard(cards, PRESETS.flat.structure, false)).toHaveLength(7);
     const tasks = PRESETS.task_subtask.structure;
     expect(ids(visibleOnBoard([card("t", 0, null), card("s", 1, "t"), card("s2", 1, null)], tasks, false))).toEqual(["t", "s2"]);
+  });
+
+  test("a column names the levels it hides: epics above the work level, subtasks inside parents (QA FAIL-2)", () => {
+    const todo = cards.filter((item) => item.column_id === "todo");
+    const shown = visibleOnBoard(cards, epics, false).filter((item) => item.column_id === "todo");
+    const hidden = hiddenLevels(todo, shown, epics);
+    expect(hidden).toEqual({ above: [{ level: 0, count: 1 }], below: [{ level: 2, count: 1 }] });
+    expect(hiddenAboveNote(epics, hidden.above)).toBe("1 epic not shown");
+    expect(hiddenColumnHint(epics, hidden)).toBe("1 epic is shown in Table and List views; 1 subtask sits inside its parent");
+    // A parentless new epic alone in a column: the hint no longer says it sits inside a parent.
+    const lone = [card("e1", 0, null), card("e2", 0, null)];
+    const alone = hiddenLevels(lone, visibleOnBoard(lone, epics, false), epics);
+    expect(hiddenAboveNote(epics, alone.above)).toBe("2 epics not shown");
+    expect(hiddenColumnHint(epics, alone)).toBe("2 epics are shown in Table and List views");
+    const subs = [card("s1", 2, "storyA"), card("s2", 2, "storyA"), card("storyA", 1, null)];
+    const nested = hiddenLevels(subs, visibleOnBoard(subs, epics, false), epics);
+    expect(hiddenAboveNote(epics, nested.above)).toBeNull();
+    expect(hiddenColumnHint(epics, nested)).toBe("2 subtasks sit inside their parents");
+    expect(hiddenColumnHint(epics, hiddenLevels(todo, todo, epics))).toBeNull();
   });
 
   test("roll-ups count live direct children and those in a done column", () => {

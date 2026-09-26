@@ -6,7 +6,7 @@ import { useBoardSprints } from "./useBoardSprints";
 import { SprintBar } from "./SprintBar";
 import { SprintCompleteDialog } from "./SprintCompleteDialog";
 import { SprintSettingsSection } from "./SprintSettingsSection";
-import { withLocalCounts } from "./sprintModel";
+import { sprintFilterConflict, withLocalCounts } from "./sprintModel";
 import { binConfirmMessage, type TaskNotify } from "./taskActions";
 import { ApiError } from "../api";
 import { ConfirmDialog, ModalDialog } from "../files/Dialog";
@@ -24,7 +24,7 @@ import { isMobileViewport } from "../mobileNavigation";
 import { formatRoute } from "../router";
 import { tasksRoute } from "../tasksRoute";
 import { columnIndexFor, createTasksHistoryState } from "../tasksNavigation";
-import { addCardRefusal, canEnterColumn, cardCountLabel, columnFullMessage, validateBoardName, validateColumnName, wipCountLabel, wipState } from "./taskActions";
+import { addCardRefusal, canEnterColumn, cardCountLabel, columnBadge, columnFullMessage, validateBoardName, validateColumnName } from "./taskActions";
 import { WipLimitDialog } from "./WipLimitDialog";
 import { ColumnStateField } from "./views/ColumnStateField";
 import { columnState } from "./home/homeApi";
@@ -37,6 +37,7 @@ import { hasBoardFilter, withBoardQuery, type BoardQuery } from "./boardUrl";
 import { localDateString, viewerTimeZone } from "./taskActions";
 import { FilterBar } from "./FilterBar";
 import { KeyboardMoveHint } from "./boardViewParts";
+import { useTasksTitle } from "./home/HomeSegments";
 import { BoardCalendar } from "./BoardCalendar";
 import { displayedDay, displayedTime, dueAnnouncement, shiftedDueAt } from "./calendarPlacement";
 import { daysBetween } from "../calendarRoute";
@@ -194,6 +195,9 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
 
   const board = detail?.board ?? null;
   const owner = board?.is_owner === 1;
+  // The tab names the board, and the open card before it (QA 0.9.0).
+  const openCardTitle = openCardId ? detail?.cards.find((card) => card.id === openCardId)?.title ?? null : null;
+  useTasksTitle(board ? `${openCardTitle ? `${openCardTitle} · ` : ""}${board.name} · Tasks` : null);
   const cardPage = Boolean(openCardId && openCardFull && board);
   // Back on the board from the full page: the phone track shows the column this entry was on.
   useEffect(() => {
@@ -228,6 +232,13 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
     move: (cardId, columnId, afterCardId) => move(cardId, columnId, afterCardId),
     openComposer: ({ parentId }) => setComposer({ columnId: null, parentId })
   });
+
+  const shownLane = hierarchy.visible(laneCards, filtered);
+  const sprintConflict = sprintFilterConflict(query.filter.terms, sprints.selection, sprints.sprints);
+  const showAllLevels = () => {
+    hierarchy.setShowAll(true);
+    notify("Showing all levels. Turn it off in Board settings.");
+  };
 
   const setCards = (change: (cards: CardSummary[]) => CardSummary[]) =>
     setDetail((current) => current ? { ...current, cards: change(current.cards) } : current);
@@ -525,6 +536,7 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
     {!loadError && !detail && <p className="bin-loading task-board-state" role="status">Loading the board…</p>}
     {detail && data && result && <FilterBar board={data} context={viewContext} filter={query.filter} shown={result.cards.length} total={scopedTotal}
       onChange={(filter) => onQueryChange(withBoardQuery(query, { filter }))} />}
+    {detail && sprintConflict && <p className="task-sprint-conflict" role="status">{sprintConflict}</p>}
     {detail && data && result && view === "table" && <div className="task-view-body">
       <BoardTable board={data} cards={result.cards} sort={query.sort} today={viewContext.today} filtered={filtered}
         onSort={(sort) => onQueryChange(withBoardQuery(query, { sort }))}
@@ -543,21 +555,26 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
     </div>}
     {detail && view === "board" && <nav className="task-column-tabs" aria-label="Columns">
       {columns.map((column, index) => {
-        const count = columnCards(cards, column.id).length;
-        const wip = wipState(count, column.wip_limit);
+        // The cards on screen; a WIP limit counts every live card (QA 0.9.0).
+        const badge = columnBadge(columnCards(shownLane, column.id).length, columnCards(cards, column.id).length, column.wip_limit);
         return <button key={column.id} id={`task-tab-${column.id}`} className={index === shownColumn ? "active" : ""} aria-current={index === shownColumn ? "true" : undefined} onClick={() => showColumn(index)}>
-          <span>{column.name}</span><b className={wip ? `task-wip ${wip}` : undefined} aria-label={wipCountLabel(count, column.wip_limit)}>{wip ? `${count} / ${column.wip_limit}` : count}</b>
+          <span>{column.name}</span><b className={badge.wip ? `task-wip ${badge.wip}` : undefined} aria-label={badge.label}>{badge.text}</b>
         </button>;
       })}
       {owner && columns.length < MAX_COLUMNS && <button className="task-tab-add" onClick={(event) => openDialog({ kind: "addColumn" }, event.currentTarget)} aria-haspopup="dialog" aria-label="Add column"><Plus /></button>}
     </nav>}
     {detail && view === "board" && <div className="task-columns" ref={trackRef} onScroll={onTrackScroll}>
-      {columns.map((column, index) => <BoardColumnView
+      {columns.map((column, index) => {
+        const lane = columnCards(laneCards, column.id);
+        const shown = columnCards(shownLane, column.id);
+        const hidden = hierarchy.hiddenIn(lane, shown);
+        return <BoardColumnView
         key={column.id}
         column={column}
-        cards={columnCards(hierarchy.visible(laneCards, filtered), column.id)}
+        cards={shown}
         totalCount={columnCards(cards, column.id).length}
-        emptyText={filtered ? "No matching cards" : sprintScoped ? (sprints.selection?.kind === "backlog" ? "Nothing from the backlog here" : "Nothing from this sprint here") : "Its cards sit inside their parents"}
+        hiddenNote={hidden.note ? { text: hidden.note, onShowAll: showAllLevels } : undefined}
+        emptyText={filtered ? "No matching cards" : sprintScoped && !lane.length ? (sprints.selection?.kind === "backlog" ? "Nothing from the backlog here" : "Nothing from this sprint here") : hidden.hint ?? "No matching cards"}
         nesting={hierarchy.nesting}
         tags={detail.tags}
         owner={owner}
@@ -581,7 +598,8 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
           const refusal = addCardRefusal(cards, column);
           if (refusal) { notify(refusal); setAnnouncement(refusal); } else setComposer({ columnId: column.id });
         }}
-      />)}
+      />;
+      })}
       {owner && columns.length < MAX_COLUMNS && <button className="task-add-column" onClick={(event) => openDialog({ kind: "addColumn" }, event.currentTarget)} aria-haspopup="dialog"><Plus />Add column</button>}
     </div>}
     </>}

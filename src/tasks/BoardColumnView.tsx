@@ -2,7 +2,7 @@ import { useRef, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKe
 import { ChevronLeft, ChevronRight, Ellipsis, Plus } from "lucide-react";
 import { CARD_DRAG_TYPE, isCardDrag, isMoveKey, type MoveKey } from "./boardOrder";
 import { CardFace, cardFaceLabel } from "./CardFace";
-import { localDateString, wipCountLabel, wipState } from "./taskActions";
+import { columnBadge, localDateString } from "./taskActions";
 import type { BoardColumn, BoardTag, CardSummary } from "./tasksApi";
 import type { ColumnNesting } from "./useBoardHierarchy";
 
@@ -30,8 +30,10 @@ type BoardColumnViewProps = {
   onMoveColumn: (direction: -1 | 1) => void;
   /** Opens the card composer on this column (§4.3; it replaced the inline quick add, §11 Q4). */
   onAddCard: () => void;
-  /** With filters on (13E), `cards` are the matching ones and this is the column's real count (for WIP). */
+  /** With filters, a sprint, or hidden levels, `cards` are the ones shown and this is the column's real count (for WIP). */
   totalCount?: number;
+  /** Cards above the work level that the column hides ("1 epic not shown"), with the switch that shows them. */
+  hiddenNote?: { text: string; onShowAll: () => void };
   /** Shown when the column has cards but none are listed (filters, or hierarchy levels that are hidden). */
   emptyText?: string;
   /** Hierarchy (17A): parent and subtask chips, and nesting by drag onto a card one level up (D128). */
@@ -109,15 +111,15 @@ export function BoardColumnView(props: BoardColumnViewProps) {
   const indicator = (index: number) => dropIndex === index ? <li className="task-drop-indicator" aria-hidden="true" /> : null;
 
   const count = props.totalCount ?? cards.length;
-  const wip = wipState(count, column.wip_limit);
+  const badge = columnBadge(cards.length, count, column.wip_limit);
 
   return <section className={`task-column${dropIndex !== null ? " drop-active" : ""}${props.refuseDrop ? " drop-refused" : ""}`} aria-labelledby={`column-${column.id}`} data-column-id={column.id}
     onDragOver={dragOver} onDragEnter={dragOver} onDrop={drop}
     onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) props.onDragOverIndex(null); }}>
     <header className="task-column-header">
       <h2 id={`column-${column.id}`} title={column.name}>{column.name}</h2>
-      <b className={wip ? `task-wip ${wip}` : undefined} aria-label={wipCountLabel(count, column.wip_limit)} title={wip ? `WIP limit ${column.wip_limit}` : undefined}>
-        {wip ? `${count} / ${column.wip_limit}` : count}
+      <b className={badge.wip ? `task-wip ${badge.wip}` : undefined} aria-label={badge.label} title={badge.wip ? `WIP limit ${column.wip_limit}` : undefined}>
+        {badge.text}
       </b>
       {owner && <span className="task-column-controls">
         <button className="icon-button desktop-only" onClick={() => props.onMoveColumn(-1)} disabled={isFirst} aria-label={`Move ${column.name} left`} title="Move column left"><ChevronLeft /></button>
@@ -126,6 +128,10 @@ export function BoardColumnView(props: BoardColumnViewProps) {
       </span>}
     </header>
     {props.refuseDrop && <p className="task-column-full-hint" role="status">Full: it takes at most {column.wip_limit} {column.wip_limit === 1 ? "card" : "cards"}.</p>}
+    {props.hiddenNote && <p className="task-column-hidden">
+      <span>{props.hiddenNote.text}</span>
+      <button type="button" className="task-column-show-all" onClick={props.hiddenNote.onShowAll}>Show all levels</button>
+    </p>}
     <ul ref={listRef} className="task-card-list" aria-label={`${column.name} cards`}>
       {cards.map((card) => {
         // The dragged card stays rendered (removing it would cancel the drag); slots count the others.

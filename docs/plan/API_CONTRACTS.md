@@ -320,7 +320,7 @@ Positions are computed by the server (D40) and never accepted from clients: a ne
 | Endpoint | Who | Success | Errors |
 | --- | --- | --- | --- |
 | `GET /boards` | any | 200 `{ boards: BoardSummary[] }`: owned boards first, then shared ones, each by name (limit 500) | |
-| `POST /boards { name, template? }` | any | 201 `{ board, columns }`. Without `template` (or `kanban`): To do, Doing, Done at 1024, 2048, 3072. `template` (17A, D136) is one of `kanban`, `todo`, `checklist`, `scrum`, `epics`, `triage`, `content` (`shared/boardStructure.ts` `TEMPLATES`): it sets the columns with their states, the structure, and for `triage` the tags Bug and Regression; no template creates cards (the Scrum sprint is 17B). Audit `task.board_create` adds `template` when not `kanban` | 400 (an unknown template), 409 `LIMIT_REACHED` |
+| `POST /boards { name, template?, tz? }` | any | 201 `{ board, columns }`. Without `template` (or `kanban`): To do, Doing, Done at 1024, 2048, 3072. `template` (17A, D136) is one of `kanban`, `todo`, `checklist`, `scrum`, `epics`, `triage`, `content` (`shared/boardStructure.ts` `TEMPLATES`): it sets the columns with their states, the structure, and for `triage` the tags Bug and Regression; no template creates cards (the Scrum sprint is 17B). Audit `task.board_create` adds `template` when not `kanban` | 400 (an unknown template or `tz`), 409 `LIMIT_REACHED` |
 | `GET /boards/:b` | reader | 200 `{ board, columns, cards: BoardCard[], users: Record<userId, { display_name, can_read }>, tags: BoardTag[] }` (columns and cards by position, tags by name). Wave 13 adds `tags`, and each card adds `relation_count` and `open_blockers` for this viewer (§ Relations). **v0.9.0 (D113 trim):** `BoardCard` is `CardSummary & RelationCounts` without `board_id`, `assignees`, `assignee_id`, and `assignee_name`, plus `assignee_ids: string[]` (assignment order); `users` names every assignee on the board once, with `can_read` for this board. `GET /cards/:k`, the card write responses, and MCP keep `assignees[]` objects. | 404 |
 | `PATCH /boards/:b { name }` | owner | 200 `{ board }` | 400, 403, 404 |
 | `DELETE /boards/:b` | owner | 200 `{ ok: true, purgeAfter }`: the board moves to the Bin for 30 days | 403, 404 |
@@ -538,7 +538,7 @@ type BoardStructure = {
 
 | Endpoint | Who | Success | Errors |
 | --- | --- | --- | --- |
-| `PATCH /boards/:b { name?, structure? }` | owner | 200 `{ board }`; at least one field | 400 (an invalid structure, with `details`), 403, 404, 409 `LEVEL_IN_USE { level, cardCount, binnedCount }` (a card, live or in the Bin, sits at a level being removed), 409 `SPRINTS_IN_USE` (sprints turned off while sprints are open, or the work level moved while cards carry a sprint) |
+| `PATCH /boards/:b { name?, structure? }` | owner | 200 `{ board }`; at least one field | 400 (an invalid structure, with `details`), 403, 404, 409 `LEVEL_IN_USE { level, cardCount, binnedCount, levels: [{ level, name, cardCount }] }` (a card, live or in the Bin, sits at a level being removed), 409 `SPRINTS_IN_USE` (sprints turned off while sprints are open, or the work level moved while cards carry a sprint) |
 
 Audit: `task.board_structure { boardId, levels, workLevel, sprints }` (counts only, no names).
 
@@ -572,7 +572,7 @@ type CardSummary = /* … */ & { sprint_id: string | null };   // stored (work l
 
 - A sprint id is joined to its board: a sprint of a board the caller cannot read is 404, whatever the action.
 - `PATCH /boards/:b` refuses `sprints: false` while sprints are open, and a work-level change while cards carry a sprint (409 `SPRINTS_IN_USE`, § Board structure).
-- The **Scrum sprint board** template (`POST /boards { template: "scrum" }`) also creates a planned "Sprint 1" from today (UTC) for two weeks.
+- The **Scrum sprint board** template (`POST /boards { template: "scrum" }`) also creates a planned "Sprint 1" for two weeks from today in `tz` (the creator's IANA zone, as the web app sends), else UTC. Completing a sprint into a new one (`carryTo: "new"`) dates it from today, as long as the completed one, never after an end date that has not come yet; completed on its last day, it starts tomorrow.
 - **The board page** keeps the sprint on screen in its URL as `?sprint=backlog|all|<id>`, beside `view`, `group`, and `sort` (absent = the current sprint: the active one, else the backlog), and carries it through card routes. It scopes every view with one more `sprint:` term (§ Filter grammar); the filter bar keeps only the viewer's own terms. Picking a sprint pushes a history entry (a committed choice, like the view switch).
 - **Audit** (ids only): `task.sprint_create { boardId, sprintId }`, `task.sprint_update { boardId, sprintId, fields }`, `task.sprint_start`, `task.sprint_delete`, `task.sprint_complete { boardId, sprintId, carried, doneCount, carryTo: "next" | "backlog" | "new" | "sprint", targetSprintId? }` (a `new` target is also a `task.sprint_create`); `task.card_create` and `task.card_update` add `sprintId` when it is set or changes. Carried cards get no per-card audit row: the completion row counts them.
 

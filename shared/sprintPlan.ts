@@ -58,3 +58,14 @@ export function nextSprintDates(previous: { start_on: string | null; end_on: str
   }
   return { startOn: today, endOn: addSprintDays(today, SPRINT_DEFAULT_DAYS - 1) };
 }
+
+/**
+ * The dates of a new sprint made while completing `sprint` today (QA 0.9.0): as long as it, but
+ * from today, never chained after an end date that has not come yet (completed early) or has passed
+ * (completed late). Completed on its last day, the new one starts tomorrow.
+ */
+export function sprintDatesAfterCompleting(sprint: { start_on: string | null; end_on: string | null }, today: string): { startOn: string; endOn: string } {
+  const length = sprint.start_on && sprint.end_on ? Math.max(0, sprintDaysBetween(sprint.start_on, sprint.end_on)) : SPRINT_DEFAULT_DAYS - 1;
+  const startOn = sprint.end_on === today ? addSprintDays(today, 1) : today;
+  return { startOn, endOn: addSprintDays(startOn, length) };
+}

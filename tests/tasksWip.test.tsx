@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { BoardColumnView } from "../src/tasks/BoardColumnView";
 import { MoveCardSheet } from "../src/tasks/MoveCardSheet";
 import { WipLimitDialog } from "../src/tasks/WipLimitDialog";
-import { addCardRefusal, canEnterColumn, columnFullMessage, validateWipLimit, wipCountLabel, wipState } from "../src/tasks/taskActions";
+import { addCardRefusal, canEnterColumn, columnBadge, columnFullMessage, validateWipLimit, wipCountLabel, wipState } from "../src/tasks/taskActions";
 import type { BoardColumn, CardSummary } from "../src/tasks/tasksApi";
 
 const noop = () => undefined;
@@ -57,6 +57,20 @@ test("the column header shows n / limit with the full and over styles", () => {
   expect(refused).toContain("task-column drop-refused");
   expect(refused).toContain("Full: it takes at most 1 card.");
   expect(renderColumn(1, 1)).not.toContain("drop-refused");
+});
+
+test("column badges count the cards shown, with the total in the label; WIP counts every live card (QA FAIL-2)", () => {
+  expect(columnBadge(3, 3, null)).toEqual({ text: "3", label: "3 cards", wip: null });
+  expect(columnBadge(3, 8, null)).toEqual({ text: "3", label: "3 shown of 8 cards", wip: null });
+  expect(columnBadge(8, 8, 10)).toEqual({ text: "8 / 10", label: "8 of 10 cards", wip: "under" });
+  expect(columnBadge(3, 8, 8)).toEqual({ text: "3 · 8 / 8", label: "3 shown; 8 of 8 cards, at the limit", wip: "full" });
+  const markup = renderToStaticMarkup(<BoardColumnView
+    column={column("doing", null, "Doing")} cards={[]} totalCount={1} hiddenNote={{ text: "1 epic not shown", onShowAll: noop }} emptyText="1 epic is shown in Table and List views"
+    owner={false} isFirst isLast draggingId={null} dropIndex={null}
+    onDragStart={noop} onDragEnd={noop} onDragOverIndex={noop} onDropAt={noop} onKeyMove={noop} onCardMenu={noop} onOpenCard={noop} onColumnMenu={noop} onMoveColumn={noop} onAddCard={async () => undefined} />);
+  expect(markup).toContain('<b aria-label="0 shown of 1 card">0</b>');
+  expect(markup).toContain('<p class="task-column-hidden"><span>1 epic not shown</span><button type="button" class="task-column-show-all">Show all levels</button></p>');
+  expect(markup).toContain(">1 epic is shown in Table and List views</li>");
 });
 
 test("Move to… disables a full column and keeps the card's own column", () => {

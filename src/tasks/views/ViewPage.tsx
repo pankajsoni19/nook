@@ -12,7 +12,7 @@ import { HomeResultsPane, type HomeDirectory } from "../home/HomeResultsPane";
 import { useTasksTitle } from "../home/HomeSegments";
 import { isSelectiveQuery, NEW_VIEW, newViewDefault, sameHomeQuery, serverGroup, viewHomeQuery, type HomeQuery } from "../home/homeUrl";
 import { useRole } from "../../team/roleAccess";
-import { ownedViewActions, validateViewName, viewNameHint, viewRoleAccess, viewUndoBody, viewVisibilityLabel } from "./viewActions";
+import { announceViewsChanged, ownedViewActions, validateViewName, viewNameHint, viewRoleAccess, viewUndoBody, viewVisibilityLabel } from "./viewActions";
 import { ViewSharePanel } from "./ViewSharePanel";
 
 type ViewPageProps = {
@@ -164,8 +164,10 @@ export function ViewPage({ userId, viewId, query, onQuery, directory, notify, on
       onDeleted();
       const body = viewUndoBody(view);
       notify(`Deleted “${view.name}”`, { label: "Undo", run: () => {
-        createView(body).then(({ view: restored }) => notify(`Restored “${restored.name}” as a private view`, { label: "Open", run: () => onOpenView(restored) }),
-          (reason) => notify(taskErrorMessage(reason, "Could not restore the view")));
+        createView(body).then(({ view: restored }) => {
+          announceViewsChanged();
+          notify(`Restored “${restored.name}” as a private view`, { label: "Open", run: () => onOpenView(restored) });
+        }, (reason) => notify(taskErrorMessage(reason, "Could not restore the view")));
       } });
     } catch (reason) {
       closeDialog();

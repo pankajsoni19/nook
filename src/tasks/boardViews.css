@@ -122,8 +122,7 @@ span.task-filter-chip-body { cursor: default; }
 @media (max-width: 760px) {
   .task-filter-bar { padding: 0 16px 8px; }
   .task-filter-chip { min-height: 44px; font-size: .88rem; }
-  .task-filter-chip-remove { width: 36px; height: 36px; }
-  .task-filter-chip-remove::after { content: ""; position: absolute; inset: -4px; }
+  .task-filter-chip-remove { width: 44px; height: 44px; margin-block: -1px; }
   .task-filter-editor { width: 100%; }
   .task-filter-editor .ui-combobox { min-width: 0; flex-basis: 100%; }
   .task-filter-date input, .task-filter-date .secondary-button, .task-filter-clear { min-height: 44px; }
@@ -188,3 +187,6 @@ span.task-filter-chip-body { cursor: default; }
   .task-cal-row-due { width: 44px; height: 44px; }
   .task-cal-due-form input, .task-cal-due-actions button { min-height: 44px; font-size: 1rem; }
 }
+
+/* The filter bar's sprint filter disagrees with the header switcher (QA 0.9.0). */
+.task-sprint-conflict { margin: 0 clamp(16px, 3vw, 32px) 8px; border-radius: 8px; padding: 6px 10px; background: #221d12; color: #f0d591; font-size: .78rem; }

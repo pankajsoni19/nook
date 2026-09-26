@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { RotateCcw, TriangleAlert } from "lucide-react";
+import { useCallback, useEffect, useId, useMemo, useState, type ReactNode } from "react";
+import { RotateCcw, SlidersHorizontal, TriangleAlert } from "lucide-react";
 import type { FilterKey } from "../../../shared/taskQuery";
 import { api } from "../../api";
 import type { User } from "../../types";
@@ -47,12 +47,17 @@ type HomeResultsPaneProps = {
   lockedKeys?: readonly FilterKey[];
   hiddenKeys?: readonly FilterKey[];
   readOnly?: boolean;
-  /** Between the toolbar and the filter bar (My work's state chips). */
+  /** First in the toolbar (My work's state chips), on the layout switch's row. */
   above?: ReactNode;
   /** Right of the layout controls (Save, Save as, …). */
   actions?: ReactNode;
   emptyText: string;
 };
+
+/** The filters a viewer set (the Filters button's count): locked and hidden keys (My work's assignee and state) are not theirs to count. */
+export function activeFilterCount(terms: ReadonlyArray<{ key: FilterKey }>, lockedKeys: readonly FilterKey[] = [], hiddenKeys: readonly FilterKey[] = []) {
+  return terms.filter((term) => !lockedKeys.includes(term.key) && !hiddenKeys.includes(term.key)).length;
+}
 
 /** The toolbar, filter bar, and results shared by My work and the view page (§9.1 "same controls, same place"). */
 export function HomeResultsPane({ userId, query, onQuery, source, idle, directory, notify, onOpenCard, lockedKeys, hiddenKeys, readOnly = false, above, actions, emptyText }: HomeResultsPaneProps) {
@@ -69,19 +74,31 @@ export function HomeResultsPane({ userId, query, onQuery, source, idle, director
   const names = refNames(refs, { boards, users, userId });
   const tagNames = useMemo(() => [...new Set(result.cards.flatMap((card) => card.tags.map((tag) => tag.name)))], [result.cards]);
   const onMoveError = useCallback((message: string) => { setMoving(null); notify(message); }, [notify]);
+  // At 760 px and below the group, sort, and filter controls fold behind one "Filters" button
+  // (QA 0.9.0: they took ~600 px on a phone); above that the toggle is hidden and they always show.
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const filtersId = useId();
+  const filterCount = activeFilterCount(query.filter.terms, lockedKeys, hiddenKeys);
 
-  return <div className="task-home-pane">
+  return <div className={`task-home-pane${filtersOpen ? " filters-open" : ""}`}>
     <div className="task-home-toolbar">
+      {above}
       <BoardViewSwitch value={query.layout} views={["list", "table", "board"]} onChange={(layout) => onQuery({ ...query, layout: layout as HomeLayout }, { push: true })} />
-      {query.layout === "list" && <Select<HomeGroup> variant="chip" label="Group by" value={query.group} searchable={false}
-        options={HOME_GROUPS.map((group) => ({ value: group, label: `Group: ${GROUP_LABELS[group]}` }))} onChange={(group) => onQuery({ ...query, group }, { push: false })} />}
-      <Select<HomeSort> variant="chip" label="Sort by" value={query.sort} searchable={false}
-        options={HOME_SORTS.map((sort) => ({ value: sort, label: `Sort: ${SORT_LABELS[sort]}` }))} onChange={(sort) => onQuery({ ...query, sort }, { push: false })} />
+      <button type="button" className="secondary-button task-home-filters-toggle" aria-expanded={filtersOpen} aria-controls={filtersId} onClick={() => setFiltersOpen((open) => !open)}>
+        <SlidersHorizontal aria-hidden="true" /><span>{filterCount ? `Filters · ${filterCount}` : "Filters"}</span>
+      </button>
+      <span className="task-home-collapsible task-home-sorts">
+        {query.layout === "list" && <Select<HomeGroup> variant="chip" label="Group by" value={query.group} searchable={false}
+          options={HOME_GROUPS.map((group) => ({ value: group, label: `Group: ${GROUP_LABELS[group]}` }))} onChange={(group) => onQuery({ ...query, group }, { push: false })} />}
+        <Select<HomeSort> variant="chip" label="Sort by" value={query.sort} searchable={false}
+          options={HOME_SORTS.map((sort) => ({ value: sort, label: `Sort: ${SORT_LABELS[sort]}` }))} onChange={(sort) => onQuery({ ...query, sort }, { push: false })} />
+      </span>
       {actions && <span className="task-home-actions">{actions}</span>}
     </div>
-    {above}
-    <HomeFilterBar filter={query.filter} names={names} options={{ boards: directory.boards, users: directory.users.filter((user) => user.id !== userId), tagNames }}
-      lockedKeys={lockedKeys} hiddenKeys={hiddenKeys} readOnly={readOnly} onChange={(filter, options) => onQuery({ ...query, filter }, options)} />
+    <div id={filtersId} className="task-home-collapsible">
+      <HomeFilterBar filter={query.filter} names={names} options={{ boards: directory.boards, users: directory.users.filter((user) => user.id !== userId), tagNames }}
+        lockedKeys={lockedKeys} hiddenKeys={hiddenKeys} readOnly={readOnly} onChange={(filter, options) => onQuery({ ...query, filter }, options)} />
+    </div>
     <div className="task-home-results">
       {!source && idle}
       {source && result.status === "loading" && <p className="bin-loading" role="status">Loading cards…</p>}

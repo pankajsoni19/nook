@@ -10,6 +10,20 @@ import type { CardHierarchyContext } from "./useBoardHierarchy";
 
 const NO_PARENT = "__none";
 
+/**
+ * Runs one inline add at a time (QA 0.9.0): while `flag` is set a second call is refused (null),
+ * so a quick double Enter never creates a duplicate. Otherwise the add's own result.
+ */
+export async function addOnce(flag: { current: boolean }, run: () => Promise<boolean>): Promise<boolean | null> {
+  if (flag.current) return null;
+  flag.current = true;
+  try {
+    return await run();
+  } finally {
+    flag.current = false;
+  }
+}
+
 /** "Epic: Checkout › Story: Refunds ›" above the card title; each step opens that card (a history entry). */
 export function CardBreadcrumb({ card, context }: { card: CardDetail; context: CardHierarchyContext }) {
   const chain = ancestorsOf(context.cards, card.id);
@@ -17,7 +31,7 @@ export function CardBreadcrumb({ card, context }: { card: CardDetail; context: C
   return <nav className="task-breadcrumb" aria-label="Parents">
     {chain.map((item) => <span key={item.id}>
       <button type="button" onClick={() => context.openCard(item.id)} title={item.title}>
-        <small>{levelName(context.structure, levelOf(item))}</small>{item.title}
+        <small>{levelName(context.structure, levelOf(item))}</small><span className="sr-only">: </span>{item.title}
       </button>
       <ChevronRight aria-hidden="true" />
     </span>)}
@@ -114,6 +128,7 @@ export function SubtasksSection({ card, context, idPrefix, readOnly = false }: S
   const [adding, setAdding] = useState(false);
   const [pending, setPending] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const inFlightRef = useRef(false);
   const headingId = useId();
   const { structure } = context;
   const level = levelOf(card);
@@ -127,13 +142,15 @@ export function SubtasksSection({ card, context, idPrefix, readOnly = false }: S
   const today = localDateString();
   const columnName = (columnId: string) => context.columns.find((column) => column.id === columnId)?.name ?? "";
 
+  // QA 0.9.0: the input stays enabled (a disabled input drops focus) and a ref, not state, refuses a
+  // second Enter while the first add is saving, so a quick double Enter never adds a duplicate.
   async function add() {
     const check = validateCardTitle(draft);
-    if (!check.ok || adding) return;
+    if (!check.ok || inFlightRef.current) return;
     setAdding(true);
-    const added = await context.addChild(card, check.name);
+    const added = await addOnce(inFlightRef, () => context.addChild(card, check.name));
     setAdding(false);
-    if (added) setDraft("");
+    if (added) setDraft((current) => current.trim() === check.name ? "" : current);
     inputRef.current?.focus();
   }
 
@@ -184,7 +201,7 @@ export function SubtasksSection({ card, context, idPrefix, readOnly = false }: S
     {!readOnly && <div className="task-subtask-add">
       <Plus aria-hidden="true" />
       <input ref={inputRef} id={`${idPrefix}-add-child`} value={draft} maxLength={200} placeholder={`Add ${singular.toLowerCase()}…`} aria-label={`Add ${singular.toLowerCase()}`}
-        disabled={adding} onChange={(event) => setDraft(event.target.value)} onKeyDown={onKey} enterKeyHint="done" />
+        aria-busy={adding || undefined} onChange={(event) => setDraft(event.target.value)} onKeyDown={onKey} enterKeyHint="done" />
       {draft.trim() && <button type="button" className="primary-button task-small-button" onClick={() => { void add(); }} disabled={adding}>{adding ? "Adding…" : "Add"}</button>}
     </div>}
     {readOnly && !children.length && <p className="task-comment-empty">No {plural.toLowerCase()} yet.</p>}

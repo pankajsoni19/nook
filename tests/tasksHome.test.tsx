@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { format, parse } from "../shared/taskQuery";
 import { formatRoute, parseRoute, sameRoute } from "../src/router";
@@ -12,7 +13,7 @@ import { MyWork, statePreset } from "../src/tasks/home/MyWork";
 import { QueryResults } from "../src/tasks/home/QueryResults";
 import { TasksHome } from "../src/tasks/home/TasksHome";
 import { ColumnStateField } from "../src/tasks/views/ColumnStateField";
-import { ownedViewActions, validateViewName, viewNameHint, viewRoleAccess, viewUndoBody } from "../src/tasks/views/viewActions";
+import { announceViewsChanged, onViewsChanged, ownedViewActions, validateViewName, viewNameHint, viewRoleAccess, viewUndoBody } from "../src/tasks/views/viewActions";
 import { ViewPage } from "../src/tasks/views/ViewPage";
 import { RoleContext, useRole } from "../src/team/roleAccess";
 import type { Role } from "../src/team/teamRoles";
@@ -212,6 +213,21 @@ test("view names follow the server rule, and Undo re-creates the same body", () 
   expect(validateViewName("x".repeat(81)).ok).toBe(false);
   expect(validateViewName("bad\u0007").ok).toBe(false);
   expect(viewUndoBody({ name: "A", query: "flag:urgent", display: { layout: "table", group: "none", sort: "due" } })).toEqual({ name: "A", query: "flag:urgent", display: { layout: "table", group: "none", sort: "due" } });
+});
+
+test("Undo of a deleted view refreshes the views list without a reload (QA FAIL-1)", () => {
+  const target = new EventTarget();
+  let loads = 0;
+  const stop = onViewsChanged(() => { loads += 1; }, target);
+  announceViewsChanged(target);
+  expect(loads).toBe(1);
+  stop();
+  announceViewsChanged(target);
+  expect(loads).toBe(1);
+  const list = readFileSync(new URL("../src/tasks/views/ViewsList.tsx", import.meta.url), "utf8");
+  expect(list).toContain("onViewsChanged(() => { void load(); })");
+  const page = readFileSync(new URL("../src/tasks/views/ViewPage.tsx", import.meta.url), "utf8");
+  expect(page).toMatch(/createView\(body\)\.then\(\(\{ view: restored \}\) => \{\s*announceViewsChanged\(\);/);
 });
 
 test("views follow the Team role (Wave 15, Q12): viewers save private views, guests save none, read-only roles never share", () => {

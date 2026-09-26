@@ -1,4 +1,4 @@
-import { useEffect, useId, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { useEffect, useId, useRef, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
 import { X } from "lucide-react";
 
 const focusableSelector = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -23,6 +23,24 @@ export function trapTabKey(event: ReactKeyboardEvent<HTMLElement>) {
   }
 }
 
+type FocusContainer = Pick<HTMLElement, "contains" | "querySelectorAll" | "focus">;
+
+/**
+ * Moves focus into a modal that has just opened when nothing inside has it yet (an `autoFocus`
+ * child wins, as React focuses it before effects run): the first focusable element, else the
+ * container. Without this the opener keeps focus and Tab walks the page behind (QA 0.9.0).
+ */
+export function focusIntoDialog(container: FocusContainer | null, active: Element | null = document.activeElement) {
+  if (!container || (active && container.contains(active))) return;
+  const first = Array.from(container.querySelectorAll<HTMLElement>(focusableSelector)).find((element) => !element.hasAttribute("hidden"));
+  (first ?? container).focus();
+}
+
+/** {@link focusIntoDialog} once, on open. */
+export function useDialogFocus(ref: RefObject<HTMLElement | null>) {
+  useEffect(() => { focusIntoDialog(ref.current); }, [ref]);
+}
+
 type ModalDialogProps = {
   title: string;
   eyebrow?: string;
@@ -39,6 +57,8 @@ type ModalDialogProps = {
 // Back is handled by FilesApp (it closes the dialog and keeps the panel, D18).
 export function ModalDialog({ title, eyebrow, onClose, children, variant = "dialog", busy = false, describedBy }: ModalDialogProps) {
   const titleId = useId();
+  const sectionRef = useRef<HTMLElement>(null);
+  useDialogFocus(sectionRef);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       // A dropdown inside the dialog handles its own Escape first (preventDefault).
@@ -53,7 +73,7 @@ export function ModalDialog({ title, eyebrow, onClose, children, variant = "dial
 
   return <>
     <button className="panel-scrim file-dialog-scrim" onClick={() => { if (!busy) onClose(); }} aria-label="Close dialog" tabIndex={-1} />
-    <section className={`file-dialog${variant === "sheet" ? " file-dialog-sheet" : ""}`} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={describedBy} aria-busy={busy || undefined} onKeyDown={trapTabKey}>
+    <section ref={sectionRef} tabIndex={-1} className={`file-dialog${variant === "sheet" ? " file-dialog-sheet" : ""}`} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={describedBy} aria-busy={busy || undefined} onKeyDown={trapTabKey}>
       <header className="file-dialog-header">
         <div>{eyebrow && <span className="eyebrow">{eyebrow}</span>}<h2 id={titleId} title={title}>{title}</h2></div>
         <button className="icon-button" onClick={onClose} disabled={busy} aria-label="Close"><X /></button>

@@ -10,11 +10,12 @@ import { insertRelation } from "./cardRelations";
 import { descriptionExcerpt } from "./excerpt";
 import type { RelationType } from "./relations";
 import { boardStructure, liveChildCount, parentRow, rollupFor, rollupsForBoard, type Rollup } from "./hierarchy";
-import { HIERARCHY_LIMITS, parseStructure, TEMPLATES, type BoardStructure, type BoardTemplateId } from "../../shared/boardStructure";
+import { HIERARCHY_LIMITS, levelInUseMessage, parseStructure, TEMPLATES, type BoardStructure, type BoardTemplateId } from "../../shared/boardStructure";
 import { boardSprints, EFFECTIVE_SPRINT_SQL, sprintOfBoard } from "./sprintData";
 import { addSprintDays, SPRINT_DEFAULT_DAYS } from "../../shared/sprintPlan";
 import { flagsForBoard, flagsForCard, listBoardTags, replaceCardFlags, replaceCardTags, requireCardTags, tagIdsForBoard, tagIdsForCard, type CardFlag } from "./tags";
 import { audienceAllUsersFor } from "../team/roles";
+import { dateInZone, validTimeZone } from "../today/registry";
 
 /**
  * Task Boards services (WAVES_7-9.md §3). Routes are thin adapters over these
@@ -212,7 +213,7 @@ export function requireOwnedBoard(boardId: string, userId: string) {
 }
 
 /** Creates a board from a template (D136; default Simple kanban): its columns and states, its structure, and any tags. Never cards. */
-export function createBoard(userId: string, name: string, templateId: BoardTemplateId = "kanban") {
+export function createBoard(userId: string, name: string, templateId: BoardTemplateId = "kanban", tz?: string) {
   const template = TEMPLATES[templateId];
   return db.transaction(() => {
     const owned = (db.query("SELECT COUNT(*) AS count FROM boards WHERE owner_id = ? AND deleted_at IS NULL").get(userId) as { count: number }).count;
@@ -228,9 +229,11 @@ export function createBoard(userId: string, name: string, templateId: BoardTempl
     });
     const insertTag = db.query("INSERT INTO board_tags (id, board_id, name, color, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)");
     for (const tag of template.tags ?? []) insertTag.run(crypto.randomUUID(), id, tag.name, tag.color, userId, timestamp, timestamp);
-    // The Scrum template starts with a planned first sprint of two weeks from today (UTC, §7.4).
+    // The Scrum template starts with a planned first sprint of two weeks from today (§7.4): the
+    // creator's today in their zone when the client sends one (QA 0.9.0), else UTC's.
     if (template.firstSprint) {
-      const startOn = timestamp.slice(0, 10);
+      const zone = tz ? validTimeZone(tz) : null;
+      const startOn = zone ? dateInZone(new Date(timestamp), zone) : timestamp.slice(0, 10);
       db.query("INSERT INTO board_sprints (id, board_id, name, start_on, end_on, state, position, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'planned', 1024, ?, ?, ?)")
         .run(crypto.randomUUID(), id, template.firstSprint, startOn, addSprintDays(startOn, SPRINT_DEFAULT_DAYS - 1), userId, timestamp, timestamp);
     }
@@ -256,12 +259,17 @@ export function setBoardStructure(userId: string, boardId: string, structure: Bo
 /** Throws the 409 that refuses `structure` on this board, if any (see setBoardStructure). */
 function checkStructureChange(boardId: string, structure: BoardStructure) {
   const current = boardStructure(boardId);
-  const removed = db.query("SELECT COUNT(*) AS count, MIN(level) AS level, SUM(deleted_at IS NOT NULL) AS binned FROM cards WHERE board_id = ? AND level >= ?")
-    .get(boardId, structure.levels.length) as { count: number; level: number | null; binned: number | null };
-  if (removed.count > 0) {
-    const binned = removed.binned ?? 0;
-    throw new TaskError(409, `${removed.count === 1 ? "1 card is" : `${removed.count} cards are`} ${current.levels[removed.level!]?.plural ?? "at that level"}${binned ? ` (${binned} in the Bin)` : ""}. Move or change them before removing this level.`,
-      "LEVEL_IN_USE", { level: removed.level, cardCount: removed.count, binnedCount: binned });
+  // Per removed level (QA 0.9.0): "8 cards are Stories and 6 are Subtasks", not one level's name with the total.
+  const removedLevels = db.query("SELECT level, COUNT(*) AS count, SUM(deleted_at IS NOT NULL) AS binned FROM cards WHERE board_id = ? AND level >= ? GROUP BY level ORDER BY level")
+    .all(boardId, structure.levels.length) as Array<{ level: number; count: number; binned: number | null }>;
+  if (removedLevels.length) {
+    const cardCount = removedLevels.reduce((sum, row) => sum + row.count, 0);
+    const binned = removedLevels.reduce((sum, row) => sum + (row.binned ?? 0), 0);
+    const levels = removedLevels.map((row) => ({ level: row.level, name: current.levels[row.level]?.name ?? "Card", plural: current.levels[row.level]?.plural ?? "Cards", cardCount: row.count }));
+    throw new TaskError(409, levelInUseMessage(levels, binned), "LEVEL_IN_USE", {
+      level: removedLevels[0]!.level, cardCount, binnedCount: binned,
+      levels: levels.map(({ level, name, cardCount: count }) => ({ level, name, cardCount: count }))
+    });
   }
   if (!structure.sprints && current.sprints) {
     const open = (db.query("SELECT COUNT(*) AS count FROM board_sprints WHERE board_id = ? AND state IN ('planned', 'active')").get(boardId) as { count: number }).count;

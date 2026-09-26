@@ -18,6 +18,10 @@ type ResultMoveSheetProps = {
  * "Move to…" for a card in cross-board results (Q9, D143: no drag between state lanes). It loads
  * the card's board for its columns, then moves with the board's own move call and WIP rules.
  */
+/** "Moved to Review (In progress)"; "Moved to Done" when the column is named for its state (QA 0.9.0). */
+export const movedMessage = (columnName: string, stateLabel: string) =>
+  columnName.trim().toLowerCase() === stateLabel.toLowerCase() ? `Moved to ${columnName}` : `Moved to ${columnName} (${stateLabel})`;
+
 export function ResultMoveSheet({ card, onMoved, onCancel, onError }: ResultMoveSheetProps) {
   const [board, setBoard] = useState<BoardDetail | null>(null);
   useEffect(() => {
@@ -35,7 +39,7 @@ export function ResultMoveSheet({ card, onMoved, onCancel, onError }: ResultMove
       await moveCard(card.id, columnId, sheetMoveAnchor(board.cards, card.id, columnId, place));
       const column = board.columns.find((item) => item.id === columnId) as StatefulColumn | undefined;
       const state = column ? columnState(column) : card.column_state;
-      onMoved({ column_id: columnId, column_name: column?.name ?? card.column_name, column_state: state, is_done: state === "done" ? 1 : 0 }, `Moved to ${column?.name ?? "the column"} (${STATE_LABELS[state]})`);
+      onMoved({ column_id: columnId, column_name: column?.name ?? card.column_name, column_state: state, is_done: state === "done" ? 1 : 0 }, movedMessage(column?.name ?? "the column", STATE_LABELS[state]));
     } catch (reason) {
       const column = board.columns.find((item) => item.id === columnId);
       // The sheet stays open and shows why.

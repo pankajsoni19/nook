@@ -146,7 +146,15 @@ describe("sprint words and defaults", () => {
     expect(newSprintDefaults([], "2026-09-27")).toEqual({ name: "Sprint 1", startOn: "2026-09-27", endOn: "2026-10-10" });
     const running = sprint(S1, "active", { name: "Sprint 12", start_on: "2026-09-21", end_on: "2026-10-04" });
     expect(newSprintDefaults([running], "2026-09-27")).toEqual({ name: "Sprint 13", startOn: "2026-10-05", endOn: "2026-10-18" });
-    expect(carryOverSprint(running, "2026-09-27")).toEqual({ name: "Sprint 13", startOn: "2026-10-05", endOn: "2026-10-18" });
+    // Completing early starts the new sprint today, not after the unused end date (QA NOTE-a).
+    expect(carryOverSprint(running, "2026-09-27")).toEqual({ name: "Sprint 13", startOn: "2026-09-27", endOn: "2026-10-10" });
+    expect(carryOverSprint(running, "2026-10-04")).toEqual({ name: "Sprint 13", startOn: "2026-10-05", endOn: "2026-10-18" });
+    expect(carryOverSprint(running, "2026-10-09")).toEqual({ name: "Sprint 13", startOn: "2026-10-09", endOn: "2026-10-22" });
+    // After sprints completed early, the New sprint form starts today; an open one is still followed.
+    const closed = sprint(S0, "completed", { name: "Sprint 12", start_on: "2026-09-21", end_on: "2026-10-04" });
+    expect(newSprintDefaults([closed], "2026-09-27")).toEqual({ name: "Sprint 13", startOn: "2026-09-27", endOn: "2026-10-10" });
+    expect(newSprintDefaults([closed, sprint(S1, "planned", { name: "Sprint 13", start_on: "2026-09-28", end_on: "2026-10-11" })], "2026-09-27"))
+      .toEqual({ name: "Sprint 14", startOn: "2026-10-12", endOn: "2026-10-25" });
   });
 
   test("the composer sends a sprint only when one is chosen", () => {

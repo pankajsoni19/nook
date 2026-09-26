@@ -45,3 +45,18 @@ export function ownedViewActions(canShare: boolean, visibility: TaskView["visibi
 
 /** The Save dialogs' hint: a read-only role's views stay private. */
 export const viewNameHint = (canShare: boolean) => canShare ? "Up to 80 characters. Only you see it until you share it." : "Up to 80 characters. Only you see it.";
+
+/**
+ * The views list listens for this after a change made elsewhere (Undo of a delete re-creates the
+ * view from a toast after the view page has gone), so it reloads without a page reload.
+ */
+export const VIEWS_CHANGED_EVENT = "nook:task-views-changed";
+export function announceViewsChanged(target: EventTarget = window) {
+  target.dispatchEvent(new Event(VIEWS_CHANGED_EVENT));
+}
+/** Subscribes to {@link announceViewsChanged}; returns the unsubscribe. */
+export function onViewsChanged(listener: () => void, target: EventTarget = window) {
+  const handler = () => listener();
+  target.addEventListener(VIEWS_CHANGED_EVENT, handler);
+  return () => target.removeEventListener(VIEWS_CHANGED_EVENT, handler);
+}

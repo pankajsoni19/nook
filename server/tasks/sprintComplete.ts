@@ -2,7 +2,7 @@ import { audit, db, now } from "../db";
 import { limitReached, TaskError, withBoardLock } from "./service";
 import { insertSprint, openCount, ownedSprint, requireDateOrder, sprintNotFound } from "./sprints";
 import { openSprintRows, SPRINT_LIMITS, sprintById, sprintCounts, sprintNames, sprintOfBoard, toSummary, type SprintRow, type SprintSummary } from "./sprintData";
-import { nextSprintDates, nextSprintName } from "../../shared/sprintPlan";
+import { nextSprintName, sprintDatesAfterCompleting } from "../../shared/sprintPlan";
 
 /** `next`: the first planned sprint; `backlog`: no sprint; `new`: a sprint created in the same call; or a planned sprint's id. */
 export type CarryTo = "next" | "backlog" | "new" | string;
@@ -38,7 +38,7 @@ export async function completeSprint(userId: string, sprintId: string, input: Co
     let planned: { name: string; goal: string; startOn: string | null; endOn: string | null } | null = null;
     if (carryTo === "new") {
       if (openCount(board.id) >= SPRINT_LIMITS.openPerBoard) throw limitReached(`A board can have up to ${SPRINT_LIMITS.openPerBoard} planned or active sprints`);
-      const dates = nextSprintDates(sprint, input.today ?? now().slice(0, 10));
+      const dates = sprintDatesAfterCompleting(sprint, input.today ?? now().slice(0, 10));
       const startOn = input.startOn === undefined ? dates.startOn : input.startOn;
       const endOn = input.endOn === undefined ? dates.endOn : input.endOn;
       requireDateOrder(startOn, endOn);

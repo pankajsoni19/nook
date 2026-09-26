@@ -2,7 +2,7 @@
 // progress, and the words for it. Pure, no DOM access, so it is unit tested.
 import type { FilterTerm, TaskState } from "../../shared/taskQuery";
 import type { BoardStructure } from "../../shared/boardStructure";
-import { nextSprintDates, nextSprintName, sprintDaysBetween } from "../../shared/sprintPlan";
+import { nextSprintDates, nextSprintName, sprintDatesAfterCompleting, sprintDaysBetween } from "../../shared/sprintPlan";
 import type { BoardColumn, CardSummary, SprintSummary } from "./tasksApi";
 
 /** What the switcher shows: one sprint, the backlog (no sprint), or every card. */
@@ -58,6 +58,24 @@ export function sprintQueryValue(value: string, sprints: readonly SprintSummary[
 export function selectionTerm(selection: SprintSelection | null): FilterTerm | null {
   if (!selection || selection.kind === "all") return null;
   return { key: "sprint", negate: false, values: [selection.kind === "sprint" ? selection.sprint.id : "none"] };
+}
+
+/**
+ * The filter bar's sprint filter against the header switcher (QA 0.9.0): when both are set and
+ * name different sprints, the board shows nothing, so say why: "Showing Sprint 2 cards within
+ * Sprint 1 — clear one". Null when they agree or either is unset.
+ */
+export function sprintFilterConflict(terms: readonly FilterTerm[], selection: SprintSelection | null, sprints: readonly SprintSummary[]) {
+  if (!selection || selection.kind === "all") return null;
+  const term = terms.find((item) => item.key === "sprint" && !item.negate);
+  if (!term || !term.values.length) return null;
+  const pointers = sprintPointers(sprints);
+  const resolve = (value: string) => value === "current" ? pointers.current : value === "next" ? pointers.next : value;
+  const selected = selection.kind === "sprint" ? selection.sprint.id : "none";
+  if (term.values.some((value) => resolve(value) === selected)) return null;
+  const name = (value: string) => value === "none" ? "backlog" : sprints.find((sprint) => sprint.id === resolve(value))?.name
+    ?? (value === "current" ? "current sprint" : value === "next" ? "next sprint" : "older sprint");
+  return `Showing ${term.values.map(name).join(" or ")} cards within ${selection.kind === "sprint" ? selection.sprint.name : "the backlog"} — clear one`;
 }
 
 /** `sprint:current` and `sprint:next` for the in-memory matcher. */
@@ -154,7 +172,8 @@ export function progressLabel(progress: SprintProgress, plural: string) {
 
 /** What the New sprint form starts with: the next name and dates after the latest sprint (§7.5). */
 export function newSprintDefaults(sprints: readonly SprintSummary[], today: string) {
-  const latest = [...sprints].sort((a, b) => (b.end_on ?? "").localeCompare(a.end_on ?? "") || b.position - a.position)[0] ?? null;
+  // Only an open sprint is followed; after sprints completed early the next one starts today (QA 0.9.0).
+  const latest = sprints.filter((sprint) => sprint.state !== "completed").sort((a, b) => (b.end_on ?? "").localeCompare(a.end_on ?? "") || b.position - a.position)[0] ?? null;
   const byName = [...sprints].sort((a, b) => b.created_at.localeCompare(a.created_at))[0] ?? null;
   const dates = nextSprintDates(latest && latest.end_on && latest.end_on >= today ? latest : null, today);
   return { name: nextSprintName(byName?.name ?? null, sprints.map((sprint) => sprint.name)), startOn: dates.startOn, endOn: dates.endOn };
@@ -162,5 +181,5 @@ export function newSprintDefaults(sprints: readonly SprintSummary[], today: stri
 
 /** The close dialog's "New sprint" choice: named (skipping the board's other names) and dated after the sprint being completed, as the server does. */
 export function carryOverSprint(sprint: Pick<SprintSummary, "name" | "start_on" | "end_on">, today: string, taken: readonly string[] = []) {
-  return { name: nextSprintName(sprint.name, taken), ...nextSprintDates(sprint, today) };
+  return { name: nextSprintName(sprint.name, taken), ...sprintDatesAfterCompleting(sprint, today) };
 }

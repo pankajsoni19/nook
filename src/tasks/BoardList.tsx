@@ -6,7 +6,7 @@ import { NameDialog } from "../files/RenameDialog";
 import { BoardSharePanel } from "./BoardSharePanel";
 import { NewBoardDialog } from "./NewBoardDialog";
 import { structureLabel, type BoardTemplateId } from "../../shared/boardStructure";
-import { binConfirmMessage, cardCountLabel, sharingLabel, validateBoardName, type TaskNotify } from "./taskActions";
+import { binConfirmMessage, cardCountLabel, sharingLabel, validateBoardName, viewerTimeZone, type TaskNotify } from "./taskActions";
 import { createBoard, deleteBoard, listBoards, renameBoard, restoreTaskItem, taskErrorCode, taskErrorMessage, type BoardSummary } from "./tasksApi";
 import { useHistoryDialogGuard } from "./useHistoryDialogGuard";
 
@@ -46,7 +46,7 @@ export function BoardList({ onOpen, onOpenBoard, notify, header }: BoardListProp
   const dialogBoard = dialog && dialog.kind !== "new" ? all.find((board) => board.id === dialog.boardId) ?? null : null;
 
   async function create(name: string, template: BoardTemplateId) {
-    const { board } = await createBoard(name, template);
+    const { board } = await createBoard(name, template, viewerTimeZone());
     setDialog(null);
     setBoards((current) => current ? [...current, board] : [board]);
     onOpen(board);

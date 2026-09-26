@@ -47,7 +47,7 @@ export function BoardTable({ board, cards, sort, today, onSort, onOpenCard, onCa
   const levels = structure.levels.length > 1;
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const tree = levels && !sort;
-  const rows = tree ? treeRows(cards, collapsed) : cards.map((card) => ({ card, depth: 0, childCount: 0 }));
+  const rows = tree ? treeRows(cards, collapsed) : cards.map((card) => ({ card, depth: 0, childCount: 0, descendantCount: 0 }));
   const toggle = (id: string) => setCollapsed((current) => {
     const next = new Set(current);
     if (next.has(id)) next.delete(id);
@@ -72,7 +72,7 @@ export function BoardTable({ board, cards, sort, today, onSort, onOpenCard, onCa
         </tr>
       </thead>
       <tbody>
-        {rows.map(({ card, depth, childCount }) => {
+        {rows.map(({ card, depth, childCount, descendantCount }) => {
           const column = columns.get(card.column_id);
           const done = column?.is_done === 1;
           const names = assigneeNames(card);
@@ -82,7 +82,7 @@ export function BoardTable({ board, cards, sort, today, onSort, onOpenCard, onCa
               <span className="task-table-title-cell" style={depth ? { paddingLeft: `${depth * 18}px` } : undefined}>
                 {tree && (childCount > 0
                   ? <button type="button" className="icon-button task-tree-toggle" aria-expanded={!collapsed.has(card.id)} onClick={() => toggle(card.id)}
-                    aria-label={`${collapsed.has(card.id) ? "Show" : "Hide"} the ${childCount} ${childCount === 1 ? "card" : "cards"} under “${card.title}”`}>
+                    aria-label={`${collapsed.has(card.id) ? "Show" : "Hide"} the ${descendantCount} ${descendantCount === 1 ? "card" : "cards"} under “${card.title}”`}>
                     {collapsed.has(card.id) ? <ChevronRight /> : <ChevronDown />}
                   </button>
                   : <span className="task-tree-spacer" aria-hidden="true" />)}

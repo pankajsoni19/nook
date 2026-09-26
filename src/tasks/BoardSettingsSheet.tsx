@@ -1,6 +1,6 @@
-import { useEffect, useId, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Check, Columns3, Layers, Minus, Pencil, Plus, Share2, Trash2, X } from "lucide-react";
-import { trapTabKey } from "../files/Dialog";
+import { trapTabKey, useDialogFocus } from "../files/Dialog";
 import { Select } from "../ui/Select";
 import {
   LEVEL_NAME_MAX,
@@ -60,6 +60,9 @@ export function BoardSettingsSheet({ board, owner, showAllLevels, onShowAllLevel
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const titleId = useId();
+  // Take focus on open (QA 0.9.0): the gear kept it and Tab walked the board behind the sheet.
+  const panelRef = useRef<HTMLElement>(null);
+  useDialogFocus(panelRef);
   const preset = presetOf(draft);
   const dirty = JSON.stringify(draft) !== JSON.stringify(saved);
   const check = validateStructure(draft);
@@ -112,7 +115,7 @@ export function BoardSettingsSheet({ board, owner, showAllLevels, onShowAllLevel
 
   return <>
     <button className="panel-scrim" onClick={onClose} aria-label="Close board settings" tabIndex={-1} />
-    <aside className="side-panel task-settings-panel" role="dialog" aria-modal="true" aria-labelledby={titleId} onKeyDown={trapTabKey}>
+    <aside ref={panelRef} tabIndex={-1} className="side-panel task-settings-panel" role="dialog" aria-modal="true" aria-labelledby={titleId} onKeyDown={trapTabKey}>
       <header>
         <div><span className="eyebrow">{board.name}</span><h2 id={titleId}>Board settings</h2></div>
         <button className="icon-button" onClick={onClose} aria-label="Close board settings"><X /></button>

@@ -95,8 +95,9 @@ export type SprintSummary = {
 const json = (method: string, body: unknown): RequestInit => ({ method, body: JSON.stringify(body) });
 
 export const listBoards = () => api<{ boards: BoardSummary[] }>("/tasks/boards");
-export const createBoard = (name: string, template?: BoardTemplateId) =>
-  api<{ board: BoardSummary; columns: BoardColumn[] }>("/tasks/boards", json("POST", template ? { name, template } : { name }));
+/** `tz` (the browser's zone) dates a template's first sprint from the viewer's today, not UTC's. */
+export const createBoard = (name: string, template?: BoardTemplateId, tz?: string) =>
+  api<{ board: BoardSummary; columns: BoardColumn[] }>("/tasks/boards", json("POST", { name, ...(template ? { template } : {}), ...(tz ? { tz } : {}) }));
 /** Owner only (D122): 409 `LEVEL_IN_USE` or `SPRINTS_IN_USE` when the change would hide cards. */
 export const updateBoardStructure = (boardId: string, structure: BoardStructure) =>
   api<{ board: BoardSummary }>(`/tasks/boards/${boardId}`, json("PATCH", { structure }));
