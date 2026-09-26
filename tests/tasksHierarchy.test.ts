@@ -250,6 +250,19 @@ describe("Bin subtrees (D129, D130, T114)", () => {
     expect(restored.status).toBe(200);
     expect(restored.body.detached).toBeUndefined();
   });
+
+  test("restoring under a parent that already has 100 children comes back detached instead of over the cap (D135)", async () => {
+    const t = await tree("Bin full parent");
+    expect((await call(t.member, "DELETE", `/cards/${t.subB1.id}`)).status).toBe(200);
+    // Story B fills up with 100 live children meanwhile.
+    const insert = db.query(`INSERT INTO cards (id, board_id, column_id, position, title, parent_card_id, level, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, 2, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`);
+    for (let index = 0; index < 100; index += 1) insert.run(crypto.randomUUID(), t.boardId, t.columns[0].id, 20_000 + index, `Filler ${index}`, t.storyB.id);
+    const restored = await call(t.member, "POST", `/bin/card/${t.subB1.id}/restore`, {});
+    expect(restored).toMatchObject({ status: 200, body: { ok: true, detached: true } });
+    expect(db.query("SELECT parent_card_id, level, deleted_at FROM cards WHERE id = ?").get(t.subB1.id)).toEqual({ parent_card_id: null, level: 2, deleted_at: null });
+    expect(db.query("SELECT COUNT(*) AS count FROM cards WHERE parent_card_id = ? AND deleted_at IS NULL").get(t.storyB.id)).toEqual({ count: 100 });
+  });
 });
 
 describe("board structure (D122, T120)", () => {
