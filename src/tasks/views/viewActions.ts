@@ -33,5 +33,15 @@ export function viewRoleAccess(access: { canWrite: boolean; isGuest: boolean }) 
   return { canCreate: !access.isGuest, canShare: access.canWrite };
 }
 
+/**
+ * What an owner may do with one of their views. A read-only owner (a member demoted after sharing)
+ * edits, renames, and deletes a view only while it is private, and may withdraw a share by making
+ * it private (the server answers 403 VIEW_SHARED_READ_ONLY otherwise).
+ */
+export function ownedViewActions(canShare: boolean, visibility: TaskView["visibility"]) {
+  const edit = canShare || visibility === "private";
+  return { edit, share: canShare, withdraw: !canShare && visibility !== "private" };
+}
+
 /** The Save dialogs' hint: a read-only role's views stay private. */
 export const viewNameHint = (canShare: boolean) => canShare ? "Up to 80 characters. Only you see it until you share it." : "Up to 80 characters. Only you see it.";

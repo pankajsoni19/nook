@@ -39,10 +39,13 @@ export const ROLE_READ_ONLY_ALLOWED_WRITES: readonly AllowedWrite[] = [
   { method: "DELETE", path: "/api/mcp/keys/:id", why: "revoke own MCP keys" },
   { method: "POST", path: "/api/collections/:collectionId/query", why: "a read sent as POST" },
   { method: "POST", path: "/api/tasks/query", why: "a read sent as POST; guests only with assignee:me (isGuestTaskQuery)" },
-  // Personal task views (task hierarchy plan Q12): viewers keep private views; sharing stays refused.
+  // Personal task views (task hierarchy plan Q12): viewers keep private views; sharing stays refused
+  // except withdrawing one. The service allows PATCH/DELETE only while the view is private and PUT
+  // sharing only to `private` (403 VIEW_SHARED_READ_ONLY), so a demoted member can unshare.
   { method: "POST", path: "/api/tasks/views", roles: ["viewer"], why: "own private view" },
-  { method: "PATCH", path: "/api/tasks/views/:viewId", roles: ["viewer"], why: "own private view (owner-only in the service)" },
-  { method: "DELETE", path: "/api/tasks/views/:viewId", roles: ["viewer"], why: "own private view (owner-only in the service)" },
+  { method: "PATCH", path: "/api/tasks/views/:viewId", roles: ["viewer"], why: "own private view (owner-only, private-only in the service)" },
+  { method: "DELETE", path: "/api/tasks/views/:viewId", roles: ["viewer"], why: "own private view (owner-only, private-only in the service)" },
+  { method: "PUT", path: "/api/tasks/views/:viewId/sharing", roles: ["viewer"], why: "withdraw a share of own view (only to private in the service)" },
   { method: "POST", path: "/api/tasks/views/:viewId/duplicate", roles: ["viewer"], why: "private copy of a readable view" }
 ];
 

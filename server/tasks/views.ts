@@ -6,6 +6,7 @@ import { planInsert } from "./boardOrder";
 import { filterError, QUERY_GROUPS, QUERY_SORTS, runQuery, type QueryGroup, type QueryResult, type QuerySort } from "./query";
 import { applyRenumber, limitReached, TaskError } from "./service";
 import { AUDIENCE_ALL_USERS } from "../team/roles";
+import { canWriteContent } from "../team/userRole";
 
 /**
  * Saved cross-board task views (research 2026-09-26 §10.2, D140, Q12, Q13;
@@ -22,6 +23,12 @@ import { AUDIENCE_ALL_USERS } from "../team/roles";
  * view (403 `OWNER_ONLY` for other readers); readers may duplicate it into a
  * private copy. Anyone else gets 404, the same as a missing view (T116). A
  * disabled owner's views vanish for everyone else.
+ *
+ * An owner whose role cannot write content (a viewer, or a member demoted
+ * after sharing) keeps only private views: they may rename, change, or
+ * delete a view while it is `private`, and may withdraw a share by setting
+ * it back to `private`, but a shared view is otherwise read-only for them
+ * (403 `VIEW_SHARED_READ_ONLY`).
  */
 
 export const VIEW_LIMITS = { perOwner: 50, members: 100, listed: 200 } as const;
@@ -86,6 +93,17 @@ export function requireReadableView(viewId: string, userId: string) {
 function requireOwnedView(viewId: string, userId: string) {
   const row = requireReadableView(viewId, userId);
   if (row.owner_id !== userId) throw viewOwnerOnly();
+  return row;
+}
+
+const viewSharedReadOnly = (message: string) => new TaskError(403, message, "VIEW_SHARED_READ_ONLY");
+
+/** An owned view the caller may change: read-only roles only while it is private. */
+function requireEditableOwnedView(viewId: string, userId: string) {
+  const row = requireOwnedView(viewId, userId);
+  if (row.visibility !== "private" && !canWriteContent(userId)) {
+    throw viewSharedReadOnly("Your team role is read-only: make this view private before changing it");
+  }
   return row;
 }
 
@@ -156,10 +174,10 @@ export type ViewPatchInput = { name?: string; query?: string; display?: Partial<
 
 /** Owner only, with a revision compare-and-swap (409 `VIEW_CHANGED` carries the current view). */
 export function patchView(userId: string, viewId: string, input: ViewPatchInput) {
-  requireOwnedView(viewId, userId);
+  requireEditableOwnedView(viewId, userId);
   const query = input.query === undefined ? undefined : canonicalFilter(input.query);
   return withViewsLock(userId, () => {
-    const current = toView(requireOwnedView(viewId, userId), userId);
+    const current = toView(requireEditableOwnedView(viewId, userId), userId);
     if (current.revision !== input.revision) throw new TaskError(409, "This view changed since you opened it", "VIEW_CHANGED", { view: current });
     let plan = null as ReturnType<typeof planInsert>;
     if (input.afterViewId !== undefined) {
@@ -195,9 +213,9 @@ export function patchView(userId: string, viewId: string, input: ViewPatchInput)
 }
 
 export function deleteView(userId: string, viewId: string) {
-  requireOwnedView(viewId, userId);
+  requireEditableOwnedView(viewId, userId);
   return withViewsLock(userId, () => {
-    requireOwnedView(viewId, userId);
+    requireEditableOwnedView(viewId, userId);
     db.transaction(() => {
       db.query("DELETE FROM task_views WHERE id = ?").run(viewId);
       audit(userId, null, "task.view_delete", { viewId });
@@ -213,9 +231,13 @@ export function getViewSharing(userId: string, viewId: string) {
   return { visibility: view.visibility, users };
 }
 
-/** Replaces the audience, as board sharing does: members are kept only for `selected`. */
+/**
+ * Replaces the audience, as board sharing does: members are kept only for `selected`.
+ * Read-only roles may only withdraw a share (set it to `private`).
+ */
 export function putViewSharing(userId: string, viewId: string, visibility: BoardVisibility, userIds: string[]) {
   requireOwnedView(viewId, userId);
+  if (visibility !== "private" && !canWriteContent(userId)) throw viewSharedReadOnly("Your team role is read-only: you can only make this view private");
   const uniqueIds = [...new Set(userIds.map((id) => id.toLowerCase()))];
   if (uniqueIds.includes(userId)) throw new TaskError(400, "The owner cannot be added as a recipient");
   if (uniqueIds.length > VIEW_LIMITS.members) throw new TaskError(400, `Share with at most ${VIEW_LIMITS.members} people`);

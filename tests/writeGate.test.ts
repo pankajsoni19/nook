@@ -120,7 +120,9 @@ describe("role write gate (T87)", () => {
     expect(isAllowedReadOnlyWrite("viewer", "POST", `/api/collections/a/b/query`)).toBe(false);
     expect(isAllowedReadOnlyWrite("viewer", "DELETE", `/api/tasks/views/${crypto.randomUUID()}`)).toBe(true);
     expect(isAllowedReadOnlyWrite("guest", "DELETE", `/api/tasks/views/${crypto.randomUUID()}`)).toBe(false);
-    expect(isAllowedReadOnlyWrite("viewer", "PUT", `/api/tasks/views/${crypto.randomUUID()}/sharing`)).toBe(false);
+    // Viewers may withdraw a share (the service allows only `private`); guests never.
+    expect(isAllowedReadOnlyWrite("viewer", "PUT", `/api/tasks/views/${crypto.randomUUID()}/sharing`)).toBe(true);
+    expect(isAllowedReadOnlyWrite("guest", "PUT", `/api/tasks/views/${crypto.randomUUID()}/sharing`)).toBe(false);
   });
 });
 
@@ -187,10 +189,41 @@ describe("read-only roles and item share roles (§2.4)", () => {
     expect((await send(guest, "POST", "/tasks/query", "not json")).status).toBe(403);
     const view = await send(viewer, "POST", "/tasks/views", { name: "My work", query: "assignee:me" });
     expect(view.status).toBe(201);
-    expect((await send(viewer, "PUT", `/tasks/views/${view.body.view.id}/sharing`, { visibility: "all_users", userIds: [] })).body.code).toBe("ROLE_READ_ONLY");
+    expect((await send(viewer, "PUT", `/tasks/views/${view.body.view.id}/sharing`, { visibility: "all_users", userIds: [] })).body.code).toBe("VIEW_SHARED_READ_ONLY");
     expect((await send(viewer, "PATCH", `/tasks/views/${view.body.view.id}`, { name: "Renamed", revision: view.body.view.revision })).status).toBe(200);
     expect((await send(viewer, "DELETE", `/tasks/views/${view.body.view.id}`, {})).status).toBe(200);
     expect((await send(guest, "POST", "/tasks/views", { name: "My work", query: "assignee:me" })).body.code).toBe("ROLE_READ_ONLY");
+  });
+
+  test("a member demoted to viewer can withdraw a shared view but not change it while shared; guests change nothing", async () => {
+    const owner = await user("Demoted view owner");
+    const reader = await user("Demoted view reader");
+    const created = (await send(owner, "POST", "/tasks/views", { name: "Team work", query: "state:todo" })).body.view;
+    const privateView = (await send(owner, "POST", "/tasks/views", { name: "Mine", query: "assignee:me" })).body.view;
+    expect((await send(owner, "PUT", `/tasks/views/${created.id}/sharing`, { visibility: "selected", userIds: [reader.userId] })).status).toBe(200);
+    db.query("UPDATE users SET role = 'viewer' WHERE id = ?").run(owner.userId);
+    let revision = (await send(owner, "GET", `/tasks/views/${created.id}`)).body.view.revision as number;
+    expect(await send(owner, "PATCH", `/tasks/views/${created.id}`, { name: "Renamed", revision })).toMatchObject({ status: 403, body: { code: "VIEW_SHARED_READ_ONLY" } });
+    expect(await send(owner, "DELETE", `/tasks/views/${created.id}`, {})).toMatchObject({ status: 403, body: { code: "VIEW_SHARED_READ_ONLY" } });
+    expect(await send(owner, "PUT", `/tasks/views/${created.id}/sharing`, { visibility: "selected", userIds: [reader.userId] })).toMatchObject({ status: 403, body: { code: "VIEW_SHARED_READ_ONLY" } });
+    expect((await send(reader, "GET", `/tasks/views/${created.id}`)).status).toBe(200);
+    // Withdrawing the share works, and then the now-private view is theirs to change.
+    expect((await send(owner, "PUT", `/tasks/views/${created.id}/sharing`, { visibility: "private", userIds: [] })).status).toBe(200);
+    expect((await send(reader, "GET", `/tasks/views/${created.id}`)).status).toBe(404);
+    revision = (await send(owner, "GET", `/tasks/views/${created.id}`)).body.view.revision as number;
+    expect((await send(owner, "PATCH", `/tasks/views/${created.id}`, { name: "Renamed", revision })).status).toBe(200);
+    expect((await send(owner, "PATCH", `/tasks/views/${privateView.id}`, { name: "Still mine", revision: privateView.revision })).status).toBe(200);
+    // A guest owner is refused every view write at the gate, private or shared.
+    db.query("UPDATE users SET role = 'guest' WHERE id = ?").run(owner.userId);
+    const current = (await send(owner, "GET", `/tasks/views/${privateView.id}`)).body.view;
+    for (const [method, path, body] of [
+      ["PATCH", `/tasks/views/${privateView.id}`, { name: "Guest", revision: current.revision }],
+      ["DELETE", `/tasks/views/${privateView.id}`, {}],
+      ["PUT", `/tasks/views/${privateView.id}/sharing`, { visibility: "private", userIds: [] }],
+      ["POST", `/tasks/views/${privateView.id}/duplicate`, {}]
+    ] as const) {
+      expect({ method, ...(await send(owner, method, path, body)) }).toMatchObject({ method, status: 403, body: { code: "ROLE_READ_ONLY" } });
+    }
   });
 
   test("the share picker is refused to read-only roles and hints each recipient's role", async () => {
