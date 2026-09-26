@@ -16,6 +16,7 @@ import { BoardSharePanel } from "./BoardSharePanel";
 import { CardComposer, type ComposerMode } from "./CardComposer";
 import { CardDialog } from "./CardDialog";
 import { CardPage } from "./CardPage";
+import { useRole } from "../team/roleAccess";
 import { MoveCardSheet } from "./MoveCardSheet";
 import { focusBoardCard } from "./cardFocus";
 import { afterCardIdAt, applyLocalMove, applyPositions, byPosition, cardPlace, columnCards, columnIndexFromScroll, columnMoveAnchor, isNoopMove, keyboardMoveTarget, mergeMovedCard, moveChangesBlockers, readCardDragPayload, sheetMoveAnchor, type MoveKey } from "./boardOrder";
@@ -104,6 +105,8 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
   const [announcement, setAnnouncement] = useState("");
   // The card composer (a guarded dialog, no history entry): the column it was opened from, or null.
   const [composer, setComposer] = useState<{ columnId: string | null; parentId?: string } | null>(null);
+  // Read-only Team roles never get the composer (the card dialog hides its Add controls too).
+  const { readOnly } = useRole();
   const detailRef = useRef(detail);
   detailRef.current = detail;
   // The control that opened the current dialog, so focus can return to it.
@@ -598,7 +601,7 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
       hierarchy={hierarchy.dialog}
       sprints={sprints.enabled ? sprints.sprints : undefined}
     /></CardPage>}
-    {composer && detail && board && <CardComposer
+    {composer && !readOnly && detail && board && <CardComposer
       boardId={boardId}
       boardName={board.name}
       userId={userId}
