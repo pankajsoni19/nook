@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronLeft, Copy, Ellipsis, Filter, Pencil, RotateCcw, Save, Share2, Trash2, TriangleAlert, Undo2 } from "lucide-react";
+import { ChevronLeft, Copy, Ellipsis, Filter, Lock, Pencil, RotateCcw, Save, Share2, Trash2, TriangleAlert, Undo2 } from "lucide-react";
 import { format } from "../../../shared/taskQuery";
 import { ApiError } from "../../api";
 import { ConfirmDialog, ModalDialog } from "../../files/Dialog";
@@ -7,12 +7,12 @@ import { NameDialog } from "../../files/RenameDialog";
 import { useHistoryDialogGuard } from "../../ui/useHistoryDialogGuard";
 import { taskErrorCode, taskErrorMessage } from "../tasksApi";
 import { viewerTimeZone, type TaskNotify } from "../taskActions";
-import { createView, deleteView, duplicateView, getView, updateView, type QueriedCard, type TaskView } from "../home/homeApi";
+import { createView, deleteView, duplicateView, getView, saveViewSharing, updateView, type QueriedCard, type TaskView } from "../home/homeApi";
 import { HomeResultsPane, type HomeDirectory } from "../home/HomeResultsPane";
 import { useTasksTitle } from "../home/HomeSegments";
 import { isSelectiveQuery, NEW_VIEW, newViewDefault, sameHomeQuery, serverGroup, viewHomeQuery, type HomeQuery } from "../home/homeUrl";
 import { useRole } from "../../team/roleAccess";
-import { validateViewName, viewNameHint, viewRoleAccess, viewUndoBody, viewVisibilityLabel } from "./viewActions";
+import { ownedViewActions, validateViewName, viewNameHint, viewRoleAccess, viewUndoBody, viewVisibilityLabel } from "./viewActions";
 import { ViewSharePanel } from "./ViewSharePanel";
 
 type ViewPageProps = {
@@ -20,8 +20,11 @@ type ViewPageProps = {
   viewId: string;
   /** The URL's unsaved change to the view, or undefined for the saved one. */
   query: HomeQuery | undefined;
-  /** Replace: the view's filter, group, and sort; push: layouts and committed filter changes. */
-  onQuery: (next: HomeQuery | undefined, options: { push: boolean }) => void;
+  /**
+   * Replace: the view's filter, group, and sort; push: layouts and committed filter changes.
+   * `saved`: after Save (the host may step back onto an identical entry instead of replacing).
+   */
+  onQuery: (next: HomeQuery | undefined, options: { push: boolean; saved?: boolean }) => void;
   directory: HomeDirectory;
   notify: TaskNotify;
   onOpenCard: (card: QueriedCard) => void;
@@ -84,6 +87,9 @@ export function ViewPage({ userId, viewId, query, onQuery, directory, notify, on
   const { canCreate, canShare } = viewRoleAccess(useRole());
   // A guest edits no view, even one kept from before a role change (the write gate refuses it).
   const owner = canCreate && (isNew || view?.is_owner === 1);
+  const actions = ownedViewActions(canShare, view?.visibility ?? "private");
+  // A read-only owner's shared view is read only until they make it private.
+  const editable = owner && actions.edit;
   const dirty = isNew ? isSelectiveQuery(effective.filter) : Boolean(view && query && !sameHomeQuery(query, saved));
   const selective = isSelectiveQuery(effective.filter);
   const tz = viewerTimeZone();
@@ -102,12 +108,12 @@ export function ViewPage({ userId, viewId, query, onQuery, directory, notify, on
   }
 
   async function save() {
-    if (!view || !owner || busy) return;
+    if (!view || !editable || busy) return;
     setBusy(true);
     try {
       const { view: next } = await updateView(view.id, { query: format(effective.filter), display: displayOf(effective), revision: view.revision });
       setView(next);
-      onQuery(undefined, { push: false });
+      onQuery(undefined, { push: false, saved: true });
       notify(`Saved “${next.name}”`);
     } catch (reason) {
       conflictOr(reason, "Could not save the view");
@@ -169,20 +175,37 @@ export function ViewPage({ userId, viewId, query, onQuery, directory, notify, on
     }
   }
 
+  /** A read-only owner withdraws a share: the view becomes private (and editable again). */
+  async function makePrivate() {
+    if (!view || busy) return;
+    setBusy(true);
+    try {
+      await saveViewSharing(view.id, "private", []);
+      setDialog(null);
+      notify(`“${view.name}” is private now`);
+      void load();
+    } catch (reason) {
+      closeDialog();
+      notify(taskErrorMessage(reason, "Could not make the view private"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const title = isNew ? "New view" : view?.name ?? (loadError ? "View" : "Loading…");
-  const readOnly = !owner;
+  const readOnly = !editable;
 
   return <div className="task-view-page">
     <header className="task-view-header">
       <button className="icon-button task-back" onClick={onBack} aria-label="Back to views" title="Back to views"><ChevronLeft /></button>
       <div className="task-board-heading">
-        <span className="eyebrow">{isNew ? "Unsaved view" : view && !owner ? `${view.owner_name}’s view · read only` : view ? `View · ${viewVisibilityLabel(view.visibility)}` : "View"}</span>
+        <span className="eyebrow">{isNew ? "Unsaved view" : view && !owner ? `${view.owner_name}’s view · read only` : view && !editable ? `View · ${viewVisibilityLabel(view.visibility)} · view only` : view ? `View · ${viewVisibilityLabel(view.visibility)}` : "View"}</span>
         <h2 id="task-view-title" title={title}>{title}</h2>
       </div>
       {dirty && !isNew && <span className="task-view-dirty" role="status">Unsaved changes</span>}
       <span className="task-view-actions">
-        {!isNew && view && owner && dirty && <button className="icon-button" onClick={() => onQuery(undefined, { push: true })} aria-label="Discard changes" title="Discard changes"><Undo2 /></button>}
-        {!isNew && view && owner && <button className="primary-button task-home-action" onClick={() => { void save(); }} disabled={!dirty || busy}><Save aria-hidden="true" /><span>{busy ? "Saving…" : "Save"}</span></button>}
+        {!isNew && view && editable && dirty && <button className="icon-button" onClick={() => onQuery(undefined, { push: true })} aria-label="Discard changes" title="Discard changes"><Undo2 /></button>}
+        {!isNew && view && editable && <button className="primary-button task-home-action" onClick={() => { void save(); }} disabled={!dirty || busy}><Save aria-hidden="true" /><span>{busy ? "Saving…" : "Save"}</span></button>}
         {isNew && canCreate && <button className="primary-button task-home-action" onClick={(event) => open({ kind: "saveAs" }, event.currentTarget)} disabled={!selective} aria-haspopup="dialog"><Save aria-hidden="true" /><span>Save view</span></button>}
         {!isNew && view && !owner && canCreate && <button className="primary-button task-home-action" onClick={() => { void duplicate(); }}><Copy aria-hidden="true" /><span>Duplicate</span></button>}
         {!isNew && view && owner && <button className="icon-button" onClick={(event) => open({ kind: "menu" }, event.currentTarget)} aria-haspopup="dialog" aria-label="View options" title="View options"><Ellipsis /></button>}
@@ -206,11 +229,12 @@ export function ViewPage({ userId, viewId, query, onQuery, directory, notify, on
 
     {dialog?.kind === "menu" && view && <ModalDialog title={view.name} eyebrow="View" onClose={closeDialog}>
       <div className="move-list task-menu">
-        <button className="move-option" autoFocus onClick={() => setDialog({ kind: "rename" })}><Pencil aria-hidden="true" /><span>Rename</span></button>
+        {actions.withdraw && <button className="move-option" autoFocus onClick={() => { void makePrivate(); }} disabled={busy}><Lock aria-hidden="true" /><span>Make private<small>Your Team role is view only: stop sharing to change this view</small></span></button>}
+        {actions.edit && <button className="move-option" autoFocus onClick={() => setDialog({ kind: "rename" })}><Pencil aria-hidden="true" /><span>Rename</span></button>}
         <button className="move-option" onClick={() => setDialog({ kind: "saveAs" })}><Save aria-hidden="true" /><span>Save as a new view…<small>Keeps this one as it is</small></span></button>
         <button className="move-option" onClick={() => { void duplicate(); }}><Copy aria-hidden="true" /><span>Duplicate<small>A private copy of the saved view</small></span></button>
         {canShare && <button className="move-option" onClick={() => setDialog({ kind: "share" })}><Share2 aria-hidden="true" /><span>Share…<small>{viewVisibilityLabel(view.visibility)}</small></span></button>}
-        <button className="move-option danger" onClick={() => setDialog({ kind: "delete" })}><Trash2 aria-hidden="true" /><span>Delete view</span></button>
+        {actions.edit && <button className="move-option danger" onClick={() => setDialog({ kind: "delete" })}><Trash2 aria-hidden="true" /><span>Delete view</span></button>}
       </div>
     </ModalDialog>}
     {dialog?.kind === "saveAs" && <NameDialog title={isNew ? "Save view" : "Save as a new view"} eyebrow="Views" label="View name" initialValue={isNew ? "" : `${view?.name ?? "View"} (copy)`.slice(0, 80)} submitLabel="Save view"

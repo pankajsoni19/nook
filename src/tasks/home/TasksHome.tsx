@@ -17,7 +17,7 @@ type TasksHomeProps = {
   /** Undefined is the Boards segment (/tasks). */
   home: TasksHomeRoute | undefined;
   /** Pushes, or replaces with `replace`, a home route (or the board list for undefined). */
-  onHome: (home: TasksHomeRoute | undefined, options?: { replace?: boolean }) => void;
+  onHome: (home: TasksHomeRoute | undefined, options?: { replace?: boolean; saved?: boolean }) => void;
   onOpenBoard: (board: BoardSummary) => void;
   onOpenBoardId: (boardId: string) => void;
   /** Opens a card from cross-board results: pushes /tasks/:b/card/:k, so Back returns here (§9.5). */
@@ -63,7 +63,7 @@ export function TasksHome({ userId, home, onHome, onOpenBoard, onOpenBoardId, on
       onQuery={(query: HomeQuery, options) => onHome({ section: "my", query }, { replace: !options.push })} />}
     {home.section === "views" && <ViewsList onOpen={openView} onNew={() => onHome({ section: "view", viewId: NEW_VIEW })} />}
     {home.section === "view" && <ViewPage key={home.viewId} userId={userId} viewId={home.viewId} query={home.query} directory={directory} notify={notify} onOpenCard={onOpenCard}
-      onQuery={(query, options) => onHome(query ? { section: "view", viewId: home.viewId, query } : { section: "view", viewId: home.viewId }, { replace: !options.push })}
+      onQuery={(query, options) => onHome(query ? { section: "view", viewId: home.viewId, query } : { section: "view", viewId: home.viewId }, { replace: !options.push, saved: options.saved === true })}
       onOpenView={openView} onBack={onBack} onMissing={onMissing}
       onDeleted={() => onHome({ section: "views" }, { replace: true })} />}
   </section>;

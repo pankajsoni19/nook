@@ -35,9 +35,11 @@ import {
   type CardComment,
   type CardDetail,
   type CardRelation,
+  type CardView,
   type SprintSummary
 } from "./tasksApi";
 import { useHistoryDialogGuard } from "./useHistoryDialogGuard";
+import { ReadOnlyBanner, useRole } from "../team/roleAccess";
 
 type CardDialogProps = {
   userId: string;
@@ -74,6 +76,11 @@ type CardDialogProps = {
   hierarchy?: CardHierarchyContext;
   /** The board's sprints (17B), for the Sprint field; only on boards with sprints on. */
   sprints?: SprintSummary[];
+  /**
+   * The card's data when the caller already has it (render tests); the dialog still loads the
+   * current version on open.
+   */
+  initialView?: CardView;
 };
 
 /** Live children and grandchildren on the board: they go to the Bin with the card (D129). */
@@ -92,13 +99,16 @@ const payloadCard = (reason: unknown) => reason instanceof ApiError && reason.pa
  * The description is Markdown shown through the notes renderer read-only (D44) and edited with
  * an explicit Save; a revision conflict offers Reload or Copy my text.
  */
-export function CardDialog({ userId, cardId, columns, columnId, boardOwner, onClose, onMissing, onChanged, onMove, onDelete, notify, tags, onTagsChange, onOpenRelated, onRelationsChanged, layout = "dialog", onExpand, onCollapse, hierarchy, sprints }: CardDialogProps) {
+export function CardDialog({ userId, cardId, columns, columnId, boardOwner, onClose, onMissing, onChanged, onMove, onDelete, notify, tags, onTagsChange, onOpenRelated, onRelationsChanged, layout = "dialog", onExpand, onCollapse, hierarchy, sprints, initialView }: CardDialogProps) {
   const page = layout === "page";
-  const [card, setCard] = useState<CardDetail | null>(null);
-  const [comments, setComments] = useState<CardComment[]>([]);
-  const [hasMore, setHasMore] = useState(false);
+  // Viewers and guests read the card: every write control is left out or shown as text, since the
+  // server's write gate refuses those writes (403 ROLE_READ_ONLY), comments included.
+  const { readOnly } = useRole();
+  const [card, setCard] = useState<CardDetail | null>(initialView?.card ?? null);
+  const [comments, setComments] = useState<CardComment[]>(initialView?.comments ?? []);
+  const [hasMore, setHasMore] = useState(initialView?.hasMoreComments ?? false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [title, setTitle] = useState("");
+  const [title, setTitle] = useState(initialView?.card.title ?? "");
   const [titleError, setTitleError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -110,8 +120,8 @@ export function CardDialog({ userId, cardId, columns, columnId, boardOwner, onCl
   const [editingComment, setEditingComment] = useState<{ id: string; body: string } | null>(null);
   const [deletingComment, setDeletingComment] = useState<string | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
-  const [attachments, setAttachments] = useState<CardAttachment[]>([]);
-  const [relations, setRelations] = useState<CardRelation[]>([]);
+  const [attachments, setAttachments] = useState<CardAttachment[]>(initialView?.attachments ?? []);
+  const [relations, setRelations] = useState<CardRelation[]>(initialView?.relations ?? []);
   const [attaching, setAttaching] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<UploadedAttachment[]>([]);
   const [unlinking, setUnlinking] = useState<CardAttachment | null>(null);
@@ -460,7 +470,7 @@ export function CardDialog({ userId, cardId, columns, columnId, boardOwner, onCl
         : <span className="task-attachment-icon" aria-hidden="true"><FileIcon /></span>}
       <span className="task-attachment-copy"><span title={item.name}>{item.name}</span><small>{formatBytes(item.size_bytes)}{item.linker_name ? ` · ${item.linker_name}` : ""}</small></span>
       <a className="icon-button" href={contentUrl(item.document_id, "attachment")} download aria-label={`Download ${item.name}`} title="Download"><Download /></a>
-      {canUnlink(item, userId, boardOwner) && <button className="icon-button" onClick={() => setUnlinking(item)} aria-haspopup="dialog" aria-label={`Remove ${item.name}`} title="Remove"><Trash2 /></button>}
+      {!readOnly && canUnlink(item, userId, boardOwner) && <button className="icon-button" onClick={() => setUnlinking(item)} aria-haspopup="dialog" aria-label={`Remove ${item.name}`} title="Remove"><Trash2 /></button>}
     </li>)}
   </ul>;
 
@@ -479,7 +489,9 @@ export function CardDialog({ userId, cardId, columns, columnId, boardOwner, onCl
         <div className="task-card-dialog-heading">
           <span className="eyebrow">{[card && hierarchy ? levelEyebrow(hierarchy.structure, levelOf(card)) : null, column ? columnEyebrow(column.name) : "Card"].filter(Boolean).join(" · ")}</span>
           {card && hierarchy && <CardBreadcrumb card={card} context={hierarchy} />}
-          {card
+          {card && readOnly
+            ? <h2 id={titleId} className="task-card-title-static">{card.title}</h2>
+            : card
             ? <input
               id={titleId}
               className="task-card-title-input"
@@ -497,12 +509,13 @@ export function CardDialog({ userId, cardId, columns, columnId, boardOwner, onCl
             : <h2 id={titleId}>Loading…</h2>}
           {titleError && <p className="file-dialog-error" role="alert">{titleError}</p>}
         </div>
-        {card && <button className="icon-button" onClick={() => onMove(card)} aria-haspopup="dialog" aria-label="Move card" title="Move to…"><ArrowRightLeft /></button>}
-        {card && <button className="icon-button" onClick={() => setConfirmDelete(true)} aria-haspopup="dialog" aria-label="Delete card" title="Move to the Bin"><Trash2 /></button>}
+        {card && !readOnly && <button className="icon-button" onClick={() => onMove(card)} aria-haspopup="dialog" aria-label="Move card" title="Move to…"><ArrowRightLeft /></button>}
+        {card && !readOnly && <button className="icon-button" onClick={() => setConfirmDelete(true)} aria-haspopup="dialog" aria-label="Delete card" title="Move to the Bin"><Trash2 /></button>}
         {!page && onExpand && <button className="icon-button task-card-expand" onClick={onExpand} aria-label="Open as page" title="Open as page"><Maximize2 /></button>}
         {page && onCollapse && <button className="icon-button" onClick={onCollapse} aria-label="Collapse to a dialog" title="Collapse"><Minimize2 /></button>}
         {!page && <button className="icon-button" onClick={requestClose} aria-label="Close card" title="Close"><X /></button>}
       </header>
+      <ReadOnlyBanner />
 
       <div className="task-card-dialog-body">
         {loadError && <div className="bin-state bin-error" role="alert">
@@ -514,12 +527,12 @@ export function CardDialog({ userId, cardId, columns, columnId, boardOwner, onCl
           <div className="task-card-side">
           <p className="task-card-byline">{card.creator_name ? `Added by ${card.creator_name}` : "Added"} · <time dateTime={card.created_at}>{relativeTime(card.created_at)}</time>{card.updated_at !== card.created_at && <> · Updated <time dateTime={card.updated_at}>{relativeTime(card.updated_at)}</time></>}</p>
 
-          <CardFields card={card} userId={userId} idPrefix={titleId} done={column?.is_done === 1} saving={savingDetails} onSave={saveDetails} tags={tags} owner={boardOwner} onTagsChange={onTagsChange} />
-          {hierarchy && <div className="task-card-details"><CardParentFields card={card} context={hierarchy} idPrefix={titleId} saving={savingDetails} onSave={saveDetails} />
-            {sprints && <CardSprintField card={card} structure={hierarchy.structure} cards={hierarchy.cards} sprints={sprints} idPrefix={titleId} saving={savingDetails} onSave={saveDetails} />}</div>}
+          <CardFields card={card} userId={userId} idPrefix={titleId} done={column?.is_done === 1} saving={savingDetails} onSave={saveDetails} tags={tags} owner={boardOwner} onTagsChange={onTagsChange} readOnly={readOnly} />
+          {hierarchy && <div className="task-card-details"><CardParentFields card={card} context={hierarchy} idPrefix={titleId} saving={savingDetails} onSave={saveDetails} readOnly={readOnly} />
+            {sprints && <CardSprintField card={card} structure={hierarchy.structure} cards={hierarchy.cards} sprints={sprints} idPrefix={titleId} saving={savingDetails} onSave={saveDetails} readOnly={readOnly} />}</div>}
           {detailsConflict && <p className="file-dialog-error" role="alert">{detailsConflict}</p>}
 
-          <RelationsSection cardId={card.id} boardId={card.board_id} idPrefix={titleId} relations={relations} notify={notify}
+          <RelationsSection cardId={card.id} boardId={card.board_id} idPrefix={titleId} relations={relations} notify={notify} readOnly={readOnly}
             onOpen={(target) => onOpenRelated?.(target)}
             onChange={(next) => {
               setRelations(next);
@@ -528,10 +541,10 @@ export function CardDialog({ userId, cardId, columns, columnId, boardOwner, onCl
           </div>
 
           <div className="task-card-main">
-          {hierarchy && <SubtasksSection card={card} context={hierarchy} idPrefix={titleId} />}
+          {hierarchy && <SubtasksSection card={card} context={hierarchy} idPrefix={titleId} readOnly={readOnly} />}
           <section className="task-card-section" aria-labelledby={`${titleId}-description`}>
-            <header><h3 id={`${titleId}-description`}>Description</h3>{!editing && <button className="secondary-button task-small-button" onClick={startEditing}><Pencil />Edit</button>}</header>
-            {editing
+            <header><h3 id={`${titleId}-description`}>Description</h3>{!editing && !readOnly && <button className="secondary-button task-small-button" onClick={startEditing}><Pencil />Edit</button>}</header>
+            {editing && !readOnly
               ? <div className="task-description-editor">
                 <NoteEditor
                   markdown={draft}
@@ -556,16 +569,20 @@ export function CardDialog({ userId, cardId, columns, columnId, boardOwner, onCl
               </div>
               : card.description.trim()
                 ? <div className="task-description-view"><NoteEditor key={`${card.id}:${card.revision}`} markdown={card.description} editable={false} onChange={() => undefined} label="Card description" /></div>
-                : <button className="task-description-empty" onClick={startEditing}>Add a description…</button>}
+                : readOnly
+                  ? <p className="task-comment-empty">No description.</p>
+                  : <button className="task-description-empty" onClick={startEditing}>Add a description…</button>}
           </section>
 
           <section className="task-card-section" aria-labelledby={`${titleId}-files`}>
             <header>
               <h3 id={`${titleId}-files`}><Paperclip aria-hidden="true" />Attachments</h3>
-              <button className="secondary-button task-small-button" onClick={() => cardFileRef.current?.click()} disabled={attaching}><Paperclip />{attaching ? "Uploading…" : "Attach"}</button>
-              <input ref={cardFileRef} type="file" multiple hidden onChange={(event) => { void attachFiles(event.currentTarget.files); event.currentTarget.value = ""; }} />
+              {!readOnly && <>
+                <button className="secondary-button task-small-button" onClick={() => cardFileRef.current?.click()} disabled={attaching}><Paperclip />{attaching ? "Uploading…" : "Attach"}</button>
+                <input ref={cardFileRef} type="file" multiple hidden onChange={(event) => { void attachFiles(event.currentTarget.files); event.currentTarget.value = ""; }} />
+              </>}
             </header>
-            {attachmentList(attachmentsFor(attachments, null)) || <p className="task-comment-empty">No files yet. Pasted images in the description are attached here too.</p>}
+            {attachmentList(attachmentsFor(attachments, null)) || <p className="task-comment-empty">{readOnly ? "No files." : "No files yet. Pasted images in the description are attached here too."}</p>}
           </section>
 
           <section className="task-card-section" aria-labelledby={`${titleId}-comments`}>
@@ -578,11 +595,11 @@ export function CardDialog({ userId, cardId, columns, columnId, boardOwner, onCl
                   <time dateTime={comment.created_at}>{relativeTime(comment.created_at)}</time>
                   {comment.edited_at && <span className="task-comment-edited">edited</span>}
                   <span className="task-comment-actions">
-                    {comment.is_author === 1 && editingComment?.id !== comment.id && <button className="icon-button" onClick={() => setEditingComment({ id: comment.id, body: comment.body })} aria-label="Edit comment" title="Edit"><Pencil /></button>}
-                    {(comment.is_author === 1 || boardOwner) && <button className="icon-button" onClick={() => setDeletingComment(comment.id)} aria-haspopup="dialog" aria-label="Delete comment" title="Delete"><Trash2 /></button>}
+                    {!readOnly && comment.is_author === 1 && editingComment?.id !== comment.id && <button className="icon-button" onClick={() => setEditingComment({ id: comment.id, body: comment.body })} aria-label="Edit comment" title="Edit"><Pencil /></button>}
+                    {!readOnly && (comment.is_author === 1 || boardOwner) && <button className="icon-button" onClick={() => setDeletingComment(comment.id)} aria-haspopup="dialog" aria-label="Delete comment" title="Delete"><Trash2 /></button>}
                   </span>
                 </header>
-                {editingComment?.id === comment.id
+                {!readOnly && editingComment?.id === comment.id
                   ? <div className="task-comment-edit">
                     <textarea value={editingComment.body} onChange={(event) => setEditingComment({ id: comment.id, body: event.target.value })} onKeyDown={(event) => {
                       if (event.key === "Escape") { event.preventDefault(); setEditingComment(null); }
@@ -595,7 +612,9 @@ export function CardDialog({ userId, cardId, columns, columnId, boardOwner, onCl
               </li>)}
               {!comments.length && <li className="task-comment-empty">No comments yet.</li>}
             </ol>
-            <div className="task-comment-composer">
+            {readOnly
+              ? <p className="task-comment-empty" role="note">View only: your Team role can read comments but not post them.</p>
+              : <div className="task-comment-composer">
               <textarea value={composer} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => composerKey(event, () => { void post(); })} placeholder="Write a comment" aria-label="Write a comment" rows={2} disabled={posting} />
               {pendingFiles.length > 0 && <ul className="task-pending-files" aria-label="Files to attach">
                 {pendingFiles.map((file) => <li key={file.id}><Paperclip aria-hidden="true" /><span title={file.name}>{file.name}</span><button className="icon-button" onClick={() => setPendingFiles((current) => current.filter((item) => item.id !== file.id))} aria-label={`Don't attach ${file.name}`}><X /></button></li>)}
@@ -605,7 +624,7 @@ export function CardDialog({ userId, cardId, columns, columnId, boardOwner, onCl
                 <input ref={commentFileRef} type="file" multiple hidden onChange={(event) => { void pickCommentFiles(event.currentTarget.files); event.currentTarget.value = ""; }} />
                 <button className="primary-button" onClick={() => { void post(); }} disabled={posting || attaching || !composer.trim()}>{posting ? "Posting…" : "Comment"}</button>
               </span>
-            </div>
+            </div>}
           </section>
           </div>
         </>}

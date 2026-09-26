@@ -322,3 +322,23 @@ describe("completing a sprint", () => {
     else expect(card.sprint_id).toBe(next.id);
   });
 });
+
+describe("structure changes and finished sprints (review L4)", () => {
+  test("cards in completed sprints keep their sprint and do not block sprints off or a new work level; open sprints still do", async () => {
+    const { owner, member, boardId, columns } = await setup("Finished sprints");
+    const finished = await addSprint(owner, boardId, "Finished");
+    const done = await addCard(member, boardId, columns[2].id, "Shipped", { sprintId: finished.id });
+    db.query("UPDATE board_sprints SET state = 'closed', closed_at = ? WHERE id = ?").run("2026-01-01T00:00:00.000Z", finished.id);
+    const planned = await addSprint(owner, boardId, "Next");
+    const pending = await addCard(member, boardId, columns[0].id, "Pending", { sprintId: planned.id });
+    const subtaskWork = { ...SPRINT_TASKS, workLevel: 1 };
+    // A card in an open sprint still blocks moving the work level.
+    expect(await call(owner, "PATCH", `/boards/${boardId}`, { structure: subtaskWork })).toMatchObject({ status: 409, body: { code: "SPRINTS_IN_USE", cardCount: 1 } });
+    expect((await call(member, "PATCH", `/cards/${pending.id}`, { sprintId: null, revision: pending.revision })).status).toBe(200);
+    expect((await call(owner, "DELETE", `/sprints/${planned.id}`)).status).toBe(200);
+    // Only the finished sprint's card has a sprint now: it blocks neither change, and keeps its sprint.
+    expect((await call(owner, "PATCH", `/boards/${boardId}`, { structure: { ...SPRINT_TASKS, sprints: false } })).status).toBe(200);
+    expect((await call(owner, "PATCH", `/boards/${boardId}`, { structure: { ...subtaskWork, sprints: false } })).status).toBe(200);
+    expect(db.query("SELECT sprint_id FROM cards WHERE id = ?").get(done.id)).toEqual({ sprint_id: finished.id });
+  });
+});

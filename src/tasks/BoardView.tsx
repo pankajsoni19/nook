@@ -16,6 +16,7 @@ import { BoardSharePanel } from "./BoardSharePanel";
 import { CardComposer, type ComposerMode } from "./CardComposer";
 import { CardDialog } from "./CardDialog";
 import { CardPage } from "./CardPage";
+import { useRole } from "../team/roleAccess";
 import { MoveCardSheet } from "./MoveCardSheet";
 import { focusBoardCard } from "./cardFocus";
 import { afterCardIdAt, applyLocalMove, applyPositions, byPosition, cardPlace, columnCards, columnIndexFromScroll, columnMoveAnchor, isNoopMove, keyboardMoveTarget, mergeMovedCard, moveChangesBlockers, readCardDragPayload, sheetMoveAnchor, type MoveKey } from "./boardOrder";
@@ -104,6 +105,8 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
   const [announcement, setAnnouncement] = useState("");
   // The card composer (a guarded dialog, no history entry): the column it was opened from, or null.
   const [composer, setComposer] = useState<{ columnId: string | null; parentId?: string } | null>(null);
+  // Read-only Team roles never get the composer (the card dialog hides its Add controls too).
+  const { readOnly } = useRole();
   const detailRef = useRef(detail);
   detailRef.current = detail;
   // The control that opened the current dialog, so focus can return to it.
@@ -165,6 +168,14 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
     if (target) window.setTimeout(() => { if (target.isConnected) target.focus(); }, 0);
   }, []);
   useHistoryDialogGuard(dialog !== null, closeDialog);
+  // "Complete…" from Board settings opens over the sheet as a nested dialog with its own guard
+  // (asked first), so Back, Escape, or Cancel close only it and the settings stay (review L6b).
+  const [settingsCompleteId, setSettingsCompleteId] = useState<string | null>(null);
+  const settingsOpen = dialog?.kind === "settings";
+  const nestedCompleteId = settingsOpen ? settingsCompleteId : null;
+  const closeNestedComplete = useCallback(() => setSettingsCompleteId(null), []);
+  useHistoryDialogGuard(nestedCompleteId !== null, closeNestedComplete);
+  useEffect(() => { if (!settingsOpen) setSettingsCompleteId(null); }, [settingsOpen]);
 
   const openDialog = (next: BoardDialog, trigger?: HTMLElement | null) => {
     returnFocusRef.current = trigger ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
@@ -598,7 +609,7 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
       hierarchy={hierarchy.dialog}
       sprints={sprints.enabled ? sprints.sprints : undefined}
     /></CardPage>}
-    {composer && detail && board && <CardComposer
+    {composer && !readOnly && detail && board && <CardComposer
       boardId={boardId}
       boardName={board.name}
       userId={userId}
@@ -618,22 +629,29 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
       initialSprintId={sprints.composerSprintId}
     />}
     {dialog?.kind === "settings" && board && <BoardSettingsSheet board={board} owner={owner} showAllLevels={hierarchy.showAll} onShowAllLevels={hierarchy.setShowAll}
-      onClose={closeDialog} notify={notify}
+      onClose={closeDialog} notify={notify} suspended={nestedCompleteId !== null}
       onRename={() => setDialog({ kind: "rename" })} onShare={() => setDialog({ kind: "share" })} onDelete={() => setDialog({ kind: "deleteBoard" })} onAddColumn={() => setDialog({ kind: "addColumn" })}
       onStructureSaved={(saved) => setDetail((current) => current ? { ...current, board: saved } : current)}
       sprintsSection={<SprintSettingsSection boardId={boardId} sprints={data ? withLocalCounts(sprints.sprints, data.cards, columns, hierarchy.structure.workLevel) : sprints.sprints} owner={owner} today={viewContext.today}
         plural={hierarchy.structure.levels[hierarchy.structure.workLevel]?.plural ?? "Cards"}
         onCreate={sprints.create} onUpdate={sprints.update} onStart={sprints.start} onDelete={sprints.remove}
-        onComplete={(sprint) => setDialog({ kind: "completeSprint", sprintId: sprint.id })} />} />}
-    {dialog?.kind === "completeSprint" && data && (() => {
-      const sprint = sprints.sprints.find((item) => item.id === dialog.sprintId && item.state === "active");
-      if (!sprint) return null;
+        onComplete={(sprint) => setSettingsCompleteId(sprint.id)} />} />}
+    {(() => {
+      // From the sprint bar it is the board's dialog; from Board settings it is nested over the sheet.
+      const nested = nestedCompleteId !== null;
+      const sprintId = nested ? nestedCompleteId : dialog?.kind === "completeSprint" ? dialog.sprintId : null;
+      const sprint = sprintId && data ? sprints.sprints.find((item) => item.id === sprintId && item.state === "active") : undefined;
+      if (!sprint || !data) return null;
       const { structure } = hierarchy;
       return <SprintCompleteDialog sprint={sprint} sprints={sprints.sprints} cards={data.cards} columns={columns} workLevel={structure.workLevel}
         name={structure.levels[structure.workLevel]?.name ?? "Card"} plural={structure.levels[structure.workLevel]?.plural ?? "Cards"}
-        childPlural={structure.levels[structure.workLevel + 1]?.plural ?? null} today={viewContext.today} onCancel={closeDialog}
+        childPlural={structure.levels[structure.workLevel + 1]?.plural ?? null} today={viewContext.today} onCancel={nested ? closeNestedComplete : closeDialog}
         onComplete={async (carryTo, next) => {
           await sprints.complete(sprint, carryTo, next);
+          if (nested) {
+            setSettingsCompleteId(null);
+            return;
+          }
           setDialog(null);
           returnFocusRef.current = null;
         }} />;

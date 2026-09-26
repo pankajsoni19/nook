@@ -78,7 +78,7 @@ export const audienceAllUsersFor = (userExpression: string) =>
 
 /**
  * The fragment every `x.visibility = 'all_users'` in server SQL must be ANDed with, for the caller
- * bound as `$userId` (§5.3). tests/audienceGuard.test.ts fails on any bare `all_users` comparison.
+ * bound as `$userId` (§5.3). tests/guestAudience.test.ts fails on any bare `all_users` comparison.
  */
 export const AUDIENCE_ALL_USERS = audienceAllUsersFor("$userId");
 

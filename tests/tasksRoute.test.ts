@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
 import { formatRoute, parseRoute } from "../src/router";
-import { fullPageAction, hasFromDialogHint, parentTasksRoute, tasksBackAction, tasksRoute, withFromDialogHint } from "../src/tasksRoute";
+import { cardCloseAction, createTasksEntryLog, fullPageAction, hasFromDialogHint, savedViewStep, tasksHomeRoute, parentTasksRoute, tasksBackAction, tasksRoute, withFromDialogHint } from "../src/tasksRoute";
 import { carriedTasksState, columnIndexFor, createTasksHistoryState, readTasksHistoryHint } from "../src/tasksNavigation";
+import { DEFAULT_BOARD_QUERY } from "../src/tasks/boardUrl";
 
 const boardId = "3f2b8c1e-4d5a-4b6c-8d7e-9f0a1b2c3d4e";
 const otherBoard = "4f2b8c1e-4d5a-4b6c-8d7e-9f0a1b2c3d4e";
@@ -105,4 +106,46 @@ test("Collapse and Close on the page step back with the Expand hint, and replace
   // No hint (a deep link to /full, or a page opened another way): replace, never leave Nook.
   expect(fullPageAction("collapse", full, { "mynotes.depth": 3 }, 3)).toEqual({ kind: "replace", route: tasksRoute(boardId, cardId) });
   expect(fullPageAction("close", full, null, 0)).toEqual({ kind: "replace", route: tasksRoute(boardId) });
+});
+
+test("closing a card steps back only onto an entry this Tasks visit saw; otherwise it replaces with the board (review L6c)", () => {
+  const card = tasksRoute(boardId, cardId);
+  const board = formatRoute(tasksRoute(boardId));
+  // Opened from the board in this visit: Back parity.
+  const log = createTasksEntryLog();
+  log.note(3, board, false);
+  log.note(4, formatRoute(card), true);
+  expect(cardCloseAction(card, 4, log)).toEqual({ kind: "history" });
+  // Opened from Notifications (another app's entry below), or after a reload: this visit never saw
+  // the entry below, so history.back() would leave Tasks (and its Undo toast). Replace instead.
+  const fromElsewhere = createTasksEntryLog();
+  fromElsewhere.note(4, formatRoute(card), false);
+  expect(cardCloseAction(card, 4, fromElsewhere)).toEqual({ kind: "replace", route: tasksRoute(boardId) });
+  // A deep link at depth 0 replaces too, keeping the board's query.
+  const query = { ...DEFAULT_BOARD_QUERY, view: "list" as const };
+  const filtered = tasksRoute(boardId, cardId, false, query);
+  expect(cardCloseAction(filtered, 0, log)).toEqual({ kind: "replace", route: tasksRoute(boardId, null, false, query) });
+  // A write drops what the log knew above it (a push discards the forward entries).
+  log.note(5, "/tasks/other", true);
+  log.note(3, board, true);
+  expect(log.urlAt(4)).toBeUndefined();
+  expect(log.urlAt(5)).toBeUndefined();
+  expect(log.urlAt(3)).toBe(board);
+});
+
+test("a view's Save steps back onto an identical entry below instead of leaving a dead Back (review L6a)", () => {
+  const saved = formatRoute(tasksHomeRoute({ section: "view", viewId: cardId }));
+  const views = formatRoute(tasksHomeRoute({ section: "views" }));
+  const log = createTasksEntryLog();
+  log.note(1, views, true);
+  log.note(2, saved, true);
+  // A committed filter change pushed the unsaved query at depth 3; Save lands on the view's URL,
+  // which is the entry at depth 2: step back onto it, so the next Back reaches the views list.
+  log.note(3, `${saved}?q=state:todo`, true);
+  expect(savedViewStep(3, saved, log)).toBe("back");
+  // Edits that only replaced (group, sort, typing) leave a different entry below: replace.
+  expect(savedViewStep(2, saved, log)).toBe("replace");
+  // An entry below this visit never saw, or depth 0: replace, never step out of Tasks.
+  expect(savedViewStep(3, saved, createTasksEntryLog())).toBe("replace");
+  expect(savedViewStep(0, saved, log)).toBe("replace");
 });

@@ -2,6 +2,8 @@ import { audit, db, now } from "../db";
 import { binUnlinkedAttachments, cardAttachmentIds } from "./attachments";
 import { planInsert } from "./boardOrder";
 import { applyRenumber, LIMITS, liveCardsIn, withBoardLock } from "./service";
+import { liveChildCount } from "./hierarchy";
+import { HIERARCHY_LIMITS } from "../../shared/boardStructure";
 import { AUDIENCE_ALL_USERS } from "../team/roles";
 
 /**
@@ -21,7 +23,7 @@ import { AUDIENCE_ALL_USERS } from "../team/roles";
  *   tagged `bin_root_id = <root>`. Only roots are Bin items (listed with `descendant_count`);
  *   restoring the root restores exactly its group, and purging it purges the group. A descendant
  *   binned on its own first is its own root and keeps its entry. A root restored while its parent
- *   is binned (or gone) comes back detached.
+ *   is binned (or gone), or under a parent that already has 100 children, comes back detached.
  */
 export type TaskBinType = "card" | "board";
 export const isTaskBinType = (type: string): type is TaskBinType => type === "card" || type === "board";
@@ -42,7 +44,7 @@ export type TaskBinRow = {
 
 type CardBinRow = {
   id: string; board_id: string; column_id: string | null; title: string; deleted_at: string | null; deleted_by: string | null; purge_started_at: string | null;
-  parent_card_id: string | null; bin_root_id: string | null;
+  parent_card_id: string | null; bin_root_id: string | null; level: number;
 };
 type BoardBinRow = { id: string; owner_id: string; name: string; visibility: string; deleted_at: string | null; purge_started_at: string | null };
 
@@ -90,7 +92,7 @@ export type TaskRestoreOutcome =
 const boardOfCard = (cardId: string) => (db.query("SELECT board_id FROM cards WHERE id = ?").get(cardId) as { board_id: string } | null)?.board_id ?? null;
 
 function cardAccess(cardId: string, userId: string) {
-  return db.query(`SELECT k.id, k.board_id, k.column_id, k.title, k.deleted_at, k.deleted_by, k.purge_started_at, k.parent_card_id, k.bin_root_id,
+  return db.query(`SELECT k.id, k.board_id, k.column_id, k.title, k.deleted_at, k.deleted_by, k.purge_started_at, k.parent_card_id, k.bin_root_id, k.level,
       b.owner_id, b.name AS board_name, b.deleted_at AS board_deleted_at
     FROM cards k JOIN boards b ON b.id = k.board_id
     WHERE k.id = $cardId AND (b.owner_id = $userId OR ((k.deleted_by = $userId OR k.deleted_at IS NULL) AND ${boardAudience}))`).get({ cardId, userId }) as
@@ -137,7 +139,12 @@ export async function restoreTaskItem(type: TaskBinType, id: string, userId: str
     const parentLive = card.parent_card_id
       ? Boolean(db.query("SELECT 1 FROM cards WHERE id = ? AND board_id = ? AND deleted_at IS NULL").get(card.parent_card_id, card.board_id))
       : false;
-    const detached = card.parent_card_id !== null && !parentLive;
+    // Detached (D130) when the parent is binned, when it was purged (the FK already set the parent to
+    // NULL, so a child-level card has none), or when the live parent already has the most children
+    // (D135): it keeps its level with no parent, which the 019 triggers allow, rather than failing.
+    const detached = card.parent_card_id === null
+      ? card.level > 0
+      : !parentLive || liveChildCount(card.parent_card_id) >= HIERARCHY_LIMITS.childrenPerCard;
     // The requested column when it is on this board, else its own column if it still exists, else
     // the first one. After the requested neighbour when it is still live there, else at the bottom.
     const boardColumn = (columnId: string | null | undefined) => (columnId ? db.query("SELECT id, name FROM board_columns WHERE id = ? AND board_id = ?").get(columnId, card.board_id) : null) as { id: string; name: string } | null;

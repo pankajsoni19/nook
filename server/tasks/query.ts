@@ -7,7 +7,8 @@ import { readableBoardPredicate } from "./access";
 import { assigneesForCards, type CardAssignee } from "./assignees";
 import { dueAt } from "./dueTime";
 import { TaskError } from "./service";
-import { AUDIENCE_ALL_USERS } from "../team/roles";
+import { AUDIENCE_ALL_USERS, audienceAllUsersFor, can } from "../team/roles";
+import { userRole } from "../team/userRole";
 
 /**
  * The cross-board card query (research 2026-09-26 §10.3–§10.4, D140, D144,
@@ -399,7 +400,7 @@ export function runQuery(userId: string, query: TaskQuery, input: Omit<QueryInpu
   if (!input.cursor) {
     const counted = (db.query(`SELECT COUNT(*) AS count FROM (SELECT 1 ${from} LIMIT $cap)`).get({ ...compiled.params, cap: QUERY_TOTAL_CAP + 1 }) as { count: number }).count;
     if (counted <= QUERY_TOTAL_CAP) result.total = counted;
-    result.refs = resolveRefs(userId, query);
+    result.refs = resolveRefs(userId, query, result.cards);
   }
   return result;
 }
@@ -438,8 +439,12 @@ function withCardDetails(rows: Array<Record<string, unknown>>): QueriedCard[] {
  * Names for the ids a query mentions, per caller: boards, columns, and tags
  * only when their board is readable (otherwise `restricted`, with no name);
  * users by display name, as `GET /api/users` already shows them.
+ *
+ * Roles that may not use `GET /api/users` (viewers and guests: no `sharing.write`) get a name only
+ * for themselves, a creator or assignee of a card on this page, or a reader of a board they can
+ * read; any other user id is `unknown`, so `creator:<uuid>` is no directory lookup.
  */
-export function resolveRefs(userId: string, query: TaskQuery): QueryRefs {
+export function resolveRefs(userId: string, query: TaskQuery, pageCards: readonly Pick<QueriedCard, "created_by" | "assignees">[] = []): QueryRefs {
   const valuesOf = (...keys: FilterTerm["key"][]) => [...new Set(query.terms.filter((term) => keys.includes(term.key)).flatMap((term) => term.values))];
   const uuids = (values: string[]) => values.filter((value) => /^[0-9a-f-]{36}$/.test(value));
   const boardIds = uuids(valuesOf("board"));
@@ -454,8 +459,15 @@ export function resolveRefs(userId: string, query: TaskQuery): QueryRefs {
   const readableTags = new Map((db.query(`SELECT t.id, t.name, t.color, t.board_id FROM board_tags t JOIN boards b ON b.id = t.board_id
       WHERE t.id IN (SELECT value FROM json_each($ids)) AND ${readableBoardPredicate}`)
     .all({ ids: JSON.stringify(tagIds), userId }) as Array<{ id: string; name: string; color: string; board_id: string }>).map((row) => [row.id, row]));
-  const users = new Map((db.query("SELECT id, display_name FROM users WHERE id IN (SELECT value FROM json_each(?)) AND disabled_at IS NULL")
-    .all(JSON.stringify(userIds)) as Array<{ id: string; display_name: string }>).map((row) => [row.id, row]));
+  const role = userRole(userId);
+  const directory = role !== null && can(role, "sharing.write");
+  const onPage = [...new Set(pageCards.flatMap((card) => [card.created_by, ...card.assignees.map((assignee) => assignee.id)]).filter((id): id is string => Boolean(id)))];
+  const users = new Map((db.query(`SELECT u.id, u.display_name FROM users u WHERE u.id IN (SELECT value FROM json_each($ids)) AND u.disabled_at IS NULL
+      AND ($directory = 1 OR u.id = $userId OR u.id IN (SELECT value FROM json_each($onPage))
+        OR EXISTS (SELECT 1 FROM boards b WHERE ${readableBoardPredicate} AND (b.owner_id = u.id
+          OR (b.visibility = 'all_users' AND ${audienceAllUsersFor("u.id")})
+          OR (b.visibility = 'selected' AND EXISTS (SELECT 1 FROM board_members bm WHERE bm.board_id = b.id AND bm.user_id = u.id)))))`)
+    .all({ ids: JSON.stringify(userIds), userId, directory: directory ? 1 : 0, onPage: JSON.stringify(onPage) }) as Array<{ id: string; display_name: string }>).map((row) => [row.id, row]));
   return {
     boards: boardIds.map((id) => readableBoards.get(id) ?? { id, restricted: true as const }),
     columns: columnIds.map((id) => readableColumns.get(id) ?? { id, restricted: true as const }),

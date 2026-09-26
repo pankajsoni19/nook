@@ -138,13 +138,15 @@ type RelationsSectionProps = {
   onChange: (relations: CardRelation[]) => void;
   onOpen: (card: RelatedCardTarget) => void;
   notify: (message: string) => void;
+  /** A read-only Team role: the links only (no Add relation, no Remove). */
+  readOnly?: boolean;
 };
 
 /**
  * The card's relations (D104–D107). Links are edges with their own endpoints: adding or removing
  * one never changes either card's revision, so it never conflicts with someone editing the card.
  */
-export function RelationsSection({ cardId, boardId, idPrefix, relations, onChange, onOpen, notify }: RelationsSectionProps) {
+export function RelationsSection({ cardId, boardId, idPrefix, relations, onChange, onOpen, notify, readOnly = false }: RelationsSectionProps) {
   const [adding, setAdding] = useState(false);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const rows = relations.map(relationRow);
@@ -183,12 +185,12 @@ export function RelationsSection({ cardId, boardId, idPrefix, relations, onChang
   return <section className="task-card-section" aria-labelledby={`${idPrefix}-relations`}>
     <header>
       <h3 id={`${idPrefix}-relations`}><Link2 aria-hidden="true" />Relations</h3>
-      {!adding && <button type="button" className="secondary-button task-small-button" onClick={() => setAdding(true)} disabled={relations.length >= 50}><Plus />Add relation</button>}
+      {!adding && !readOnly && <button type="button" className="secondary-button task-small-button" onClick={() => setAdding(true)} disabled={relations.length >= 50}><Plus />Add relation</button>}
     </header>
     {blockers > 0 && <p className="task-blocked-chip" role="note"><TriangleAlert aria-hidden="true" />{blockedByLabel(blockers)}</p>}
-    {adding && <RelationAdder idPrefix={idPrefix} boardId={boardId} excludeCardId={cardId} excluded={linkedCardIds(rows)} onAdd={add} onDone={() => setAdding(false)} />}
+    {adding && !readOnly && <RelationAdder idPrefix={idPrefix} boardId={boardId} excludeCardId={cardId} excluded={linkedCardIds(rows)} onAdd={add} onDone={() => setAdding(false)} />}
     {rows.length
-      ? <RelationList rows={rows} boardId={boardId} onOpen={onOpen} onRemove={(row) => { void remove(row); }} busyKey={busyKey} />
-      : !adding && <p className="task-comment-empty">No related cards. Link cards that depend on, block, or repeat this one.</p>}
+      ? <RelationList rows={rows} boardId={boardId} onOpen={onOpen} onRemove={readOnly ? undefined : (row) => { void remove(row); }} busyKey={busyKey} />
+      : !adding && <p className="task-comment-empty">{readOnly ? "No related cards." : "No related cards. Link cards that depend on, block, or repeat this one."}</p>}
   </section>;
 }

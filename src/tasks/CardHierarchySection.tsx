@@ -30,13 +30,15 @@ type ParentFieldsProps = {
   idPrefix: string;
   saving: boolean;
   onSave: (change: Pick<CardChange, "parentId" | "level">, success: string) => Promise<boolean>;
+  /** A read-only Team role: the parent and level show as text. */
+  readOnly?: boolean;
 };
 
 /**
  * The Parent field (a Combobox over this board's cards one level up, "No epic" first) and the Level
  * field ("Change level", D128). Hidden on a flat board; the Parent field is hidden at the top level.
  */
-export function CardParentFields({ card, context, idPrefix, saving, onSave }: ParentFieldsProps) {
+export function CardParentFields({ card, context, idPrefix, saving, onSave, readOnly = false }: ParentFieldsProps) {
   const { structure } = context;
   if (!hasLevels(structure)) return null;
   const level = levelOf(card);
@@ -49,6 +51,21 @@ export function CardParentFields({ card, context, idPrefix, saving, onSave }: Pa
     ...candidates.map((candidate) => ({ value: candidate.id, label: candidate.title, ...(columnName(candidate.column_id) ? { description: columnName(candidate.column_id)! } : {}) }))
   ];
   const current = card.parent_card_id ?? NO_PARENT;
+  if (readOnly) {
+    const parentTitle = card.parent_card_id
+      ? context.cards.find((item) => item.id === card.parent_card_id)?.title ?? (card.parent?.id === card.parent_card_id ? card.parent.title : parentLevelName)
+      : `No ${parentLevelName.toLowerCase()}`;
+    return <>
+      {level > 0 && <div className="task-card-field">
+        <span id={`${idPrefix}-parent-label`} className="task-card-field-label"><Layers aria-hidden="true" />{parentLevelName}</span>
+        <p className="task-card-static" aria-labelledby={`${idPrefix}-parent-label`}>{parentTitle}</p>
+      </div>}
+      <div className="task-card-field">
+        <span id={`${idPrefix}-level-label`} className="task-card-field-label"><Layers aria-hidden="true" />Level</span>
+        <p className="task-card-static" aria-labelledby={`${idPrefix}-level-label`}>{levelName(structure, level)}</p>
+      </div>
+    </>;
+  }
   const levelOptions = structure.levels.map((item, index) => ({ value: String(index), label: item.name, ...(index === level ? { description: "Now" } : {}) }));
 
   function changeLevel(value: string) {
@@ -81,14 +98,18 @@ export function CardParentFields({ card, context, idPrefix, saving, onSave }: Pa
   </>;
 }
 
-type SubtasksProps = { card: CardDetail; context: CardHierarchyContext; idPrefix: string };
+type SubtasksProps = {
+  card: CardDetail; context: CardHierarchyContext; idPrefix: string;
+  /** A read-only Team role: the list and progress only (no checkboxes, add, or remove). */
+  readOnly?: boolean;
+};
 
 /**
  * The Subtasks section (§7.2), named by the level below ("Stories" on an epic): a checklist whose
  * checkbox moves a child to the board's first done column and back (D127), links that open each
  * child, "Remove from parent", and an inline add that keeps focus for the next one.
  */
-export function SubtasksSection({ card, context, idPrefix }: SubtasksProps) {
+export function SubtasksSection({ card, context, idPrefix, readOnly = false }: SubtasksProps) {
   const [draft, setDraft] = useState("");
   const [adding, setAdding] = useState(false);
   const [pending, setPending] = useState<string | null>(null);
@@ -100,7 +121,7 @@ export function SubtasksSection({ card, context, idPrefix }: SubtasksProps) {
   const children = childrenOf(context.cards, context.columns, card.id);
   const doneIds = new Set(context.columns.filter((column) => column.is_done === 1).map((column) => column.id));
   const done = children.filter((child) => doneIds.has(child.column_id)).length;
-  const checkable = checklistColumn(context.columns, true) !== null;
+  const checkable = !readOnly && checklistColumn(context.columns, true) !== null;
   const plural = childPlural(structure, level);
   const singular = childName(structure, level);
   const today = localDateString();
@@ -139,7 +160,7 @@ export function SubtasksSection({ card, context, idPrefix }: SubtasksProps) {
   return <section className="task-card-section task-subtasks" aria-labelledby={headingId}>
     <header>
       <h3 id={headingId}><ListChecks aria-hidden="true" />{plural} {children.length > 0 && <span className="task-subtasks-count">{done}/{children.length}</span>}</h3>
-      <button type="button" className="secondary-button task-small-button" onClick={() => context.composeChild(card)}><SquarePen />Add with details</button>
+      {!readOnly && <button type="button" className="secondary-button task-small-button" onClick={() => context.composeChild(card)}><SquarePen />Add with details</button>}
     </header>
     {children.length > 0 && <span className="task-subtasks-bar" role="progressbar" aria-label={`${done} of ${children.length} ${plural.toLowerCase()} done`} aria-valuemin={0} aria-valuemax={children.length} aria-valuenow={done}>
       <span style={{ width: `${Math.round((done / children.length) * 100)}%` }} />
@@ -156,15 +177,16 @@ export function SubtasksSection({ card, context, idPrefix }: SubtasksProps) {
           <button type="button" className="task-subtask-title" onClick={() => context.openCard(child.id)} title={child.title}>{child.title}</button>
           {due && <span className={`task-due-chip ${due.tone}`}>{due.label}</span>}
           {checkable && <small className="task-subtask-where">{columnName(child.column_id)}</small>}
-          <button type="button" className="icon-button" onClick={() => { void context.detachChild(child); }} aria-label={`Remove “${child.title}” from this ${levelName(structure, level).toLowerCase()}`} title="Remove from parent"><X /></button>
+          {!readOnly && <button type="button" className="icon-button" onClick={() => { void context.detachChild(child); }} aria-label={`Remove “${child.title}” from this ${levelName(structure, level).toLowerCase()}`} title="Remove from parent"><X /></button>}
         </li>;
       })}
     </ul>
-    <div className="task-subtask-add">
+    {!readOnly && <div className="task-subtask-add">
       <Plus aria-hidden="true" />
       <input ref={inputRef} id={`${idPrefix}-add-child`} value={draft} maxLength={200} placeholder={`Add ${singular.toLowerCase()}…`} aria-label={`Add ${singular.toLowerCase()}`}
         disabled={adding} onChange={(event) => setDraft(event.target.value)} onKeyDown={onKey} enterKeyHint="done" />
       {draft.trim() && <button type="button" className="primary-button task-small-button" onClick={() => { void add(); }} disabled={adding}>{adding ? "Adding…" : "Add"}</button>}
-    </div>
+    </div>}
+    {readOnly && !children.length && <p className="task-comment-empty">No {plural.toLowerCase()} yet.</p>}
   </section>;
 }

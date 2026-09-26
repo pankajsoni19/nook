@@ -12,7 +12,7 @@ import { MyWork, statePreset } from "../src/tasks/home/MyWork";
 import { QueryResults } from "../src/tasks/home/QueryResults";
 import { TasksHome } from "../src/tasks/home/TasksHome";
 import { ColumnStateField } from "../src/tasks/views/ColumnStateField";
-import { validateViewName, viewNameHint, viewRoleAccess, viewUndoBody } from "../src/tasks/views/viewActions";
+import { ownedViewActions, validateViewName, viewNameHint, viewRoleAccess, viewUndoBody } from "../src/tasks/views/viewActions";
 import { ViewPage } from "../src/tasks/views/ViewPage";
 import { RoleContext, useRole } from "../src/team/roleAccess";
 import type { Role } from "../src/team/teamRoles";
@@ -226,6 +226,11 @@ test("views follow the Team role (Wave 15, Q12): viewers save private views, gue
   expect(as("viewer", <Access />)).toBe(`<span data-create="true" data-share="false"></span>`);
   expect(as("guest", <Access />)).toBe(`<span data-create="false" data-share="false"></span>`);
   expect(viewNameHint(false)).not.toContain("share");
+  // A read-only owner changes a view only while it is private, and may withdraw a share.
+  expect(ownedViewActions(true, "all_users")).toEqual({ edit: true, share: true, withdraw: false });
+  expect(ownedViewActions(false, "private")).toEqual({ edit: true, share: false, withdraw: false });
+  expect(ownedViewActions(false, "selected")).toEqual({ edit: false, share: false, withdraw: true });
+  expect(ownedViewActions(false, "all_users")).toEqual({ edit: false, share: false, withdraw: true });
 
   const list = (role: Role) => as(role, <ViewsList onOpen={noop} onNew={noop} />);
   for (const role of ["admin", "member", "viewer"] as const) expect(list(role)).toContain("New view");

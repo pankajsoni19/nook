@@ -236,11 +236,32 @@ describe("Bin subtrees (D129, D130, T114)", () => {
     const { sweepTaskBin } = await import("../server/tasks/bin");
     expect(await sweepTaskBin(new Date().toISOString(), 50)).toBeGreaterThanOrEqual(1);
     expect(db.query("SELECT id FROM cards WHERE id = ?").get(t.storyB.id)).toBeNull();
-    // Its parent is gone, so Sub B1 was detached by the FK and restores as a loose subtask.
+    // Its parent is gone, so Sub B1 was detached by the FK and restores as a loose subtask, and says so.
     const restored = await call(t.member, "POST", `/bin/card/${t.subB1.id}/restore`, {});
+    expect(restored).toMatchObject({ status: 200, body: { ok: true, detached: true } });
+    expect(JSON.parse(lastAudit("task.card_restore")!.metadata_json)).toMatchObject({ cardId: t.subB1.id, detached: true });
+    expect((await boardCards(t.owner, t.boardId)).find((card) => card.id === t.subB1.id)).toMatchObject({ parent_card_id: null, level: 2 });
+  });
+
+  test("a top-level card never restores detached", async () => {
+    const t = await tree("Bin top level");
+    expect((await call(t.member, "DELETE", `/cards/${t.epic.id}`)).status).toBe(200);
+    const restored = await call(t.member, "POST", `/bin/card/${t.epic.id}/restore`, {});
     expect(restored.status).toBe(200);
     expect(restored.body.detached).toBeUndefined();
-    expect((await boardCards(t.owner, t.boardId)).find((card) => card.id === t.subB1.id)).toMatchObject({ parent_card_id: null, level: 2 });
+  });
+
+  test("restoring under a parent that already has 100 children comes back detached instead of over the cap (D135)", async () => {
+    const t = await tree("Bin full parent");
+    expect((await call(t.member, "DELETE", `/cards/${t.subB1.id}`)).status).toBe(200);
+    // Story B fills up with 100 live children meanwhile.
+    const insert = db.query(`INSERT INTO cards (id, board_id, column_id, position, title, parent_card_id, level, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, 2, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`);
+    for (let index = 0; index < 100; index += 1) insert.run(crypto.randomUUID(), t.boardId, t.columns[0].id, 20_000 + index, `Filler ${index}`, t.storyB.id);
+    const restored = await call(t.member, "POST", `/bin/card/${t.subB1.id}/restore`, {});
+    expect(restored).toMatchObject({ status: 200, body: { ok: true, detached: true } });
+    expect(db.query("SELECT parent_card_id, level, deleted_at FROM cards WHERE id = ?").get(t.subB1.id)).toEqual({ parent_card_id: null, level: 2, deleted_at: null });
+    expect(db.query("SELECT COUNT(*) AS count FROM cards WHERE parent_card_id = ? AND deleted_at IS NULL").get(t.storyB.id)).toEqual({ count: 100 });
   });
 });
 
@@ -261,6 +282,28 @@ describe("board structure (D122, T120)", () => {
     const custom = { levels: [{ name: "Goal", plural: "Goals" }, { name: "Step", plural: "Steps" }], workLevel: 0, sprints: false };
     const both = await call(owner, "PATCH", `/boards/${boardId}`, { name: "Renamed", structure: custom });
     expect(both.body.board).toMatchObject({ name: "Renamed", structure: custom });
+  });
+
+  test("a name and a structure in one PATCH are one transaction: both or neither (review L5)", async () => {
+    const flat = { levels: [{ name: "Card", plural: "Cards" }], workLevel: 0, sprints: false };
+    const { owner, boardId } = await setup("Atomic patch", flat);
+    // The rename is made to fail after the structure write; the structure must roll back with it.
+    db.run(`CREATE TEMP TRIGGER trg_test_refuse_rename BEFORE UPDATE OF name ON boards WHEN NEW.id = '${boardId}' BEGIN SELECT RAISE(ABORT, 'refused'); END`);
+    try {
+      expect((await call(owner, "PATCH", `/boards/${boardId}`, { name: "Renamed", structure: EPICS })).status).toBe(500);
+    } finally {
+      db.run("DROP TRIGGER IF EXISTS trg_test_refuse_rename");
+    }
+    expect((await call(owner, "GET", `/boards/${boardId}`)).body.board).toMatchObject({ name: "Atomic patch board", structure: flat });
+    const both = await call(owner, "PATCH", `/boards/${boardId}`, { name: "Both", structure: EPICS });
+    expect(both.status).toBe(200);
+    expect(both.body.board).toMatchObject({ name: "Both", structure: EPICS });
+    // A refused structure leaves the name alone too.
+    db.query("INSERT INTO cards (id, board_id, column_id, position, title, level, created_at, updated_at) SELECT ?, ?, id, 1, 'Deep', 2, '2026-01-01', '2026-01-01' FROM board_columns WHERE board_id = ? LIMIT 1")
+      .run(crypto.randomUUID(), boardId, boardId);
+    const refused = await call(owner, "PATCH", `/boards/${boardId}`, { name: "Not saved", structure: { levels: [{ name: "Card", plural: "Cards" }], workLevel: 0, sprints: false } });
+    expect(refused).toMatchObject({ status: 409, body: { code: "LEVEL_IN_USE" } });
+    expect((await call(owner, "GET", `/boards/${boardId}`)).body.board.name).toBe("Both");
   });
 
   test("removing a level that cards use is LEVEL_IN_USE, counting binned cards; sprints off with open sprints is SPRINTS_IN_USE", async () => {

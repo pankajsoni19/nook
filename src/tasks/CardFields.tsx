@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { CalendarDays, Clock, Flag, Tag, UsersRound } from "lucide-react";
 import { Combobox } from "../ui/Combobox";
 import type { Option } from "../ui/Listbox";
@@ -38,6 +38,8 @@ type CardFieldsProps = {
   owner?: boolean;
   /** A tag was created, renamed, recoloured, or deleted. */
   onTagsChange?: (change: TagChange) => void;
+  /** A read-only Team role (viewer, guest): the values show as text, with no controls (the server refuses the writes). */
+  readOnly?: boolean;
 };
 
 /**
@@ -45,7 +47,8 @@ type CardFieldsProps = {
  * assignees, the tags, and the flags. The card dialog uses it today; the composer and the full
  * page (13D) join here, so each adds a field with a small diff.
  */
-export function CardFields({ card, userId, idPrefix, done, saving, onSave, tags, owner = false, onTagsChange }: CardFieldsProps) {
+export function CardFields({ card, userId, idPrefix, done, saving, onSave, tags, owner = false, onTagsChange, readOnly = false }: CardFieldsProps) {
+  if (readOnly) return <StaticCardFields card={card} idPrefix={idPrefix} done={done} tags={tags} />;
   return <div className="task-card-details">
     <DueField card={card} idPrefix={idPrefix} done={done} saving={saving} onSave={onSave} />
     <div className="task-card-field">
@@ -65,6 +68,27 @@ export function CardFields({ card, userId, idPrefix, done, saving, onSave, tags,
       <FlagPicker labelId={`${idPrefix}-flags`} flags={card.flags ?? []} disabled={saving}
         onCommit={(flags, flag, on) => onSave({ flags }, `${FLAG_LABELS[flag]} flag ${on ? "added" : "removed"}`)} />
     </div>
+  </div>;
+}
+
+/** The fields as text for a read-only role: Due, Assignees, Tags, and Flags, no inputs. */
+function StaticCardFields({ card, idPrefix, done, tags }: Pick<CardFieldsProps, "card" | "idPrefix" | "done" | "tags">) {
+  const due = dueStatus(card.due_on, localDateString(), done, { dueAt: card.due_at });
+  const note = dueTimeNote(card, viewerTimeZone());
+  const assignees = cardAssignees(card);
+  const tagNames = (card.tag_ids ?? []).map((id) => tags?.find((tag) => tag.id === id)?.name).filter((name): name is string => Boolean(name));
+  const flags = card.flags ?? [];
+  const field = (key: string, icon: ReactNode, label: string, value: string, extra?: ReactNode) => <div className="task-card-field">
+    <span id={`${idPrefix}-${key}-label`} className="task-card-field-label">{icon}{label}</span>
+    <p className="task-card-static" aria-labelledby={`${idPrefix}-${key}-label`}>{value}</p>
+    {extra}
+  </div>;
+  return <div className="task-card-details">
+    {field("due", <CalendarDays aria-hidden="true" />, "Due", card.due_on ? [card.due_on, card.due_time && note ? note : null].filter(Boolean).join(" · ") : "No due date",
+      <small className={due ? `task-due-text ${due.tone}` : "task-due-text"}>{due ? due.description : card.due_on ? "In a done column" : ""}</small>)}
+    {field("assignees", <UsersRound aria-hidden="true" />, "Assignees", assignees.length ? assignees.map(assigneeLabel).join(", ") : "Nobody")}
+    {tags && field("tags", <Tag aria-hidden="true" />, "Tags", tagNames.length ? tagNames.join(", ") : "No tags")}
+    {field("flags", <Flag aria-hidden="true" />, "Flags", flags.length ? flags.map((flag) => FLAG_LABELS[flag]).join(", ") : "No flags")}
   </div>;
 }
 
