@@ -62,5 +62,5 @@
   .task-view-header .task-board-heading { flex: 1 1 60%; }
   .task-view-header .task-board-heading h2 { font-size: 1.1rem; }
   .task-view-actions { width: 100%; justify-content: flex-end; }
-  .task-view-actions .icon-button { width: 44px; height: 44px; }
+  .task-view-actions .icon-button, .task-view-header .task-back { width: 44px; height: 44px; }
 }

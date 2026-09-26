@@ -122,8 +122,7 @@ span.task-filter-chip-body { cursor: default; }
 @media (max-width: 760px) {
   .task-filter-bar { padding: 0 16px 8px; }
   .task-filter-chip { min-height: 44px; font-size: .88rem; }
-  .task-filter-chip-remove { width: 36px; height: 36px; }
-  .task-filter-chip-remove::after { content: ""; position: absolute; inset: -4px; }
+  .task-filter-chip-remove { width: 44px; height: 44px; margin-block: -1px; }
   .task-filter-editor { width: 100%; }
   .task-filter-editor .ui-combobox { min-width: 0; flex-basis: 100%; }
   .task-filter-date input, .task-filter-date .secondary-button, .task-filter-clear { min-height: 44px; }

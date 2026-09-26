@@ -482,8 +482,11 @@
   .task-subtask-add { position: sticky; bottom: 0; padding-block: 6px; background: #111113; }
   .task-subtask-add input { height: 44px; }
   .task-subtask-where { display: none; }
-  .task-parent-chip { min-height: 32px; }
-  .task-breadcrumb button { min-height: 36px; }
+  /* 44 px targets at 390 px (QA 0.9.0); the epic chip grows its hit area, not its look. */
+  .task-parent-chip { min-height: 44px; margin-block: -12px -6px; }
+  .task-breadcrumb button { min-height: 44px; }
+  .task-subtask .icon-button, .task-settings-panel header .icon-button { width: 44px; height: 44px; }
+  .task-card-field .ui-chip-remove { width: 44px; height: 44px; margin: -6px -4px -6px -8px; }
   .task-level-row input { height: 44px; }
 }
 

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { PRESETS } from "../shared/boardStructure";
 import { focusIntoDialog } from "../src/files/Dialog";
-import { addOnce, SubtasksSection } from "../src/tasks/CardHierarchySection";
+import { addOnce, CardBreadcrumb, SubtasksSection } from "../src/tasks/CardHierarchySection";
 import type { BoardColumn, CardDetail, CardSummary } from "../src/tasks/tasksApi";
 import type { CardHierarchyContext } from "../src/tasks/useBoardHierarchy";
 
@@ -41,6 +41,22 @@ test("the inline add keeps its input enabled and refuses a second add while one 
   // Free again once the first add settles, even when it fails.
   await expect(addOnce(flag, async () => { throw new Error("offline"); })).rejects.toThrow("offline");
   expect(await addOnce(flag, async () => false)).toBe(false);
+});
+
+test("phone targets are at least 44 px, and the breadcrumb's accessible name separates level and title (QA FAIL-6)", () => {
+  const markup = renderToStaticMarkup(<CardBreadcrumb card={detail(cards[2]!)} context={context} />);
+  expect(markup).toContain('<small>Epic</small><span class="sr-only">: </span>Alpha');
+  const phone = (file: string) => {
+    const css = readFileSync(new URL(file, import.meta.url), "utf8");
+    return css.split("@media (max-width: 760px)").slice(1).join("\n");
+  };
+  const tasks = phone("../src/tasks/tasks.css");
+  expect(tasks).toContain(".task-parent-chip { min-height: 44px;");
+  expect(tasks).toContain(".task-breadcrumb button { min-height: 44px; }");
+  expect(tasks).toContain(".task-subtask .icon-button, .task-settings-panel header .icon-button { width: 44px; height: 44px; }");
+  expect(tasks).toContain(".task-card-field .ui-chip-remove { width: 44px; height: 44px;");
+  expect(phone("../src/tasks/home/home.css")).toContain(".task-view-header .task-back { width: 44px; height: 44px; }");
+  expect(phone("../src/tasks/boardViews.css")).toContain(".task-filter-chip-remove { width: 44px; height: 44px;");
 });
 
 test("a modal takes focus on open unless a child already has it; the board settings sheet uses it (QA FAIL-5)", () => {

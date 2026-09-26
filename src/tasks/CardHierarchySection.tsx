@@ -31,7 +31,7 @@ export function CardBreadcrumb({ card, context }: { card: CardDetail; context: C
   return <nav className="task-breadcrumb" aria-label="Parents">
     {chain.map((item) => <span key={item.id}>
       <button type="button" onClick={() => context.openCard(item.id)} title={item.title}>
-        <small>{levelName(context.structure, levelOf(item))}</small>{item.title}
+        <small>{levelName(context.structure, levelOf(item))}</small><span className="sr-only">: </span>{item.title}
       </button>
       <ChevronRight aria-hidden="true" />
     </span>)}
