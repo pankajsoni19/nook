@@ -2,6 +2,7 @@ import { useState } from "react";
 import { BookmarkPlus } from "lucide-react";
 import { format, type TaskState } from "../../../shared/taskQuery";
 import { NameDialog } from "../../files/RenameDialog";
+import { Select } from "../../ui/Select";
 import { useHistoryDialogGuard } from "../../ui/useHistoryDialogGuard";
 import { viewerTimeZone, type TaskNotify } from "../taskActions";
 import { createView, type QueriedCard, type TaskView } from "./homeApi";
@@ -48,6 +49,10 @@ export function MyWork({ userId, query, onQuery, directory, notify, onOpenCard, 
   useHistoryDialogGuard(saving, () => setSaving(false));
   const preset = statePreset(effective);
   const q = format(effective.filter);
+  const choosePreset = (id: string) => {
+    const item = STATE_PRESETS.find((candidate) => candidate.id === id);
+    if (item && preset !== item.id) onQuery({ ...effective, filter: withHomeTerm(effective.filter, "state", item.states) }, { push: true });
+  };
 
   async function saveAsView(name: string) {
     const { view } = await createView({ name, query: q, display: { layout: effective.layout, group: effective.group, sort: effective.sort } });
@@ -60,10 +65,17 @@ export function MyWork({ userId, query, onQuery, directory, notify, onOpenCard, 
     <HomeResultsPane userId={userId} query={effective} onQuery={onQuery} directory={directory} notify={notify} onOpenCard={onOpenCard}
       source={{ kind: "query", request: { q, sort: effective.sort, group: serverGroup(effective.group), tz: viewerTimeZone() } }}
       lockedKeys={["assignee"]} hiddenKeys={["state"]}
-      above={<div className="task-home-states" role="radiogroup" aria-label="State">
-        {STATE_PRESETS.map((item) => <button key={item.id} type="button" role="radio" aria-checked={preset === item.id} className={`task-home-state${preset === item.id ? " active" : ""}`}
-          onClick={() => { if (preset !== item.id) onQuery({ ...effective, filter: withHomeTerm(effective.filter, "state", item.states) }, { push: true }); }}>{item.label}</button>)}
-      </div>}
+      above={<>
+        <div className="task-home-states" role="radiogroup" aria-label="State">
+          {STATE_PRESETS.map((item) => <button key={item.id} type="button" role="radio" aria-checked={preset === item.id} className={`task-home-state${preset === item.id ? " active" : ""}`}
+            onClick={() => choosePreset(item.id)}>{item.label}</button>)}
+        </div>
+        {/* Phones (QA 0.9.0): one chip on the layout switch's row instead of five. */}
+        <span className="task-home-state-select">
+          <Select<string> variant="chip" label="State" placeholder="Custom" value={preset} searchable={false}
+            options={STATE_PRESETS.map((item) => ({ value: item.id, label: item.label }))} onChange={choosePreset} />
+        </span>
+      </>}
       actions={canCreate && !sameHomeQuery(effective, myWorkDefault()) && <button type="button" className="secondary-button task-home-action" onClick={() => setSaving(true)} aria-haspopup="dialog"><BookmarkPlus aria-hidden="true" /><span>Save as view</span></button>}
       emptyText={preset === "open" ? "Nothing open is assigned to you. Cards assigned to you on any board show here." : "No cards assigned to you match these filters."} />
     {saving && canCreate && <NameDialog title="Save as view" eyebrow="My work" label="View name" initialValue="My work" submitLabel="Save view" hint={viewNameHint(canShare)}

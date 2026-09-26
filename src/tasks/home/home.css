@@ -24,6 +24,7 @@
 .task-home-state:focus-visible { outline: 2px solid var(--yellow); outline-offset: 1px; }
 /* Phones fold group, sort, and the filter bar behind "Filters" (QA 0.9.0); wider screens always show them. */
 .task-home-filters-toggle { display: none; }
+.task-home-state-select { display: none; }
 .task-home-sorts { display: contents; }
 
 .task-home-results { display: grid; gap: 12px; min-width: 0; }
@@ -58,11 +59,10 @@
   .task-home-segments { display: flex; width: 100%; }
   .task-home-segments button { flex: 1; min-height: 44px; padding: 0 6px; }
   .task-home-action, .task-home-state, .task-home-more .secondary-button { min-height: 44px; }
-  /* State chips and the layout switch share one row; the chips scroll sideways when they do not fit. */
+  /* The state is one chip on the layout switch's row (the five radios return above 760 px). */
   .task-home-toolbar { gap: 8px 6px; }
-  .task-home-states { flex: 1 1 0; min-width: 0; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
-  .task-home-states::-webkit-scrollbar { display: none; }
-  .task-home-state { flex: none; padding: 0 10px; }
+  .task-home-states { display: none; }
+  .task-home-state-select { display: contents; }
   .task-home-filters-toggle { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; margin: 0; padding: 0 12px; }
   .task-home-filters-toggle svg { width: 16px; flex: none; }
   .task-home-filters-toggle[aria-expanded="true"] { border-color: #6f5928; color: #f5cf79; }

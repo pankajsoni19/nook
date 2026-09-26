@@ -137,5 +137,7 @@ test("polish: My work folds group, sort, and filters behind one Filters button o
   const [desktop, phone] = [css.split("@media (max-width: 760px)")[0]!, css.split("@media (max-width: 760px)").slice(1).join("")];
   expect(desktop).toContain(".task-home-filters-toggle { display: none; }");
   expect(phone).toContain(".task-home-pane:not(.filters-open) .task-home-collapsible { display: none; }");
-  expect(phone).toContain(".task-home-states { flex: 1 1 0; min-width: 0; flex-wrap: nowrap; overflow-x: auto;");
+  expect(desktop).toContain(".task-home-state-select { display: none; }");
+  expect(phone).toContain(".task-home-states { display: none; }");
+  expect(source("../src/tasks/home/MyWork.tsx")).toContain('<Select<string> variant="chip" label="State"');
 });
