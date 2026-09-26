@@ -27,8 +27,7 @@ import {
   listBoards,
   patchColumn,
   putSharing,
-  renameBoard,
-  setBoardStructure,
+  updateBoard,
   TaskError
 } from "./service";
 import { BOARD_TEMPLATES, validateStructure } from "../../shared/boardStructure";
@@ -213,11 +212,8 @@ export function registerTaskRoutes(app: Hono<AppEnv>) {
     const structure = body.structure === undefined ? null : validateStructure(body.structure);
     if (structure && !structure.ok) return c.json(invalid(structure.error), 400);
     const userId = c.get("user").id;
-    return respond(c, async () => {
-      let result = structure?.ok ? await setBoardStructure(userId, boardId, structure.structure) : null;
-      if (body.name !== undefined) result = await renameBoard(userId, boardId, body.name);
-      return result!;
-    });
+    // One lock and one transaction for both (review L5): never a renamed board with a refused structure.
+    return respond(c, () => updateBoard(userId, boardId, { ...(body.name !== undefined ? { name: body.name } : {}), ...(structure?.ok ? { structure: structure.structure } : {}) }));
   });
 
   app.delete("/api/tasks/boards/:boardId", (c) => {

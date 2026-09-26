@@ -284,6 +284,28 @@ describe("board structure (D122, T120)", () => {
     expect(both.body.board).toMatchObject({ name: "Renamed", structure: custom });
   });
 
+  test("a name and a structure in one PATCH are one transaction: both or neither (review L5)", async () => {
+    const flat = { levels: [{ name: "Card", plural: "Cards" }], workLevel: 0, sprints: false };
+    const { owner, boardId } = await setup("Atomic patch", flat);
+    // The rename is made to fail after the structure write; the structure must roll back with it.
+    db.run(`CREATE TEMP TRIGGER trg_test_refuse_rename BEFORE UPDATE OF name ON boards WHEN NEW.id = '${boardId}' BEGIN SELECT RAISE(ABORT, 'refused'); END`);
+    try {
+      expect((await call(owner, "PATCH", `/boards/${boardId}`, { name: "Renamed", structure: EPICS })).status).toBe(500);
+    } finally {
+      db.run("DROP TRIGGER IF EXISTS trg_test_refuse_rename");
+    }
+    expect((await call(owner, "GET", `/boards/${boardId}`)).body.board).toMatchObject({ name: "Atomic patch board", structure: flat });
+    const both = await call(owner, "PATCH", `/boards/${boardId}`, { name: "Both", structure: EPICS });
+    expect(both.status).toBe(200);
+    expect(both.body.board).toMatchObject({ name: "Both", structure: EPICS });
+    // A refused structure leaves the name alone too.
+    db.query("INSERT INTO cards (id, board_id, column_id, position, title, level, created_at, updated_at) SELECT ?, ?, id, 1, 'Deep', 2, '2026-01-01', '2026-01-01' FROM board_columns WHERE board_id = ? LIMIT 1")
+      .run(crypto.randomUUID(), boardId, boardId);
+    const refused = await call(owner, "PATCH", `/boards/${boardId}`, { name: "Not saved", structure: { levels: [{ name: "Card", plural: "Cards" }], workLevel: 0, sprints: false } });
+    expect(refused).toMatchObject({ status: 409, body: { code: "LEVEL_IN_USE" } });
+    expect((await call(owner, "GET", `/boards/${boardId}`)).body.board.name).toBe("Both");
+  });
+
   test("removing a level that cards use is LEVEL_IN_USE, counting binned cards; sprints off with open sprints is SPRINTS_IN_USE", async () => {
     const { owner, member, boardId, columns } = await setup("Structure refusals");
     const todo = columns[0].id;

@@ -240,14 +240,7 @@ export function createBoard(userId: string, name: string, templateId: BoardTempl
 }
 
 export function renameBoard(userId: string, boardId: string, name: string) {
-  return withBoardLock(boardId, () => {
-    requireOwnedBoard(boardId, userId);
-    db.transaction(() => {
-      db.query("UPDATE boards SET name = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL").run(name, now(), boardId);
-      audit(userId, null, "task.board_rename", { boardId });
-    })();
-    return { board: boardSummary(boardId, userId)! };
-  });
+  return updateBoard(userId, boardId, { name });
 }
 
 /**
@@ -257,30 +250,52 @@ export function renameBoard(userId: string, boardId: string, name: string) {
  * moving the work level while cards are in an open sprint (17B; completed sprints never block).
  */
 export function setBoardStructure(userId: string, boardId: string, structure: BoardStructure) {
+  return updateBoard(userId, boardId, { structure });
+}
+
+/** Throws the 409 that refuses `structure` on this board, if any (see setBoardStructure). */
+function checkStructureChange(boardId: string, structure: BoardStructure) {
+  const current = boardStructure(boardId);
+  const removed = db.query("SELECT COUNT(*) AS count, MIN(level) AS level, SUM(deleted_at IS NOT NULL) AS binned FROM cards WHERE board_id = ? AND level >= ?")
+    .get(boardId, structure.levels.length) as { count: number; level: number | null; binned: number | null };
+  if (removed.count > 0) {
+    const binned = removed.binned ?? 0;
+    throw new TaskError(409, `${removed.count === 1 ? "1 card is" : `${removed.count} cards are`} ${current.levels[removed.level!]?.plural ?? "at that level"}${binned ? ` (${binned} in the Bin)` : ""}. Move or change them before removing this level.`,
+      "LEVEL_IN_USE", { level: removed.level, cardCount: removed.count, binnedCount: binned });
+  }
+  if (!structure.sprints && current.sprints) {
+    const open = (db.query("SELECT COUNT(*) AS count FROM board_sprints WHERE board_id = ? AND state IN ('planned', 'active')").get(boardId) as { count: number }).count;
+    if (open) throw new TaskError(409, "Complete or delete the open sprints before turning sprints off", "SPRINTS_IN_USE", { sprintCount: open });
+  }
+  if (structure.workLevel !== current.workLevel) {
+    // Only sprints still open count: cards in completed sprints keep their sprint as history and
+    // must not block the change (with sprints off there is no way to take them out).
+    const assigned = (db.query(`SELECT COUNT(*) AS count FROM cards k JOIN board_sprints s ON s.id = k.sprint_id
+      WHERE k.board_id = ? AND s.state <> 'closed'`).get(boardId) as { count: number }).count;
+    if (assigned) throw new TaskError(409, "Take the cards out of their sprints before changing where new cards are created", "SPRINTS_IN_USE", { cardCount: assigned });
+  }
+}
+
+/**
+ * `PATCH /boards/:b` (owner only): a new name, a new structure, or both. Both are checked first and
+ * then written in one transaction under the board lock, so a refused structure never leaves the
+ * name changed and a failed write leaves neither.
+ */
+export function updateBoard(userId: string, boardId: string, input: { name?: string; structure?: BoardStructure }) {
   return withBoardLock(boardId, () => {
     requireOwnedBoard(boardId, userId);
-    const current = boardStructure(boardId);
-    const removed = db.query("SELECT COUNT(*) AS count, MIN(level) AS level, SUM(deleted_at IS NOT NULL) AS binned FROM cards WHERE board_id = ? AND level >= ?")
-      .get(boardId, structure.levels.length) as { count: number; level: number | null; binned: number | null };
-    if (removed.count > 0) {
-      const binned = removed.binned ?? 0;
-      throw new TaskError(409, `${removed.count === 1 ? "1 card is" : `${removed.count} cards are`} ${current.levels[removed.level!]?.plural ?? "at that level"}${binned ? ` (${binned} in the Bin)` : ""}. Move or change them before removing this level.`,
-        "LEVEL_IN_USE", { level: removed.level, cardCount: removed.count, binnedCount: binned });
-    }
-    if (!structure.sprints && current.sprints) {
-      const open = (db.query("SELECT COUNT(*) AS count FROM board_sprints WHERE board_id = ? AND state IN ('planned', 'active')").get(boardId) as { count: number }).count;
-      if (open) throw new TaskError(409, "Complete or delete the open sprints before turning sprints off", "SPRINTS_IN_USE", { sprintCount: open });
-    }
-    if (structure.workLevel !== current.workLevel) {
-      // Only sprints still open count: cards in completed sprints keep their sprint as history and
-      // must not block the change (with sprints off there is no way to take them out).
-      const assigned = (db.query(`SELECT COUNT(*) AS count FROM cards k JOIN board_sprints s ON s.id = k.sprint_id
-        WHERE k.board_id = ? AND s.state <> 'closed'`).get(boardId) as { count: number }).count;
-      if (assigned) throw new TaskError(409, "Take the cards out of their sprints before changing where new cards are created", "SPRINTS_IN_USE", { cardCount: assigned });
-    }
+    const { name, structure } = input;
+    if (structure) checkStructureChange(boardId, structure);
     db.transaction(() => {
-      db.query("UPDATE boards SET structure_json = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL").run(JSON.stringify(structure), now(), boardId);
-      audit(userId, null, "task.board_structure", { boardId, levels: structure.levels.length, workLevel: structure.workLevel, sprints: structure.sprints });
+      const timestamp = now();
+      if (structure) {
+        db.query("UPDATE boards SET structure_json = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL").run(JSON.stringify(structure), timestamp, boardId);
+        audit(userId, null, "task.board_structure", { boardId, levels: structure.levels.length, workLevel: structure.workLevel, sprints: structure.sprints });
+      }
+      if (name !== undefined) {
+        db.query("UPDATE boards SET name = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL").run(name, timestamp, boardId);
+        audit(userId, null, "task.board_rename", { boardId });
+      }
     })();
     return { board: boardSummary(boardId, userId)! };
   });
