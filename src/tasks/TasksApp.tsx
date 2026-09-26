@@ -6,7 +6,7 @@ import { ReadOnlyBanner, useRole } from "../team/roleAccess";
 import { readHistoryDepth } from "../appShellNavigation";
 import { popStateClosedDialog } from "../historyDialogs";
 import { formatRoute, locationUrl, routeFromLocation, type Route } from "../router";
-import { cardCloseAction, createTasksEntryLog, fullPageAction, tasksBackAction, tasksHomeRoute, tasksRoute, withFromDialogHint, type TasksRoute } from "../tasksRoute";
+import { cardCloseAction, createTasksEntryLog, fullPageAction, savedViewStep, tasksBackAction, tasksHomeRoute, tasksRoute, withFromDialogHint, type TasksRoute } from "../tasksRoute";
 import { TasksHome } from "./home/TasksHome";
 import type { TasksHome as TasksHomeRoute } from "./home/homeUrl";
 import { BoardView } from "./BoardView";
@@ -139,8 +139,16 @@ export function TasksApp({ userId, displayName, navigate, onHome, onBin, onSetti
   // The home segments and views are routes (17C, §9.5): a segment tap, a layout switch, or a
   // committed filter change pushes; value edits replace. A card from cross-board results pushes
   // its board's card URL, so closing it (or Back) returns to the list it came from.
-  const goHome = useCallback((home: TasksHomeRoute | undefined, options: { replace?: boolean } = {}) => {
-    go(home ? tasksHomeRoute(home) : tasksRoute(), options.replace === true);
+  // `saved`: a view's Save, which lands on the saved view; when the entry below already is that
+  // view, step back onto it rather than leave a Back that goes nowhere (review L6a).
+  const goHome = useCallback((home: TasksHomeRoute | undefined, options: { replace?: boolean; saved?: boolean } = {}) => {
+    const next = home ? tasksHomeRoute(home) : tasksRoute();
+    if (options.saved && savedViewStep(readHistoryDepth(window.history.state), formatRoute(next), entryLogRef.current) === "back") {
+      setRoute(next);
+      window.history.back();
+      return;
+    }
+    go(next, options.replace === true);
   }, [go]);
   const openResultCard = useCallback((card: { board_id: string; id: string }) => go(tasksRoute(card.board_id, card.id)), [go]);
 

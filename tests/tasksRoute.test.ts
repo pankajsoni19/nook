@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { formatRoute, parseRoute } from "../src/router";
-import { cardCloseAction, createTasksEntryLog, fullPageAction, hasFromDialogHint, parentTasksRoute, tasksBackAction, tasksRoute, withFromDialogHint } from "../src/tasksRoute";
+import { cardCloseAction, createTasksEntryLog, fullPageAction, hasFromDialogHint, savedViewStep, tasksHomeRoute, parentTasksRoute, tasksBackAction, tasksRoute, withFromDialogHint } from "../src/tasksRoute";
 import { carriedTasksState, columnIndexFor, createTasksHistoryState, readTasksHistoryHint } from "../src/tasksNavigation";
 import { DEFAULT_BOARD_QUERY } from "../src/tasks/boardUrl";
 
@@ -131,4 +131,21 @@ test("closing a card steps back only onto an entry this Tasks visit saw; otherwi
   expect(log.urlAt(4)).toBeUndefined();
   expect(log.urlAt(5)).toBeUndefined();
   expect(log.urlAt(3)).toBe(board);
+});
+
+test("a view's Save steps back onto an identical entry below instead of leaving a dead Back (review L6a)", () => {
+  const saved = formatRoute(tasksHomeRoute({ section: "view", viewId: cardId }));
+  const views = formatRoute(tasksHomeRoute({ section: "views" }));
+  const log = createTasksEntryLog();
+  log.note(1, views, true);
+  log.note(2, saved, true);
+  // A committed filter change pushed the unsaved query at depth 3; Save lands on the view's URL,
+  // which is the entry at depth 2: step back onto it, so the next Back reaches the views list.
+  log.note(3, `${saved}?q=state:todo`, true);
+  expect(savedViewStep(3, saved, log)).toBe("back");
+  // Edits that only replaced (group, sort, typing) leave a different entry below: replace.
+  expect(savedViewStep(2, saved, log)).toBe("replace");
+  // An entry below this visit never saw, or depth 0: replace, never step out of Tasks.
+  expect(savedViewStep(3, saved, createTasksEntryLog())).toBe("replace");
+  expect(savedViewStep(0, saved, log)).toBe("replace");
 });

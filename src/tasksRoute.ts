@@ -96,3 +96,12 @@ export function createTasksEntryLog(): TasksEntryLog {
 export function cardCloseAction(route: TasksRoute, depth: number, log: Pick<TasksEntryLog, "urlAt">): { kind: "history" } | { kind: "replace"; route: TasksRoute } {
   return depth > 0 && log.urlAt(depth - 1) !== undefined ? { kind: "history" } : { kind: "replace", route: tasksRoute(route.boardId, null, false, route.query) };
 }
+
+/**
+ * After a view's Save the URL drops its unsaved query. When the entry just below already shows
+ * that URL (the view as it was opened, before a filter edit pushed an entry), replacing would leave
+ * two identical entries and a Back that changes nothing: step back onto it instead (review L6a).
+ */
+export function savedViewStep(depth: number, savedUrl: string, log: Pick<TasksEntryLog, "urlAt">): "back" | "replace" {
+  return depth > 0 && log.urlAt(depth - 1) === savedUrl ? "back" : "replace";
+}

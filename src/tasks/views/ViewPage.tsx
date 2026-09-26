@@ -20,8 +20,11 @@ type ViewPageProps = {
   viewId: string;
   /** The URL's unsaved change to the view, or undefined for the saved one. */
   query: HomeQuery | undefined;
-  /** Replace: the view's filter, group, and sort; push: layouts and committed filter changes. */
-  onQuery: (next: HomeQuery | undefined, options: { push: boolean }) => void;
+  /**
+   * Replace: the view's filter, group, and sort; push: layouts and committed filter changes.
+   * `saved`: after Save (the host may step back onto an identical entry instead of replacing).
+   */
+  onQuery: (next: HomeQuery | undefined, options: { push: boolean; saved?: boolean }) => void;
   directory: HomeDirectory;
   notify: TaskNotify;
   onOpenCard: (card: QueriedCard) => void;
@@ -110,7 +113,7 @@ export function ViewPage({ userId, viewId, query, onQuery, directory, notify, on
     try {
       const { view: next } = await updateView(view.id, { query: format(effective.filter), display: displayOf(effective), revision: view.revision });
       setView(next);
-      onQuery(undefined, { push: false });
+      onQuery(undefined, { push: false, saved: true });
       notify(`Saved “${next.name}”`);
     } catch (reason) {
       conflictOr(reason, "Could not save the view");
