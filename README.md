@@ -105,6 +105,7 @@ Back up first (`./scripts/backup.sh --force`), pull, rebuild, and let migrations
 - **Viewer and guest roles** with read-only enforcement on the server; `SIGNUP_ROLE` (default `guest`) sets the role of new accounts.
 - **Task hierarchy and sprints**: subtasks, epics and stories, hierarchy templates, sprint planning, and a lighter board payload.
 - **Tasks home** with My work and saved cross-board views. Migration 019 runs on the first boot, so back up first.
+- **Review and QA fixes**: read-only roles can edit only their private views (with a Make private option for shared ones), Columns view says how many epics it hides with a Show all levels switch, focus moves into sheets and dialogs, and 44 px phone targets.
 
 Earlier releases: [release notes](https://pankajsoni19.github.io/nook/#whats-new).
 
