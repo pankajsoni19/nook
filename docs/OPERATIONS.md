@@ -295,6 +295,7 @@ Compose passes these variables from `.env` (see `.env.example`). Invalid values 
 | `DATA_DIR` | `/data` | Data root inside the container. Leave unchanged under Compose. |
 | `APP_ORIGIN` | `http://localhost:2026` | Primary browser origin; the fallback for `APP_ORIGINS`. |
 | `APP_ORIGINS` | `APP_ORIGIN` | Comma-separated exact `http(s)` origins accepted for sign-in, mutations, and MCP host checks. Entries with a path, credentials, query, or fragment are rejected. |
+| `APP_NAME` | `Nook` | The name people see: tab titles, the sign-in page, link previews (`<title>`, `og:title`, `og:site_name`, `twitter:title`), the installed app's name (manifest `name`; `short_name` is its first 12 characters or first word), mail subjects, sender name when `MAIL_FROM` is a bare address, and footers, the authenticator app entry, and the MCP server title. One line of 1 to 40 characters without `<`, `>`, or control characters; the server logs the name it uses at startup. The social preview image, internal ids, and product terms such as "Nook keys" do not change. |
 | `COOKIE_SECURE` | `true` (Compose and production) | `true` or `false`. Plain-HTTP access needs `false`. |
 | `ALLOW_REGISTRATION` | `false` | `true` allows additional accounts; the first account is always allowed on an empty database. Team invites work with `false` (see *Invites instead of ALLOW_REGISTRATION*). |
 | `ALLOWED_EMAILS` | empty | Comma-separated allowlist for registration, sign-in, and existing sessions. Empty allows any address. |

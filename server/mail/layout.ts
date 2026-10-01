@@ -1,3 +1,4 @@
+import { appName, DEFAULT_APP_NAME } from "../config";
 import { cleanLine, html, join, type SafeHtml } from "./html";
 
 /**
@@ -149,9 +150,12 @@ const SUBJECT_MAX = 120;
 /** Renders a mail from its parts. Subject and preheader are one line and length-capped (T228). */
 export function layout(input: LayoutInput): RenderedMail {
   const tone = input.tone ?? "default";
-  const subject = cleanLine(input.subject, SUBJECT_MAX, "Nook");
+  // Wave 39: APP_NAME in the band, the footer, and the fallback subject.
+  const name = cleanLine(appName(), 40, DEFAULT_APP_NAME, false);
+  const mark = ([...name][0] ?? "N").toUpperCase();
+  const subject = cleanLine(input.subject, SUBJECT_MAX, name);
   const preheader = cleanLine(input.preheader, 150);
-  const instance = cleanLine(input.instanceName, 40, "Nook", false);
+  const instance = cleanLine(input.instanceName, 40, name, false);
   const blocks = [...input.blocks, ...(input.action ? [button(input.action.label, input.action.href)] : [])];
   const eyebrowColor = tone === "security" ? COLORS.danger : COLORS.goldText;
   const footer = input.footer;
@@ -183,8 +187,8 @@ ${STYLE}
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;margin:0 auto;">
 <tr><td class="nk-pad" bgcolor="${COLORS.band}" style="background:${COLORS.band};border-radius:12px 12px 0 0;padding:16px 32px;">
 <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
-<td width="28" height="28" align="center" valign="middle" bgcolor="${COLORS.gold}" style="width:28px;height:28px;background:${COLORS.gold};border-radius:7px;font-family:${FONT};font-size:16px;line-height:28px;font-weight:800;color:${COLORS.buttonText};">N</td>
-<td style="padding-left:10px;font-family:${FONT};font-size:16px;line-height:28px;font-weight:700;color:#f5f5f4;">Nook</td>
+<td width="28" height="28" align="center" valign="middle" bgcolor="${COLORS.gold}" style="width:28px;height:28px;background:${COLORS.gold};border-radius:7px;font-family:${FONT};font-size:16px;line-height:28px;font-weight:800;color:${COLORS.buttonText};">${mark}</td>
+<td style="padding-left:10px;font-family:${FONT};font-size:16px;line-height:28px;font-weight:700;color:#f5f5f4;">${name}</td>
 <td style="padding-left:10px;font-family:${FONT};font-size:13px;line-height:28px;color:${COLORS.goldDim};">${instance}</td>
 </tr></table>
 </td></tr>
@@ -198,7 +202,7 @@ ${join(blocks.map((block) => block.html))}
 <p class="nk-muted" style="margin:0 0 8px;font-family:${FONT};font-size:12px;line-height:1.6;color:${COLORS.muted};text-align:center;">${footer.reason}</p>
 ${footer.security ? html`<p class="nk-muted" style="margin:0 0 8px;font-family:${FONT};font-size:12px;line-height:1.6;color:${COLORS.muted};text-align:center;">${securityLine}</p>` : ""}
 ${footerLinks.length ? html`<p class="nk-muted" style="margin:0 0 8px;font-family:${FONT};font-size:12px;line-height:1.6;color:${COLORS.muted};text-align:center;">${join(footerLinks.flatMap((link, index) => index ? [html` &middot; `, link] : [link]))}</p>` : ""}
-<p class="nk-muted" style="margin:0;font-family:${FONT};font-size:12px;line-height:1.6;color:${COLORS.muted};text-align:center;">Sent by Nook on ${instance}, a self-hosted workspace. No tracking. Nook never asks for your password by email.</p>
+<p class="nk-muted" style="margin:0;font-family:${FONT};font-size:12px;line-height:1.6;color:${COLORS.muted};text-align:center;">Sent by ${name} on ${instance}, a self-hosted workspace. No tracking. ${name} never asks for your password by email.</p>
 </td></tr>
 </table>
 <!--[if mso]></td></tr></table><![endif]-->
@@ -210,7 +214,7 @@ ${footerLinks.length ? html`<p class="nk-muted" style="margin:0 0 8px;font-famil
 `;
 
   const text = [
-    `Nook · ${instance}`,
+    `${name} · ${instance}`,
     "",
     input.eyebrow.toUpperCase(),
     cleanLine(input.title, 200),
@@ -222,7 +226,7 @@ ${footerLinks.length ? html`<p class="nk-muted" style="margin:0 0 8px;font-famil
     ...(footer.security ? [securityLine] : []),
     ...(footer.unsubscribe ? [`${footer.unsubscribe.label}:`, footer.unsubscribe.href] : []),
     ...(footer.settingsHref ? ["Email settings:", footer.settingsHref] : []),
-    `Sent by Nook on ${instance}, a self-hosted workspace. No tracking. Nook never asks for your password by email.`,
+    `Sent by ${name} on ${instance}, a self-hosted workspace. No tracking. ${name} never asks for your password by email.`,
     ""
   ].join("\n");
 

@@ -123,6 +123,16 @@ export function setMailTransportForTests(next: MailTransport | null, sender = "N
 
 export const mailEnabled = () => transport !== null && from !== null;
 
+/**
+ * Wave 39: MAIL_FROM as a bare address gets APP_NAME as its display name ("Acme Notes <notes@…>");
+ * a MAIL_FROM with its own name is sent as it is. A name with RFC 5322 specials is quoted.
+ */
+export function senderHeader(sender: string, name = config.appName) {
+  if (sender.includes("<")) return sender;
+  const display = /[()<>[\]:;@\\,."]/.test(name) ? `"${name.replace(/["\\]/g, "\\$&")}"` : name;
+  return `${display} <${sender}>`;
+}
+
 type Window = { count: number; resetAt: number };
 const windows = new Map<string, Window>();
 
@@ -192,7 +202,7 @@ export async function sendMail(message: MailMessage, options: SendOptions): Prom
     return { sent: false, reason: "rate_limited" };
   }
   try {
-    const request = { ...message, to: address, from: from!, idempotencyKey: options.idempotencyKey ?? crypto.randomUUID() };
+    const request = { ...message, to: address, from: senderHeader(from!), idempotencyKey: options.idempotencyKey ?? crypto.randomUUID() };
     const { id } = await withTimeout((signal) => transport!(request, signal), options.timeoutMs ?? MAIL_TIMEOUT_MS);
     console.info(`Mail sent: purpose=${options.purpose} recipient=${handle} id=${id}`);
     return { sent: true, id };

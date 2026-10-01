@@ -106,7 +106,7 @@ APP_VERSION=0.24.0 GIT_SHA=$(git rev-parse --short HEAD) docker compose up -d --
 curl http://localhost:2026/api/health   # then open http://localhost:2026 and create the first account (the admin)
 ```
 
-Later registrations stay disabled unless you set `ALLOW_REGISTRATION=true`. Every environment variable (email, push, limits) is listed in [docs/OPERATIONS.md](docs/OPERATIONS.md#configuration). Internal identifiers such as `mynotes.sqlite`, the `mynotes` container, `MYNOTES_DATA_DIR`, and the `mynotes-*` backup archives keep the original prefix for compatibility.
+Later registrations stay disabled unless you set `ALLOW_REGISTRATION=true`. `APP_NAME=Acme Notes` renames the app in titles, link previews, the installed app, and mail. Every environment variable (email, push, limits) is listed in [docs/OPERATIONS.md](docs/OPERATIONS.md#configuration). Internal identifiers such as `mynotes.sqlite`, the `mynotes` container, `MYNOTES_DATA_DIR`, and the `mynotes-*` backup archives keep the original prefix for compatibility.
 
 ## Upgrading
 

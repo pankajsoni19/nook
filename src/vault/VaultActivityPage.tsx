@@ -4,6 +4,7 @@ import { relativeTime } from "../files/format";
 import { Select } from "../ui/Select";
 import { errorCode, messageOf } from "./VaultDialogs";
 import { listActivity, type ActivityEvent, type ActivityPage } from "./vaultApi";
+import { appName } from "../appName";
 
 /**
  * A vault's Activity at /vault/:id/activity (vault plan §7, §10; Wave 26): who did what and how many,
@@ -109,7 +110,7 @@ export function VaultActivityPage({ vaultId, vaultName, initialActor, onBack, on
   useEffect(() => { void load(null); }, [load]);
   const ready = page !== null || error !== null;
   useLayoutEffect(() => { if (ready) onReady(); }, [ready, onReady]);
-  useEffect(() => { document.title = `Activity${vaultName ? ` · ${vaultName}` : ""} · Vault · Nook`; }, [vaultName]);
+  useEffect(() => { document.title = `Activity${vaultName ? ` · ${vaultName}` : ""} · Vault · ${appName()}`; }, [vaultName]);
 
   return <>
     <div className="vault-toolbar">

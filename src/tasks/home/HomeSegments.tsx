@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { Bookmark, KanbanSquare, UserCheck } from "lucide-react";
+import { appName } from "../../appName";
 
 export type HomeSegment = "boards" | "my" | "views";
 
@@ -28,12 +29,12 @@ export function HomeSegments({ active, onSelect }: { active: HomeSegment; onSele
 export function useTasksTitle(title: string | null) {
   useEffect(() => {
     if (title === null) return undefined;
-    const text = `${title} · Nook`;
+    const text = `${title} · ${appName()}`;
     document.title = text;
     const timer = window.setTimeout(() => { document.title = text; }, 0);
     return () => {
       window.clearTimeout(timer);
-      if (document.title === text) document.title = "Tasks · Nook";
+      if (document.title === text) document.title = `Tasks · ${appName()}`;
     };
   }, [title]);
 }

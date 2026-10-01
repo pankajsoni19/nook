@@ -13,6 +13,7 @@ import type { EnvLevel } from "../../shared/vault";
 import { errorCode, messageOf } from "./VaultDialogs";
 import { getVault, getVaultAccess, putVaultAccess, type AccessPutBody, type SheetEnvironment, type SheetGroup, type SheetPerson, type VaultAccessSheet } from "./vaultApi";
 import { VaultKeysSection } from "./VaultKeysSection";
+import { appName } from "../appName";
 
 /**
  * Who has access to one vault, at /vault/:id/access (vault plan §10 Access; D214–D216, V-O3; Wave 26).
@@ -160,7 +161,7 @@ export function VaultAccessPage({ vaultId, onBack, onReady, flash, ask, onOpenAc
   useLayoutEffect(() => { if (ready) onReady(); }, [ready, onReady]);
   useEffect(() => {
     const name = sheet?.vault.name ?? readOnly?.name;
-    if (name) document.title = `Access · ${name} · Vault · Nook`;
+    if (name) document.title = `Access · ${name} · Vault · ${appName()}`;
   }, [sheet, readOnly]);
 
   const dirty = Boolean(sheet && draft && !sameDraft(draft, draftOf(sheet)));

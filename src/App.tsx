@@ -78,6 +78,7 @@ import { publishedElsewhere, usePublishWatch } from "./editor/publishWatch";
 import { NotificationsContext } from "./notifications/notificationsApi";
 import { NotificationSettings } from "./notifications/NotificationSettings";
 import { forgetThisDevice } from "./notifications/pushClient";
+import { appName, setAppName } from "./appName";
 import { carriedCalendarState } from "./calendarNavigation";
 import { calendarHomeRoute, localDate } from "./calendarRoute";
 import { dialogPopDirection, popStateClosedDialog, takeDialogSentinelEntry, undoDialogPop, whenHistorySettled, type PopDirection } from "./historyDialogs";
@@ -172,7 +173,7 @@ function AuthScreen({ onAuthenticated, onForgotPassword, googleResult = null }: 
 
   useEffect(() => {
     let live = true;
-    api<RegistrationInfo>("/about").then((info) => { if (live) setRegistration(info); }, () => { if (live) setRegistration("failed"); });
+    api<RegistrationInfo>("/about").then((info) => { if (live) { setAppName(info.appName); setRegistration(info); } }, () => { if (live) setRegistration("failed"); });
     return () => { live = false; };
   }, []);
 
@@ -263,7 +264,7 @@ function AuthScreen({ onAuthenticated, onForgotPassword, googleResult = null }: 
       <section className="auth-card">
         <div className="brand-mark"><Sparkles aria-hidden="true" /></div>
         <div className="auth-heading">
-          <span className="eyebrow">Nook</span>
+          <span className="eyebrow">{appName()}</span>
           <h1>{heading}</h1>
           <p>{googleCode ? "Google confirmed your account. Enter the code from your authenticator app to finish signing in." : "Your private workspace for ideas, passwords, and configuration notes."}</p>
         </div>
@@ -481,7 +482,7 @@ function SettingsPage({ session, modules, googleResult = null, navigate, flash, 
 
   useEffect(() => {
     api<TotpState>("/auth/totp/status").then(setState).catch((reason) => setError(reason instanceof Error ? reason.message : "Could not load security settings"));
-    api<{ version: string; gitSha: string; twoFactor?: boolean; passwordReset?: boolean }>("/about").then(setAppInfo).catch(() => undefined);
+    api<{ appName?: string; version: string; gitSha: string; twoFactor?: boolean; passwordReset?: boolean }>("/about").then((info) => { setAppName(info.appName); setAppInfo(info); }).catch(() => undefined);
   }, []);
 
   async function beginSetup(event: React.FormEvent<HTMLFormElement>) {
@@ -615,8 +616,8 @@ function SettingsPage({ session, modules, googleResult = null, navigate, flash, 
       <button className="primary-button" disabled={busy}>{busy ? "Preparing…" : "Set up authenticator"}</button>
     </form> : <div className="security-card enrollment-card">
       <div className="enrollment-grid">
-        <div className="qr-frame"><img src={qrCode} alt="QR code for Nook two-factor authentication" /></div>
-        <div><span className="step-label">1 · Scan the code</span><h4>Add Nook to Google Authenticator</h4><p>If you cannot scan it, enter the entire setup key manually in Google Authenticator. The groups of four are only for readability; copying removes all spaces. This key is not entered when signing in.</p><button className="secret-copy" onClick={copySecret}><code>{secret.match(/.{1,4}/g)?.join(" ")}</code><span>{copied ? <><Check />Copied</> : "Copy setup key without spaces"}</span></button></div>
+        <div className="qr-frame"><img src={qrCode} alt={`QR code for ${appName()} two-factor authentication`} /></div>
+        <div><span className="step-label">1 · Scan the code</span><h4>Add {appName()} to Google Authenticator</h4><p>If you cannot scan it, enter the entire setup key manually in Google Authenticator. The groups of four are only for readability; copying removes all spaces. This key is not entered when signing in.</p><button className="secret-copy" onClick={copySecret}><code>{secret.match(/.{1,4}/g)?.join(" ")}</code><span>{copied ? <><Check />Copied</> : "Copy setup key without spaces"}</span></button></div>
       </div>
       <form className="verify-totp-form" onSubmit={enable}><span className="step-label">2 · Verify setup</span><label>Authentication code<input name="code" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} placeholder="000000" required autoFocus /></label><button className="primary-button" disabled={busy}>{busy ? "Verifying…" : "Enable two-factor authentication"}</button></form>
     </div>}
@@ -628,7 +629,7 @@ function SettingsPage({ session, modules, googleResult = null, navigate, flash, 
     : section === "mcp" ? <KeysSettings notice={googleNoticeLine} onPendingChange={onMcpKeyPending} totpEnabled={state.enabled} role={session.user.role} />
     : section === "access" ? <MyAccess />
     : section === "notifications" ? <NotificationSettings />
-    : section === "about" ? <section className="settings-content about-settings" aria-labelledby="about-heading"><div className="settings-section-heading"><span className="settings-icon"><Info /></span><div><h3 id="about-heading">About Nook</h3><p>A private, self-hosted workspace for notes, files, and ideas.</p></div></div><div className="about-card"><div className="brand-mark"><Sparkles /></div><div><h4>Nook</h4><p>Built by Pankaj</p></div><dl><div><dt>Version</dt><dd>{appInfo.version}</dd></div><div><dt>Git SHA</dt><dd><code>{appInfo.gitSha}</code></dd></div></dl><a href="https://github.com/pankajsoni19" target="_blank" rel="noopener noreferrer">github.com/pankajsoni19</a></div></section>
+    : section === "about" ? <section className="settings-content about-settings" aria-labelledby="about-heading"><div className="settings-section-heading"><span className="settings-icon"><Info /></span><div><h3 id="about-heading">About {appName()}</h3><p>A private, self-hosted workspace for notes, files, and ideas.</p></div></div><div className="about-card"><div className="brand-mark"><Sparkles /></div><div><h4>{appName()}</h4><p>{appName() === "Nook" ? "Built by Pankaj" : "Built on Nook by Pankaj"}</p></div><dl><div><dt>Version</dt><dd>{appInfo.version}</dd></div><div><dt>Git SHA</dt><dd><code>{appInfo.gitSha}</code></dd></div></dl><a href="https://github.com/pankajsoni19" target="_blank" rel="noopener noreferrer">github.com/pankajsoni19</a></div></section>
     : securitySection;
 
   // While setup is required there is nowhere else to go: Sign out is the only header action.
@@ -1079,7 +1080,7 @@ export function App() {
     if (activeApp === "settings" || activeApp === "team") return;
     const sectionName = { home: "Home", notes: "Notes", files: "Files", tasks: "Tasks", collections: "Collections", calendar: "Calendar", notifications: "Notifications", bin: "Bin", inbox: "Inbox", whiteboards: "Whiteboards", vault: "Vault" }[activeApp];
     const detail = activeApp === "notes" && note && note.id === selectedNoteId ? note.title || "Untitled" : null;
-    document.title = session ? `${detail ? `${detail} · ` : ""}${sectionName} · Nook` : "Sign in · Nook";
+    document.title = session ? `${detail ? `${detail} · ` : ""}${sectionName} · ${appName()}` : `Sign in · ${appName()}`;
   }, [activeApp, note, selectedNoteId, session]);
   useEffect(() => {
     if (!session || selectionOwner !== session.user.id) return;
@@ -1982,7 +1983,7 @@ export function App() {
     setSession(null);
   }
 
-  if (checking) return <main className="loading-page"><div className="brand-mark"><Sparkles /></div><span>Opening Nook…</span></main>;
+  if (checking) return <main className="loading-page"><div className="brand-mark"><Sparkles /></div><span>Opening {appName()}…</span></main>;
   const acceptSession = (result: SessionResponse) => {
     if (sessionUserRef.current !== result.user.id) clearCardSummaries();
     sessionUserRef.current = result.user.id;
@@ -2130,7 +2131,7 @@ export function App() {
     <main className={`workspace ${collapsed ? "nav-collapsed" : ""}`} data-mobile-panel={mobilePanel}>
       <aside className="folder-pane" id="note-folders">
         <header className="sidebar-header">
-          <button className="sidebar-brand sidebar-home-button" onClick={() => { void openHome(); }} aria-label="Open Nook home" title="Back to Home"><span className="brand-dot"><Sparkles /></span><span className="brand-text"><strong>Notes</strong></span></button>
+          <button className="sidebar-brand sidebar-home-button" onClick={() => { void openHome(); }} aria-label={`Open ${appName()} home`} title="Back to Home"><span className="brand-dot"><Sparkles /></span><span className="brand-text"><strong>Notes</strong></span></button>
           <button className="icon-button desktop-only" onClick={() => setCollapsed(true)} aria-label="Collapse folders sidebar" aria-controls="note-folders" aria-expanded={!collapsed} title="Collapse folders"><PanelLeftClose /></button>
         </header>
         <nav className="folder-nav" aria-label="Note folders">

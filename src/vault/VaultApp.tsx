@@ -26,6 +26,7 @@ import {
 } from "./vaultApi";
 import "../files/files.css";
 import "./vault.css";
+import { appName } from "../appName";
 
 type VaultNavigate = (route: Route, options?: { replace?: boolean; removed?: boolean }) => void;
 type VaultAppProps = {
@@ -195,7 +196,7 @@ function VaultList({ onOpen, onReady, flash }: { onOpen: (vault: VaultSummary) =
     }
   }, []);
   useEffect(() => { void load(); }, [load]);
-  useEffect(() => { document.title = "Vault · Nook"; }, []);
+  useEffect(() => { document.title = `Vault · ${appName()}`; }, []);
   const ready = vaults !== null;
   useLayoutEffect(() => { if (ready) onReady(); }, [ready, onReady]);
 
@@ -319,7 +320,7 @@ function VaultPage({ vaultId, envId, cache, onBack, onReady, flash, ask, onEnvir
   }, [load, query]);
   const ready = data !== null;
   useLayoutEffect(() => { if (ready) onReady(); }, [ready, onReady]);
-  useEffect(() => { if (data) document.title = `${data.vault.name} · Vault · Nook`; }, [data]);
+  useEffect(() => { if (data) document.title = `${data.vault.name} · Vault · ${appName()}`; }, [data]);
 
   const actions = useValueActions(vaultId, flash, load, ask);
   const { hideAll } = actions;
@@ -484,7 +485,7 @@ function SecretPage({ vaultId, secretId, onBack, onReady, flash, ask, onMissing,
   useEffect(() => { void load(); }, [load]);
   const ready = data !== null;
   useLayoutEffect(() => { if (ready) onReady(); }, [ready, onReady]);
-  useEffect(() => { if (data) document.title = `${data.vault.name} · Vault · Nook`; }, [data]);
+  useEffect(() => { if (data) document.title = `${data.vault.name} · Vault · ${appName()}`; }, [data]);
   const actions = useValueActions(vaultId, flash, load, ask);
   const { hideAll } = actions;
   useEffect(() => hideAll, [hideAll]);

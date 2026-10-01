@@ -1,3 +1,4 @@
+import { appName } from "../../config";
 import { cleanLine } from "../html";
 import type { Footer } from "../layout";
 import { appLink, paths } from "../links";
@@ -20,7 +21,7 @@ export function activityFooter(category: MailCategory, reason: string, context: 
 }
 
 /** Security mail cannot be switched off, so it has no unsubscribe link (B.2). */
-export function securityFooter(reason = "You got this because it is about your own Nook account."): Footer {
+export function securityFooter(reason = `You got this because it is about your own ${appName()} account.`): Footer {
   return { reason, settingsHref: settingsHref(), security: true };
 }
 

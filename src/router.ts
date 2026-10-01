@@ -1,6 +1,7 @@
 // Pure URL routing for the SPA. No DOM access, so it can be unit tested directly.
 import { formatBoardSearch, isDefaultBoardQuery, parseBoardSearch, type BoardQuery } from "./tasks/boardUrl";
 import { formatHomeSearch, NEW_VIEW, parseMyWorkSearch, parseViewSearch, type TasksHome } from "./tasks/home/homeUrl";
+import { appName } from "./appName";
 
 export type Route =
   | { app: "home" }
@@ -335,7 +336,7 @@ export const SETTINGS_SECTION_NAMES: Record<SettingsSection, string> = { securit
 export const settingsDocumentTitle = (section: SettingsSection) => hubDocumentTitle(SETTINGS_SECTION_NAMES[section]);
 
 /** The document title on a Settings hub screen (Wave 37): "Settings · Members · Nook", or "Settings · Nook" on the list. */
-export const hubDocumentTitle = (name: string | null) => name ? `Settings · ${name} · Nook` : "Settings · Nook";
+export const hubDocumentTitle = (name: string | null) => name ? `Settings · ${name} · ${appName()}` : `Settings · ${appName()}`;
 
 /** A location's route, with its query (the one way DOM callers should parse the current URL). */
 export const routeFromLocation = (location: { pathname: string; search: string }) => parseRoute(location.pathname, location.search);

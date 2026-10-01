@@ -1,6 +1,6 @@
 # Using Nook
 
-This guide covers the apps a signed-in user sees. For installing, configuring, backing up, and upgrading a server, see [OPERATIONS.md](OPERATIONS.md). The same material is published at [pankajsoni19.github.io/nook](https://pankajsoni19.github.io/nook/).
+This guide covers the apps a signed-in user sees. Your server may use its own name in place of "Nook" (the operator's `APP_NAME`): it appears in tab titles, the sign-in page, **Settings → About**, and email. For installing, configuring, backing up, and upgrading a server, see [OPERATIONS.md](OPERATIONS.md). The same material is published at [pankajsoni19.github.io/nook](https://pankajsoni19.github.io/nook/).
 
 ## Home and URLs
 
