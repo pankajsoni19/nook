@@ -72,7 +72,7 @@ test("toasts wrap within a phone's width (B8) and phone inputs are 40 px tall (B
 
 test("file and Bin action sheets are named, and New event fields are labelled (B12)", () => {
   expect(src("files", "FileActionSheet.tsx")).toContain("aria-label={`Actions for ${document.name}`}");
-  expect(src("bin", "BinApp.tsx")).toContain("aria-label={`Actions for ${binItemLabel(sheetItem)}`}");
+  expect(src("bin", "BinSection.tsx")).toContain("aria-label={`Actions for ${binItemLabel(sheetItem)}`}");
   const sheet = src("calendar", "EventSheet.tsx");
   for (const label of ["Event title", "Start date", "Start time", "End date", "End time", "Location", "Notes", "All day"]) expect(sheet).toContain(`aria-label="${label}"`);
 });

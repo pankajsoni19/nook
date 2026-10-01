@@ -14,6 +14,8 @@ export type Route =
   | { app: "collections"; collectionId: string | null; viewId: string | null; rowId: string | null }
   | { app: "calendar"; view: "agenda" | "month"; month: string | null; eventId: string | null }
   | { app: "notifications" }
+  // Wave 38: the Bin lives in the Settings hub. Its canonical URL is /settings/bin; the old /bin
+  // still parses to the same route and is rewritten in place.
   | { app: "bin" }
   // `invites` (Wave 18): the admin Invites panel at /team/invites, in the detail pane. Never with a user.
   // `email` (Wave 28): the admin Email log at /team/email, the same way.
@@ -192,11 +194,12 @@ function parseTeam(rest: string[], hub: boolean): Route {
 
 /**
  * The Settings hub (Wave 37): /settings (the section list), /settings/:section (an account section;
- * the old /settings/mcp opens API keys), and /settings/team/… (Team sections). An unknown section
- * opens the list.
+ * the old /settings/mcp opens API keys), /settings/bin (the Bin, Wave 38), and /settings/team/…
+ * (Team sections). An unknown section opens the list.
  */
 function parseSettings(rest: string[]): Route {
   if (rest[0] === "team") return parseTeam(rest.slice(1), true);
+  if (rest.length === 1 && rest[0] === "bin") return { app: "bin" };
   const section = rest.length === 1 ? settingsSectionForSlug(rest[0]!) : null;
   return { app: "settings", section };
 }
@@ -254,7 +257,7 @@ export function formatRoute(route: Route): string {
     return "/calendar";
   }
   if (route.app === "notifications") return "/notifications";
-  if (route.app === "bin") return "/bin";
+  if (route.app === "bin") return "/settings/bin";
   if (route.app === "team") return formatTeam(route);
   if (route.app === "settings") return route.section && SETTINGS_SECTIONS.includes(route.section) ? settingsPath(route.section) : "/settings";
   if (route.app === "whiteboards") return formatCollection("/whiteboards", route.folder, route.boardId);

@@ -1,7 +1,7 @@
 import { Component, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Ellipsis, FileUp, House, LayoutGrid, List as ListIcon, PenTool, Plus, RotateCcw, Sparkles, TriangleAlert, Users } from "lucide-react";
 import { api } from "../api";
-import { AccountActions, AppPageName, useBinCount } from "../AppShell";
+import { AccountActions, AppPageName } from "../AppShell";
 import { readHistoryDepth } from "../appShellNavigation";
 import { relativeTime } from "../files/format";
 import { popStateClosedDialog } from "../historyDialogs";
@@ -70,7 +70,6 @@ type WhiteboardsAppProps = {
   navigate: WhiteboardsNavigate;
   flash: (message: string) => void;
   onHome: () => void;
-  onBin?: () => void;
   onSettings: () => void;
   onSignOut: () => void;
   /** Opens an in-app path (a link on a shape) as a new history entry. */
@@ -117,9 +116,8 @@ function readSort(userId: string): WhiteboardSort {
  * (all, shared, or one folder) and a board's canvas at /whiteboards/:id, each a history entry;
  * sheets and dialogs push none, so Back closes them first (D18), then the canvas, then the app.
  */
-export function WhiteboardsApp({ userId, displayName, navigate, flash, onHome, onBin, onSettings, onSignOut, onOpenPath }: WhiteboardsAppProps) {
+export function WhiteboardsApp({ userId, displayName, navigate, flash, onHome, onSettings, onSignOut, onOpenPath }: WhiteboardsAppProps) {
   const { canWrite } = useRole();
-  const binCount = useBinCount(Boolean(onBin));
   const [route, setRoute] = useState<WhiteboardsRoute>(currentRoute);
   const [boards, setBoards] = useState<WhiteboardSummary[] | null>(null);
   const [folders, setFolders] = useState<Folder[]>([]);
@@ -332,7 +330,7 @@ export function WhiteboardsApp({ userId, displayName, navigate, flash, onHome, o
     <header className="app-page-header">
       <button className="app-home-button" onClick={onHome}><House />Home</button>
       <span className="app-home-brand"><span className="brand-dot"><Sparkles /></span><span className="brand-text"><strong>Whiteboards</strong></span></span><AppPageName name="Whiteboards" />
-      <AccountActions displayName={displayName} onSettings={onSettings} onSignOut={onSignOut} onBin={onBin} binCount={binCount} />
+      <AccountActions displayName={displayName} onSettings={onSettings} onSignOut={onSignOut} />
     </header>
     <ReadOnlyBanner />
     <section className="whiteboards-body" aria-labelledby="whiteboards-title">

@@ -1,22 +1,14 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { Avatar } from "./ui/Avatar";
 import { useSelfAvatar } from "./ui/selfAvatar";
-import { Inbox, LogOut, Settings, Trash2, Users } from "lucide-react";
+import { Inbox, LogOut, Settings } from "lucide-react";
 import "./appShell.css";
 import { listBin, onBinChanged } from "./bin/binApi";
 import { INBOX_CHANGED, pendingCount } from "./inbox/inboxApi";
 import { useModuleEnabled } from "./modules";
 import { NotificationBell } from "./notifications/NotificationBell";
 import { NOTIFICATIONS_POLLED } from "./notifications/notificationsApi";
-import { listTeam } from "./team/teamApi";
-import { canManageTeam, canSeeTeam, type Role } from "./team/teamRoles";
-
-/**
- * The Team button in the account row (D78), provided once by App so every app's header gets it
- * without each app wiring a prop. Hidden for guests and on the Team app itself.
- */
-export type TeamNav = { role: Role | undefined; openTeam: () => void; onTeam: boolean };
-export const TeamNavContext = createContext<TeamNav | null>(null);
+import type { Role } from "./team/teamRoles";
 
 /**
  * The Inbox button in the account row, next to the bell (agent inbox D157), provided once by App.
@@ -68,53 +60,25 @@ export function SidebarInboxRow({ nav }: { nav: Pick<InboxNav, "role" | "openInb
   return <button className="footer-bin footer-inbox" onClick={nav.openInbox} aria-label={label}><Inbox />Inbox{count > 0 && <span className="footer-badge" aria-hidden="true">{count > 99 ? "99+" : count}</span>}</button>;
 }
 
-/** Admins see how many accounts are blocked: one lazy look on mount, like the Bin count. */
-function useBlockedCount(enabled: boolean) {
-  const [count, setCount] = useState(0);
-  useEffect(() => {
-    if (!enabled) return;
-    let live = true;
-    listTeam().then(({ users }) => { if (live) setCount(users.filter((user) => user.status === "blocked").length); }, () => undefined);
-    return () => { live = false; };
-  }, [enabled]);
-  return count;
-}
-
-function TeamButton({ nav }: { nav: TeamNav }) {
-  const blocked = useBlockedCount(canManageTeam(nav.role));
-  const label = blocked > 0 ? `Team, ${blocked} blocked` : "Team";
-  return <button className="app-account-button app-account-bin" onClick={nav.openTeam} aria-label={label} title="Team"><Users /><span className="app-account-label">Team</span>{blocked > 0 && <span className="app-account-badge" aria-hidden="true">{blocked > 99 ? "99+" : blocked}</span>}</button>;
-}
-
 type AccountProps = {
   displayName: string;
   /** Opens the Settings page; absent on the Settings page itself, which leaves the button out. */
   onSettings?: () => void;
   onSignOut: () => void;
-  /** Shown only where the Bin is a utility action (Home, which is Today); the Bin app itself leaves it out. */
-  onBin?: () => void;
-  binCount?: number;
 };
 
 /**
- * The account row of every app header. Wave 37 order, left to right: Bin · Team · Settings · Inbox ·
- * the bell · the signed-in person (picture and name) · Sign out, so Sign out is always the rightmost
- * action. Phones keep the same order with icon-only buttons (the name is hidden, the picture stays).
+ * The account row of every app header. Wave 38 order, left to right: Settings · Inbox · the bell ·
+ * the signed-in person (picture and name) · Sign out, so Sign out is always the rightmost action.
+ * The Bin and Team live in Settings (its nav), so the row has no Bin or Team button. Phones keep the
+ * same order with icon-only buttons (the name is hidden, the picture stays).
  */
-export function AccountActions({ displayName, onSettings, onSignOut, onBin, binCount = 0 }: AccountProps) {
-  // Bin turned off (D92): no Bin button, whatever the app passes. Deleting still moves items to the Bin.
-  const binEnabled = useModuleEnabled("bin");
-  // Team turned off hides its button too (admins still reach Team from Settings, where it now lives).
-  const teamEnabled = useModuleEnabled("team");
-  const team = useContext(TeamNavContext);
+export function AccountActions({ displayName, onSettings, onSignOut }: AccountProps) {
   const inbox = useContext(InboxNavContext);
   const inboxEnabled = useModuleEnabled("inbox");
-  const binLabel = binCount > 0 ? `Bin, ${binCount} item${binCount === 1 ? "" : "s"}` : "Bin";
   // Wave 35 (QA U4): the signed-in person's own picture beside their name (the letter without one).
   const selfAvatar = useSelfAvatar();
   return <div className="app-account" role="group" aria-label="Account">
-    {onBin && binEnabled && <button className="app-account-button app-account-bin" onClick={onBin} aria-label={binLabel} title="Bin"><Trash2 /><span className="app-account-label">Bin</span>{binCount > 0 && <span className="app-account-badge" aria-hidden="true">{binCount > 99 ? "99+" : binCount}</span>}</button>}
-    {team && teamEnabled && canSeeTeam(team.role) && !team.onTeam && <TeamButton nav={team} />}
     {onSettings && <button className="app-account-button" onClick={onSettings} aria-label={`Open settings for ${displayName}`} title="Settings"><Settings /><span className="app-account-label">Settings</span></button>}
     {inbox && inboxEnabled && inbox.role !== "guest" && !inbox.onInbox && <InboxButton nav={inbox} />}
     {/* The bell renders only inside the signed-in shell. */}
@@ -125,9 +89,10 @@ export function AccountActions({ displayName, onSettings, onSignOut, onBin, binC
 }
 
 /**
- * The Bin badge count: a lazy look on mount (no polling), and again whenever the app restores or
- * deletes from the Bin (notifyBinChanged: Restore all in a key's Review, the Bin page); a failure
- * leaves the plain Bin button. `enabled` false skips the request where the header has no Bin button.
+ * The Bin's item count for its Settings nav entry (Wave 38; the top bar's Bin badge before): a lazy
+ * look on mount (no polling), and again whenever the app restores or deletes from the Bin
+ * (notifyBinChanged: Restore all in a key's Review, Settings → Bin); a failure leaves no count.
+ * `enabled` false skips the request (the Bin module off, or two-factor setup still required).
  */
 export function useBinCount(enabled = true) {
   const [binCount, setBinCount] = useState(0);

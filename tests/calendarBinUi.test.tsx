@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { BinApp } from "../src/bin/BinApp";
+import { BinSection } from "../src/bin/BinSection";
 import { binFolderLabel, binItemLabel, filterBinItems, restoredCalendarMessage } from "../src/bin/binFormat";
 import type { BinItem } from "../src/types";
 
@@ -24,7 +24,7 @@ test("the Calendar filter shows calendars and events, with calendar-aware labels
   expect(restoredCalendarMessage(items[2]!, "Family", true)).toBe("Already restored to Family");
 });
 
-test("the Bin app offers a Calendar filter chip", () => {
-  const markup = renderToStaticMarkup(<BinApp displayName="Ada" flash={() => undefined} onHome={() => undefined} onSettings={() => undefined} onSignOut={() => undefined} />);
+test("Settings → Bin offers a Calendar filter chip", () => {
+  const markup = renderToStaticMarkup(<BinSection flash={() => undefined} />);
   for (const label of ["All", "Notes", "Files", "Calendar"]) expect(markup).toContain(`>${label}</button>`);
 });

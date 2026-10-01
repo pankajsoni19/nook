@@ -1,5 +1,5 @@
 import { useEffect, useRef, type ReactNode } from "react";
-import { Bell, Bot, ChevronLeft, ChevronRight, History, House, Info, KeyRound, LayoutGrid, LayoutTemplate, Link2, Mail, Scale, Share2, ShieldCheck, Sparkles, Users, UsersRound, type LucideIcon } from "lucide-react";
+import { Bell, Bot, ChevronLeft, ChevronRight, History, House, Info, KeyRound, LayoutGrid, LayoutTemplate, Link2, Mail, Scale, Share2, ShieldCheck, Sparkles, Trash2, Users, UsersRound, type LucideIcon } from "lucide-react";
 import { AppPageName } from "../AppShell";
 import { isMobileViewport } from "../mobileNavigation";
 import { Avatar } from "../ui/Avatar";
@@ -8,7 +8,7 @@ import type { HubEntry, HubEntryId } from "./hubModel";
 import "./settingsHub.css";
 
 const ICONS: Record<HubEntryId, LucideIcon> = {
-  security: ShieldCheck, notifications: Bell, access: Share2, mcp: KeyRound, modules: LayoutGrid, about: Info,
+  security: ShieldCheck, notifications: Bell, access: Share2, mcp: KeyRound, modules: LayoutGrid, about: Info, bin: Trash2,
   "team-members": Users, "team-invites": Link2, "team-groups": UsersRound, "team-integrations": Bot, "team-keys": KeyRound,
   "team-policies": Scale, "team-templates": LayoutTemplate, "team-activity": History, "team-email": Mail
 };
@@ -17,6 +17,7 @@ const ICONS: Record<HubEntryId, LucideIcon> = {
 const HINTS: Record<HubEntryId, string> = {
   security: "Password, two-factor, and Google sign-in", notifications: "Push and email", access: "What others share with you",
   mcp: "Keys for AI clients and scripts", modules: "Turn parts of Nook on or off", about: "Version and source",
+  bin: "Deleted items, kept for 30 days",
   "team-members": "Everyone on this Nook and their team role", "team-invites": "Links to add people", "team-groups": "Share with a team at once",
   "team-integrations": "Accounts for AI clients and scripts", "team-keys": "Every API key on this Nook", "team-policies": "Key lifetime and where keys work",
   "team-templates": "A role and groups for new people", "team-activity": "Who changed keys, groups, and access", "team-email": "What Nook emailed, and how it went"
@@ -45,8 +46,8 @@ type HubShellProps = {
 };
 
 /**
- * The Settings hub (Wave 37): a page, not a dialog. A left nav (Account, and Team for the roles that
- * see it) beside the section on screen on a computer, each pane scrolling on its own. On a phone the
+ * The Settings hub (Wave 37): a page, not a dialog. A left nav (Account, Workspace with the Bin since
+ * Wave 38, and Team for the roles that see it) beside the section on screen on a computer, each pane scrolling on its own. On a phone the
  * nav is the first screen (/settings) and a section opens as a screen of its own with a back arrow;
  * both are history entries, so browser Back returns to the list, then to where Settings was opened.
  */
@@ -65,6 +66,7 @@ export function SettingsHubShell({ displayName, avatarUrl, role, entries, select
   const roleLabel = role ? ROLE_LABELS[role] : null;
   const groups = [
     { id: "account", label: "Account", items: entries.filter((entry) => entry.group === "account") },
+    { id: "workspace", label: "Workspace", items: entries.filter((entry) => entry.group === "workspace") },
     { id: "team", label: "Team", items: entries.filter((entry) => entry.group === "team") }
   ].filter((group) => group.items.length > 0);
   return <main className={`app-page settings-hub${listScreen ? " settings-hub-list" : ""}`}>
@@ -85,9 +87,12 @@ export function SettingsHubShell({ displayName, avatarUrl, role, entries, select
             {group.items.map((entry) => {
               const Icon = ICONS[entry.id];
               const current = entry.id === selected;
-              return <li key={entry.id}><button type="button" className={current ? "active" : ""} aria-current={current ? "page" : undefined} onClick={() => onSelect(entry)}>
+              // Wave 38: the Bin's item count, as the top bar's Bin button had it.
+              const badge = entry.badge ?? 0;
+              return <li key={entry.id}><button type="button" className={current ? "active" : ""} aria-current={current ? "page" : undefined} aria-label={badge > 0 ? `${entry.label}, ${badge} item${badge === 1 ? "" : "s"}` : undefined} onClick={() => onSelect(entry)}>
                 <Icon aria-hidden="true" />
                 <span className="settings-hub-entry"><span>{entry.label}</span><small>{HINTS[entry.id]}</small></span>
+                {badge > 0 && <span className="settings-hub-badge" aria-hidden="true">{badge > 99 ? "99+" : badge}</span>}
                 <ChevronRight className="settings-hub-chevron" aria-hidden="true" />
               </button></li>;
             })}

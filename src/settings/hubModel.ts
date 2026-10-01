@@ -6,8 +6,12 @@ import { formatRoute, SETTINGS_SECTION_NAMES } from "../router";
 import { canManageTeam, canSeeTeam, type Role } from "../team/teamRoles";
 
 export type TeamEntryId = "members" | "invites" | "groups" | "integrations" | "keys" | "policies" | "templates" | "activity" | "email";
-export type HubEntryId = SettingsSection | `team-${TeamEntryId}`;
-export type HubEntry = { id: HubEntryId; group: "account" | "team"; label: string; route: Route };
+export type HubEntryId = SettingsSection | "bin" | `team-${TeamEntryId}`;
+/** `badge` (Wave 38): a count shown beside the label (the Bin's items). */
+export type HubEntry = { id: HubEntryId; group: "account" | "workspace" | "team"; label: string; route: Route; badge?: number };
+
+/** The Bin's entry (Wave 38): its own Workspace group between Account and Team. */
+const BIN_ENTRY: HubEntry = { id: "bin", group: "workspace", label: "Bin", route: { app: "bin" } };
 
 type TeamRoute = Extract<Route, { app: "team" }>;
 const team = (flags: Partial<TeamRoute> = {}): TeamRoute => ({ app: "team", userId: null, ...flags });
@@ -39,18 +43,20 @@ export function teamGroupShown(role: Role | undefined, teamModuleEnabled: boolea
 
 /**
  * The hub's nav entries for a role. While two-factor setup is required, Security is the only one.
+ * The Bin (Wave 38) is for every role (viewers and guests read theirs) while the Bin module is on.
  */
-export function hubEntries(role: Role | undefined, options: { teamModuleEnabled: boolean; setupRequired?: boolean }): HubEntry[] {
+export function hubEntries(role: Role | undefined, options: { teamModuleEnabled: boolean; binModuleEnabled?: boolean; setupRequired?: boolean; binCount?: number }): HubEntry[] {
   if (options.setupRequired) return [{ id: "security", group: "account", label: SETTINGS_SECTION_NAMES.security, route: { app: "settings", section: "security" } }];
   const account: HubEntry[] = ACCOUNT_ORDER
     .filter((section) => section !== "access" || role !== "guest")
     .map((section) => ({ id: section, group: "account", label: SETTINGS_SECTION_NAMES[section], route: { app: "settings", section } }));
-  if (!teamGroupShown(role, options.teamModuleEnabled)) return account;
+  const workspace: HubEntry[] = options.binModuleEnabled === false ? [] : [options.binCount ? { ...BIN_ENTRY, badge: options.binCount } : BIN_ENTRY];
+  if (!teamGroupShown(role, options.teamModuleEnabled)) return [...account, ...workspace];
   const admin = canManageTeam(role);
-  return [...account, ...TEAM_ENTRIES.filter((entry) => admin || !entry.adminOnly).map((entry): HubEntry => ({ id: `team-${entry.id}`, group: "team", label: entry.label, route: entry.route }))];
+  return [...account, ...workspace, ...TEAM_ENTRIES.filter((entry) => admin || !entry.adminOnly).map((entry): HubEntry => ({ id: `team-${entry.id}`, group: "team", label: entry.label, route: entry.route }))];
 }
 
-/** Where the Team button (and a Team link) opens: the first Team entry the role has, Members for everyone. */
+/** Where a Team link opens: the first Team entry the role has, Members for everyone. */
 export function firstTeamRoute(): Route {
   return team();
 }
@@ -76,11 +82,13 @@ export function teamEntryOf(route: TeamRoute): TeamEntryId {
 export function hubEntryOf(route: Route): HubEntryId | null {
   if (route.app === "settings") return route.section;
   if (route.app === "team") return `team-${teamEntryOf(route)}`;
+  if (route.app === "bin") return "bin";
   return null;
 }
 
 /** The nav label of an entry. */
 export function hubEntryLabel(id: HubEntryId): string {
+  if (id === "bin") return BIN_ENTRY.label;
   if (id.startsWith("team-")) return TEAM_ENTRIES.find((entry) => `team-${entry.id}` === id)?.label ?? "Team";
   return SETTINGS_SECTION_NAMES[id as SettingsSection];
 }
@@ -93,8 +101,8 @@ export function isNestedHubRoute(route: Route) {
   return route.app === "team" && Boolean(route.userId || route.groupId || route.integrationId);
 }
 
-/** Whether a route is one of the hub's (an account section, the list, or a Team section). */
-export const isHubRoute = (route: Route) => route.app === "settings" || route.app === "team";
+/** Whether a route is one of the hub's (an account section, the list, the Bin, or a Team section). */
+export const isHubRoute = (route: Route) => route.app === "settings" || route.app === "team" || route.app === "bin";
 
 /** The account section the Home tile, the header button, and a hint open. */
 export const settingsRoute = (section: SettingsSection | null = null): Route => ({ app: "settings", section });
@@ -114,12 +122,14 @@ export function hubBackAction(state: unknown): "history" | "list" {
 
 /**
  * The route the hub shows after Back or Forward (review M2): the hub route on the URL, or null to
- * keep the screen (not a hub route, or a Team entry while the role's Team group is hidden: the route
- * gate skips that entry, D92, and the hub reads the URL again once that move settled).
+ * keep the screen (not a hub route, a Team entry while the role's Team group is hidden, or the Bin
+ * while its module is off: the route gate skips that entry, D92, and the hub reads the URL again
+ * once that move settled).
  */
-export function hubPopRoute(route: Route, teamShown: boolean): Route | null {
+export function hubPopRoute(route: Route, teamShown: boolean, binShown = true): Route | null {
   if (!isHubRoute(route)) return null;
   if (route.app === "team" && !teamShown) return null;
+  if (route.app === "bin" && !binShown) return null;
   return route;
 }
 
@@ -133,7 +143,7 @@ export function leaveGuardAction(target: Route, current: Route): "section" | "le
 }
 
 /**
- * Phones (review L4/Q1): a hub section opened from outside the hub (the Team button, "Turn on in
+ * Phones (review L4/Q1): a hub section opened from outside the hub (a Team link, "Open Bin", "Turn on in
  * Settings", a notification, a deep link) gets the section list pushed under it first, so browser
  * Back and the section's back arrow agree (both return to the list, then to where Settings was
  * opened) and Forward reopens the section. One extra entry per visit, none within the hub.

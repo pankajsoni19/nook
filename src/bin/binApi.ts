@@ -5,7 +5,7 @@ const itemPath = (item: Pick<BinItem, "type" | "id">) => `/bin/${item.type}/${en
 
 const BIN_CHANGED = "nook:bin-changed";
 
-/** Tells the header Bin badges (useBinCount) that the Bin's contents changed, so they count again (Friction 8). */
+/** Tells the Bin count (useBinCount, on Settings → Bin since Wave 38) that the Bin's contents changed, so they count again (Friction 8). */
 export function notifyBinChanged() {
   if (typeof window !== "undefined") window.dispatchEvent(new Event(BIN_CHANGED));
 }

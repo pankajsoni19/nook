@@ -26,7 +26,7 @@ test("every former native confirm site asks through useConfirm", async () => {
   expect(app).toContain('title: "Disable two-factor authentication?"');
   expect(app).toContain('title: "Generate new recovery codes?"');
   expect(app).toContain("const confirmed = await appConfirm.ask({");
-  const bin = await read("bin/BinApp.tsx");
+  const bin = await read("bin/BinSection.tsx");
   expect(bin).toContain('title: "Delete forever?"');
   expect(bin).toContain('title: "Empty the Bin?"');
   expect(bin).toContain("{confirmElement}");

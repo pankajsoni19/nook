@@ -20,7 +20,7 @@
 .app-account-button { min-height: 36px; display: inline-flex; align-items: center; gap: 7px; border: 0; border-radius: 9px; padding: 8px 10px; background: transparent; color: #b2b2b8; font-size: .83rem; cursor: pointer; }
 .app-account-button:hover { background: #222225; color: #fff; }
 .app-account-button svg { width: 16px; flex: none; }
-.app-account-bin { position: relative; }
+.app-account-inbox { position: relative; }
 .app-account-badge { min-width: 18px; height: 18px; display: inline-grid; place-items: center; border-radius: 9px; padding: 0 5px; background: #2d281b; color: #f4ca67; font-size: .68rem; font-weight: 750; line-height: 1; }
 .app-page-header { justify-content: flex-start; gap: 20px; }
 .app-page-header .app-account { margin-left: auto; }

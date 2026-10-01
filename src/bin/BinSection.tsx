@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArchiveRestore, CalendarClock, CalendarDays, Ellipsis, File as FileIcon, House, KanbanSquare, KeyRound, KeySquare, Layers, NotebookText, PenTool, RotateCcw, Rows3, Sparkles, SquareCheck, Table2, Trash2, TriangleAlert, X } from "lucide-react";
+import { ArchiveRestore, CalendarClock, CalendarDays, Ellipsis, File as FileIcon, KanbanSquare, KeyRound, KeySquare, Layers, NotebookText, PenTool, RotateCcw, Rows3, SquareCheck, Table2, Trash2, TriangleAlert, X } from "lucide-react";
 import { ApiError } from "../api";
-import { AccountActions, AppPageName } from "../AppShell";
 import { formatBytes } from "../files/filesApi";
-import { useDialogSentinel } from "../historyDialogs";
 import { useConfirm } from "../ui/useConfirm";
+import { useHistoryDialogGuard } from "../ui/useHistoryDialogGuard";
 import { relativeTime } from "../files/format";
 import type { BinItem } from "../types";
 import { deleteBinItem, emptyBin, listBin, restoreBinItem } from "./binApi";
@@ -25,12 +24,8 @@ import {
 import "./bin.css";
 import { ReadOnlyBanner, useRole } from "../team/roleAccess";
 
-type BinAppProps = {
-  displayName: string;
+type BinSectionProps = {
   flash: (message: string) => void;
-  onHome: () => void;
-  onSettings: () => void;
-  onSignOut: () => void;
   /** Called after an item is restored, so the owning app can refresh its lists. */
   onRestored?: (item: BinItem) => void;
 };
@@ -54,7 +49,12 @@ const errorCode = (reason: unknown) => reason instanceof ApiError && reason.payl
   ? (reason.payload as { code?: unknown }).code
   : undefined;
 
-export function BinApp({ displayName, flash, onHome, onSettings, onSignOut, onRestored }: BinAppProps) {
+/**
+ * The Bin (Wave 38: Settings → Bin, at /settings/bin; before, a page of its own at /bin). A section of
+ * the Settings hub: the hub's header names it and brings Home and the account row, and its list
+ * scrolls inside the hub's section scroller (the page itself does not scroll on a computer).
+ */
+export function BinSection({ flash, onRestored }: BinSectionProps) {
   // O3: viewers and guests see their Bin but cannot restore or delete forever; items age out.
   const { canWrite } = useRole();
   const [items, setItems] = useState<BinItem[] | null>(null);
@@ -90,18 +90,14 @@ export function BinApp({ displayName, flash, onHome, onSettings, onSignOut, onRe
     sheetReturnFocusRef.current = null;
   }, []);
 
-  // The sheet has no history entry of its own (except the depth-0 sentinel on a phone), so Back/Forward (and Escape) just close it.
-  useDialogSentinel(sheetKey !== null);
+  // The row's actions sheet is a history layer (D18; Wave 38): Back or Forward only closes it, so Back
+  // from the sheet stays in the Bin instead of leaving Settings → Bin. Escape closes it too.
+  useHistoryDialogGuard(sheetKey !== null, closeSheet);
   useEffect(() => {
     if (!sheetKey) return;
     const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") closeSheet(); };
-    const onPop = () => setSheetKey(null);
     window.addEventListener("keydown", onKey);
-    window.addEventListener("popstate", onPop);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("popstate", onPop);
-    };
+    return () => window.removeEventListener("keydown", onKey);
   }, [closeSheet, sheetKey]);
 
   const all = items ?? [];
@@ -205,19 +201,12 @@ export function BinApp({ displayName, flash, onHome, onSettings, onSignOut, onRe
 
   const emptyCopy = filter === "note" ? "No notes in the Bin." : filter === "document" ? "No files in the Bin." : filter === "tasks" ? "No cards or boards in the Bin." : filter === "collections" ? "No collections or rows in the Bin." : filter === "calendar" ? "No calendars or events in the Bin." : filter === "vault" ? "No vaults, environments, or secrets in the Bin." : "Nothing in the Bin.";
 
-  return <main className="app-page bin-app">
-    <header className="app-page-header">
-      <button className="app-home-button" onClick={onHome}><House />Home</button>
-      <span className="app-home-brand"><span className="brand-dot"><Sparkles /></span><span className="brand-text"><strong>Bin</strong></span></span><AppPageName name="Bin" />
-      <AccountActions displayName={displayName} onSettings={onSettings} onSignOut={onSignOut} />
-    </header>
+  // The hub's header is the section's title ("Bin"); the retention line and Empty Bin stay here.
+  return <section className="settings-content bin-section" aria-labelledby="settings-hub-title">
     <ReadOnlyBanner />
-
-    <section className="bin-content" aria-labelledby="bin-title">
+    <div className="bin-content">
       <div className="bin-intro">
         <div>
-          <span className="eyebrow">Bin</span>
-          <h1 id="bin-title">Bin</h1>
           <p>Deleted notes, files, cards, boards, collections, rows, calendars, and events stay here for 30 days, then they are deleted forever. Restoring brings back their sharing.</p>
         </div>
         {canWrite && <button className="bin-empty-button" onClick={() => { void emptyAll(); }} disabled={!all.length || busy}><Trash2 />{emptying ? "Emptying…" : "Empty Bin"}</button>}
@@ -279,7 +268,7 @@ export function BinApp({ displayName, flash, onHome, onSettings, onSignOut, onRe
           </li>;
         })}
       </ul>}
-    </section>
+    </div>
 
     {sheetItem && <>
       <button className="panel-scrim" onClick={closeSheet} aria-label="Close actions" />
@@ -294,5 +283,5 @@ export function BinApp({ displayName, flash, onHome, onSettings, onSignOut, onRe
       </div>
     </>}
     {confirmElement}
-  </main>;
+  </section>;
 }

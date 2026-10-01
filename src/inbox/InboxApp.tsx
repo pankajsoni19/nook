@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, CheckCheck, ChevronLeft, ExternalLink, House, Inbox, RotateCcw, Sparkles, TriangleAlert, X } from "lucide-react";
 import { ApiError } from "../api";
-import { AccountActions, useBinCount, AppPageName } from "../AppShell";
+import { AccountActions, AppPageName } from "../AppShell";
 import { readHistoryDepth } from "../appShellNavigation";
 import { diffStats, lineDiff } from "../diff/lineDiff";
 import { relativeTime } from "../files/format";
@@ -33,7 +33,6 @@ type InboxAppProps = {
   navigate: InboxNavigate;
   flash: (message: string) => void;
   onHome: () => void;
-  onBin?: () => void;
   onSettings: () => void;
   onSignOut: () => void;
   /** Opens an in-app path (a card, event, row, or note) as a new history entry. */
@@ -64,9 +63,8 @@ const refLabel: Record<ProposalRef["type"], string> = { note: "Open note", card:
  * wrote is rendered as text under "Written by the agent" (T127). Approve is for members and admins;
  * viewers may reject (D152).
  */
-export function InboxApp({ displayName, navigate, flash, onHome, onBin, onSettings, onSignOut, onOpenPath }: InboxAppProps) {
+export function InboxApp({ displayName, navigate, flash, onHome, onSettings, onSignOut, onOpenPath }: InboxAppProps) {
   const { canWrite } = useRole();
-  const binCount = useBinCount(Boolean(onBin));
   const [route, setRoute] = useState<InboxRoute>(currentRoute);
   const [groups, setGroups] = useState<ProposalGroup[] | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -314,7 +312,7 @@ export function InboxApp({ displayName, navigate, flash, onHome, onBin, onSettin
     <header className="app-page-header">
       <button className="app-home-button" onClick={onHome}><House />Home</button>
       <span className="app-home-brand"><span className="brand-dot"><Sparkles /></span><span className="brand-text"><strong>Inbox</strong></span></span><AppPageName name="Inbox" />
-      <AccountActions displayName={displayName} onSettings={onSettings} onSignOut={onSignOut} onBin={onBin} binCount={binCount} />
+      <AccountActions displayName={displayName} onSettings={onSettings} onSignOut={onSignOut} />
     </header>
     <ReadOnlyBanner />
 
