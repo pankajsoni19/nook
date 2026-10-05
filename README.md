@@ -102,7 +102,7 @@ You need Git, Docker Engine, and Docker Compose.
 git clone https://github.com/pankajsoni19/nook.git && cd nook
 cp .env.example .env            # set ALLOWED_EMAILS, TOTP_POLICY, APP_ORIGINS as needed
 sudo mkdir -p /srv/mynotes && sudo chown 1000:1000 /srv/mynotes   # or set MYNOTES_DATA_DIR
-APP_VERSION=0.24.0 GIT_SHA=$(git rev-parse --short HEAD) docker compose up -d --build
+APP_VERSION=0.25.0 GIT_SHA=$(git rev-parse --short HEAD) docker compose up -d --build
 curl http://localhost:2026/api/health   # then open http://localhost:2026 and create the first account (the admin)
 ```
 
@@ -111,6 +111,14 @@ Later registrations stay disabled unless you set `ALLOW_REGISTRATION=true`. `APP
 ## Upgrading
 
 Back up first (`./scripts/backup.sh --force`), pull, rebuild, and let migrations run on the first boot. Release-specific steps are in [docs/OPERATIONS.md](docs/OPERATIONS.md#upgrades).
+
+## What's new in v0.25.0
+
+- **Your own app name**: set `APP_NAME` (for example `APP_NAME=Acme Notes`) and the name appears in every tab title, in link previews when you share a URL, in the installed app's name, in email subjects and the sender name, in the two-factor issuer, and across the app's own screens. Leave it unset to keep "Nook". Internal ids and key prefixes never change.
+- **Bin inside Settings**: the Bin is a Settings section now (Workspace → Bin, with its item count). Old `/bin` links still open it. Guests, who can delete nothing, don't see it.
+- **A slimmer top bar**: Settings · Inbox · bell · your name · Sign out. The Bin and Team buttons are gone (both live in Settings); admins see the blocked-account count on Settings → Team → Members instead.
+- **Fixes**: browser Forward onto a hidden entry after turning a module off no longer leaves the address and the screen out of step (the app's history listener was being re-registered on every render); the Bin is fetched once when opened.
+- No migration. `APP_NAME` is the only new setting. See [docs/OPERATIONS.md](docs/OPERATIONS.md#upgrades).
 
 ## What's new in v0.24.0
 

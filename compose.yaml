@@ -4,7 +4,7 @@ services:
       context: .
       target: production
       args:
-        APP_VERSION: ${APP_VERSION:-0.24.0}
+        APP_VERSION: ${APP_VERSION:-0.25.0}
         GIT_SHA: ${GIT_SHA:-development}
     container_name: mynotes
     restart: unless-stopped
