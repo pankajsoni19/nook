@@ -143,8 +143,9 @@ describe("the access matrix for sessions (T181)", () => {
     setRole(guest, "guest");
     try {
       const features = async (session: typeof member) => ((await (await request("/auth/me", {}, session)).json()) as { features: unknown }).features;
-      expect(await features(member)).toEqual({ vault: true });
-      expect(await features(guest)).toEqual({ vault: false });
+      // Wave 40: `agents` (Chat) follows the same rule.
+      expect(await features(member)).toEqual({ vault: true, agents: true });
+      expect(await features(guest)).toEqual({ vault: false, agents: false });
     } finally {
       setRole(guest, "member");
     }

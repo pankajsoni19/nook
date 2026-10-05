@@ -5,7 +5,7 @@
  */
 export type McpScope = "notes:read" | "notes:write-draft" | "notes:publish" | "files:read" | "files:write" | "tasks:read" | "tasks:write" | "today:read"
   | "calendar:read" | "calendar:write" | "collections:read" | "collections:write" | "bin:write" | "team:read"
-  | "inbox:read" | "inbox:write" | "whiteboards:read" | "whiteboards:write";
+  | "inbox:read" | "inbox:write" | "whiteboards:read" | "whiteboards:write" | "agents:read";
 
 /** `warning` is an extra line Settings shows under the help, for permissions with a wider reach. */
 export type McpPermission = { scope: McpScope; label: string; help: string; implies?: McpScope; warning?: string };
@@ -29,7 +29,8 @@ export const MCP_PERMISSIONS: readonly McpPermission[] = [
   { scope: "inbox:read", label: "Read inbox", help: "See your routines and this key's own proposals." },
   { scope: "inbox:write", label: "Suggest changes", help: "Suggest changes for you to approve in the Inbox. Never applies anything; each suggestion also needs that module's read permission.", implies: "inbox:read" },
   { scope: "whiteboards:read", label: "Read whiteboards", help: "Whiteboards you can open: their names and text, and on request a summary of their shapes." },
-  { scope: "whiteboards:write", label: "Create whiteboards", help: "Create empty, private whiteboards in your folders; never draws, shares, or deletes.", implies: "whiteboards:read" }
+  { scope: "whiteboards:write", label: "Create whiteboards", help: "Create empty, private whiteboards in your folders; never draws, shares, or deletes.", implies: "whiteboards:read" },
+  { scope: "agents:read", label: "Read agents and chats", help: "Your agents (name, description, model; never the prompt) and the chats you own, read-only. Running an agent over MCP comes later." }
 ];
 
 /** The permissions offered when creating a key: every scope that has tools. */

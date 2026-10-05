@@ -328,6 +328,10 @@ const quoted = (words: readonly string[]) => words.map((word) => `'${word}'`).jo
 export function rebuildApiKeyGrants(db: Parameters<Migration["up"]>[0]) {
   const current = (db.query("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'api_key_grants'").get() as { sql: string } | null)?.sql ?? "";
   if (!current || /'agents'/.test(current)) return;
+  // 031, 037, and 038 may reach an install after this one (each id is applied on its own): without
+  // 038's column the copy writes its default, and 038 later finds the column and triggers in place.
+  const columns = (db.query("PRAGMA table_info(api_key_grants)").all() as Array<{ name: string }>).map((column) => column.name);
+  const protectedSource = columns.includes("protected_at_grant") ? "protected_at_grant" : "0";
   // The Messages migration (040) may have rebuilt it first with its own words: keep them too.
   db.exec(`
     CREATE TABLE api_key_grants_new (
@@ -344,7 +348,7 @@ export function rebuildApiKeyGrants(db: Parameters<Migration["up"]>[0]) {
       CHECK (env_id IS NULL OR module = 'vault')
     );
     INSERT INTO api_key_grants_new (id, key_id, module, permission, resource_kind, resource_id, env_id, created_at, protected_at_grant)
-      SELECT id, key_id, module, permission, resource_kind, resource_id, env_id, created_at, protected_at_grant FROM api_key_grants;
+      SELECT id, key_id, module, permission, resource_kind, resource_id, env_id, created_at, ${protectedSource} FROM api_key_grants;
     DROP TABLE api_key_grants;
     -- Triggers on other tables (notes_purge_access_grants, vaults_purge_access_grants, ...) name this
     -- table; with the modern rename check they would make the rename fail while the table is gone,

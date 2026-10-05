@@ -1,5 +1,5 @@
 import { useEffect, useRef, type ReactNode } from "react";
-import { Bell, Bot, ChevronLeft, ChevronRight, History, House, Info, KeyRound, LayoutGrid, LayoutTemplate, Link2, Mail, Scale, Share2, ShieldCheck, Sparkles, Users, UsersRound, type LucideIcon } from "lucide-react";
+import { Bell, Bot, ChevronLeft, ChevronRight, Cpu, History, House, Info, KeyRound, LayoutGrid, LayoutTemplate, Link2, Mail, Scale, Share2, ShieldCheck, Sparkles, Users, UsersRound, type LucideIcon } from "lucide-react";
 import { AppPageName } from "../AppShell";
 import { isMobileViewport } from "../mobileNavigation";
 import { Avatar } from "../ui/Avatar";
@@ -8,7 +8,7 @@ import type { HubEntry, HubEntryId } from "./hubModel";
 import "./settingsHub.css";
 
 const ICONS: Record<HubEntryId, LucideIcon> = {
-  security: ShieldCheck, notifications: Bell, access: Share2, mcp: KeyRound, modules: LayoutGrid, about: Info,
+  security: ShieldCheck, notifications: Bell, access: Share2, mcp: KeyRound, agents: Bot, ai: Cpu, modules: LayoutGrid, about: Info,
   "team-members": Users, "team-invites": Link2, "team-groups": UsersRound, "team-integrations": Bot, "team-keys": KeyRound,
   "team-policies": Scale, "team-templates": LayoutTemplate, "team-activity": History, "team-email": Mail
 };
@@ -16,7 +16,7 @@ const ICONS: Record<HubEntryId, LucideIcon> = {
 /** One line under each entry on the phone's section list (the computer's nav shows labels only). */
 const HINTS: Record<HubEntryId, string> = {
   security: "Password, two-factor, and Google sign-in", notifications: "Push and email", access: "What others share with you",
-  mcp: "Keys for AI clients and scripts", modules: "Turn parts of Nook on or off", about: "Version and source",
+  mcp: "Keys for AI clients and scripts", agents: "Your agents: prompt, model, and steps", ai: "Model providers and chat policy", modules: "Turn parts of Nook on or off", about: "Version and source",
   "team-members": "Everyone on this Nook and their team role", "team-invites": "Links to add people", "team-groups": "Share with a team at once",
   "team-integrations": "Accounts for AI clients and scripts", "team-keys": "Every API key on this Nook", "team-policies": "Key lifetime and where keys work",
   "team-templates": "A role and groups for new people", "team-activity": "Who changed keys, groups, and access", "team-email": "What Nook emailed, and how it went"

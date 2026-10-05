@@ -1,0 +1,215 @@
+import { useCallback, useEffect, useId, useState, type FormEvent } from "react";
+import { Cpu, Plus, ShieldAlert } from "lucide-react";
+import { ModalDialog } from "../files/Dialog";
+import { hubDocumentTitle } from "../router";
+import { Select } from "../ui/Select";
+import { useConfirm } from "../ui/useConfirm";
+import { useHistoryDialogGuard } from "../ui/useHistoryDialogGuard";
+import { AGENT_BOUNDS, AGENT_ROLE_OPTIONS, DEFAULT_BASE_URL, DEFAULT_MODEL, type AgentRole, type AgentSettings, type ProviderSummary } from "../../shared/agents";
+import { agentsStatus, createProvider, deleteProvider, listProviders, messageOf, readSettings, testProvider, updateProvider, writeSettings, errorCode, type AgentsStatus, type ProviderTest } from "./chatApi";
+import "./chat.css";
+
+/**
+ * Settings → AI (admins; agent chat plan §4.1, §13.4): providers (name, base URL, a write-only API
+ * key shown as a hint, default model, compatibility) with Test, and the chat policy (who creates,
+ * who chats, daily token budgets). Without AGENT_SECRETS_KEY the page explains what to set and
+ * everything else is disabled.
+ */
+
+export const SECRET_HONESTY = "Encrypted at rest; anyone with the server and its key can read these secrets.";
+const ROLE_LABELS: Record<AgentRole, string> = { admin: "Admins", member: "Members", viewer: "Viewers" };
+
+export function AiSettings({ flash }: { flash: (message: string) => void }) {
+  const [status, setStatus] = useState<AgentsStatus | null>(null);
+  const [providers, setProviders] = useState<ProviderSummary[] | null>(null);
+  const [settings, setSettings] = useState<(AgentSettings & { revision: number }) | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState<ProviderSummary | "new" | null>(null);
+  const [tests, setTests] = useState<Record<string, ProviderTest | "running">>({});
+  const confirm = useConfirm();
+  useEffect(() => { document.title = hubDocumentTitle("AI"); }, []);
+
+  const load = useCallback(async () => {
+    try {
+      const next = await agentsStatus();
+      setStatus(next);
+      if (!next.enabled) return;
+      const [list, policy] = await Promise.all([listProviders(), readSettings()]);
+      setProviders(list.providers);
+      setSettings(policy.settings);
+      setError(null);
+    } catch (reason) {
+      setError(messageOf(reason, "Could not load AI settings"));
+    }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+
+  async function test(provider: ProviderSummary) {
+    setTests((current) => ({ ...current, [provider.id]: "running" }));
+    try {
+      const { test: result } = await testProvider(provider.id);
+      setTests((current) => ({ ...current, [provider.id]: result }));
+    } catch (reason) {
+      flash(messageOf(reason, "The test could not run"));
+      setTests((current) => { const next = { ...current }; delete next[provider.id]; return next; });
+    }
+  }
+  async function remove(provider: ProviderSummary) {
+    if (!await confirm.ask({ title: `Remove ${provider.name}?`, message: "Agents using it fall back to the default provider. Its API key is deleted.", confirmLabel: "Remove", danger: true })) return;
+    try {
+      await deleteProvider(provider.id);
+      flash("Provider removed");
+      void load();
+    } catch (reason) {
+      flash(messageOf(reason, "Could not remove the provider"));
+    }
+  }
+  async function makeDefault(provider: ProviderSummary) {
+    try {
+      await updateProvider(provider.id, { isDefault: true, expectedRevision: provider.revision });
+      void load();
+    } catch (reason) {
+      flash(messageOf(reason, "Could not change the default"));
+    }
+  }
+
+  if (error) return <section className="settings-content" aria-labelledby="ai-heading"><h3 id="ai-heading" className="sr-only">AI</h3><p className="form-error" role="alert">{error}</p><button className="secondary-button" onClick={() => { void load(); }}>Retry</button></section>;
+  if (!status) return <section className="settings-content" aria-busy="true"><p className="chat-muted">Loading…</p></section>;
+  if (!status.enabled) {
+    return <section className="settings-content ai-settings" aria-labelledby="ai-heading">
+      <div className="settings-section-heading"><span className="settings-icon"><Cpu /></span><div><h3 id="ai-heading">AI</h3><p>Model providers and the chat policy.</p></div></div>
+      <div className="settings-warning"><ShieldAlert />{status.reason === "key_mismatch" ? "AGENT_SECRETS_KEY does not open the stored provider secrets." : "AGENT_SECRETS_KEY is not set, so Chat is off."}</div>
+      <div className="security-card setup-intro">
+        <strong>Not configured</strong>
+        <p>{status.reason === "key_mismatch" ? "Restore the key the providers were saved with, or remove and re-enter their API keys." : "Generate a key with openssl rand -base64 32 (different from TOTP_ENCRYPTION_KEY and VAULT_ENCRYPTION_KEY), set it as AGENT_SECRETS_KEY or AGENT_SECRETS_KEY_FILE on the server, and restart. Then come back here to add a model provider."} See docs/OPERATIONS.md, Agent chat.</p>
+      </div>
+    </section>;
+  }
+  return <section className="settings-content ai-settings" aria-labelledby="ai-heading">
+    <div className="settings-section-heading"><span className="settings-icon"><Cpu /></span><div><h3 id="ai-heading">Model providers</h3><p>OpenAI-compatible endpoints the server calls for every chat. Every message, prompt, and reply leaves this Nook for the provider you configure. At most {AGENT_BOUNDS.providers}; one is the default.</p></div></div>
+    <ul className="ai-providers">
+      {providers?.map((provider) => {
+        const result = tests[provider.id];
+        return <li key={provider.id} className="security-card ai-provider">
+          <div className="ai-provider-head">
+            <div><strong>{provider.name}</strong>{provider.isDefault && <span className="ai-badge">Default</span>}<small>{provider.baseUrl}</small></div>
+            <div className="ai-provider-actions">
+              <button type="button" className="secondary-button" onClick={() => { void test(provider); }} disabled={result === "running"}>{result === "running" ? "Testing…" : "Test"}</button>
+              <button type="button" className="secondary-button" onClick={() => setEditing(provider)}>Edit</button>
+              {!provider.isDefault && <button type="button" className="secondary-button" onClick={() => { void makeDefault(provider); }}>Make default</button>}
+              <button type="button" className="secondary-button" onClick={() => { void remove(provider); }}>Remove</button>
+            </div>
+          </div>
+          <dl className="ai-provider-facts">
+            <div><dt>API key</dt><dd>{provider.hasSecret ? <code>{provider.hint}</code> : <span className="chat-muted">none</span>}</dd></div>
+            <div><dt>Default model</dt><dd><code>{provider.defaultModel}</code></dd></div>
+            <div><dt>Token parameter</dt><dd><code>{provider.compat.tokenParam}</code></dd></div>
+            <div><dt>Context</dt><dd>{provider.compat.contextTokens.toLocaleString()} tokens{provider.compat.streamUsage ? "" : " · usage estimated"}</dd></div>
+          </dl>
+          {result && result !== "running" && <p className={`ai-test ${result.ok ? "ok" : "failed"}`} role="status">
+            {result.models.ok ? `Models: ${result.models.count} in ${result.models.latencyMs} ms.` : `Models: ${result.models.error ?? "failed"}.`} {result.completion.ok ? `Completion: ok (${result.completion.model}) in ${result.completion.latencyMs} ms.` : `Completion: ${result.completion.error ?? "failed"}.`}
+          </p>}
+        </li>;
+      })}
+    </ul>
+    {providers && providers.length === 0 && <p className="chat-muted">No provider yet. Chats need one.</p>}
+    <p className="policy-copy">{SECRET_HONESTY}</p>
+    <button type="button" className="secondary-button ai-add" onClick={() => setEditing("new")} disabled={(providers?.length ?? 0) >= AGENT_BOUNDS.providers}><Plus />Add provider</button>
+
+    {settings && <PolicyForm settings={settings} providers={providers ?? []} flash={flash} onSaved={(next) => setSettings(next)} />}
+    {editing && <ProviderDialog provider={editing === "new" ? null : editing} onCancel={() => setEditing(null)} onSaved={() => { setEditing(null); void load(); }} />}
+    {confirm.confirmElement}
+  </section>;
+}
+
+function PolicyForm({ settings, providers, flash, onSaved }: { settings: AgentSettings & { revision: number }; providers: ProviderSummary[]; flash: (message: string) => void; onSaved: (settings: AgentSettings & { revision: number }) => void }) {
+  const [draft, setDraft] = useState(settings);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => setDraft(settings), [settings]);
+  const toggleRole = (field: "createRoles" | "chatRoles", role: AgentRole) => setDraft((current) => ({ ...current, [field]: current[field].includes(role) ? current[field].filter((item) => item !== role) : [...current[field], role] }));
+  async function save(event: FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    try {
+      const { settings: next } = await writeSettings({ createRoles: draft.createRoles, chatRoles: draft.chatRoles, dailyTokensUser: draft.dailyTokensUser, dailyTokensInstance: draft.dailyTokensInstance, agentsPerUser: draft.agentsPerUser, defaultProviderId: draft.defaultProviderId, expectedRevision: settings.revision });
+      onSaved(next);
+      flash("Policy saved");
+    } catch (reason) {
+      flash(errorCode(reason) === "REVISION_MISMATCH" ? "The policy changed elsewhere; reload and try again" : messageOf(reason, "Could not save the policy"));
+    } finally {
+      setBusy(false);
+    }
+  }
+  const roleBoxes = (field: "createRoles" | "chatRoles") => <div className="ai-roles">{AGENT_ROLE_OPTIONS.map((role) => <label key={role}><input type="checkbox" checked={draft[field].includes(role)} onChange={() => toggleRole(field, role)} />{ROLE_LABELS[role]}</label>)}</div>;
+  return <form className="security-card ai-policy" onSubmit={save}>
+    <strong>Chat policy</strong>
+    <p>Guests never see Chat. Budgets reset at midnight UTC; a run is refused before it starts once the budget is used up.</p>
+    <div className="ai-policy-grid">
+      <div><span className="ai-label">Who can create agents</span>{roleBoxes("createRoles")}</div>
+      <div><span className="ai-label">Who can chat</span>{roleBoxes("chatRoles")}</div>
+      <label>Tokens per person per day<input type="number" min={0} max={1_000_000_000} value={draft.dailyTokensUser} onChange={(event) => setDraft({ ...draft, dailyTokensUser: Math.max(0, Math.floor(Number(event.target.value) || 0)) })} /><small>0 = unlimited</small></label>
+      <label>Tokens for the whole Nook per day<input type="number" min={0} max={10_000_000_000} value={draft.dailyTokensInstance} onChange={(event) => setDraft({ ...draft, dailyTokensInstance: Math.max(0, Math.floor(Number(event.target.value) || 0)) })} /><small>0 = unlimited</small></label>
+      <label>Agents per person<input type="number" min={1} max={500} value={draft.agentsPerUser} onChange={(event) => setDraft({ ...draft, agentsPerUser: Math.min(500, Math.max(1, Math.floor(Number(event.target.value) || 1))) })} /></label>
+      <div><span className="ai-label" id="ai-default-provider">Default provider</span><Select<string> labelledBy="ai-default-provider" label="Default provider" value={draft.defaultProviderId ?? providers.find((provider) => provider.isDefault)?.id ?? null} onChange={(value) => setDraft({ ...draft, defaultProviderId: value })} options={providers.map((provider) => ({ value: provider.id, label: provider.name, description: provider.defaultModel }))} placeholder="The provider marked default" disabled={providers.length === 0} /></div>
+    </div>
+    <p className="chat-muted">Public chat links stay off in this release (AC-O1). Sharing, tool servers, and the Audit log come in later releases.</p>
+    <footer className="file-dialog-actions"><button type="submit" className="primary-button" disabled={busy}>{busy ? "Saving…" : "Save policy"}</button></footer>
+  </form>;
+}
+
+function ProviderDialog({ provider, onCancel, onSaved }: { provider: ProviderSummary | null; onCancel: () => void; onSaved: () => void }) {
+  const [name, setName] = useState(provider?.name ?? "");
+  const [baseUrl, setBaseUrl] = useState(provider?.baseUrl ?? DEFAULT_BASE_URL);
+  const [apiKey, setApiKey] = useState("");
+  const [removeSecret, setRemoveSecret] = useState(false);
+  const [defaultModel, setDefaultModel] = useState(provider?.defaultModel ?? DEFAULT_MODEL);
+  const [tokenParam, setTokenParam] = useState<"max_completion_tokens" | "max_tokens">(provider?.compat.tokenParam ?? "max_completion_tokens");
+  const [streamUsage, setStreamUsage] = useState(provider?.compat.streamUsage ?? true);
+  const [contextTokens, setContextTokens] = useState(provider?.compat.contextTokens ?? 128_000);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const ids = { name: useId(), url: useId(), key: useId(), model: useId(), context: useId(), param: useId() };
+  useHistoryDialogGuard(true, onCancel, { blocked: busy });
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!name.trim()) return setError("Enter a name.");
+    setBusy(true);
+    setError(null);
+    const compat = { tokenParam, streamUsage, contextTokens };
+    try {
+      if (provider) await updateProvider(provider.id, { name: name.trim(), baseUrl: baseUrl.trim(), ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}), removeSecret, defaultModel: defaultModel.trim() || DEFAULT_MODEL, compat, expectedRevision: provider.revision });
+      else await createProvider({ name: name.trim(), baseUrl: baseUrl.trim(), apiKey: apiKey.trim() || null, defaultModel: defaultModel.trim() || DEFAULT_MODEL, compat });
+      setApiKey("");
+      onSaved();
+    } catch (reason) {
+      setError(errorCode(reason) === "REVISION_MISMATCH" ? "This provider changed elsewhere; close and reopen it." : messageOf(reason, "Could not save the provider"));
+      setBusy(false);
+    }
+  }
+  return <ModalDialog title={provider ? "Edit provider" : "Add provider"} eyebrow="AI" onClose={onCancel} busy={busy} variant="sheet" className="chat-dialog">
+    <form className="file-dialog-form ai-provider-form" onSubmit={submit}>
+      <label htmlFor={ids.name}>Name</label>
+      <input id={ids.name} value={name} maxLength={AGENT_BOUNDS.providerName} autoFocus autoComplete="off" placeholder="OpenAI" onChange={(event) => setName(event.target.value)} />
+      <label htmlFor={ids.url}>Base URL</label>
+      <input id={ids.url} value={baseUrl} maxLength={AGENT_BOUNDS.baseUrl} autoComplete="off" spellCheck={false} placeholder={DEFAULT_BASE_URL} onChange={(event) => setBaseUrl(event.target.value)} />
+      <p className="file-dialog-hint">https only. A private host (Ollama, LiteLLM, vLLM on your network) must be listed in AGENT_ALLOWED_PRIVATE_HOSTS on the server.</p>
+      <label htmlFor={ids.key}>API key {provider?.hasSecret && !removeSecret ? <small>(saved: {provider.hint}; leave empty to keep it)</small> : null}</label>
+      <input id={ids.key} type="password" value={apiKey} maxLength={1024} autoComplete="off" placeholder={provider?.hasSecret ? "Keep the saved key" : "sk-…"} onChange={(event) => { setApiKey(event.target.value); setRemoveSecret(false); }} />
+      {provider?.hasSecret && <label className="ai-check"><input type="checkbox" checked={removeSecret} onChange={(event) => setRemoveSecret(event.target.checked)} />Remove the saved key</label>}
+      <p className="file-dialog-hint">{SECRET_HONESTY} The key is sent only to this provider's endpoint and is never shown again.</p>
+      <label htmlFor={ids.model}>Default chat model</label>
+      <input id={ids.model} value={defaultModel} maxLength={AGENT_BOUNDS.model} autoComplete="off" spellCheck={false} placeholder={DEFAULT_MODEL} onChange={(event) => setDefaultModel(event.target.value)} />
+      <span className="ai-label" id={ids.param}>Output-token parameter</span>
+      <Select<"max_completion_tokens" | "max_tokens"> labelledBy={ids.param} label="Output-token parameter" value={tokenParam} onChange={setTokenParam} options={[{ value: "max_completion_tokens", label: "max_completion_tokens", description: "OpenAI" }, { value: "max_tokens", label: "max_tokens", description: "Most compatible servers" }]} />
+      <label htmlFor={ids.context}>Context window (tokens)</label>
+      <input id={ids.context} type="number" min={1024} max={10_000_000} value={contextTokens} onChange={(event) => setContextTokens(Math.min(10_000_000, Math.max(1024, Math.floor(Number(event.target.value) || 1024))))} />
+      <label className="ai-check"><input type="checkbox" checked={streamUsage} onChange={(event) => setStreamUsage(event.target.checked)} />The server reports token usage while streaming (off: tokens are estimated)</label>
+      {error && <p className="form-error" role="alert">{error}</p>}
+      <footer className="file-dialog-actions">
+        <button type="button" className="secondary-button" onClick={onCancel} disabled={busy}>Cancel</button>
+        <button type="submit" className="primary-button" disabled={busy}>{busy ? "Saving…" : provider ? "Save" : "Add provider"}</button>
+      </footer>
+    </form>
+  </ModalDialog>;
+}

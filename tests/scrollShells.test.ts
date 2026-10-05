@@ -114,6 +114,24 @@ test("F1: two-pane pages (Team and its sections, Inbox proposals) scroll each pa
   expect(inbox).toMatch(/detailPaneRef\.current\?\.scrollTo\(\{ top: 0 \}\); \}, \[route\.proposalId\]\)/);
 });
 
+test("Chat (Wave 40): a split page on a computer (the list | the chat, each its own scroller), one pane at a time on phones; tables and code scroll inside their blocks", async () => {
+  const chat = await read("chat/ChatApp.tsx");
+  expect(chat).toContain(`<main className={\`app-page chat-app\${detailOpen ? " chat-detail-open" : ""}\`}>`);
+  expect(chat).toContain(`className="chat-layout split-layout"`);
+  expect(chat).toContain(`className="chat-list-pane split-pane"`);
+  expect(chat).toContain(`className="chat-pane split-pane"`);
+  const css = await read("chat/chat.css");
+  // The root never takes the page's scrolling away; phones hide one pane and keep the page scroller.
+  expect(css).not.toMatch(/\.chat-app\s*\{[^}]*overflow/);
+  expect(css).toContain(".chat-app:not(.chat-detail-open) .chat-pane { display: none; }");
+  expect(css).toContain(".chat-app.chat-detail-open .chat-list-pane { display: none; }");
+  // The composer sticks to the pane's bottom (above the keyboard with the safe-area inset), and wide content scrolls inside itself.
+  expect(rule(css, ".chat-composer")).toContain("position: sticky");
+  expect(rule(css, ".chat-composer")).toContain("env(safe-area-inset-bottom)");
+  expect(rule(css, ".chat-md-table")).toContain("overflow-x: auto");
+  expect(rule(css, ".chat-md-pre pre")).toContain("overflow-x: auto");
+});
+
 test("Vault (Wave 25): every screen scrolls as a page with a fixed header; a wide grid scrolls sideways only inside itself", async () => {
   const shell = await read("appShell.css");
   expect(bounded(rule(shell, ".app-page:not(.tasks-app):not(.collections-app)"))).toBe(true);

@@ -12,8 +12,9 @@ export type HubEntry = { id: HubEntryId; group: "account" | "team"; label: strin
 type TeamRoute = Extract<Route, { app: "team" }>;
 const team = (flags: Partial<TeamRoute> = {}): TeamRoute => ({ app: "team", userId: null, ...flags });
 
-/** Account entries, in nav order. My access is for every role but guest. */
-const ACCOUNT_ORDER: readonly SettingsSection[] = ["security", "notifications", "access", "mcp", "modules", "about"];
+/** Account entries, in nav order. My access and Agents are for every role but guest; AI is for admins. */
+const ACCOUNT_ORDER: readonly SettingsSection[] = ["security", "notifications", "access", "mcp", "agents", "ai", "modules", "about"];
+const ADMIN_ONLY_SECTIONS: readonly SettingsSection[] = ["ai"];
 
 /** Team entries, in nav order. Only Members is for every role that sees Team; the rest are admins only. */
 const TEAM_ENTRIES: ReadonlyArray<{ id: TeamEntryId; label: string; route: TeamRoute; adminOnly: boolean }> = [
@@ -43,7 +44,8 @@ export function teamGroupShown(role: Role | undefined, teamModuleEnabled: boolea
 export function hubEntries(role: Role | undefined, options: { teamModuleEnabled: boolean; setupRequired?: boolean }): HubEntry[] {
   if (options.setupRequired) return [{ id: "security", group: "account", label: SETTINGS_SECTION_NAMES.security, route: { app: "settings", section: "security" } }];
   const account: HubEntry[] = ACCOUNT_ORDER
-    .filter((section) => section !== "access" || role !== "guest")
+    .filter((section) => (section !== "access" && section !== "agents") || role !== "guest")
+    .filter((section) => !ADMIN_ONLY_SECTIONS.includes(section) || role === "admin")
     .map((section) => ({ id: section, group: "account", label: SETTINGS_SECTION_NAMES[section], route: { app: "settings", section } }));
   if (!teamGroupShown(role, options.teamModuleEnabled)) return account;
   const admin = canManageTeam(role);
@@ -90,6 +92,7 @@ export function hubEntryLabel(id: HubEntryId): string {
  * back button to the section, so the hub's phone back arrow (to the list) is not shown over it.
  */
 export function isNestedHubRoute(route: Route) {
+  if (route.app === "settings") return route.section === "agents" && Boolean(route.agentId);
   return route.app === "team" && Boolean(route.userId || route.groupId || route.integrationId);
 }
 

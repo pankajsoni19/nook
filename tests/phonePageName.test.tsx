@@ -11,6 +11,7 @@ const pages: Record<string, string> = {
   "calendar/CalendarApp.tsx": "Calendar",
   "settings/SettingsHub.tsx": "Settings",
   "inbox/InboxApp.tsx": "Inbox",
+  "chat/ChatApp.tsx": "Chat",
   "bin/BinApp.tsx": "Bin",
   "notifications/NotificationsApp.tsx": "Notifications"
 };
