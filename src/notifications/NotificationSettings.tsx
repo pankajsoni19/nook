@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Bell, BellRing, Send, Smartphone, Trash2 } from "lucide-react";
 import { getInboxSettings, setInboxPush } from "../inbox/inboxApi";
 import { useRole } from "../team/roleAccess";
+import { appName } from "../appName";
 import { EmailSettings } from "./EmailSettings";
 import {
   currentEndpoint,
@@ -15,15 +16,17 @@ import {
   type PushDevice
 } from "./pushClient";
 
-export const PUSH_UNAVAILABLE_COPY = "Push needs the HTTPS address, such as your Tailscale URL; reminders still appear in Nook.";
+/** Wave 39: the copy names the app by its runtime name (APP_NAME), so it is built when asked. */
+export const pushUnavailableCopy = () => `Push needs the HTTPS address, such as your Tailscale URL; reminders still appear in ${appName()}.`;
 export const IOS_HOME_SCREEN_COPY = "Add to Home Screen first.";
 
 /** The explanation shown when push cannot be enabled here (§4.4). */
 export function unavailableMessage(reason: "server_insecure" | "server_disabled" | "ios_home_screen" | "unsupported") {
-  if (reason === "server_disabled") return "Push notifications are turned off on this server; reminders still appear in Nook.";
-  if (reason === "ios_home_screen") return `${IOS_HOME_SCREEN_COPY} On iPhone and iPad, open Nook from the Share menu → Add to Home Screen, then enable notifications from there. Reminders still appear in Nook.`;
-  if (reason === "unsupported") return "This browser does not support push notifications; reminders still appear in Nook.";
-  return PUSH_UNAVAILABLE_COPY;
+  const name = appName();
+  if (reason === "server_disabled") return `Push notifications are turned off on this server; reminders still appear in ${name}.`;
+  if (reason === "ios_home_screen") return `${IOS_HOME_SCREEN_COPY} On iPhone and iPad, open ${name} from the Share menu → Add to Home Screen, then enable notifications from there. Reminders still appear in ${name}.`;
+  if (reason === "unsupported") return `This browser does not support push notifications; reminders still appear in ${name}.`;
+  return pushUnavailableCopy();
 }
 
 /** Settings → Notifications: enable push on this device, see and remove devices, send a test. */
@@ -94,7 +97,7 @@ export function NotificationSettings() {
   }
 
   return <section className="settings-content notification-settings" aria-labelledby="notification-settings-heading">
-    <div className="settings-section-heading"><span className="settings-icon"><Bell /></span><div><h3 id="notification-settings-heading">Notifications</h3><p>Calendar reminders always appear under the bell in Nook. Push shows them on this device too, even when Nook is closed. Push messages carry no content; your device fetches the reminder from Nook.</p></div></div>
+    <div className="settings-section-heading"><span className="settings-icon"><Bell /></span><div><h3 id="notification-settings-heading">Notifications</h3><p>Calendar reminders always appear under the bell in {appName()}. Push shows them on this device too, even when {appName()} is closed. Push messages carry no content; your device fetches the reminder from {appName()}.</p></div></div>
     {!config && !error && <p className="notification-empty" role="status">Loading…</p>}
     {availability && !availability.available && <p className="notification-settings-note" role="note">{unavailableMessage(availability.reason)}</p>}
     {availability?.available && <div className="notification-settings-row">

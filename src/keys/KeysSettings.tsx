@@ -14,6 +14,7 @@ import {
 import { keyDetailEvents, useKeysApi, type ApiKey, type KeyEvent, type KeyList, type NarrowBody, type KeysApi, type VaultKeyEvent } from "./keysApi";
 import { firstVaultRow, useVaultChoices, VaultGrantBuilder } from "./VaultGrantBuilder";
 import { namesProtected, vaultFlagChips, vaultGrantChips, vaultGrantCountChips, vaultGrantsToRows, vaultKeyEventLine, vaultRowsNarrow, vaultRowsToGrants, type VaultGrantRow, type VaultGrantView } from "./vaultKeyGrants";
+import { appName } from "../appName";
 import "./keys.css";
 
 /**
@@ -133,7 +134,7 @@ export function KeysSettings({ onPendingChange, onNestedDialogChange, totpEnable
     {notice}
     <div className="settings-section-heading"><span className="settings-icon"><KeyRound /></span><div><h3 id="keys-heading">API keys</h3><p>{integration
       ? `Keys let an AI client or script act as ${integration.name}, over MCP or the REST API. A key reaches only what owners share with ${integration.name} by name, only what its permissions allow, and only until it expires. Creating or rotating one asks for your password; copy the new key into the client that uses it.`
-      : "Keys let trusted AI clients and scripts use Nook as you, over MCP or the REST API. Each key does only what its permissions allow, only with items you can open, and only until it expires. No key can share, manage access, manage keys, or delete forever."}</p></div></div>
+      : `Keys let trusted AI clients and scripts use ${appName()} as you, over MCP or the REST API. Each key does only what its permissions allow, only with items you can open, and only until it expires. No key can share, manage access, manage keys, or delete forever.`}</p></div></div>
     {error && <p className="form-error" role="alert">{error}</p>}
     {status && <p className="keys-status" role="status">{status}</p>}
     <div className="mcp-endpoint"><div><span>Transport</span><strong>Streamable HTTP</strong></div><div><span>Endpoint</span><code>{endpoint}</code><button type="button" className="icon-button" onClick={() => copy(endpoint, "endpoint")} aria-label="Copy MCP endpoint"><Copy /></button></div></div>

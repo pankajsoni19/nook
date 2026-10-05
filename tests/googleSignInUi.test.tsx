@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { isValidElement, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Avatar, avatarInitial, AvatarView, isAvatarPath } from "../src/ui/Avatar";
-import { currentReturnPath, GOOGLE_ONLY_HINT, GOOGLE_ONLY_PASSWORD_TEXT, GoogleButton, googleErrorMessage, googleStartUrl, linkRequiredText, takeGoogleSettingsResult, takeGoogleSignInResult } from "../src/auth/googleSignIn";
+import { currentReturnPath, googleOnlyHint, googleOnlyPasswordText, GoogleButton, googleErrorMessage, googleStartUrl, linkRequiredText, takeGoogleSettingsResult, takeGoogleSignInResult } from "../src/auth/googleSignIn";
 import { googleCardShown, resetLines } from "../src/team/TeamGoogle";
 import { draftFrom } from "../src/access/accessModel";
 import { takeInviteFromLocation } from "../src/auth/inviteLink";
@@ -210,7 +210,7 @@ describe("end-user QA fixes (U1–U11)", () => {
     const pages = readFileSync(join(src, "auth", "passwordPages.tsx"), "utf8");
     expect(pages).toContain("setGoogleOnly(info.authMethods?.password === false)");
     expect(pages).toContain('code === "PASSWORD_SIGNIN_DISABLED"');
-    expect(GOOGLE_ONLY_PASSWORD_TEXT).toContain("Google only");
+    expect(googleOnlyPasswordText()).toContain("Google only");
   });
 
   test("U2: sign-in, register, and invite render a placeholder until the methods are known", () => {
@@ -236,8 +236,8 @@ describe("end-user QA fixes (U1–U11)", () => {
   });
 
   test("U5–U7: the Google-only hint, Google messages beside the button, and a way out of the code step", () => {
-    expect(GOOGLE_ONLY_HINT).toBe("This Nook signs people in with Google. Use the Google account with your Nook email address. If that does not work, ask your admin.");
-    expect(app()).toContain('<p className="auth-google-only">{GOOGLE_ONLY_HINT}</p>');
+    expect(googleOnlyHint()).toBe("This Nook signs people in with Google. Use the Google account with your Nook email address. If that does not work, ask your admin.");
+    expect(app()).toContain('<p className="auth-google-only">{googleOnlyHint()}</p>');
     expect(app()).toContain('<div className="auth-google-notice" role="alert">');
     expect(app()).toContain("Cancel and use another account");
     expect(app()).toContain('api("/auth/google/cancel"');
@@ -352,7 +352,7 @@ describe("final QA (G1d, G2, G3, G4)", () => {
   test("G2: in google mode the reset page says passwords are off, even with email on", async () => {
     const { ResetPasswordPage, RESET_OFF_TEXT } = await import("../src/auth/passwordPages");
     const markup = renderToStaticMarkup(<ResetPasswordPage token={null} about={{ passwordReset: false, authMethods: { password: false, google: true } }} onSignIn={() => undefined} onForgot={() => undefined} />);
-    expect(markup).toContain(GOOGLE_ONLY_PASSWORD_TEXT);
+    expect(markup).toContain(googleOnlyPasswordText());
     expect(markup).not.toContain(RESET_OFF_TEXT);
     const emailOff = renderToStaticMarkup(<ResetPasswordPage token={null} about={{ passwordReset: false, authMethods: { password: true, google: false } }} onSignIn={() => undefined} onForgot={() => undefined} />);
     expect(emailOff).toContain(RESET_OFF_TEXT);

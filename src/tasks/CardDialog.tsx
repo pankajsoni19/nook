@@ -48,6 +48,7 @@ import { CommentReactions } from "./CommentReactions";
 import type { TaskNotify } from "./taskActions";
 import { ReadOnlyBanner, useRole } from "../team/roleAccess";
 import { levelAtLeast, type ItemLevel } from "../access/accessLevels";
+import { appName } from "../appName";
 
 type CardDialogProps = {
   userId: string;
@@ -197,7 +198,7 @@ export function CardDialog({ userId, cardId, columns, columnId, boardOwner, boar
   useEffect(() => {
     if (pageTitle === null) return undefined;
     const previous = document.title;
-    document.title = `${pageTitle || "Card"} · Tasks · Nook`;
+    document.title = `${pageTitle || "Card"} · Tasks · ${appName()}`;
     return () => { document.title = previous; };
   }, [pageTitle]);
 

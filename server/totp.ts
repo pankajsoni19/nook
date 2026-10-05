@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { config } from "./config";
 
 const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 const periodSeconds = 30;
@@ -115,7 +116,8 @@ export function verifyTotp(secret: string, suppliedCode: string, lastCounter: nu
 }
 
 export function totpUri(secret: string, email: string) {
-  const issuer = "Nook";
+  // Wave 39: APP_NAME names the entry in the authenticator app; a colon would split the label.
+  const issuer = config.appName.replace(/:/g, " ");
   const label = encodeURIComponent(`${issuer}:${email}`);
   return `otpauth://totp/${label}?secret=${secret}&issuer=${encodeURIComponent(issuer)}&algorithm=SHA1&digits=6&period=${periodSeconds}`;
 }

@@ -490,6 +490,7 @@ docker compose ps</code></pre></div></article></div>
           <tr><td><code>DATA_DIR</code></td><td><code>/data</code></td><td>Container data root. Leave unchanged under Compose.</td></tr>
           <tr><td><code>APP_ORIGIN</code></td><td><code>http://localhost:2026</code></td><td>Primary browser origin; the fallback for <code>APP_ORIGINS</code>.</td></tr>
           <tr><td><code>APP_ORIGINS</code></td><td><code>APP_ORIGIN</code></td><td>Comma-separated exact <code>http(s)</code> origins accepted for login, CSRF, mutations, and MCP host checks. Entries with a path, credentials, query, or fragment are rejected.</td></tr>
+          <tr><td><code>APP_NAME</code></td><td><code>Nook</code></td><td>The name people see in tab titles, link previews, the installed app, mail, and the authenticator app. One line of 1 to 40 characters without <code>&lt;</code> or <code>&gt;</code>. The preview image and internal ids stay.</td></tr>
           <tr><td><code>COOKIE_SECURE</code></td><td><code>true</code> (Compose and production)</td><td>Keep enabled for HTTPS. Plain-HTTP LAN access requires <code>false</code>.</td></tr>
           <tr><td><code>ALLOW_REGISTRATION</code></td><td><code>false</code></td><td>Allows additional accounts. The first account is still allowed on an empty database. Team invites work with <code>false</code>.</td></tr>
           <tr><td><code>ALLOWED_EMAILS</code></td><td>empty</td><td>Comma-separated allowlist for registration, sign-in, and existing sessions. Empty permits any email.</td></tr>

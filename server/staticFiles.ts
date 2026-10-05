@@ -1,5 +1,7 @@
 import { realpath, stat } from "node:fs/promises";
 import { extname, join, resolve, sep } from "node:path";
+import { brotliCompressSync, gzipSync } from "node:zlib";
+import { BRAND_DEFAULT, BRANDED_PATHS, brandFile } from "./branding";
 
 /**
  * The built client (`dist/`) in production (C14). Vite's hashed files under `/assets/` never change
@@ -175,10 +177,49 @@ export function parseRange(header: string | null | undefined, size: number): { s
 }
 
 /**
+ * Wave 39 (APP_NAME, server/branding.ts): index.html, the manifest, and the service worker with the
+ * app name put in. Each is built once per file version and name and kept in memory with its own gzip
+ * and br encodings; its ETags hash the branded bytes, so they differ from the plain file's and change
+ * with the name. Ranges are not offered on these small files (the whole body is sent).
+ */
+type Branded = { identity: Uint8Array<ArrayBuffer>; gzip: Uint8Array<ArrayBuffer>; br: Uint8Array<ArrayBuffer>; tag: string };
+const brandedCache = new Map<string, Branded>();
+async function brandedVariant(servedPath: string, path: string, size: number, mtimeMs: number, name: string): Promise<Branded | null> {
+  const key = `${path}\0${size}\0${mtimeMs}\0${name}`;
+  const known = brandedCache.get(key);
+  if (known) return known;
+  const text = brandFile(servedPath, await Bun.file(path).text(), name);
+  if (text === null) return null;
+  const identity = new TextEncoder().encode(text);
+  const hasher = new Bun.CryptoHasher("sha256");
+  hasher.update(identity);
+  const branded = { identity, gzip: new Uint8Array(gzipSync(identity)), br: new Uint8Array(brotliCompressSync(identity)), tag: hasher.digest("base64url").slice(0, 22) };
+  if (brandedCache.size >= 16) brandedCache.clear();
+  brandedCache.set(key, branded);
+  return branded;
+}
+
+function brandedResponse(request: Request, branded: Branded, type: string, mtimeMs: number) {
+  const encoding = negotiateEncoding(request.headers.get("Accept-Encoding"), { br: true, gzip: true });
+  const etag = etagOf(branded.tag, encoding);
+  const body = encoding === "br" ? branded.br : encoding === "gzip" ? branded.gzip : branded.identity;
+  const headers = new Headers({ "Content-Type": type, "Cache-Control": REVALIDATE, ETag: etag, "Last-Modified": new Date(mtimeMs).toUTCString(), Vary: "Accept-Encoding" });
+  if (encoding !== "identity") headers.set("Content-Encoding", encoding);
+  // Only the ETag decides: the file's date stays the same when APP_NAME changes.
+  const ifNoneMatch = request.headers.get("If-None-Match");
+  if (ifNoneMatch && notModified(request, etag, mtimeMs)) {
+    headers.delete("Content-Type");
+    return new Response(null, { status: 304, headers });
+  }
+  headers.set("Content-Length", String(body.byteLength));
+  return new Response(request.method === "HEAD" ? null : body, { status: 200, headers });
+}
+
+/**
  * The response for a GET or HEAD of `pathname`, or null for another method (the caller moves on).
  * `root` is the absolute dist directory.
  */
-export async function serveStaticFile(request: Request, pathname: string, root: string): Promise<Response | null> {
+export async function serveStaticFile(request: Request, pathname: string, root: string, appName = BRAND_DEFAULT): Promise<Response | null> {
   if (request.method !== "GET" && request.method !== "HEAD") return null;
   let found = await fileFor(root, pathname);
   if (found.refused) return new Response("Not found", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": REVALIDATE } });
@@ -195,6 +236,10 @@ export async function serveStaticFile(request: Request, pathname: string, root: 
   const { path, size, mtimeMs } = found as { path: string; size: number; mtimeMs: number };
   const extension = extname(path).toLowerCase();
   const type = TYPES[extension] ?? "application/octet-stream";
+  if (appName !== BRAND_DEFAULT && BRANDED_PATHS.has(servedPath)) {
+    const branded = await brandedVariant(servedPath, path, size, mtimeMs, appName);
+    if (branded) return brandedResponse(request, branded, type, mtimeMs);
+  }
   const compressible = COMPRESSIBLE.has(extension);
   const identityEtag = etagOf(await contentTag(path, size, mtimeMs), "identity");
   // A Range whose If-Range no longer matches is dropped: the whole current file is sent (L2).

@@ -20,6 +20,7 @@ services:
       DATA_DIR: /data
       APP_ORIGIN: ${APP_ORIGIN:-http://localhost:2026}
       APP_ORIGINS: ${APP_ORIGINS:-${APP_ORIGIN:-http://localhost:2026}}
+      APP_NAME: ${APP_NAME:-}
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
       ALLOW_REGISTRATION: ${ALLOW_REGISTRATION:-false}
       ALLOWED_EMAILS: ${ALLOWED_EMAILS:-}

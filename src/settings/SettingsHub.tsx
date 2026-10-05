@@ -1,6 +1,7 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { Bell, Bot, ChevronLeft, ChevronRight, History, House, Info, KeyRound, LayoutGrid, LayoutTemplate, Link2, Mail, Scale, Share2, ShieldCheck, Sparkles, Users, UsersRound, type LucideIcon } from "lucide-react";
 import { AppPageName } from "../AppShell";
+import { useAppName } from "../appName";
 import { isMobileViewport } from "../mobileNavigation";
 import { Avatar } from "../ui/Avatar";
 import { ROLE_LABELS, type Role } from "../team/teamRoles";
@@ -13,14 +14,17 @@ const ICONS: Record<HubEntryId, LucideIcon> = {
   "team-policies": Scale, "team-templates": LayoutTemplate, "team-activity": History, "team-email": Mail
 };
 
-/** One line under each entry on the phone's section list (the computer's nav shows labels only). */
-const HINTS: Record<HubEntryId, string> = {
+/**
+ * One line under each entry on the phone's section list (the computer's nav shows labels only).
+ * Wave 39: the app's own name follows APP_NAME; "this Nook" names the instance and stays.
+ */
+const hintsFor = (name: string): Record<HubEntryId, string> => ({
   security: "Password, two-factor, and Google sign-in", notifications: "Push and email", access: "What others share with you",
-  mcp: "Keys for AI clients and scripts", modules: "Turn parts of Nook on or off", about: "Version and source",
+  mcp: "Keys for AI clients and scripts", modules: `Turn parts of ${name} on or off`, about: "Version and source",
   "team-members": "Everyone on this Nook and their team role", "team-invites": "Links to add people", "team-groups": "Share with a team at once",
   "team-integrations": "Accounts for AI clients and scripts", "team-keys": "Every API key on this Nook", "team-policies": "Key lifetime and where keys work",
-  "team-templates": "A role and groups for new people", "team-activity": "Who changed keys, groups, and access", "team-email": "What Nook emailed, and how it went"
-};
+  "team-templates": "A role and groups for new people", "team-activity": "Who changed keys, groups, and access", "team-email": `What ${name} emailed, and how it went`
+});
 
 type HubShellProps = {
   displayName: string;
@@ -52,6 +56,7 @@ type HubShellProps = {
  */
 export function SettingsHubShell({ displayName, avatarUrl, role, entries, selected, listScreen, title, screenKey = "", showBack, onBack, onSelect, onHome, account, children }: HubShellProps) {
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const hints = hintsFor(useAppName());
   // Q4: after a move, focus goes to the section's heading when it was lost (the control that moved
   // is gone: "Turn on in Settings", Home's Settings button) or, on a phone, sat in the list that is
   // now hidden. A section that placed focus itself (the module row asked for) keeps it.
@@ -87,7 +92,7 @@ export function SettingsHubShell({ displayName, avatarUrl, role, entries, select
               const current = entry.id === selected;
               return <li key={entry.id}><button type="button" className={current ? "active" : ""} aria-current={current ? "page" : undefined} onClick={() => onSelect(entry)}>
                 <Icon aria-hidden="true" />
-                <span className="settings-hub-entry"><span>{entry.label}</span><small>{HINTS[entry.id]}</small></span>
+                <span className="settings-hub-entry"><span>{entry.label}</span><small>{hints[entry.id]}</small></span>
                 <ChevronRight className="settings-hub-chevron" aria-hidden="true" />
               </button></li>;
             })}

@@ -4,6 +4,7 @@ import { relativeTime } from "../files/format";
 import { Select } from "../ui/Select";
 import { errorCode, messageOf } from "./VaultDialogs";
 import { listActivity, type ActivityEvent, type ActivityPage } from "./vaultApi";
+import { appName } from "../appName";
 
 /**
  * A vault's Activity at /vault/:id/activity (vault plan §7, §10; Wave 26): who did what and how many,
@@ -36,7 +37,7 @@ const WORDS: Record<string, string> = {
  * name is shown to whoever sees the event (owners see every event; members their own).
  */
 export function activityActor(event: Pick<ActivityEvent, "actor" | "via" | "key">) {
-  const person = event.actor ? (event.actor.isYou ? "You" : event.actor.displayName) : event.via === "sweeper" ? "Nook" : "Someone";
+  const person = event.actor ? (event.actor.isYou ? "You" : event.actor.displayName) : event.via === "sweeper" ? appName() : "Someone";
   if (!event.key || event.via === "session") return person;
   const whose = event.actor ? (event.actor.isYou ? "your key" : `${event.actor.displayName}'s key`) : "a key";
   return `key:${event.key.name} (${whose})`;
@@ -109,7 +110,7 @@ export function VaultActivityPage({ vaultId, vaultName, initialActor, onBack, on
   useEffect(() => { void load(null); }, [load]);
   const ready = page !== null || error !== null;
   useLayoutEffect(() => { if (ready) onReady(); }, [ready, onReady]);
-  useEffect(() => { document.title = `Activity${vaultName ? ` · ${vaultName}` : ""} · Vault · Nook`; }, [vaultName]);
+  useEffect(() => { document.title = `Activity${vaultName ? ` · ${vaultName}` : ""} · Vault · ${appName()}`; }, [vaultName]);
 
   return <>
     <div className="vault-toolbar">

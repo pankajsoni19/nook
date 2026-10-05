@@ -26,6 +26,7 @@ import {
 } from "./vaultApi";
 import "../files/files.css";
 import "./vault.css";
+import { appName } from "../appName";
 
 type VaultNavigate = (route: Route, options?: { replace?: boolean; removed?: boolean }) => void;
 type VaultAppProps = {
@@ -170,7 +171,7 @@ function NotConfigured({ status, admin }: { status: VaultStatus; admin: boolean 
     {admin && status.reason === "key_mismatch"
       ? <p>The server has a vault key, but it does not open the vaults stored here, so the vault stays off. Put back the key these vaults were created with, then check it on the host with <code>bun server/vault-admin.ts verify-key</code>.</p>
       : admin
-        ? <p>Set <code>VAULT_ENCRYPTION_KEY</code> (make one with <code>openssl rand -base64 32</code>; it must differ from <code>TOTP_ENCRYPTION_KEY</code>) and restart Nook. Keep the key away from where backups are stored. The operations guide's Vault section explains more.</p>
+        ? <p>Set <code>VAULT_ENCRYPTION_KEY</code> (make one with <code>openssl rand -base64 32</code>; it must differ from <code>TOTP_ENCRYPTION_KEY</code>) and restart {appName()}. Keep the key away from where backups are stored. The operations guide's Vault section explains more.</p>
         : <p>Ask an admin to set it up.</p>}
     <p className="vault-honest">{HONEST_LABEL}</p>
   </div>;
@@ -195,7 +196,7 @@ function VaultList({ onOpen, onReady, flash }: { onOpen: (vault: VaultSummary) =
     }
   }, []);
   useEffect(() => { void load(); }, [load]);
-  useEffect(() => { document.title = "Vault · Nook"; }, []);
+  useEffect(() => { document.title = `Vault · ${appName()}`; }, []);
   const ready = vaults !== null;
   useLayoutEffect(() => { if (ready) onReady(); }, [ready, onReady]);
 
@@ -319,7 +320,7 @@ function VaultPage({ vaultId, envId, cache, onBack, onReady, flash, ask, onEnvir
   }, [load, query]);
   const ready = data !== null;
   useLayoutEffect(() => { if (ready) onReady(); }, [ready, onReady]);
-  useEffect(() => { if (data) document.title = `${data.vault.name} · Vault · Nook`; }, [data]);
+  useEffect(() => { if (data) document.title = `${data.vault.name} · Vault · ${appName()}`; }, [data]);
 
   const actions = useValueActions(vaultId, flash, load, ask);
   const { hideAll } = actions;
@@ -484,7 +485,7 @@ function SecretPage({ vaultId, secretId, onBack, onReady, flash, ask, onMissing,
   useEffect(() => { void load(); }, [load]);
   const ready = data !== null;
   useLayoutEffect(() => { if (ready) onReady(); }, [ready, onReady]);
-  useEffect(() => { if (data) document.title = `${data.vault.name} · Vault · Nook`; }, [data]);
+  useEffect(() => { if (data) document.title = `${data.vault.name} · Vault · ${appName()}`; }, [data]);
   const actions = useValueActions(vaultId, flash, load, ask);
   const { hideAll } = actions;
   useEffect(() => hideAll, [hideAll]);

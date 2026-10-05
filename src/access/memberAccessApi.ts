@@ -1,4 +1,5 @@
 import { api } from "../api";
+import { appName } from "../appName";
 import type { Role } from "../team/teamRoles";
 
 /**
@@ -233,7 +234,7 @@ function integrationChange(event: ActivityEvent) {
   return words.length ? words.join(" and ") : "changed";
 }
 const templateName = (event: ActivityEvent) => typeof event.meta?.templateName === "string" ? `“${event.meta.templateName}”` : "(name not recorded)";
-const who = (event: ActivityEvent) => event.actor?.displayName ?? (event.via === "sweeper" ? "Nook" : "Someone");
+const who = (event: ActivityEvent) => event.actor?.displayName ?? (event.via === "sweeper" ? appName() : "Someone");
 const target = (event: ActivityEvent) => event.target?.displayName ?? "someone";
 const surfaceSuffix = (event: ActivityEvent) => event.meta?.surface === "rest" ? " over REST" : event.meta?.surface === "mcp" ? " over MCP" : "";
 

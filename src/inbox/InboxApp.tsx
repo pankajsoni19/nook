@@ -24,6 +24,7 @@ import {
 import { actionLabel, BULK_CONFIRM_OVER, bulkConfirmText, bulkSummary, expiresText, failureText, groupTitle, inboxBackAction, rejectedText, rejectEffectText, runLine, statusLabel } from "./inboxFormat";
 import { RoutinesPane } from "./RoutinesPane";
 import "./inbox.css";
+import { appName } from "../appName";
 
 type InboxRoute = Extract<Route, { app: "inbox" }>;
 type InboxNavigate = (route: Route, options?: { replace?: boolean }) => void;
@@ -178,7 +179,7 @@ export function InboxApp({ displayName, navigate, flash, onHome, onBin, onSettin
   }, [loadDetail, route.proposalId]);
 
   useEffect(() => {
-    document.title = detail && route.proposalId === detail.id ? `${detail.kindLabel} · Inbox · Nook` : route.view === "history" ? "History · Inbox · Nook" : route.view === "routines" ? "Routines · Inbox · Nook" : "Inbox · Nook";
+    document.title = detail && route.proposalId === detail.id ? `${detail.kindLabel} · Inbox · ${appName()}` : route.view === "history" ? `History · Inbox · ${appName()}` : route.view === "routines" ? `Routines · Inbox · ${appName()}` : `Inbox · ${appName()}`;
   }, [detail, route.proposalId, route.view]);
 
   const back = useCallback(() => {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronLeft, Mail, RotateCcw, TriangleAlert } from "lucide-react";
 import { api } from "../api";
+import { appName } from "../appName";
 import { relativeTime } from "../files/format";
 import { hubDocumentTitle } from "../router";
 
@@ -84,7 +85,7 @@ export function TeamEmailLog({ onBack, flash }: { onBack: () => void; flash: (me
     <header className="team-invites-header">
       <div>
         <h2 id="team-email-title">Email log</h2>
-        <p className="team-muted">What Nook emailed and how it went. Addresses, subjects, and content are never shown or kept here.</p>
+        <p className="team-muted">What {appName()} emailed and how it went. Addresses, subjects, and content are never shown or kept here.</p>
       </div>
     </header>
     {data && !data.emailEnabled && <p className="team-muted team-invites-limit" role="note">Email is not configured. See OPERATIONS → Email.</p>}
