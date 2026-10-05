@@ -4,7 +4,8 @@
  * boot-fallback lines), the web app manifest (name, short_name), and the service worker's generic
  * notification title are served with the name put in. Only those exact places change: script and
  * stylesheet URLs, og:image, its alt text (the picture says Nook), and the CSP are left alone.
- * The name is HTML-escaped in HTML, and JSON-encoded in the manifest and the worker.
+ * The name is HTML-escaped in HTML, and JSON-encoded in the manifest and the worker. Every substitution
+ * is a function replacement, so `$` sequences in a name are never read as replacement patterns.
  */
 
 export const BRAND_DEFAULT = "Nook";
@@ -20,7 +21,8 @@ const NAMED_META = /(<meta\s+(?:name|property)="(?:application-name|apple-mobile
 /** index.html with `name` in the title, the naming meta tags, and the boot-fallback lines. */
 export function brandIndexHtml(html: string, name: string) {
   const safe = escapeHtml(name);
-  const swap = (text: string) => text.replace(/\bNook\b/g, safe);
+  // A function replacement: `$&`, `$$`, and "$`" in a name are kept literally, not read as patterns.
+  const swap = (text: string) => text.replace(/\bNook\b/g, () => safe);
   return html
     .replace(NAMED_META, (_match, head: string, content: string, tail: string) => `${head}${swap(content)}${tail}`)
     .replace(/<title>([^<]*)<\/title>/, (_match, title: string) => `<title>${swap(title)}</title>`)

@@ -1,4 +1,5 @@
 import { api } from "../api";
+import { appName } from "../appName";
 
 /**
  * Browser side of Web Push (D65). The service worker is registered, and permission is asked for,
@@ -69,7 +70,7 @@ const sameKey = (subscription: PushSubscription, key: Uint8Array) => {
 /** Registers the worker, asks for permission (this click only), subscribes, and tells Nook. */
 export async function enablePushOnThisDevice(config: Extract<PushConfig, { enabled: true }>) {
   const permission = await Notification.requestPermission();
-  if (permission !== "granted") throw new Error(permission === "denied" ? "Notifications are blocked for Nook in this browser's settings." : "Notifications were not allowed.");
+  if (permission !== "granted") throw new Error(permission === "denied" ? `Notifications are blocked for ${appName()} in this browser's settings.` : "Notifications were not allowed.");
   const registration = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
   await navigator.serviceWorker.ready;
   const key = applicationServerKey(config.publicKey);

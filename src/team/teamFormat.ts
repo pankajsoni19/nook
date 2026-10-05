@@ -2,6 +2,7 @@
  * Pure helpers for the Team app: filtering, labels, and the activity copy. No DOM, so they are
  * unit-tested directly (tests/teamClient.test.tsx).
  */
+import { appName } from "../appName";
 import type { JoinedWithInvite, TeamEvent, TeamMember } from "./teamApi";
 import { ROLE_LABELS, type Role } from "./teamRoles";
 
@@ -84,7 +85,7 @@ export function teamBackAction(userId: string | null, depth: number): TeamBackAc
 export function lastAdminReason(member: TeamMember, members: readonly TeamMember[]) {
   if (member.role !== "admin" || member.status !== "active") return null;
   const others = members.filter((other) => other.id !== member.id && other.role === "admin" && other.status === "active").length;
-  return others === 0 ? "Nook needs at least one admin. Make someone else an admin first." : null;
+  return others === 0 ? `${appName()} needs at least one admin. Make someone else an admin first.` : null;
 }
 
 /** D165: the Activity line for an account created from an invite (derived from team_invites). */

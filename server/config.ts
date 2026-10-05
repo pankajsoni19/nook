@@ -133,9 +133,10 @@ const appOriginUrl = new URL(appOrigin);
 const mailInstanceName = process.env.MAIL_INSTANCE_NAME?.trim() || appOriginUrl.hostname;
 if (!isInstanceName(mailInstanceName)) throw new Error("MAIL_INSTANCE_NAME must be one line of at most 40 characters");
 
-/** One printable line of at most 40 characters (it appears in every mail's band and footer, T228). */
+/** One printable line of 1 to 40 characters, counted in code points (it appears in every mail's band and footer, T228). */
 export function isInstanceName(value: string) {
-  return value.length >= 1 && value.length <= 40 && !/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069<>]/.test(value);
+  const length = [...value].length;
+  return length >= 1 && length <= 40 && !/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069<>]/.test(value);
 }
 
 // Wave 39: the name people see in titles, link previews, the web app manifest, and mail. Default "Nook";
@@ -145,7 +146,7 @@ export const DEFAULT_APP_NAME = "Nook";
 export function parseAppName(raw: string | undefined) {
   const value = raw?.trim() ?? "";
   if (value === "") return DEFAULT_APP_NAME;
-  if ([...value].length > 40 || !isInstanceName(value)) throw new Error("APP_NAME must be one line of 1 to 40 characters without <, >, or control characters");
+  if (!isInstanceName(value)) throw new Error("APP_NAME must be one line of 1 to 40 characters without <, >, or control characters");
   return value;
 }
 const appNameValue = parseAppName(process.env.APP_NAME);

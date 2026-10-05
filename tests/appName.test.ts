@@ -10,7 +10,7 @@ import { serveStaticFile } from "../server/staticFiles";
 import { senderHeader } from "../server/mail";
 import { renderFixture } from "../server/mail/preview";
 import { totpUri } from "../server/totp";
-import { appName, DEFAULT_APP_NAME, setAppName, titled } from "../src/appName";
+import { appName, DEFAULT_APP_NAME, setAppName } from "../src/appName";
 import { hubDocumentTitle, settingsDocumentTitle } from "../src/router";
 
 /** Wave 39: APP_NAME renames the app in titles, link previews, the manifest, mail, and the client. */
@@ -177,11 +177,8 @@ describe("client", () => {
 
   test("titles use the runtime name, Nook until the server says otherwise", () => {
     expect(appName()).toBe("Nook");
-    expect(titled("Notes")).toBe("Notes · Nook");
     expect(hubDocumentTitle("Members")).toBe("Settings · Members · Nook");
     setAppName("Acme Notes");
-    expect(titled("Notes")).toBe("Notes · Acme Notes");
-    expect(titled(null, "Home")).toBe("Home · Acme Notes");
     expect(hubDocumentTitle(null)).toBe("Settings · Acme Notes");
     expect(settingsDocumentTitle("about")).toBe("Settings · About · Acme Notes");
     setAppName("  ");

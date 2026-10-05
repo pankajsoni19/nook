@@ -147,12 +147,21 @@ a{color:inherit}
 
 const SUBJECT_MAX = 120;
 
+/** The badge letter: the first user-perceived character of a name (a flag or ZWJ emoji stays whole), "N" when empty. */
+export function firstGrapheme(value: string) {
+  if (typeof Intl.Segmenter === "function") {
+    for (const { segment } of new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(value)) return segment;
+    return "N";
+  }
+  return [...value][0] ?? "N";
+}
+
 /** Renders a mail from its parts. Subject and preheader are one line and length-capped (T228). */
 export function layout(input: LayoutInput): RenderedMail {
   const tone = input.tone ?? "default";
   // Wave 39: APP_NAME in the band, the footer, and the fallback subject.
   const name = cleanLine(appName(), 40, DEFAULT_APP_NAME, false);
-  const mark = ([...name][0] ?? "N").toUpperCase();
+  const mark = firstGrapheme(name).toUpperCase();
   const subject = cleanLine(input.subject, SUBJECT_MAX, name);
   const preheader = cleanLine(input.preheader, 150);
   const instance = cleanLine(input.instanceName, 40, name, false);

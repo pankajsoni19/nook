@@ -44,6 +44,3 @@ const subscribe = (listener: () => void) => {
 
 /** The app name in a component; re-renders when the server's answer differs from the first guess. */
 export const useAppName = () => useSyncExternalStore(subscribe, appName, appName);
-
-/** A tab title: the parts, then the app name ("Notes · Acme Notes"; just the name with no parts). */
-export const titled = (...parts: Array<string | null | undefined | false>) => [...parts.filter((part): part is string => Boolean(part)), current].join(" · ");

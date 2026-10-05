@@ -1,17 +1,23 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { brotliDecompressSync } from "node:zlib";
-import { config, parseAppName } from "../server/config";
+import { config, isInstanceName, parseAppName } from "../server/config";
 import { brandIndexHtml, brandManifest, brandServiceWorker } from "../server/branding";
 import { serveStaticFile } from "../server/staticFiles";
 import { senderHeader } from "../server/mail";
+import { firstGrapheme } from "../server/mail/layout";
 import { renderFixture } from "../server/mail/preview";
 import { createTotpSecret, totpCodeAt, totpCounter, totpUri, verifyTotp } from "../server/totp";
 import { DEFAULT_APP_NAME, setAppName } from "../src/appName";
+import { googleErrorMessage, googleOnlyHint, googleOnlyPasswordText, linkRequiredText } from "../src/auth/googleSignIn";
 import { recoveryCodesText } from "../src/auth/RecoveryCodesDialog";
 import { registrationPrompt } from "../src/auth/registrationPrompt";
+import { suppressionCopy } from "../src/notifications/EmailSettings";
+import { pushUnavailableCopy, unavailableMessage } from "../src/notifications/NotificationSettings";
+import { inviteLimitHint } from "../src/team/inviteFormat";
+import { lastAdminReason } from "../src/team/teamFormat";
 
 /**
  * Wave 39 review probes (APP_NAME). These pin down the edges the feature tests leave open: the
@@ -81,14 +87,16 @@ describe("brandIndexHtml against other template shapes", () => {
     }
   });
 
-  // FINDING (server/branding.ts:24): `swap` passes the escaped name as a String.replace replacement
-  // string, so `$&`, `$$`, "$`" and `$'` are interpreted. "Acme $& Co" renders as "Acme Nookamp; Co"
-  // in the title and meta tags while the boot line (a callback replacement) gets it right. Not an
-  // injection (the output stays escaped), but the wrong name. Fix: replace(/\bNook\b/g, () => safe).
-  test.failing("a name containing $& or $$ is kept literally in the title and meta tags", () => {
-    const template = '<meta name="og:title" content="Nook — X" /><title>Nook — X</title>';
-    expect(brandIndexHtml(template, "Acme $& Co")).toBe('<meta name="og:title" content="Acme $&amp; Co — X" /><title>Acme $&amp; Co — X</title>');
-    expect(brandIndexHtml(template, "Cost $$ 5")).toBe('<meta name="og:title" content="Cost $$ 5 — X" /><title>Cost $$ 5 — X</title>');
+  // Fixed (server/branding.ts): `swap` used the escaped name as a String.replace replacement string,
+  // so `$&`, `$$`, "$`" and `$'` were interpreted ("Acme $& Co" rendered as "Acme Nookamp; Co").
+  // Every substitution is now a function replacement.
+  test("a name containing $&, $$, or $` is kept literally in the title, meta tags, and boot lines", () => {
+    const template = '<meta name="og:title" content="Nook — X" /><title>Nook — X</title><p>Nook needs JavaScript.</p>';
+    expect(brandIndexHtml(template, "Acme $& Co")).toBe('<meta name="og:title" content="Acme $&amp; Co — X" /><title>Acme $&amp; Co — X</title><p>Acme $&amp; Co needs JavaScript.</p>');
+    expect(brandIndexHtml(template, "Cost $$ 5")).toBe('<meta name="og:title" content="Cost $$ 5 — X" /><title>Cost $$ 5 — X</title><p>Cost $$ 5 needs JavaScript.</p>');
+    expect(brandIndexHtml(template, "A$` B$' C")).toContain("<title>A$` B$&#39; C — X</title>");
+    expect(JSON.parse(brandManifest('{"name":"Nook"}', "Acme $& Co")).name).toBe("Acme $& Co");
+    expect(brandServiceWorker('const GENERIC_TITLE = "You have a reminder in Nook";', "Acme $& Co")).toContain('"You have a reminder in Acme $& Co"');
   });
 
   test("the manifest and the worker JSON-encode quotes, backslashes, and U+2028; unreadable JSON is served as it is", () => {
@@ -115,12 +123,14 @@ describe("parseAppName", () => {
     expect(parseAppName("A".repeat(40))).toBe("A".repeat(40));
   });
 
-  // LOW: the documented limit is 40 characters, counted in code points for the first check but in
-  // UTF-16 units by isInstanceName, so 21 to 40 astral characters (emoji, many CJK extension
-  // characters) are refused although they fit the documented limit.
-  test("documents the current limit: 20 emoji pass, 21 are refused", () => {
-    expect(parseAppName("📝".repeat(20))).toBe("📝".repeat(20));
-    expect(() => parseAppName("📝".repeat(21))).toThrow();
+  // Fixed: the documented limit is 40 characters; both parseAppName and isInstanceName count code
+  // points, so 40 astral characters (emoji, CJK extension characters) fit and 41 are refused.
+  test("the limit is 40 code points: 40 emoji pass, 41 are refused, and MAIL_INSTANCE_NAME agrees", () => {
+    expect(parseAppName("📝".repeat(40))).toBe("📝".repeat(40));
+    expect(() => parseAppName("📝".repeat(41))).toThrow();
+    expect(isInstanceName("📝".repeat(40))).toBe(true);
+    expect(isInstanceName("📝".repeat(41))).toBe(false);
+    expect(isInstanceName("")).toBe(false);
   });
 });
 
@@ -207,6 +217,11 @@ describe("mail and authenticator", () => {
     expect(renderFixture("account.password_reset", "notes.example.com")!.html).toContain(">1</td>");
     config.appName = "📝 Notes";
     expect(renderFixture("account.password_reset", "notes.example.com")!.html).toContain(">📝</td>");
+    // A flag and a ZWJ family stay whole: the badge takes the first grapheme, not the first code point.
+    config.appName = "🇮🇳 Notes";
+    expect(renderFixture("account.password_reset", "notes.example.com")!.html).toContain(">🇮🇳</td>");
+    expect(firstGrapheme("👨‍👩‍👧 Family")).toBe("👨‍👩‍👧");
+    expect(firstGrapheme("")).toBe("N");
     config.appName = "Acme & Sons";
     const mail = renderFixture("account.password_reset", "notes.example.com")!;
     expect(mail.html).toContain("Acme &amp; Sons");
@@ -235,6 +250,27 @@ describe("client copy", () => {
     setAppName("Acme Notes");
     expect(recoveryCodesText(["ABCDE-FGHIJ"])).toStartWith("Acme Notes recovery codes\n");
     expect(registrationPrompt({ hasUsers: false, openRegistration: true })).toBe("Setting up Acme Notes? Create the first account");
+  });
+
+  test("body copy that names the app follows the runtime name; 'this Nook' keeps the instance noun", () => {
+    setAppName("Acme Notes");
+    expect(googleOnlyHint()).toBe("This Acme Notes signs people in with Google. Use the Google account with your Acme Notes email address. If that does not work, ask your admin.");
+    expect(googleOnlyPasswordText()).toContain("This Acme Notes signs people in with Google only");
+    expect(googleErrorMessage("blocked")).toBe("This account has been blocked. Contact your Acme Notes administrator.");
+    expect(googleErrorMessage("not_allowed")).toBe("This Google account cannot sign in to this Nook. Ask your admin.");
+    expect(linkRequiredText(false)).toContain("Ask your Acme Notes admin");
+    expect(unavailableMessage("unsupported")).toEndWith("reminders still appear in Acme Notes.");
+    expect(pushUnavailableCopy()).toEndWith("reminders still appear in Acme Notes.");
+    expect(inviteLimitHint(5, 5)).toBe("5 invites are live, the most Acme Notes allows. Revoke one or wait for one to expire.");
+    const admin = { id: "a", role: "admin", status: "active" } as Parameters<typeof lastAdminReason>[0];
+    expect(lastAdminReason(admin, [admin])).toBe("Acme Notes needs at least one admin. Make someone else an admin first.");
+    expect(suppressionCopy({ address: "a@example.test", suppression: { reason: "complaint" } } as Parameters<typeof suppressionCopy>[0])).toContain("so Acme Notes stopped sending to it");
+  });
+
+  test("the session response's app.name sets the client name (development, where Vite serves index.html as it is)", () => {
+    const app = readFileSync(join(import.meta.dir, "..", "src", "App.tsx"), "utf8");
+    expect(app).toContain("if (result.app?.name) setAppName(result.app.name);");
+    expect(app).toContain("app?: { name?: string }");
   });
 
   test("setAppName rewrites only the trailing app name in the tab title, and ignores one that is not there", () => {

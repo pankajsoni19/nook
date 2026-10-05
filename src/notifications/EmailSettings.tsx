@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CheckCircle2, Mail, MailWarning, RotateCcw, Send, ShieldCheck } from "lucide-react";
 import { ApiError } from "../api";
+import { appName } from "../appName";
 import { useRole } from "../team/roleAccess";
 import { Select } from "../ui/Select";
 import { EmailMutesList } from "./emailMutes";
@@ -47,12 +48,12 @@ export function digestNote(prefs: Pick<Settings["prefs"], "digest" | "nextDigest
 /** What the bounced notice says for each reason (security email keeps coming either way). */
 export function suppressionCopy(settings: Pick<Settings, "address" | "suppression">) {
   const reason = settings.suppression?.reason ?? "bounce";
-  if (reason === "complaint") return `An email to ${settings.address} was reported as spam, so Nook stopped sending to it. Security emails still go.`;
+  if (reason === "complaint") return `An email to ${settings.address} was reported as spam, so ${appName()} stopped sending to it. Security emails still go.`;
   if (reason === "soft") {
     const until = settings.suppression?.until ? new Date(settings.suppression.until).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : null;
-    return `Email to ${settings.address} kept bouncing, so Nook paused it${until ? ` until ${until}` : ""}. Security emails still go.`;
+    return `Email to ${settings.address} kept bouncing, so ${appName()} paused it${until ? ` until ${until}` : ""}. Security emails still go.`;
   }
-  return `Email to ${settings.address} bounced, so Nook stopped sending to it. Security emails still go. Check the address with your admin, or try again.`;
+  return `Email to ${settings.address} bounced, so ${appName()} stopped sending to it. Security emails still go. Check the address with your admin, or try again.`;
 }
 
 function Switch({ checked, disabled, labelledBy, describedBy, onChange }: { checked: boolean; disabled?: boolean; labelledBy: string; describedBy?: string; onChange?: (next: boolean) => void }) {
@@ -111,7 +112,7 @@ export function EmailSettings() {
     setMessage(null);
     try {
       setSettings(await clearSuppression());
-      setMessage("Nook will email this address again.");
+      setMessage(`${appName()} will email this address again.`);
     } catch (reason) {
       const code = reason instanceof ApiError ? (reason.payload as { code?: string } | undefined)?.code : undefined;
       setError(code === "RATE_LIMITED" ? "You can try again once a day." : reason instanceof Error ? reason.message : "Could not try again");
@@ -171,7 +172,7 @@ export function EmailSettings() {
     </div>}
     {!settings.verified && <div className="email-notice" role="note">
       <Mail aria-hidden="true" />
-      <p>Verify {settings.address} to get email from Nook. Until then only security emails are sent.</p>
+      <p>Verify {settings.address} to get email from {appName()}. Until then only security emails are sent.</p>
       <button type="button" className="secondary-button email-settings-button" disabled={cooling} onClick={() => { void sendOne("verify"); }}><Send aria-hidden="true" />Send verification email</button>
     </div>}
     {conflict && <div className="email-notice danger" role="alert">

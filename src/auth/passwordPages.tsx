@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { CheckCircle2, Eye, EyeOff, KeyRound, Link2Off, Lock, MailX, Sparkles } from "lucide-react";
 import { api, ApiError } from "../api";
 import { passwordResetOffered, type RegistrationInfo } from "./registrationPrompt";
-import { GOOGLE_ONLY_PASSWORD_TEXT } from "./googleSignIn";
+import { googleOnlyPasswordText } from "./googleSignIn";
 import { collectProblems, confirmPasswordProblem, emailProblem, FieldError, fieldName, newPasswordProblem, secondFactorProblem, useFieldErrors } from "./fieldChecks";
 import "./auth.css";
 import { appName, setAppName } from "../appName";
@@ -154,7 +154,7 @@ export function ForgotPasswordPage({ onBack }: { onBack: () => void }) {
     {available === null ? <div className="auth-methods-placeholder" aria-busy="true" aria-label="Loading" /> : googleOnly ? <div className="auth-heading" role="status">
       <span className="eyebrow">Password</span>
       <h1><KeyRound aria-hidden="true" className="invite-register-icon" />Sign in with Google</h1>
-      <p>{GOOGLE_ONLY_PASSWORD_TEXT}</p>
+      <p>{googleOnlyPasswordText()}</p>
     </div> : available === false ? <div className="auth-heading" role="status">
       <span className="eyebrow">Password</span>
       <h1><MailX aria-hidden="true" className="invite-register-icon" />Email is off</h1>
@@ -191,7 +191,7 @@ const DEAD_COPY = {
 
 function deadFrom(reason: unknown): ResetState {
   const code = reason instanceof ApiError ? (reason.payload as { code?: string } | undefined)?.code : undefined;
-  if (code === "PASSWORD_SIGNIN_DISABLED") return { kind: "dead", reason: "error", message: GOOGLE_ONLY_PASSWORD_TEXT };
+  if (code === "PASSWORD_SIGNIN_DISABLED") return { kind: "dead", reason: "error", message: googleOnlyPasswordText() };
   if (code === "TOKEN_EXPIRED") return { kind: "dead", reason: "expired" };
   if (code === "TOKEN_INVALID") return { kind: "dead", reason: "invalid" };
   return { kind: "dead", reason: "error", message: reason instanceof Error ? reason.message : "Something went wrong" };
@@ -269,7 +269,7 @@ export function ResetPasswordPage({ token, onSignIn, onForgot, signedIn = false,
         <h1><Link2Off aria-hidden="true" className="invite-register-icon" />{DEAD_COPY[state.reason].title}</h1>
         <p>{state.reason === "error" ? state.message : signedIn || info === null || offerNewLink ? DEAD_COPY[state.reason].body : DEAD_COPY[state.reason].body.replace(" Ask for a new one.", "")}</p>
         {/* QA G2: in google mode passwords are what is off, whatever email says. */}
-        {!signedIn && info !== null && !offerNewLink && state.reason !== "error" && <p>{googleOnly ? GOOGLE_ONLY_PASSWORD_TEXT : RESET_OFF_TEXT}</p>}
+        {!signedIn && info !== null && !offerNewLink && state.reason !== "error" && <p>{googleOnly ? googleOnlyPasswordText() : RESET_OFF_TEXT}</p>}
       </div>
       {(signedIn || offerNewLink) && <div className="auth-form">{signedIn
         ? <button type="button" className="primary-button" onClick={onSignIn}>Open {appName()}</button>

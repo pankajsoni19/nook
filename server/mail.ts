@@ -113,7 +113,8 @@ if (config.mail.transport === "file") console.warn("Email goes to the MAIL_FILE_
 let transport: MailTransport | null = config.mail.transport === "file"
   ? fileTransport(config.mail.filePath!)
   : config.mail.enabled ? resendTransport(config.mail.apiKey!) : null;
-let from: string | null = config.mail.transport === "file" ? config.mail.from ?? "Nook <nook@example.test>" : config.mail.from;
+// The file transport's placeholder sender is a bare address, so senderHeader gives it the app name.
+let from: string | null = config.mail.transport === "file" ? config.mail.from ?? "nook@example.test" : config.mail.from;
 
 /** Test hook: a fake transport (enables mail with a placeholder sender), or null to turn mail off. */
 export function setMailTransportForTests(next: MailTransport | null, sender = "Nook <nook@example.test>") {

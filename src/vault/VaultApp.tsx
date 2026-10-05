@@ -171,7 +171,7 @@ function NotConfigured({ status, admin }: { status: VaultStatus; admin: boolean 
     {admin && status.reason === "key_mismatch"
       ? <p>The server has a vault key, but it does not open the vaults stored here, so the vault stays off. Put back the key these vaults were created with, then check it on the host with <code>bun server/vault-admin.ts verify-key</code>.</p>
       : admin
-        ? <p>Set <code>VAULT_ENCRYPTION_KEY</code> (make one with <code>openssl rand -base64 32</code>; it must differ from <code>TOTP_ENCRYPTION_KEY</code>) and restart Nook. Keep the key away from where backups are stored. The operations guide's Vault section explains more.</p>
+        ? <p>Set <code>VAULT_ENCRYPTION_KEY</code> (make one with <code>openssl rand -base64 32</code>; it must differ from <code>TOTP_ENCRYPTION_KEY</code>) and restart {appName()}. Keep the key away from where backups are stored. The operations guide's Vault section explains more.</p>
         : <p>Ask an admin to set it up.</p>}
     <p className="vault-honest">{HONEST_LABEL}</p>
   </div>;

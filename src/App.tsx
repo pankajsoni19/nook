@@ -62,7 +62,7 @@ import { setSelfAvatar } from "./ui/selfAvatar";
 import { AccountAuthContext, asksForPassword, GoogleReauthNotice, reauthPassword, useAccountAuthLoader } from "./auth/accountAuth";
 import { RecoveryCodesDialog } from "./auth/RecoveryCodesDialog";
 import { GoogleAccountCard, googleSettingsNotice, GoogleResetNoticeBanner, PasswordStateCard, type GoogleResetNotice } from "./auth/GoogleAccountCard";
-import { AuthDivider, currentReturnPath, GOOGLE_ONLY_HINT, GoogleButton, googleErrorMessage, googleStartUrl, LINK_NOT_AUTHORITATIVE_PASSWORD, linkRequiredText, initialGoogleSettingsResult, initialGoogleSignInResult, initialGoogleTeamResult, type GoogleSettingsResult, type GoogleSignInResult } from "./auth/googleSignIn";
+import { AuthDivider, currentReturnPath, googleOnlyHint, GoogleButton, googleErrorMessage, googleStartUrl, LINK_NOT_AUTHORITATIVE_PASSWORD, linkRequiredText, initialGoogleSettingsResult, initialGoogleSignInResult, initialGoogleTeamResult, type GoogleSettingsResult, type GoogleSignInResult } from "./auth/googleSignIn";
 import { AccountActions, InboxNavContext, SidebarInboxRow, TeamNavContext, useBinCount } from "./AppShell";
 import { repeatDelta, useLeaveGuard } from "./ui/useLeaveGuard";
 import { canManageTeam, canWriteContent, type Role } from "./team/teamRoles";
@@ -120,7 +120,7 @@ import { usePreferences, type PreferencesStatus } from "./usePreferences";
 type TotpState = { enabled: boolean; required: boolean; setupRequired: boolean };
 // `preferences` comes with /api/auth/me only (not with sign-in); see usePreferences.
 // `notices` (Wave 35 review N2c) comes with /api/auth/me only.
-type SessionResponse = { user: User; csrfToken: string; totp: TotpState; preferences?: unknown; notices?: { googleReset?: GoogleResetNotice | null }; features?: { vault?: boolean } };
+type SessionResponse = { user: User; csrfToken: string; totp: TotpState; preferences?: unknown; notices?: { googleReset?: GoogleResetNotice | null }; features?: { vault?: boolean }; app?: { name?: string } };
 type ModulesSettingsProps = { disabledModules: readonly ModuleId[]; status: PreferencesStatus; onToggle: (id: ModuleId, enabled: boolean) => void; role?: Role; unavailable?: readonly ModuleId[] };
 type NoteSort = "updated-desc" | "updated-asc" | "created-desc" | "created-asc" | "title-asc" | "title-desc";
 
@@ -284,7 +284,7 @@ function AuthScreen({ onAuthenticated, onForgotPassword, googleResult = null }: 
             <button type="button" className="icon-button" aria-label="Dismiss" onClick={() => setLinkRequired(false)}><X /></button>
           </div>}
           {googleButton}
-          {googleButton && !methods.password && <p className="auth-google-only">{GOOGLE_ONLY_HINT}</p>}
+          {googleButton && !methods.password && <p className="auth-google-only">{googleOnlyHint()}</p>}
           {googleButton && methods.password && <AuthDivider />}
           {methods.password && <form onSubmit={submit} className="auth-form" noValidate onChange={(event) => { setError(""); fields.clear(fieldName(event.target)); }}>
             {registering && <label>Name<input name="displayName" autoComplete="name" maxLength={80} aria-invalid={fields.errors.displayName ? true : undefined} aria-describedby={fields.errors.displayName ? "auth-name-error" : undefined} /><FieldError id="auth-name-error" message={fields.errors.displayName} /></label>}
@@ -984,7 +984,9 @@ export function App() {
 
   useEffect(() => {
     api<SessionResponse>("/auth/me")
-      .then((result) => { sessionUserRef.current = result.user.id; setCsrfToken(result.csrfToken); setSession(result); })
+      // Wave 39: the session carries APP_NAME, so in development (where Vite serves index.html as it
+      // is) the tab titles follow the name before any /api/about call.
+      .then((result) => { if (result.app?.name) setAppName(result.app.name); sessionUserRef.current = result.user.id; setCsrfToken(result.csrfToken); setSession(result); })
       .catch(() => undefined)
       .finally(() => setChecking(false));
   }, []);

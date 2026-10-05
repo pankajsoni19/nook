@@ -37,7 +37,7 @@ const WORDS: Record<string, string> = {
  * name is shown to whoever sees the event (owners see every event; members their own).
  */
 export function activityActor(event: Pick<ActivityEvent, "actor" | "via" | "key">) {
-  const person = event.actor ? (event.actor.isYou ? "You" : event.actor.displayName) : event.via === "sweeper" ? "Nook" : "Someone";
+  const person = event.actor ? (event.actor.isYou ? "You" : event.actor.displayName) : event.via === "sweeper" ? appName() : "Someone";
   if (!event.key || event.via === "session") return person;
   const whose = event.actor ? (event.actor.isYou ? "your key" : `${event.actor.displayName}'s key`) : "a key";
   return `key:${event.key.name} (${whose})`;
