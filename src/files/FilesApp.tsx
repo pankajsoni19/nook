@@ -55,6 +55,7 @@ import "./files.css";
 import { Avatar } from "../ui/Avatar";
 import { useSelfAvatar } from "../ui/selfAvatar";
 import { ReadOnlyBanner, useRole } from "../team/roleAccess";
+import { appName } from "../appName";
 
 export type FilesNavigate = (route: Route, options?: { replace?: boolean; removed?: boolean; filesPanel?: FilesPanel }) => void;
 
@@ -665,7 +666,7 @@ export function FilesApp({ userId, displayName, navigate, flash, onHome, onSetti
   return <main className={`workspace files-workspace${collapsed ? " nav-collapsed" : ""}${selected ? " preview-open" : ""}`} data-mobile-panel={panel === "files" ? "notes" : panel === "preview" ? "editor" : "folders"}>
     <aside className="folder-pane" id="file-folders">
       <header className="sidebar-header">
-        <button className="sidebar-brand sidebar-home-button" onClick={() => { void leaveFiles(onHome); }} aria-label="Open Nook home" title="Back to Home"><span className="brand-dot"><Sparkles /></span><span className="brand-text"><strong>Files</strong></span></button>
+        <button className="sidebar-brand sidebar-home-button" onClick={() => { void leaveFiles(onHome); }} aria-label={`Open ${appName()} home`} title="Back to Home"><span className="brand-dot"><Sparkles /></span><span className="brand-text"><strong>Files</strong></span></button>
         <button className="icon-button desktop-only" onClick={() => setCollapsed(true)} aria-label="Collapse folders sidebar" aria-controls="file-folders" aria-expanded={!collapsed} title="Collapse folders"><PanelLeftClose /></button>
       </header>
       <nav className="folder-nav" aria-label="File folders">

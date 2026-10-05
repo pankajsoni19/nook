@@ -1,13 +1,14 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { appName } from "../appName";
 
 /** The card shown instead of a blank page when rendering throws. The message is shown in development only. */
 export function CrashCard({ message, onReload }: { message?: string; onReload: () => void }) {
   return <main className="auth-page crash-page">
     <section className="auth-card crash-card" role="alert" aria-labelledby="crash-heading">
       <div className="auth-heading">
-        <span className="eyebrow">Nook</span>
+        <span className="eyebrow">{appName()}</span>
         <h1 id="crash-heading">Something went wrong</h1>
-        <p>Nook hit an unexpected error. Reload the page to continue; your saved work is safe.</p>
+        <p>{appName()} hit an unexpected error. Reload the page to continue; your saved work is safe.</p>
         {message && <pre className="crash-detail">{message}</pre>}
       </div>
       <button type="button" className="primary-button" onClick={onReload}>Reload</button>

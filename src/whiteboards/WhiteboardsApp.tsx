@@ -19,6 +19,7 @@ import { PENDING_SYNCED_EVENT, pendingSyncDeps, requestPendingSync } from "./pen
 import { duplicateWhiteboard, importWhiteboard, listWhiteboards, THUMBNAIL_EVENT, thumbnailUrl, whiteboardLink, type WhiteboardSort, type WhiteboardSummary } from "./whiteboardsApi";
 import "../files/files.css";
 import "./whiteboards.css";
+import { appName } from "../appName";
 
 /**
  * The canvas is the app's only lazy route chunk (D191, Q13): Excalidraw and its CSS load on the
@@ -190,7 +191,7 @@ export function WhiteboardsApp({ userId, displayName, navigate, flash, onHome, o
   useEffect(() => {
     if (route.boardId) return;
     const folderName = route.folder === "shared" ? "Shared" : route.folder !== "all" ? folders.find((folder) => folder.id === route.folder)?.name : null;
-    document.title = `${folderName ? `${folderName} · ` : ""}Whiteboards · Nook`;
+    document.title = `${folderName ? `${folderName} · ` : ""}Whiteboards · ${appName()}`;
   }, [folders, route.boardId, route.folder]);
 
   const openBoard = useCallback((board: Pick<WhiteboardSummary, "id">) => {

@@ -1,3 +1,4 @@
+import { appName } from "../../config";
 import { cleanLine } from "../html";
 import { context, layout, note, paragraph } from "../layout";
 import { appLink, paths } from "../links";
@@ -20,7 +21,7 @@ export const apiKeyCreatedTemplate = defineTemplate<{ keyName: string; scopes: s
     return layout({
       instanceName: ctx.instanceName,
       tone: "security",
-      subject: delayed(`New API key “${name}” on your Nook account`, data.delayed),
+      subject: delayed(`New API key “${name}” on your ${appName()} account`, data.delayed),
       preheader: "An MCP key was created. If this wasn't you, revoke it.",
       eyebrow: "Security · MCP key",
       title: "A new MCP API key was created",
@@ -54,11 +55,11 @@ export const roleChangedTemplate = defineTemplate<{ userId: string; fromRole: st
     return layout({
       instanceName: ctx.instanceName,
       tone: "security",
-      subject: delayed(`Your Nook role is now ${to}`, data.delayed),
+      subject: delayed(`Your ${appName()} role is now ${to}`, data.delayed),
       preheader: `${actor} changed your role from ${from} to ${to}.`,
       eyebrow: "Security · Role",
       title: `Your role is now ${to}`,
-      lead: `${actor} changed your role on this Nook.`,
+      lead: `${actor} changed your role on this ${appName()}.`,
       blocks: [
         context([{ title: `${from} → ${to}`, meta: ROLE_LINES[data.toRole] }], { tone: "security" }),
         paragraph("If you did not expect this, ask your admin.")
@@ -71,19 +72,20 @@ export const roleChangedTemplate = defineTemplate<{ userId: string; fromRole: st
 });
 
 export type TwoFactorEvent = "enabled" | "disabled" | "admin_reset" | "recovery_regenerated" | "recovery_used";
-const TWO_FACTOR_COPY: Record<TwoFactorEvent, { subject: string; title: string; lead: string; off: boolean }> = {
-  enabled: { subject: "Two-factor authentication is on", title: "Two-factor authentication is on", lead: "Signing in to Nook now needs a code from your authenticator app. Other sessions were signed out.", off: false },
-  disabled: { subject: "Two-factor authentication was turned off", title: "Two-factor authentication is off", lead: "Signing in to Nook needs only your password now. Other sessions were signed out.", off: true },
+// A function, so the copy uses APP_NAME as it is when the mail is rendered (Wave 39).
+const twoFactorCopy = (): Record<TwoFactorEvent, { subject: string; title: string; lead: string; off: boolean }> => ({
+  enabled: { subject: "Two-factor authentication is on", title: "Two-factor authentication is on", lead: `Signing in to ${appName()} now needs a code from your authenticator app. Other sessions were signed out.`, off: false },
+  disabled: { subject: "Two-factor authentication was turned off", title: "Two-factor authentication is off", lead: `Signing in to ${appName()} needs only your password now. Other sessions were signed out.`, off: true },
   admin_reset: { subject: "Two-factor authentication was reset", title: "Two-factor authentication was reset", lead: "The host administrator reset two-factor authentication on your account.", off: true },
-  recovery_regenerated: { subject: "New recovery codes for your Nook account", title: "New recovery codes were made", lead: "Your old recovery codes no longer work.", off: false },
-  recovery_used: { subject: "A recovery code was used on your Nook account", title: "A recovery code was used", lead: "Someone signed in or confirmed an action with one of your recovery codes.", off: false }
-};
+  recovery_regenerated: { subject: `New recovery codes for your ${appName()} account`, title: "New recovery codes were made", lead: "Your old recovery codes no longer work.", off: false },
+  recovery_used: { subject: `A recovery code was used on your ${appName()} account`, title: "A recovery code was used", lead: "Someone signed in or confirmed an action with one of your recovery codes.", off: false }
+});
 
 export const twoFactorTemplate = defineTemplate<{ event: TwoFactorEvent; at: string; remaining: number | null; delayed?: boolean }>({
   name: "security.two_factor",
   class: "security",
   render(data, ctx) {
-    const copy = TWO_FACTOR_COPY[data.event];
+    const copy = twoFactorCopy()[data.event];
     return layout({
       instanceName: ctx.instanceName,
       tone: "security",
@@ -136,19 +138,19 @@ export const accountEventTemplate = defineTemplate<{ event: AccountEvent; actorN
     const when = formatInstant(data.at, ctx.tz);
     const removed = resetCountLines(data.counts);
     const copy = data.event === "google_allowed"
-      ? { subject: "Google sign-in was allowed for your Nook account", title: "Google sign-in was allowed", lead: `${actor} allowed the next Google sign-in with this address to be linked to your Nook account. It works once, within 24 hours.`, action: { label: "Sign in", href: appLink(paths.home()) }, extra: "If you did not ask for this, contact your admin." }
+      ? { subject: `Google sign-in was allowed for your ${appName()} account`, title: "Google sign-in was allowed", lead: `${actor} allowed the next Google sign-in with this address to be linked to your ${appName()} account. It works once, within 24 hours.`, action: { label: "Sign in", href: appLink(paths.home()) }, extra: "If you did not ask for this, contact your admin." }
       : data.event === "google_reset"
-        ? { subject: "Your Nook account was reset for Google sign-in", title: "Your account was reset", lead: `${actor} reset your account before allowing Google sign-in. Removed: ${removed.length ? removed.join(", ") : "nothing"}. Your notes, files, and other items are kept, and everything you owned is private now.`, action: { label: "Sign in with Google", href: appLink(paths.home()) }, extra: "Sign in with Google as this address within 24 hours to link it. If you did not expect this, contact your admin." }
+        ? { subject: `Your ${appName()} account was reset for Google sign-in`, title: "Your account was reset", lead: `${actor} reset your account before allowing Google sign-in. Removed: ${removed.length ? removed.join(", ") : "nothing"}. Your notes, files, and other items are kept, and everything you owned is private now.`, action: { label: "Sign in with Google", href: appLink(paths.home()) }, extra: "Sign in with Google as this address within 24 hours to link it. If you did not expect this, contact your admin." }
         : data.event === "google_unlinked"
-          ? { subject: "Google sign-in was removed from your Nook account", title: "Google sign-in was removed", lead: `${actor} removed Google sign-in from your Nook account.`, action: { label: "Review in Settings", href: appLink(paths.settings("security")) }, extra: "Contact your admin if you think this is a mistake." }
+          ? { subject: `Google sign-in was removed from your ${appName()} account`, title: "Google sign-in was removed", lead: `${actor} removed Google sign-in from your ${appName()} account.`, action: { label: "Review in Settings", href: appLink(paths.settings("security")) }, extra: "Contact your admin if you think this is a mistake." }
           : data.event === "google_unlinked_self"
-            ? { subject: "Google sign-in was removed from your Nook account", title: "Google sign-in was removed", lead: "Google sign-in was removed from your Nook account in Settings. Sign in with your email and password from now on.", action: { label: "Review in Settings", href: appLink(paths.settings("security")) }, extra: "If this wasn't you, change your password and ask your admin to check your account." }
+            ? { subject: `Google sign-in was removed from your ${appName()} account`, title: "Google sign-in was removed", lead: `Google sign-in was removed from your ${appName()} account in Settings. Sign in with your email and password from now on.`, action: { label: "Review in Settings", href: appLink(paths.settings("security")) }, extra: "If this wasn't you, change your password and ask your admin to check your account." }
           : data.event === "blocked"
       // The admin's reason is never included (O11).
-      ? { subject: "Your Nook account was blocked", title: "Your account was blocked", lead: `${actor} blocked your account. You are signed out everywhere and cannot sign in until an admin unblocks it.`, action: null, extra: "Contact your admin if you think this is a mistake." }
+      ? { subject: `Your ${appName()} account was blocked`, title: "Your account was blocked", lead: `${actor} blocked your account. You are signed out everywhere and cannot sign in until an admin unblocks it.`, action: null, extra: "Contact your admin if you think this is a mistake." }
       : data.event === "unblocked"
-        ? { subject: "Your Nook account was unblocked", title: "Your account was unblocked", lead: `${actor} unblocked your account. You can sign in again.`, action: { label: "Sign in", href: appLink(paths.home()) }, extra: "Sign in on each device again, and turn push notifications back on in Settings if you use them." }
-        : { subject: "You were signed out of Nook everywhere", title: "You were signed out everywhere", lead: `${actor} signed your account out on every device.`, action: { label: "Sign in", href: appLink(paths.home()) }, extra: "Sign in again to continue. If you did not expect this, ask your admin." };
+        ? { subject: `Your ${appName()} account was unblocked`, title: "Your account was unblocked", lead: `${actor} unblocked your account. You can sign in again.`, action: { label: "Sign in", href: appLink(paths.home()) }, extra: "Sign in on each device again, and turn push notifications back on in Settings if you use them." }
+        : { subject: `You were signed out of ${appName()} everywhere`, title: "You were signed out everywhere", lead: `${actor} signed your account out on every device.`, action: { label: "Sign in", href: appLink(paths.home()) }, extra: "Sign in again to continue. If you did not expect this, ask your admin." };
     return layout({
       instanceName: ctx.instanceName,
       tone: "security",
@@ -181,11 +183,11 @@ export const passwordChangedTemplate = defineTemplate<{ event: PasswordEvent; at
   class: "security",
   render(data, ctx) {
     if (data.event === "google_linked") {
-      const lead = "Google sign-in was added to your Nook account. You can now sign in with Google as this address; your password and devices are unchanged.";
+      const lead = `Google sign-in was added to your ${appName()} account. You can now sign in with Google as this address; your password and devices are unchanged.`;
       return layout({
         instanceName: ctx.instanceName,
         tone: "security",
-        subject: delayed("Google sign-in was added to your Nook account", data.delayed),
+        subject: delayed(`Google sign-in was added to your ${appName()} account`, data.delayed),
         preheader: lead,
         eyebrow: "Security · Sign-in",
         title: "Google sign-in was added",
@@ -200,12 +202,12 @@ export const passwordChangedTemplate = defineTemplate<{ event: PasswordEvent; at
     }
     const reset = data.event === "reset";
     const lead = reset
-      ? "Your Nook password was reset with a link sent to this address. Every device was signed out."
-      : "Your Nook password was changed in Settings. All other sessions were signed out.";
+      ? `Your ${appName()} password was reset with a link sent to this address. Every device was signed out.`
+      : `Your ${appName()} password was changed in Settings. All other sessions were signed out.`;
     return layout({
       instanceName: ctx.instanceName,
       tone: "security",
-      subject: delayed(reset ? "Your Nook password was reset" : "Your Nook password was changed", data.delayed),
+      subject: delayed(reset ? `Your ${appName()} password was reset` : `Your ${appName()} password was changed`, data.delayed),
       preheader: lead,
       eyebrow: "Security · Password",
       title: reset ? "Your password was reset" : "Your password was changed",

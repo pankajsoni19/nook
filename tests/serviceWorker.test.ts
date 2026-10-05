@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { applicationServerKey, deviceLabel, pushAvailability, type Environment } from "../src/notifications/pushClient";
-import { IOS_HOME_SCREEN_COPY, PUSH_UNAVAILABLE_COPY, unavailableMessage } from "../src/notifications/NotificationSettings";
+import { IOS_HOME_SCREEN_COPY, pushUnavailableCopy, unavailableMessage } from "../src/notifications/NotificationSettings";
 
 const source = readFileSync(join(import.meta.dir, "..", "public", "sw.js"), "utf8");
 const eventId = "a1b2c3d4-e5f6-4a7b-9c8d-0e1f2a3b4c5d";
@@ -121,8 +121,8 @@ describe("push client helpers", () => {
     expect(pushAvailability(on, iphone)).toEqual({ available: false, reason: "ios_home_screen" });
     expect(pushAvailability(on, { ...iphone, standalone: true })).toEqual({ available: true });
     expect(pushAvailability(on, { ...desktop, hasPushManager: false })).toEqual({ available: false, reason: "unsupported" });
-    expect(unavailableMessage("server_insecure")).toBe(PUSH_UNAVAILABLE_COPY);
-    expect(PUSH_UNAVAILABLE_COPY).toBe("Push needs the HTTPS address, such as your Tailscale URL; reminders still appear in Nook.");
+    expect(unavailableMessage("server_insecure")).toBe(pushUnavailableCopy());
+    expect(pushUnavailableCopy()).toBe("Push needs the HTTPS address, such as your Tailscale URL; reminders still appear in Nook.");
     expect(unavailableMessage("ios_home_screen").startsWith(IOS_HOME_SCREEN_COPY)).toBe(true);
     expect(IOS_HOME_SCREEN_COPY).toBe("Add to Home Screen first.");
   });

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Ban, Check, ChevronLeft, Copy, Link2, Mail, Plus, RotateCcw, TriangleAlert, X } from "lucide-react";
 import { ApiError } from "../api";
+import { appName } from "../appName";
 import { relativeTime } from "../files/format";
 import { Select, type Option } from "../ui/Select";
 import { guestRefusalReason, guestRefusedNames, listTemplates, type AccessTemplate } from "../access/memberAccessApi";
@@ -320,7 +321,7 @@ function InviteEmailDialog({ invite, onClose, onDone }: { invite: TeamInvite; on
         <button type="button" className="icon-button" onClick={onClose} disabled={busy} aria-label="Close"><X /></button>
       </header>
       <form onSubmit={submit}>
-        <p>Nook emails a fresh {ROLE_LABELS[invite.role]} link to this address only. Once it is sent, the link you copied earlier stops working. The expiry stays the same.</p>
+        <p>{appName()} emails a fresh {ROLE_LABELS[invite.role]} link to this address only. Once it is sent, the link you copied earlier stops working. The expiry stays the same.</p>
         {error && <p className="form-error" role="alert">{error}</p>}
         <div className="team-dialog-actions">
           <button type="button" className="team-action" onClick={onClose} disabled={busy}>Cancel</button>

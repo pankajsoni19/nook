@@ -6,6 +6,7 @@ import type { InviteRole } from "../team/teamApi";
 import { AuthDivider, GoogleButton, googleErrorMessage } from "./googleSignIn";
 import type { RegistrationInfo } from "./registrationPrompt";
 import { collectProblems, emailProblem, FieldError, fieldName, newPasswordProblem, useFieldErrors } from "./fieldChecks";
+import { appName, setAppName } from "../appName";
 
 export type InvitePreview = { role: InviteRole; emailHint: string | null; expiresAt: string; inviterName: string };
 export type InviteRegisterBody = { email: string; displayName: string; password: string; inviteToken: string };
@@ -56,7 +57,7 @@ export function InviteRegister({ token, onRegister, onSignIn, googleError = null
 
   useEffect(() => {
     let live = true;
-    api<RegistrationInfo>("/about").then((info) => { if (live) setMethods(info.authMethods ?? { password: true, google: false }); }, () => { if (live) setMethods({ password: true, google: false }); });
+    api<RegistrationInfo>("/about").then((info) => { if (live) { setAppName(info.appName); setMethods(info.authMethods ?? { password: true, google: false }); } }, () => { if (live) setMethods({ password: true, google: false }); });
     return () => { live = false; };
   }, []);
 
@@ -95,7 +96,7 @@ export function InviteRegister({ token, onRegister, onSignIn, googleError = null
     return () => { active = false; };
   }, [token]);
 
-  useEffect(() => { document.title = "Join Nook"; }, []);
+  useEffect(() => { document.title = `Join ${appName()}`; }, []);
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -120,15 +121,15 @@ export function InviteRegister({ token, onRegister, onSignIn, googleError = null
       <div className="brand-mark"><Sparkles aria-hidden="true" /></div>
       {state.kind === "loading" && <p className="invite-register-status" role="status">Checking your invite…</p>}
       {state.kind === "dead" && <div className="auth-heading" role="alert">
-        <span className="eyebrow">Nook</span>
+        <span className="eyebrow">{appName()}</span>
         <h1><Link2Off aria-hidden="true" className="invite-register-icon" />{DEAD_COPY[state.reason].title}</h1>
         <p>{state.reason === "error" ? state.message : DEAD_COPY[state.reason].body}</p>
       </div>}
       {state.kind === "ready" && <>
         <div className="auth-heading">
           <span className="eyebrow">You were invited as {ROLE_LABELS[state.preview.role]}</span>
-          <h1>Join Nook</h1>
-          <p>{state.preview.inviterName} invited you to Nook as a <strong>{ROLE_LABELS[state.preview.role]}</strong>.</p>
+          <h1>Join {appName()}</h1>
+          <p>{state.preview.inviterName} invited you to {appName()} as a <strong>{ROLE_LABELS[state.preview.role]}</strong>.</p>
           <p className="invite-register-role">{ROLE_DESCRIPTIONS[state.preview.role]}.</p>
           <p className="invite-register-expiry">The link works once, until {new Date(state.preview.expiresAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}.</p>
         </div>
@@ -167,7 +168,7 @@ export function InviteRegister({ token, onRegister, onSignIn, googleError = null
 
 /** A signed-in visitor opened an invite link (§1.6): they must sign out to use it. */
 export function InviteWhileSignedIn({ displayName, onSignOut, onContinue }: { displayName: string; onSignOut: () => void; onContinue: () => void }) {
-  useEffect(() => { document.title = "Join Nook"; }, []);
+  useEffect(() => { document.title = `Join ${appName()}`; }, []);
   return <main className="auth-page">
     <section className="auth-card invite-register">
       <div className="brand-mark"><Sparkles aria-hidden="true" /></div>
@@ -179,7 +180,7 @@ export function InviteWhileSignedIn({ displayName, onSignOut, onContinue }: { di
       <div className="auth-form">
         <button type="button" className="primary-button invite-register-signout" onClick={onSignOut}><LogOut aria-hidden="true" />Sign out and use the invite</button>
       </div>
-      <button type="button" className="text-button" onClick={onContinue}>Continue to Nook as {displayName}</button>
+      <button type="button" className="text-button" onClick={onContinue}>Continue to {appName()} as {displayName}</button>
     </section>
   </main>;
 }

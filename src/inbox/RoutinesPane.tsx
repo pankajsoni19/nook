@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CalendarClock, Pause, Play, Plus, RotateCcw, Trash2, TriangleAlert, X } from "lucide-react";
 import { api } from "../api";
+import { appName } from "../appName";
 import { trapTabKey, useDialogFocus } from "../files/Dialog";
 import { relativeTime } from "../files/format";
 import { Combobox } from "../ui/Combobox";
@@ -85,7 +86,7 @@ export function RoutinesPane({ canWrite, flash }: { canWrite: boolean; flash: (m
       <h2 id="inbox-routines-title">Routines</h2>
       {canWrite && <button type="button" className="inbox-action primary" onClick={(event) => openSheet(null, event.currentTarget)}><Plus />New routine</button>}
     </header>
-    <p className="inbox-muted">A routine is a prompt an agent runs on a schedule. Nook only says when it is due; your MCP client runs it, and every change it suggests waits here for you.</p>
+    <p className="inbox-muted">A routine is a prompt an agent runs on a schedule. {appName()} only says when it is due; your MCP client runs it, and every change it suggests waits here for you.</p>
 
     {error && <div className="inbox-state inbox-error" role="alert">
       <span className="inbox-state-icon"><TriangleAlert /></span>
@@ -147,7 +148,7 @@ function ClientRecipe() {
   const origin = typeof window === "undefined" ? "https://nook.example" : window.location.origin;
   return <details className="inbox-recipe">
     <summary>Set up your client</summary>
-    <p>Add Nook as an MCP server at <code>{origin}/mcp</code> with a key that has <b>Suggest changes</b> and the read permission for what the routine looks at. Then, on your schedule:</p>
+    <p>Add {appName()} as an MCP server at <code>{origin}/mcp</code> with a key that has <b>Suggest changes</b> and the read permission for what the routine looks at. Then, on your schedule:</p>
     <ol>
       <li><code>list_due_routines</code> — what is due now</li>
       <li><code>start_run</code> with the routineId — the instructions and a two-hour lease</li>

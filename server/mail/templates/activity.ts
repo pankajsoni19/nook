@@ -1,3 +1,4 @@
+import { appName } from "../../config";
 import { cleanLine } from "../html";
 import { context, layout, note, type ContextRow } from "../layout";
 import { appLink, paths } from "../links";
@@ -34,7 +35,7 @@ export const assignedTemplate = defineTemplate<{ actors: string[]; cards: Assign
       lead: oneBoard ? `On the board ${oneBoard}.` : `On ${plural(boards.size, "board")}.`,
       blocks: [context(rows, { more: cards.length - rows.length })],
       action: single ? { label: "Open card", href: appLink(paths.card(single.boardId, single.cardId)) } : { label: "Open My work", href: appLink(paths.myWork()) },
-      footer: activityFooter("assignments", "You got this because someone assigned you a card in Nook.", ctx)
+      footer: activityFooter("assignments", `You got this because someone assigned you a card in ${appName()}.`, ctx)
     });
   },
   fixture: () => ({
@@ -121,12 +122,12 @@ export const sharedTemplate = defineTemplate<{ actors: string[]; items: SharedIt
     return layout({
       instanceName: ctx.instanceName,
       subject: single ? `${who} shared ‘${itemTitle(single.title)}’ with you` : `${who} shared ${plural(data.items.length, "item")} with you`,
-      preheader: single ? `${KIND_LABELS[single.kind]} in Nook.` : `${plural(data.items.length, "item")} in Nook.`,
+      preheader: single ? `${KIND_LABELS[single.kind]} in ${appName()}.` : `${plural(data.items.length, "item")} in ${appName()}.`,
       eyebrow: "Sharing · Shared with you",
       title: single ? `${who} shared a ${KIND_LABELS[single.kind].toLowerCase()} with you` : `${who} shared ${plural(data.items.length, "item")} with you`,
       blocks: [context(rows, { more: data.items.length - rows.length })],
-      action: single ? { label: `Open ${KIND_LABELS[single.kind].toLowerCase()}`, href: appLink(sharedItemPath(single)) } : { label: "Open Nook", href: appLink(aggregatePath(data.items)) },
-      footer: activityFooter("sharing", "You got this because someone shared something with you by name in Nook.", ctx)
+      action: single ? { label: `Open ${KIND_LABELS[single.kind].toLowerCase()}`, href: appLink(sharedItemPath(single)) } : { label: `Open ${appName()}`, href: appLink(aggregatePath(data.items)) },
+      footer: activityFooter("sharing", `You got this because someone shared something with you by name in ${appName()}.`, ctx)
     });
   },
   fixture: () => ({

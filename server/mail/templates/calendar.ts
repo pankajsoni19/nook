@@ -1,3 +1,4 @@
+import { appName } from "../../config";
 import { cleanLine } from "../html";
 import { context, layout, note, type ContextRow } from "../layout";
 import { appLink, paths } from "../links";
@@ -47,10 +48,10 @@ export const reminderTemplate = defineTemplate<ReminderMail>({
       preheader: when ? `${title}, ${when}.` : `${title}.`,
       eyebrow: data.kind === "event" ? "Calendar · Reminder" : "Reminder",
       title: data.kind === "event" ? "Your event is coming up" : "Your reminder",
-      lead: data.late ? "This reminder is late: Nook could not send it on time." : undefined,
+      lead: data.late ? `This reminder is late: ${appName()} could not send it on time.` : undefined,
       blocks: [context(rows), note("You set this reminder yourself. Only you get it.")],
       action: data.kind === "event" && data.eventId ? { label: "Open event", href: appLink(paths.event(data.eventId)) } : { label: "Open notifications", href: appLink(paths.notifications()) },
-      footer: activityFooter("reminders", "You got this because you chose email for this reminder in Nook.", ctx)
+      footer: activityFooter("reminders", `You got this because you chose email for this reminder in ${appName()}.`, ctx)
     });
   },
   fixture: () => ({
