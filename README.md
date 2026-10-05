@@ -72,7 +72,7 @@ Team secrets per environment (dev, staging, prod, or your own): values, logins, 
 
 ### Everywhere
 
-- **Shared Bin**: deleted notes, files, cards, boards, collections, rows, calendars, and events wait 30 days with their history and sharing, then are removed for good. A card moves to the Bin with its subtasks.
+- **Shared Bin**: deleted notes, files, cards, boards, collections, rows, calendars, and events wait 30 days with their history and sharing, then are removed for good. A card moves to the Bin with its subtasks. The Bin is in **Settings → Bin** (`/settings/bin`).
 - **Settings → Modules**: turn apps on or off for your account on every device. Nothing is deleted and sharing is unchanged.
 - **Mobile first**: every app, item, and view has its own URL, phones get focused single-column screens, and browser Back and Forward work everywhere (Back closes an open dialog or sheet first).
 - **MCP server**: a Streamable HTTP endpoint for trusted AI clients with revocable API keys and per-key permissions across notes (read, write drafts), files (read), tasks (read, write), collections (read, write), calendar (read, write), Today, and team (admins). Agents write drafts; publishing always stays with you.

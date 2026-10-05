@@ -115,9 +115,9 @@ describe("route scheme", () => {
 describe("the nav per role", () => {
   const ids = (entries: ReturnType<typeof hubEntries>) => entries.map((entry) => entry.id);
 
-  test("admins: every account section, then every Team section", () => {
+  test("admins: every account section, the Bin, then every Team section", () => {
     expect(ids(hubEntries("admin", { teamModuleEnabled: true }))).toEqual([
-      "security", "notifications", "access", "mcp", "modules", "about",
+      "security", "notifications", "access", "mcp", "modules", "about", "bin",
       "team-members", "team-invites", "team-groups", "team-integrations", "team-keys", "team-policies", "team-templates", "team-activity", "team-email"
     ]);
     // Team turned off in Modules: admins keep Team here (Team plan §6.2).
@@ -126,9 +126,10 @@ describe("the nav per role", () => {
 
   test("members and viewers see Team → Members only, while Team is on; guests never", () => {
     for (const role of ["member", "viewer"] as const) {
-      expect(ids(hubEntries(role, { teamModuleEnabled: true }))).toEqual(["security", "notifications", "access", "mcp", "modules", "about", "team-members"]);
+      expect(ids(hubEntries(role, { teamModuleEnabled: true }))).toEqual(["security", "notifications", "access", "mcp", "modules", "about", "bin", "team-members"]);
       expect(ids(hubEntries(role, { teamModuleEnabled: false }))).not.toContain("team-members");
     }
+    // Wave 38 fixes: no Bin for guests either (they can delete nothing).
     expect(ids(hubEntries("guest", { teamModuleEnabled: true }))).toEqual(["security", "notifications", "mcp", "modules", "about"]);
     expect(teamGroupShown("guest", true)).toBe(false);
   });
@@ -155,7 +156,10 @@ describe("the nav per role", () => {
     expect(isNestedHubRoute(parseRoute("/settings/team/integrations"))).toBe(false);
     expect(isNestedHubRoute(parseRoute("/settings/keys"))).toBe(false);
     expect(isHubRoute(parseRoute("/team"))).toBe(true);
-    expect(isHubRoute(parseRoute("/bin"))).toBe(false);
+    // Wave 38: the Bin is a hub section.
+    expect(isHubRoute(parseRoute("/bin"))).toBe(true);
+    expect(hubEntryOf(parseRoute("/settings/bin"))).toBe("bin");
+    expect(isHubRoute(parseRoute("/notes"))).toBe(false);
   });
 });
 
@@ -340,20 +344,20 @@ describe("history at 390 px", () => {
     const app = read("App.tsx");
     // Review M2: a move that was undone (a dialog's, a leave guard's, or the route gate's) is read again once it settled.
     expect(app).toContain("if (popStateClosedDialog(event)) { cancel = whenHistorySettled(follow); return; }");
-    expect(app).toContain("const next = hubPopRoute(routeFromLocation(window.location), teamShownRef.current);");
+    expect(app).toContain("const next = hubPopRoute(routeFromLocation(window.location), teamShownRef.current, binShownRef.current);");
     // Account and Team routes render the same page element, so moving between them never remounts it.
-    expect(app).toContain(': shownApp === "settings" || shownApp === "team" ? settingsPage(false)');
+    expect(app).toContain("// Settings, Team, and the Bin (Wave 38) are the hub's routes.\n      : settingsPage(false)}");
     expect(app).toContain('key="settings-hub"');
   });
 });
 
 describe("the leave guard (a key shown only once)", () => {
-  test("switching section, the back arrow, Home, Bin, sign-out, and Back/Forward all ask first", () => {
+  test("switching section, the back arrow, Home, sign-out, and Back/Forward all ask first", () => {
     const app = read("App.tsx");
     expect(app).toContain('guardLeave(() => go(entry.route), "section");');
     expect(app).toContain('onBack={() => guardLeave(backToList, "section")}');
     expect(app).toContain("onHome={onHome ? () => guardLeave(onHome) : undefined}");
-    expect(app).toContain("onSignOut={() => guardLeave(onSignOut)} onBin={onBin ? () => guardLeave(onBin) : undefined}");
+    expect(app).toContain("onSignOut={() => guardLeave(onSignOut)} />");
     expect(app).toContain("useLeaveGuard(pending && !confirmOpen, (direction) => {");
     // Both keys hold the page: Settings → API keys and a Team integration's new key.
     expect(app).toContain("<KeysSettings notice={googleNoticeLine} onPendingChange={onMcpKeyPending}");

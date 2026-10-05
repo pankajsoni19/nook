@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { TaskNotify } from "./taskActions";
 import { House, Sparkles } from "lucide-react";
-import { AccountActions, useBinCount, AppPageName } from "../AppShell";
+import { AccountActions, AppPageName } from "../AppShell";
 import { ReadOnlyBanner, useRole } from "../team/roleAccess";
 import { readHistoryDepth } from "../appShellNavigation";
 import { popStateClosedDialog } from "../historyDialogs";
@@ -24,8 +24,6 @@ type TasksAppProps = {
   /** The app toast; Tasks shows its own so a message can carry Undo. */
   flash: (message: string) => void;
   onHome: () => void;
-  /** Opens the Bin from the header, as on Home; hidden when the host does not wire it. */
-  onBin?: () => void;
   onSettings: () => void;
   onSignOut: () => void;
 };
@@ -39,10 +37,9 @@ const currentTasksRoute = (): TasksRoute => {
  * Tasks: the board list (/tasks) and one board (/tasks/:boardId). Every view is a history entry;
  * dialogs and sheets push none (D18). Back steps card → board → list → Home.
  */
-export function TasksApp({ userId, displayName, navigate, onHome, onBin, onSettings, onSignOut }: TasksAppProps) {
+export function TasksApp({ userId, displayName, navigate, onHome, onSettings, onSignOut }: TasksAppProps) {
   const [route, setRoute] = useState<TasksRoute>(currentTasksRoute);
   const { readOnly } = useRole();
-  const binCount = useBinCount(Boolean(onBin));
   // Tasks keeps its own toast so a message can carry an action (Undo after moving to the Bin). One
   // with an action (Undo, Move, Open, View) stays 15 s so there is time to reach it (QA 0.9.0).
   const [toast, setToast] = useState<{ id: number; message: string; action?: { label: string; run: () => void }; selectable?: boolean } | null>(null);
@@ -178,7 +175,7 @@ export function TasksApp({ userId, displayName, navigate, onHome, onBin, onSetti
     <header className="app-page-header">
       <button className="app-home-button" onClick={onHome}><House />Home</button>
       <span className="app-home-brand"><span className="brand-dot"><Sparkles /></span><span className="brand-text"><strong>Tasks</strong></span></span><AppPageName name="Tasks" />
-      <AccountActions displayName={displayName} onSettings={onSettings} onSignOut={onSignOut} onBin={onBin} binCount={binCount} />
+      <AccountActions displayName={displayName} onSettings={onSettings} onSignOut={onSignOut} />
     </header>
     <ReadOnlyBanner />
     {route.boardId

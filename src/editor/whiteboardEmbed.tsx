@@ -104,7 +104,7 @@ function WhiteboardEmbedCard({ node, selected }: NodeViewProps) {
       {board === "binned" && <>
         <span className="whiteboard-embed-thumb unavailable" aria-hidden="true"><Trash2 /></span>
         <span className="whiteboard-embed-copy"><strong>In the Bin</strong><small>You deleted this whiteboard. Restore it from the Bin to show it here.</small></span>
-        <button type="button" className="secondary-button whiteboard-embed-open" onClick={() => openPath("/bin")} onMouseDown={(event) => event.preventDefault()}>Open Bin</button>
+        <button type="button" className="secondary-button whiteboard-embed-open" onClick={() => openPath("/settings/bin")} onMouseDown={(event) => event.preventDefault()}>Open Bin</button>
       </>}
       {board && board !== "binned" && <>
         <span className="whiteboard-embed-thumb">{board.hasThumbnail ? <img src={thumbnailUrl(board)} alt="" loading="lazy" draggable={false} /> : <PenTool aria-hidden="true" />}</span>

@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { join } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { AppPageName } from "../src/AppShell";
-import { BinApp } from "../src/bin/BinApp";
+import { SettingsHubShell } from "../src/settings/SettingsHub";
 
 const root = join(import.meta.dir, "..", "src");
 const pages: Record<string, string> = {
@@ -11,7 +11,6 @@ const pages: Record<string, string> = {
   "calendar/CalendarApp.tsx": "Calendar",
   "settings/SettingsHub.tsx": "Settings",
   "inbox/InboxApp.tsx": "Inbox",
-  "bin/BinApp.tsx": "Bin",
   "notifications/NotificationsApp.tsx": "Notifications"
 };
 
@@ -43,7 +42,7 @@ test("the phone stylesheet shows the page name and keeps the hidden brand in the
   expect(inbox).not.toContain(".app-home-brand { display: none; }");
 });
 
-test("a rendered page header includes the page name", () => {
-  const markup = renderToStaticMarkup(<BinApp displayName="Ada" onSettings={() => undefined} onSignOut={() => undefined} flash={() => undefined} onHome={() => undefined} />);
-  expect(markup).toContain('<span class="app-page-name" aria-hidden="true">Bin</span>');
+test("a rendered page header includes the page name (the Bin is Settings → Bin since Wave 38)", () => {
+  const markup = renderToStaticMarkup(<SettingsHubShell displayName="Ada" role="member" entries={[]} selected="bin" listScreen={false} title="Bin" showBack onBack={() => undefined} onSelect={() => undefined} account={null}>{null}</SettingsHubShell>);
+  expect(markup).toContain('<span class="app-page-name" aria-hidden="true">Settings</span>');
 });

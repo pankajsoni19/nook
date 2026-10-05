@@ -567,7 +567,9 @@ const ROUTES = (s) => [
   ["Files grid", "/files", async (page) => { if (page.mobile) await tapText(page, ".mobile-tabbar button", "Files"); await tapText(page, "button", "Grid view"); }, { check: (page) => pageKeys(page, "#file-list") }],
   ["Files folders", "/files", async (page) => { if (page.mobile) await tapText(page, ".mobile-tabbar button", "Folders"); }],
   ["Files preview (long text)", `/files/${s.longFile.id}`],
-  ["Bin", "/bin"],
+  // Wave 38: the Bin is Settings → Bin, a hub section (its list scrolls in the section scroller); /bin is an alias.
+  ["Settings · Bin", "/settings/bin", null, HUB],
+  ["Settings · Bin (old /bin link)", "/bin", null, HUB],
   ["Tasks home", "/tasks"],
   ["Tasks board", `/tasks/${s.board.id}`],
   ["Tasks views", "/tasks/views"],

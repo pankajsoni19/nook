@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { ChevronLeft, Copy, Download, Eye, EyeOff, History, House, KeyRound, Lock, Pencil, Plus, RotateCcw, Search, Settings2, ShieldAlert, Sparkles, Trash2, TriangleAlert, Upload, UsersRound } from "lucide-react";
-import { AccountActions, AppPageName, useBinCount } from "../AppShell";
+import { AccountActions, AppPageName } from "../AppShell";
 import { readHistoryDepth } from "../appShellNavigation";
 import { PHONE_QUERY, useMediaQuery } from "../calendar/hooks";
 import { relativeTime } from "../files/format";
@@ -35,7 +35,6 @@ type VaultAppProps = {
   navigate: VaultNavigate;
   flash: (message: string) => void;
   onHome: () => void;
-  onBin?: () => void;
   onSettings: () => void;
   onSignOut: () => void;
 };
@@ -59,8 +58,7 @@ type PageData = { vault: VaultSummary; secrets: SecretSummary[]; nextCursor: str
  * history entry; sheets and dialogs push none, so Back closes them first (D18). Values are masked
  * until revealed, hide again after 30 seconds, and never enter the URL, the title, or a toast.
  */
-export function VaultApp({ displayName, role, navigate, flash, onHome, onBin, onSettings, onSignOut }: VaultAppProps) {
-  const binCount = useBinCount(Boolean(onBin));
+export function VaultApp({ displayName, role, navigate, flash, onHome, onSettings, onSignOut }: VaultAppProps) {
   const [status, setStatus] = useState<VaultStatus | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [route, setRoute] = useState<VaultRoute>(currentRoute);
@@ -118,7 +116,7 @@ export function VaultApp({ displayName, role, navigate, flash, onHome, onBin, on
   const header = <header className="app-page-header">
     <button className="app-home-button" onClick={onHome}><House />Home</button>
     <span className="app-home-brand"><span className="brand-dot"><Sparkles /></span><span className="brand-text"><strong>Vault</strong></span></span><AppPageName name="Vault" />
-    <AccountActions displayName={displayName} onSettings={onSettings} onSignOut={onSignOut} onBin={onBin} binCount={binCount} />
+    <AccountActions displayName={displayName} onSettings={onSettings} onSignOut={onSignOut} />
   </header>;
 
   let body: React.ReactNode;
