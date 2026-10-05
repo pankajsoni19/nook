@@ -87,9 +87,10 @@ export function SettingsHubShell({ displayName, avatarUrl, role, entries, select
             {group.items.map((entry) => {
               const Icon = ICONS[entry.id];
               const current = entry.id === selected;
-              // Wave 38: the Bin's item count, as the top bar's Bin button had it.
+              // Wave 38: the Bin's item count and Members' blocked accounts, as the top bar's buttons had them.
               const badge = entry.badge ?? 0;
-              return <li key={entry.id}><button type="button" className={current ? "active" : ""} aria-current={current ? "page" : undefined} aria-label={badge > 0 ? `${entry.label}, ${badge} item${badge === 1 ? "" : "s"}` : undefined} onClick={() => onSelect(entry)}>
+              const noun = entry.badgeNoun ?? "item";
+              return <li key={entry.id}><button type="button" className={current ? "active" : ""} aria-current={current ? "page" : undefined} aria-label={badge > 0 ? `${entry.label}, ${badge} ${noun}${badge === 1 ? "" : "s"}` : undefined} onClick={() => onSelect(entry)}>
                 <Icon aria-hidden="true" />
                 <span className="settings-hub-entry"><span>{entry.label}</span><small>{HINTS[entry.id]}</small></span>
                 {badge > 0 && <span className="settings-hub-badge" aria-hidden="true">{badge > 99 ? "99+" : badge}</span>}

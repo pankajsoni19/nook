@@ -55,14 +55,16 @@ describe("the route gate with hubGatesItself", () => {
     expect(source).toContain('const hubGatesItself = teamGateOpen || activeApp === "bin";');
     expect(source.match(/hubGatesItself/g)?.length).toBe(3);
     // Back/Forward onto a hidden Bin entry still go through the generic skip (onPopState keeps the Team-only exemption).
-    expect(source).toContain('const hiddenRoute = route.app === "team" && canManageTeam(session.user.role) ? null : hiddenModuleForApp(disabledModules, route.app);');
+    // (wave38-fixes: a guest's Bin entry is skipped like one with the module off.)
+    expect(source).toContain('const hiddenRoute = route.app === "team" && canManageTeam(session.user.role) ? null : route.app === "bin" && !binEntryShown(session.user.role, binEnabled) ? "bin" : hiddenModuleForApp(disabledModules, route.app);');
   });
 
   test("the hub keeps the screen when a popped Bin entry is hidden, and the Bin entry disappears for every role", () => {
     expect(hubPopRoute(parseRoute("/bin"), true, false)).toBeNull();
     for (const role of ["admin", "member", "viewer", "guest"] as const) {
       expect(hubEntries(role, { teamModuleEnabled: false, binModuleEnabled: false }).some((entry) => entry.id === "bin")).toBe(false);
-      expect(hubEntries(role, { teamModuleEnabled: false, binModuleEnabled: true }).filter((entry) => entry.group === "workspace").map((entry) => entry.id)).toEqual(["bin"]);
+      // wave38-fixes: guests never get the entry (they can delete nothing).
+      expect(hubEntries(role, { teamModuleEnabled: false, binModuleEnabled: true }).filter((entry) => entry.group === "workspace").map((entry) => entry.id)).toEqual(role === "guest" ? [] : ["bin"]);
     }
     // The Workspace group renders between Account and Team for an admin with Team off too.
     const markup = renderToStaticMarkup(<SettingsHubShell displayName="A" role="admin" entries={hubEntries("admin", { teamModuleEnabled: false, binCount: 2 })} selected="bin" listScreen={false} title="Bin" showBack={false} onBack={() => undefined} onSelect={() => undefined} account={null}>{null}</SettingsHubShell>);

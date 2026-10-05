@@ -3,7 +3,7 @@ import { Avatar } from "./ui/Avatar";
 import { useSelfAvatar } from "./ui/selfAvatar";
 import { Inbox, LogOut, Settings } from "lucide-react";
 import "./appShell.css";
-import { listBin, onBinChanged } from "./bin/binApi";
+import { binCountClaimed, listBin, onBinChanged, onBinCount } from "./bin/binApi";
 import { INBOX_CHANGED, pendingCount } from "./inbox/inboxApi";
 import { useModuleEnabled } from "./modules";
 import { NotificationBell } from "./notifications/NotificationBell";
@@ -91,8 +91,11 @@ export function AccountActions({ displayName, onSettings, onSignOut }: AccountPr
 /**
  * The Bin's item count for its Settings nav entry (Wave 38; the top bar's Bin badge before): a lazy
  * look on mount (no polling), and again whenever the app restores or deletes from the Bin
- * (notifyBinChanged: Restore all in a key's Review, Settings → Bin); a failure leaves no count.
- * `enabled` false skips the request (the Bin module off, or two-factor setup still required).
+ * (notifyBinChanged: Restore all in a key's Review, a deleted note); a failure leaves no count.
+ * While Settings → Bin itself is on screen it reports the count of the items it loaded instead
+ * (claimBinCount, review L3), so opening the Bin asks the server once, and a restore or delete there
+ * is counted from the list, not fetched again. `enabled` false skips the request (the Bin entry
+ * hidden: the module off or a guest, or two-factor setup still required).
  */
 export function useBinCount(enabled = true) {
   const [binCount, setBinCount] = useState(0);
@@ -101,12 +104,15 @@ export function useBinCount(enabled = true) {
     let live = true;
     let request = 0;
     const count = () => {
+      if (binCountClaimed()) return;
       const current = ++request;
       listBin().then(({ items }) => { if (live && current === request) setBinCount(items.length); }, () => undefined);
     };
     count();
     const stop = onBinChanged(count);
-    return () => { live = false; stop(); };
+    // A reported count wins over a look still in flight.
+    const stopReports = onBinCount((reported) => { request += 1; if (live) setBinCount(reported); });
+    return () => { live = false; stop(); stopReports(); };
   }, [enabled]);
   return binCount;
 }

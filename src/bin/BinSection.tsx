@@ -6,7 +6,7 @@ import { useConfirm } from "../ui/useConfirm";
 import { useHistoryDialogGuard } from "../ui/useHistoryDialogGuard";
 import { relativeTime } from "../files/format";
 import type { BinItem } from "../types";
-import { deleteBinItem, emptyBin, listBin, restoreBinItem } from "./binApi";
+import { claimBinCount, deleteBinItem, emptyBin, listBin, reportBinCount, restoreBinItem } from "./binApi";
 import {
   binFolderLabel,
   binItemLabel,
@@ -83,6 +83,9 @@ export function BinSection({ flash, onRestored }: BinSectionProps) {
   }, []);
 
   useEffect(() => { void load(); }, [load]);
+  // Review L3: while on screen, this list is the nav entry's count (useBinCount loads nothing beside it).
+  useEffect(() => claimBinCount(), []);
+  useEffect(() => { if (items) reportBinCount(items.length); }, [items]);
 
   const closeSheet = useCallback(() => {
     setSheetKey(null);

@@ -47,8 +47,9 @@ const WhiteboardsApp = lazy(() => import("./whiteboards/WhiteboardsApp").then((m
 const VaultApp = lazy(() => import("./vault/VaultApp").then((module) => ({ default: module.VaultApp })));
 import { lineDiff } from "./diff/lineDiff";
 import { TeamSection } from "./team/TeamApp";
+import { useBlockedCount } from "./team/blockedCount";
 import { SettingsHubShell } from "./settings/SettingsHub";
-import { hubBackAction, hubEntries, hubEntryLabel, hubEntryOf, hubListGoesUnder, hubPopRoute, isHubRoute, isNestedHubRoute, leaveGuardAction, settingsRoute, teamGroupShown, type HubEntry, type HubEntryId } from "./settings/hubModel";
+import { binEntryShown, hubBackAction, hubEntries, hubEntryLabel, hubEntryOf, hubListGoesUnder, hubPopRoute, isHubRoute, isNestedHubRoute, leaveGuardAction, settingsRoute, teamGroupShown, type HubEntry, type HubEntryId } from "./settings/hubModel";
 import { HubBeforeLeaveContext, type BeforeHubLeave } from "./settings/hubLeave";
 import { InviteRegister, InviteWhileSignedIn, type InviteRegisterBody } from "./auth/InviteRegister";
 import { initialInvite } from "./auth/inviteLink";
@@ -381,8 +382,11 @@ function SettingsPage({ session, modules, googleResult = null, navigate, flash, 
   const { ask, confirmOpen, confirmElement } = useConfirm();
   // Q4: the codes shown right after turning two-factor on, until the person says they saved them.
   const [codesDialog, setCodesDialog] = useState(false);
-  // Wave 38: the Bin's item count on its nav entry (the top bar's Bin badge before).
-  const binCount = useBinCount(binModuleEnabled && !setupRequired);
+  // Wave 38: the Bin entry (not for guests, review) and its item count (the top bar's Bin badge before).
+  const binShown = binEntryShown(session.user.role, binModuleEnabled);
+  const binCount = useBinCount(binShown && !setupRequired);
+  // Review L1: the blocked-account count on Team → Members (the top bar's Team badge before).
+  const blockedCount = useBlockedCount(canManageTeam(session.user.role) && !setupRequired);
 
   // A new key shown only once (C1): Settings → API keys, or (review R4) an integration's page in Team.
   const [mcpKeyPending, setMcpKeyPending] = useState(false);
@@ -443,21 +447,27 @@ function SettingsPage({ session, modules, googleResult = null, navigate, flash, 
   // module is off, D92) is read again once it settled, so the screen always follows the URL.
   const teamShownRef = useRef(teamGroupShown(session.user.role, teamModuleEnabled));
   teamShownRef.current = teamGroupShown(session.user.role, teamModuleEnabled);
-  const binShownRef = useRef(binModuleEnabled);
-  binShownRef.current = binModuleEnabled;
+  const binShownRef = useRef(binShown);
+  binShownRef.current = binShown;
   useEffect(() => {
     let cancel = () => undefined as void;
+    let later: ReturnType<typeof setTimeout> | null = null;
     const follow = () => {
       const next = hubPopRoute(routeFromLocation(window.location), teamShownRef.current, binShownRef.current);
       if (next) setLocationRoute((current) => formatRoute(current) === formatRoute(next) ? current : next);
     };
     const onPopState = (event: PopStateEvent) => {
       cancel();
+      if (later) { clearTimeout(later); later = null; }
       if (popStateClosedDialog(event)) { cancel = whenHistorySettled(follow); return; }
       follow();
+      // Review M1: a hidden Bin entry is the route gate's to deal with, and it runs after this listener
+      // (Forward is undone, Back steps on past the entry, a depth-0 entry is replaced with Security):
+      // the URL is read once more after its move settled, so the screen follows what the gate chose.
+      if (routeFromLocation(window.location).app === "bin" && !binShownRef.current) later = setTimeout(() => { later = null; cancel = whenHistorySettled(follow); }, 0);
     };
     window.addEventListener("popstate", onPopState);
-    return () => { cancel(); window.removeEventListener("popstate", onPopState); };
+    return () => { cancel(); if (later) clearTimeout(later); window.removeEventListener("popstate", onPopState); };
   }, []);
 
   const go = useCallback((next: Route, options: { replace?: boolean } = {}) => {
@@ -471,15 +481,15 @@ function SettingsPage({ session, modules, googleResult = null, navigate, flash, 
     else go(settingsRoute(null), { replace: true });
   }, [go]);
 
-  const entries = useMemo(() => hubEntries(session.user.role, { teamModuleEnabled, binModuleEnabled, setupRequired, binCount }), [binCount, binModuleEnabled, session.user.role, setupRequired, teamModuleEnabled]);
+  const entries = useMemo(() => hubEntries(session.user.role, { teamModuleEnabled, binModuleEnabled, setupRequired, binCount, blockedCount }), [binCount, binModuleEnabled, blockedCount, session.user.role, setupRequired, teamModuleEnabled]);
   const listScreen = route.app === "settings" && route.section === null;
   // Q6: guests have no My access; its URL opens Security (replaced below).
   const guestAccess = route.app === "settings" && route.section === "access" && session.user.role === "guest";
   const section: SettingsSection | null = route.app === "settings" ? guestAccess ? "security" : route.section ?? "security" : null;
   const selected: HubEntryId = guestAccess ? "security" : hubEntryOf(route) ?? "security";
   useEffect(() => { if (guestAccess) go(settingsRoute("security"), { replace: true }); }, [go, guestAccess]);
-  // Wave 38: with the Bin module off (D92) the Bin has no entry, and /settings/bin opens Security in place.
-  const binHidden = route.app === "bin" && !binModuleEnabled;
+  // Wave 38: with the Bin module off (D92), or for a guest, the Bin has no entry, and /settings/bin opens Security in place.
+  const binHidden = route.app === "bin" && !binShown;
   useEffect(() => { if (binHidden) go(settingsRoute("security"), { replace: true }); }, [binHidden, go]);
   const title = route.app === "settings" ? SETTINGS_SECTION_NAMES[section ?? "security"] : hubEntryLabel(selected);
 
@@ -1834,7 +1844,6 @@ export function App() {
     showMobilePanel(fallback, "replace");
   }
 
-  // Re-registered every render so the handler never finalizes a note from a stale editor snapshot.
   // The depth of the entry on screen: read once per signed-in user, then kept by navigate() and by
   // every popstate (recordPopDepth), never re-read on render (see recordPopDepth).
   const sessionUserId = session?.user.id ?? null;
@@ -1846,59 +1855,76 @@ export function App() {
   // F6: End/Home/PageDown/PageUp scroll the Notes or Files panel on screen when focus is on the page.
   usePageScrollKeys(workspaceScroller);
 
-  useEffect(() => {
+  // The handler is rebuilt every render so it never finalizes a note from a stale editor snapshot,
+  // and the window listener is registered once and dispatches to the newest one (Wave 38 review M1):
+  // a listener re-registered per render was dropped mid-dispatch when an earlier listener's state
+  // change (the hub following the URL) rendered this component in the same popstate, so the route
+  // gate missed a move (a popstate's listeners are a snapshot; a removed one is skipped).
+  const onPopState = (event: PopStateEvent) => {
     if (!session) return;
-    const onPopState = (event: PopStateEvent) => {
-      if (resetLinkEvents.has(event)) return;
-      const poppedDepth = readHistoryDepth(event.state);
-      const previousDepth = recordPopDepth(historyDepthRef, poppedDepth);
-      // Back/Forward while a Files dialog is open only closes the dialog (D18).
-      if (popStateClosedDialog(event)) return;
-      if (session.totp.setupRequired) return;
-      const route = routeFromLocation(window.location);
-      // D92: Back or Forward onto a module that is off skips that entry instead of replacing it
-      // with a second Home entry. Depth 0 still falls through to the gate below, which replaces it.
-      const hiddenRoute = route.app === "team" && canManageTeam(session.user.role) ? null : hiddenModuleForApp(disabledModules, route.app);
-      const step = hiddenRoute ? hiddenEntryStep(dialogPopDirection(previousDepth, poppedDepth), poppedDepth) : "replace";
-      if (hiddenRoute && step !== "replace") {
-        setModuleHint(hiddenRoute);
-        if (step === "undo") {
-          historyDepthRef.current = previousDepth;
-          undoDialogPop("forward");
-        } else {
-          window.history.back();
-        }
+    if (resetLinkEvents.has(event)) return;
+    const poppedDepth = readHistoryDepth(event.state);
+    const previousDepth = recordPopDepth(historyDepthRef, poppedDepth);
+    // Back/Forward while a Files dialog is open only closes the dialog (D18).
+    if (popStateClosedDialog(event)) return;
+    if (session.totp.setupRequired) return;
+    const route = routeFromLocation(window.location);
+    // D92: Back or Forward onto a module that is off skips that entry instead of replacing it
+    // with a second Home entry. Depth 0 still falls through to the gate below, which replaces it.
+    // A guest's Bin entry (Wave 38: no entry for them) is skipped like one with the module off.
+    const hiddenRoute = route.app === "team" && canManageTeam(session.user.role) ? null : route.app === "bin" && !binEntryShown(session.user.role, binEnabled) ? "bin" : hiddenModuleForApp(disabledModules, route.app);
+    const step = hiddenRoute ? hiddenEntryStep(dialogPopDirection(previousDepth, poppedDepth), poppedDepth) : "replace";
+    if (hiddenRoute && step !== "replace") {
+      // The Bin's hint is the hub's (it opens Security in place); the hint is for Home.
+      if (hiddenRoute !== "bin") setModuleHint(hiddenRoute);
+      if (step === "undo") {
+        historyDepthRef.current = previousDepth;
+        undoDialogPop("forward");
+      } else {
+        window.history.back();
+      }
+      return;
+    }
+    const startup = startupRouteState(session.user.id, routeAppliedUserRef.current, startupFailedUserRef.current);
+    if (startup === "retry") {
+      retryStartup(route);
+      return;
+    }
+    if (startup === "loading") {
+      // The workspace is still loading; apply the newest URL once it is ready.
+      pendingRouteRef.current = route;
+      return;
+    }
+    if (hiddenRoute === "bin") {
+      // Wave 38 (review M1): a hidden Bin entry with nothing below it (or no known direction) opens
+      // Security in place, the hub's rule for /settings/bin, instead of Home and a hint.
+      setActiveApp("settings");
+      navigate(settingsRoute("security"), { replace: true });
+      return;
+    }
+    if (route.app !== "notes") {
+      if (activeApp === "notes") {
+        void leaveNotesFromHistory(route);
         return;
       }
-      const startup = startupRouteState(session.user.id, routeAppliedUserRef.current, startupFailedUserRef.current);
-      if (startup === "retry") {
-        retryStartup(route);
-        return;
-      }
-      if (startup === "loading") {
-        // The workspace is still loading; apply the newest URL once it is ready.
-        pendingRouteRef.current = route;
-        return;
-      }
-      if (route.app !== "notes") {
-        if (activeApp === "notes") {
-          void leaveNotesFromHistory(route);
-          return;
-        }
-        setActiveApp(route.app);
-        if (formatRoute(route) !== locationUrl(window.location)) navigate(route, { replace: true });
-        return;
-      }
-      // Each Notes entry records the search it showed; entries from before a search clear it.
-      const searchHint = readSearchHint(event.state, session.user.id);
-      searchHintRef.current = searchHint;
-      setQuery(searchHint?.query ?? "");
-      setSearchAll(searchHint?.all ?? false);
-      void restoreNotesRoute(route, readHistorySnapshot(event.state, session.user.id));
-    };
-    window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
-  });
+      setActiveApp(route.app);
+      if (formatRoute(route) !== locationUrl(window.location)) navigate(route, { replace: true });
+      return;
+    }
+    // Each Notes entry records the search it showed; entries from before a search clear it.
+    const searchHint = readSearchHint(event.state, session.user.id);
+    searchHintRef.current = searchHint;
+    setQuery(searchHint?.query ?? "");
+    setSearchAll(searchHint?.all ?? false);
+    void restoreNotesRoute(route, readHistorySnapshot(event.state, session.user.id));
+  };
+  const popStateRef = useRef(onPopState);
+  popStateRef.current = onPopState;
+  useEffect(() => {
+    const listen = (event: PopStateEvent) => popStateRef.current(event);
+    window.addEventListener("popstate", listen);
+    return () => window.removeEventListener("popstate", listen);
+  }, []);
 
   // D92: a route of a module that is turned off (a launcher link, a deep link, Back or Forward, a
   // notification, or turning it off while it is open) is replaced with Home and a hint. The entry is

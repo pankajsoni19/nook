@@ -7,8 +7,11 @@ import { canManageTeam, canSeeTeam, type Role } from "../team/teamRoles";
 
 export type TeamEntryId = "members" | "invites" | "groups" | "integrations" | "keys" | "policies" | "templates" | "activity" | "email";
 export type HubEntryId = SettingsSection | "bin" | `team-${TeamEntryId}`;
-/** `badge` (Wave 38): a count shown beside the label (the Bin's items). */
-export type HubEntry = { id: HubEntryId; group: "account" | "workspace" | "team"; label: string; route: Route; badge?: number };
+/**
+ * `badge` (Wave 38): a count shown beside the label (the Bin's items; Members' blocked accounts), and
+ * `badgeNoun` names what is counted for assistive tech ("Bin, 3 items"; "Members, 1 blocked account").
+ */
+export type HubEntry = { id: HubEntryId; group: "account" | "workspace" | "team"; label: string; route: Route; badge?: number; badgeNoun?: string };
 
 /** The Bin's entry (Wave 38): its own Workspace group between Account and Team. */
 const BIN_ENTRY: HubEntry = { id: "bin", group: "workspace", label: "Bin", route: { app: "bin" } };
@@ -42,18 +45,30 @@ export function teamGroupShown(role: Role | undefined, teamModuleEnabled: boolea
 }
 
 /**
- * The hub's nav entries for a role. While two-factor setup is required, Security is the only one.
- * The Bin (Wave 38) is for every role (viewers and guests read theirs) while the Bin module is on.
+ * Whether the hub shows its Bin entry (Wave 38): while the Bin module is on, for everyone but guests.
+ * A guest can delete nothing, so their Bin is always empty; its URL opens Security, as with the
+ * module off.
  */
-export function hubEntries(role: Role | undefined, options: { teamModuleEnabled: boolean; binModuleEnabled?: boolean; setupRequired?: boolean; binCount?: number }): HubEntry[] {
+export function binEntryShown(role: Role | undefined, binModuleEnabled: boolean) {
+  return binModuleEnabled && role !== "guest";
+}
+
+/**
+ * The hub's nav entries for a role. While two-factor setup is required, Security is the only one.
+ * The Bin (Wave 38) is for every role but guest (viewers read theirs) while the Bin module is on;
+ * `blockedCount` (review L1) is the badge on Members for the roles that manage the team.
+ */
+export function hubEntries(role: Role | undefined, options: { teamModuleEnabled: boolean; binModuleEnabled?: boolean; setupRequired?: boolean; binCount?: number; blockedCount?: number }): HubEntry[] {
   if (options.setupRequired) return [{ id: "security", group: "account", label: SETTINGS_SECTION_NAMES.security, route: { app: "settings", section: "security" } }];
   const account: HubEntry[] = ACCOUNT_ORDER
     .filter((section) => section !== "access" || role !== "guest")
     .map((section) => ({ id: section, group: "account", label: SETTINGS_SECTION_NAMES[section], route: { app: "settings", section } }));
-  const workspace: HubEntry[] = options.binModuleEnabled === false ? [] : [options.binCount ? { ...BIN_ENTRY, badge: options.binCount } : BIN_ENTRY];
+  const workspace: HubEntry[] = !binEntryShown(role, options.binModuleEnabled !== false) ? [] : [options.binCount ? { ...BIN_ENTRY, badge: options.binCount } : BIN_ENTRY];
   if (!teamGroupShown(role, options.teamModuleEnabled)) return [...account, ...workspace];
   const admin = canManageTeam(role);
-  return [...account, ...workspace, ...TEAM_ENTRIES.filter((entry) => admin || !entry.adminOnly).map((entry): HubEntry => ({ id: `team-${entry.id}`, group: "team", label: entry.label, route: entry.route }))];
+  const team = TEAM_ENTRIES.filter((entry) => admin || !entry.adminOnly).map((entry): HubEntry => ({ id: `team-${entry.id}`, group: "team", label: entry.label, route: entry.route }));
+  if (admin && options.blockedCount) team[0] = { ...team[0]!, badge: options.blockedCount, badgeNoun: "blocked account" };
+  return [...account, ...workspace, ...team];
 }
 
 /** Where a Team link opens: the first Team entry the role has, Members for everyone. */
@@ -123,8 +138,8 @@ export function hubBackAction(state: unknown): "history" | "list" {
 /**
  * The route the hub shows after Back or Forward (review M2): the hub route on the URL, or null to
  * keep the screen (not a hub route, a Team entry while the role's Team group is hidden, or the Bin
- * while its module is off: the route gate skips that entry, D92, and the hub reads the URL again
- * once that move settled).
+ * while its entry is hidden: the route gate skips that entry, D92, and the hub reads the URL again
+ * once that move settled; at depth 0 the gate replaces it with Security).
  */
 export function hubPopRoute(route: Route, teamShown: boolean, binShown = true): Route | null {
   if (!isHubRoute(route)) return null;

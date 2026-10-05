@@ -48,14 +48,16 @@ describe("routes", () => {
 });
 
 describe("the hub's entries", () => {
-  test("every role has the Bin in a Workspace group between Account and Team", () => {
-    for (const role of ["admin", "member", "viewer", "guest"] as const) {
+  test("every role but guest has the Bin in a Workspace group between Account and Team", () => {
+    for (const role of ["admin", "member", "viewer"] as const) {
       const entries = hubEntries(role, { teamModuleEnabled: true });
       const bin = entries.findIndex((entry) => entry.id === "bin");
       expect(entries[bin]).toMatchObject({ group: "workspace", label: "Bin", route: { app: "bin" } });
       expect(entries.slice(0, bin).every((entry) => entry.group === "account")).toBe(true);
       expect(entries.slice(bin + 1).every((entry) => entry.group === "team")).toBe(true);
     }
+    // wave38-fixes: a guest can delete nothing, so their (always empty) Bin has no entry.
+    expect(hubEntries("guest", { teamModuleEnabled: true }).some((entry) => entry.id === "bin")).toBe(false);
   });
 
   test("the Bin module off removes the entry; the Team module still decides Team", () => {
@@ -70,7 +72,7 @@ describe("the hub's entries", () => {
 
   test("with the Bin off, /settings/bin opens Security in place and Back/Forward skip the entry", () => {
     const app = read("App.tsx");
-    expect(app).toContain('const binHidden = route.app === "bin" && !binModuleEnabled;');
+    expect(app).toContain('const binHidden = route.app === "bin" && !binShown;');
     expect(app).toContain('useEffect(() => { if (binHidden) go(settingsRoute("security"), { replace: true }); }, [binHidden, go]);');
     // The app-wide gate (Home and a hint) leaves the Bin to the hub, which is shown for it.
     expect(app).toContain('const hubGatesItself = teamGateOpen || activeApp === "bin";');
@@ -93,7 +95,7 @@ describe("the hub's entries", () => {
     expect(shell(140)).toContain(">99+</span>");
     expect(shell(0)).not.toContain("settings-hub-badge");
     // The count follows the Bin (notifyBinChanged) and is not fetched with the module off.
-    expect(read("App.tsx")).toContain("const binCount = useBinCount(binModuleEnabled && !setupRequired);");
+    expect(read("App.tsx")).toContain("const binCount = useBinCount(binShown && !setupRequired);");
   });
 });
 

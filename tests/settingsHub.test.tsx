@@ -129,7 +129,8 @@ describe("the nav per role", () => {
       expect(ids(hubEntries(role, { teamModuleEnabled: true }))).toEqual(["security", "notifications", "access", "mcp", "modules", "about", "bin", "team-members"]);
       expect(ids(hubEntries(role, { teamModuleEnabled: false }))).not.toContain("team-members");
     }
-    expect(ids(hubEntries("guest", { teamModuleEnabled: true }))).toEqual(["security", "notifications", "mcp", "modules", "about", "bin"]);
+    // Wave 38 fixes: no Bin for guests either (they can delete nothing).
+    expect(ids(hubEntries("guest", { teamModuleEnabled: true }))).toEqual(["security", "notifications", "mcp", "modules", "about"]);
     expect(teamGroupShown("guest", true)).toBe(false);
   });
 
