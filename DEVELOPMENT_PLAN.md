@@ -693,6 +693,14 @@ Settings stops being a dialog over the app and becomes a page of its own, with T
 
 **Tests.** `tests/settingsBin.test.tsx` (routes and the alias both ways, entries per role and with the module off, the badge, the 390 px history model Home → list → Bin → row sheet → Back chain, the guards, the top-bar order); updated shell, hub, router, scroll, module, footer, and page-name tests. `docs/plan/qa/scroll-audit.mjs` covers `/settings/bin` and `/bin` with the hub check.
 
+**Fixes after review (wave38-fixes).**
+
+- *M1 (Forward onto a hidden Bin entry).* App's popstate listener was re-registered on every render; when the hub's own listener (registered earlier) changed state for the same popstate, React rendered App in the microtask between the two listeners, and the re-registered listener was skipped for that event (a dispatch invokes the listeners it started with, minus removed ones). After a page-load entry the hint's clear-render landed exactly there, so the route gate missed the skip's landing and the next Forward read an unknown direction: no undo, URL `/settings/bin`, screen Modules. The listener is now registered once and dispatches to the newest handler through a ref. The hub re-reads the URL on a tick after a popped hidden Bin entry (the gate runs after it), and a hidden Bin entry the gate cannot skip (depth 0, or no known direction) is replaced with Security in place rather than Home and a hint.
+- *L1.* The blocked-account count is back as a badge on Team → Members for admins (`useBlockedCount`, `src/team/blockedCount.ts`; Members reports its own list's count while on screen).
+- *L3.* Opening Settings → Bin asks `GET /api/bin` once: the section claims the count while mounted (`claimBinCount`) and reports its items; `useBinCount` loads only when no section does, and a reported count wins over a look in flight.
+- *Guests.* No Bin entry for guests (they can delete nothing); `/settings/bin` opens Security for them and Back/Forward skip their entry, as with the module off (`binEntryShown`).
+- *Docs.* Stale comments and test-plan lines from the Bin and Team buttons are marked superseded.
+
 **Smoke (headless Chrome, 1280 × 800 and 390 × 844, 44/44).** Top bar order on Home, Tasks, Collections, Calendar (desktop) and Home, Tasks (phone); Notes and Files footers without Bin; `/settings/bin` with Workspace → Bin selected, badge, title, no page scroll; restore updates the badge; Delete forever and Empty Bin confirms close on Back without deleting; nav Security → Bin → Back; `/bin` rewritten in place (Back goes Home); module off sends `/settings/bin` and `/bin` to Security with no entry; phone list → Bin → sheet → Back (sheet only) → confirm → Back (confirm only) → Back (list) → Back (Home), Forward twice reopens the Bin; a `/bin` deep link gets Home and the list under it. No page errors or native dialogs.
 
 ---

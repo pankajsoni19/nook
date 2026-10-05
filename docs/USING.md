@@ -276,8 +276,8 @@ The **Vault** keeps a team's secrets (API keys, database URLs, service passwords
 **Settings** is a page of its own at `/settings`. Open it with **Settings** in the account row or the Notes and Files sidebar footer. On a computer a nav on the left lists every section and the section you chose fills the rest of the window; the nav and the section scroll on their own. The header over the section shows your picture, name, team role, and the section's name.
 
 - **Account:** **Security** (password, two-factor, Google sign-in), **Notifications**, **My access** (not for guests), **API keys**, **Modules**, and **About**.
-- **Workspace:** **Bin** ([Bin](#bin)), for every role, with its item count. It is hidden while the Bin module is off, and `/settings/bin` then opens **Security**.
-- **Team:** for everyone but guests, **Members**; admins also get **Invites**, **Groups**, **Integrations**, **Keys**, **Policies**, **Templates**, **Access activity**, and **Email log**. Members, viewers, and guests see Team only while the Team module is on; admins always keep it here.
+- **Workspace:** **Bin** ([Bin](#bin)), for everyone except guests (a guest can delete nothing, so their Bin is always empty), with its item count. It is hidden while the Bin module is off or for a guest, and `/settings/bin` then opens **Security**.
+- **Team:** for everyone but guests, **Members** (admins see the number of blocked accounts beside it); admins also get **Invites**, **Groups**, **Integrations**, **Keys**, **Policies**, **Templates**, **Access activity**, and **Email log**. Members, viewers, and guests see Team only while the Team module is on; admins always keep it here.
 
 Each section has its own URL (`/settings/security`, `/settings/keys`, `/settings/bin`, `/settings/team/groups`, …), so Back and Forward move between the sections you opened and then back to where you opened Settings. Older links still work and are rewritten in place: `/team/…` opens the same Team screen under `/settings/team/…`, `/bin` opens `/settings/bin`, and `/settings/mcp` opens `/settings/keys`.
 
