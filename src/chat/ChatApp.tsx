@@ -69,6 +69,8 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onBin, onS
   const [chats, setChats] = useState<ChatSummary[] | null>(null);
   const [agents, setAgents] = useState<AgentSummary[] | null>(null);
   const [query, setQuery] = useState("");
+  const queryRef = useRef(query);
+  queryRef.current = query;
   const [detail, setDetail] = useState<ChatDetail | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [live, setLive] = useState<LiveRun | null>(null);
@@ -187,7 +189,7 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onBin, onS
             const chatId = routeRef.current.chatId;
             if (chatId) await refreshDetail(chatId, true);
             void loadUsage();
-            void loadChats(query);
+            void loadChats(queryRef.current);
           }
           return;
         } catch (reason) {
@@ -197,8 +199,9 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onBin, onS
         }
       }
     })();
+    // The search text is read through a ref: typing in the search box must not restart the stream.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [applyEvent, loadChats, loadUsage, query, stopFollowing]);
+  }, [applyEvent, loadChats, loadUsage, stopFollowing]);
 
   const refreshDetail = useCallback(async (chatId: string, keepLive = false) => {
     const generation = ++detailGeneration.current;
