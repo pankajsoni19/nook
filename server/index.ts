@@ -37,6 +37,9 @@ import { reconcileCollectionSearchIndex } from "./collections/search";
 import { registerWhiteboardRoutes } from "./whiteboards/routes";
 import { WHITEBOARD_IMPORT_MAX_BYTES } from "./whiteboards/import";
 import { registerVaultRoutes } from "./vault/routes";
+import { registerAgentRoutes } from "./agents/routes";
+import { agentsFeature, initAgentsStatus } from "./agents/status";
+import { markInterruptedRuns } from "./agents/runs";
 import { initVaultStatus, vaultFeature } from "./vault/status";
 import { scheduleRotationRun } from "./vault/rotation";
 import { reconcileWhiteboardSearchIndex } from "./whiteboards/service";
@@ -251,7 +254,7 @@ app.post("/api/auth/register", async (c) => {
   return c.json({
     user: { id, email: body.email, displayName: body.displayName, role, avatarUrl: null },
     csrfToken,
-    features: { vault: vaultFeature(role) },
+    features: { vault: vaultFeature(role), agents: agentsFeature(role) },
     totp: { enabled: false, required: config.totpPolicy === "required", setupRequired: config.totpPolicy === "required" }
   }, 201);
 });
@@ -297,7 +300,7 @@ app.post("/api/auth/login", async (c) => {
   return c.json({
     user: { id: user.id, email: user.email, displayName: user.display_name, role: user.role, avatarUrl: avatarUrlFor(user.id) },
     csrfToken,
-    features: { vault: vaultFeature(user.role) },
+    features: { vault: vaultFeature(user.role), agents: agentsFeature(user.role) },
     totp: totpState(user)
   });
 });
@@ -317,8 +320,8 @@ app.get("/api/auth/me", (c) => {
     preferences: readPreferences(user.id),
     // Wave 35 review N2c: an admin reset this account; shown once, then dismissed.
     notices: { googleReset: googleResetNotice(user.id) },
-    // Wave 25: whether this person sees the Vault module (server/vault/status.ts). UI only (T97).
-    features: { vault: vaultFeature(user.role) }
+    // Wave 25: whether this person sees the Vault module (server/vault/status.ts); Wave 40: the Chat module. UI only (T97).
+    features: { vault: vaultFeature(user.role), agents: agentsFeature(user.role) }
   });
 });
 
@@ -888,6 +891,8 @@ registerCollectionRoutes(app);
 registerWhiteboardRoutes(app);
 // The Vault (Wave 25): vaults, environments, secrets, values, and history, for sessions only.
 registerVaultRoutes(app);
+// Agent chat (Wave 40): providers and policy (admin), agents, chats, and runs with SSE.
+registerAgentRoutes(app);
 registerCalendarRoutes(app);
 registerPreferenceRoutes(app);
 registerMailRoutes(app);
@@ -954,6 +959,13 @@ await reconcilePublishedMirrors();
 // Wave 25 (D212, T199): the vault module is on only with a key that opens every live vault's data key.
 // Wave 26: a data-key rotation a restart interrupted carries on in the background.
 if (initVaultStatus().enabled) scheduleRotationRun();
+// Wave 40 (D344): the Chat module is on only with AGENT_SECRETS_KEY; runs the previous process left live are marked interrupted.
+initAgentsStatus();
+try {
+  markInterruptedRuns();
+} catch (error) {
+  console.error("Agent run sweep failed", errorClass(error));
+}
 // Migrations ran when ./db loaded: say so loudly when the team has nobody who can manage it.
 warnIfNoActiveAdmin();
 // Wave 34 review S1: with proxies trusted but not named, anyone who reaches the app port directly can

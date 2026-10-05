@@ -84,6 +84,54 @@ export function parseVaultKey(env: Record<string, string | undefined>, totpKey: 
 }
 const vaultKey = parseVaultKey(process.env, totpEncryptionKey, dataDir);
 
+/**
+ * Agent chat (Wave 40, D354): `AGENT_SECRETS_KEY` or `AGENT_SECRETS_KEY_FILE` seals provider API keys
+ * and tool-server credentials. Same rules as the vault key (base64 of 32 bytes, a file outside
+ * DATA_DIR, never both), and it must differ from both TOTP_ENCRYPTION_KEY and VAULT_ENCRYPTION_KEY
+ * (one leaked key must never open every secret). Unset: the module is off, not broken. Never logged.
+ */
+export function parseAgentSecretsKey(env: Record<string, string | undefined>, totpKey: Buffer | null, vaultKeyBytes: Buffer | null, dataRoot: string | null = null): { key: Buffer | null; source: "env" | "file" | null } {
+  const inline = env.AGENT_SECRETS_KEY?.trim() ?? "";
+  const file = env.AGENT_SECRETS_KEY_FILE?.trim() ?? "";
+  if (inline && file) throw new Error("Set AGENT_SECRETS_KEY or AGENT_SECRETS_KEY_FILE, not both");
+  let raw = inline;
+  if (file) {
+    if (!file.startsWith("/")) throw new Error("AGENT_SECRETS_KEY_FILE must be an absolute path");
+    const real = (path: string) => { try { return realpathSync(path); } catch { return resolve(path); } };
+    if (dataRoot && `${real(file)}/`.startsWith(`${real(dataRoot)}/`)) throw new Error("AGENT_SECRETS_KEY_FILE must be outside DATA_DIR: backups archive the data directory");
+    try {
+      raw = readFileSync(file, "utf8").trim();
+    } catch {
+      throw new Error("AGENT_SECRETS_KEY_FILE could not be read");
+    }
+  }
+  if (!raw) return { key: null, source: null };
+  const key = /^[A-Za-z0-9+/]{43}=$/.test(raw) ? Buffer.from(raw, "base64") : null;
+  if (!key || key.length !== 32) throw new Error("AGENT_SECRETS_KEY must be a base64-encoded 32-byte key (openssl rand -base64 32)");
+  if (totpKey && timingSafeEqual(key, totpKey)) throw new Error("AGENT_SECRETS_KEY must differ from TOTP_ENCRYPTION_KEY");
+  if (vaultKeyBytes && timingSafeEqual(key, vaultKeyBytes)) throw new Error("AGENT_SECRETS_KEY must differ from VAULT_ENCRYPTION_KEY");
+  return { key, source: file ? "file" : "env" };
+}
+const agentSecretsKey = parseAgentSecretsKey(process.env, totpEncryptionKey, vaultKey.key, dataDir);
+
+/**
+ * Hosts the agent module may call although they resolve to private, loopback, or link-local
+ * addresses (plan §3.2): host names (exact, case-insensitive) or IP addresses and CIDR ranges, comma
+ * separated. A LiteLLM or Ollama container on the compose network is the usual entry. Plain `http:`
+ * is allowed only for these hosts.
+ */
+export function parseAllowedPrivateHosts(value: string | undefined) {
+  return (value ?? "").split(",").map((entry) => entry.trim().toLowerCase()).filter(Boolean).map((entry) => {
+    if (parseEntry(entry)) return entry;
+    if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/.test(entry)) throw new Error("AGENT_ALLOWED_PRIVATE_HOSTS entries must be host names, IP addresses, or CIDR ranges, such as ollama,10.0.0.0/8");
+    return entry;
+  });
+}
+const agentAllowedPrivateHosts = parseAllowedPrivateHosts(process.env.AGENT_ALLOWED_PRIVATE_HOSTS);
+if (agentAllowedPrivateHosts.length > 50) throw new Error("AGENT_ALLOWED_PRIVATE_HOSTS takes at most 50 entries");
+const agentMaxConcurrentRuns = integerEnv("AGENT_MAX_CONCURRENT_RUNS", 4, 1, 32);
+const agentRunTimeoutS = integerEnv("AGENT_RUN_TIMEOUT_S", 600, 30, 3600);
+
 // Web Push (WAVES_10-12.md D65). auto: on only when APP_ORIGIN is https (browsers need a secure origin).
 const pushEnabledValue = process.env.PUSH_ENABLED?.trim() || "auto";
 if (!(["auto", "true", "false"] as const).includes(pushEnabledValue as "auto")) throw new Error("PUSH_ENABLED must be auto, true, or false");
@@ -243,6 +291,11 @@ export const config = {
   totpEncryptionKey,
   /** The vault's key-encryption key (D212), or null when the vault module is off. Tests switch it in process. */
   vault: { key: vaultKey.key, source: vaultKey.source },
+  /**
+   * Agent chat (Wave 40): the secrets key (null = module off), the private hosts the server may
+   * call, and the run caps. Tests switch these in process.
+   */
+  agents: { key: agentSecretsKey.key, source: agentSecretsKey.source, allowedPrivateHosts: agentAllowedPrivateHosts, maxConcurrentRuns: agentMaxConcurrentRuns, runTimeoutS: agentRunTimeoutS },
   signupRole,
   sessionDays: Math.max(1, Number(process.env.SESSION_DAYS ?? 14)),
   maxMarkdownBytes: Math.max(1024, Number(process.env.MAX_MARKDOWN_BYTES ?? 2_000_000)),

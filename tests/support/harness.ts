@@ -49,6 +49,10 @@ process.env.SIGNUP_ROLE = "member";
 process.env.TOTP_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
 // The Vault (Wave 25) is on in the shared server; tests/vaultStartup.test.ts covers it off and misconfigured.
 process.env.VAULT_ENCRYPTION_KEY = Buffer.alloc(32, 9).toString("base64");
+// Agent chat (Wave 40) is on in the shared server; the fake provider listens on 127.0.0.1, which the
+// egress guard allows only through this list (tests/agentsEgress.test.ts covers the refusal).
+process.env.AGENT_SECRETS_KEY = Buffer.alloc(32, 11).toString("base64");
+process.env.AGENT_ALLOWED_PRIVATE_HOSTS = "127.0.0.1";
 process.env.ALLOWED_EMAILS = allowedTestEmails.join(",");
 // Small limits keep the upload tests fast. Bun's maxRequestBodySize becomes
 // max(MAX_UPLOAD_BYTES, 2_100_000) + 1 MiB, which stays above the 2.1 MB JSON

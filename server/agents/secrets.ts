@@ -1,0 +1,81 @@
+import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { config } from "../config";
+import { db } from "../db";
+
+/**
+ * Provider API keys and tool-server credentials at rest (plan §4.2, D354, T309): AES-256-GCM under
+ * AGENT_SECRETS_KEY, in the `server/totp.ts` envelope format `v1:<nonce>:<tag>:<ct>` (base64url),
+ * with the AAD `nook:agent-secret:v1:<provider|server>:<rowId>`, so a ciphertext moved to another
+ * row fails to open. Plaintext lives in memory for one request only. The API is write-only: after
+ * a save the browser sees `{hasSecret, hint}` and never the value. Nothing here logs, and no error
+ * carries key material, plaintext, or ciphertext.
+ *
+ * This module has its own key, like totp.ts and access/handles.ts, which is why tests/vaultGuard
+ * lists it among the modules allowed to call the cipher functions.
+ */
+
+const FORMAT = "v1";
+const B64URL = /^[A-Za-z0-9_-]*$/;
+export type SecretOwner = "provider" | "server";
+
+export const aadFor = (owner: SecretOwner, rowId: string) => `nook:agent-secret:v1:${owner}:${rowId}`;
+
+export class AgentSecretError extends Error {
+  constructor() {
+    super("A stored agent secret failed its integrity check");
+    this.name = "AgentSecretError";
+  }
+}
+
+function keyOrThrow(): Buffer {
+  const key = config.agents.key;
+  if (!key) throw new AgentSecretError();
+  return key;
+}
+
+export function sealSecret(owner: SecretOwner, rowId: string, plaintext: string, key: Buffer = keyOrThrow()): string {
+  const nonce = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", key, nonce);
+  cipher.setAAD(Buffer.from(aadFor(owner, rowId), "utf8"));
+  const bytes = Buffer.from(plaintext, "utf8");
+  const ciphertext = Buffer.concat([cipher.update(bytes), cipher.final()]);
+  bytes.fill(0);
+  return `${FORMAT}:${nonce.toString("base64url")}:${cipher.getAuthTag().toString("base64url")}:${ciphertext.toString("base64url")}`;
+}
+
+export function openSecret(owner: SecretOwner, rowId: string, envelope: string, key: Buffer = keyOrThrow()): string {
+  const parts = envelope.split(":");
+  if (parts.length !== 4 || parts[0] !== FORMAT || !parts.slice(1).every((part) => B64URL.test(part))) throw new AgentSecretError();
+  const nonce = Buffer.from(parts[1]!, "base64url");
+  const tag = Buffer.from(parts[2]!, "base64url");
+  if (nonce.length !== 12 || tag.length !== 16) throw new AgentSecretError();
+  try {
+    const decipher = createDecipheriv("aes-256-gcm", key, nonce, { authTagLength: 16 });
+    decipher.setAAD(Buffer.from(aadFor(owner, rowId), "utf8"));
+    decipher.setAuthTag(tag);
+    return Buffer.concat([decipher.update(Buffer.from(parts[3]!, "base64url")), decipher.final()]).toString("utf8");
+  } catch {
+    throw new AgentSecretError();
+  }
+}
+
+/** The mask shown after a save (plan §4.2): the first three and last four characters, `sk-…a1B2`. */
+export function secretHint(plaintext: string) {
+  const text = plaintext.trim();
+  if (text.length <= 8) return "…";
+  return `${text.slice(0, 3)}…${text.slice(-4)}`;
+}
+
+/** Startup check: whether every stored provider secret opens under `key`. Counts only. */
+export function verifySecrets(key: Buffer): { total: number; failed: number } {
+  const rows = db.query("SELECT id, api_key_ct FROM agent_providers WHERE api_key_ct IS NOT NULL").all() as Array<{ id: string; api_key_ct: string }>;
+  let failed = 0;
+  for (const row of rows) {
+    try {
+      openSecret("provider", row.id, row.api_key_ct, key);
+    } catch {
+      failed += 1;
+    }
+  }
+  return { total: rows.length, failed };
+}

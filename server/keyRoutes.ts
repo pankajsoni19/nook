@@ -79,7 +79,8 @@ export function precheckKeyCreate(user: { id: string; role: Role }, input: { sur
 
 /** The alias's scopes as grant inputs over "all" (the pre-grants `/api/mcp/keys` body). */
 export const scopesAsGrantInputs = (scopes: readonly McpScope[]): GrantInput[] =>
-  grantsForScopes(scopes).map((grant) => ({ module: grant.module, permission: grant.permission, resourceIds: null }));
+  // No scope maps to `run` (AC-C), so the narrower input type holds.
+  grantsForScopes(scopes).map((grant) => ({ module: grant.module, permission: grant.permission as GrantInput["permission"], resourceIds: null }));
 
 /** The alias `POST /api/mcp/keys` runs the same policy checks; null when the key may be created. */
 export function aliasKeyRefusal(user: { id: string; role: Role }, scopes: readonly McpScope[]): KeyError | null {

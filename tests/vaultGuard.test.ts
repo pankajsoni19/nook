@@ -17,7 +17,8 @@ async function sources() {
 }
 
 // totp.ts (second factors) and access/handles.ts (opaque item handles) have their own keys and never see vault data.
-const OTHER_CIPHER_USERS = new Set(["totp.ts", "access/handles.ts"]);
+// agents/secrets.ts (Wave 40) seals provider API keys under its own AGENT_SECRETS_KEY (D354).
+const OTHER_CIPHER_USERS = new Set(["totp.ts", "access/handles.ts", "agents/secrets.ts"]);
 
 test("only vault/crypto.ts touches the cipher functions (besides modules with their own keys)", async () => {
   const offenders = (await sources()).filter(({ path, source }) => /createDecipheriv|createCipheriv/.test(source) && path !== "vault/crypto.ts" && !OTHER_CIPHER_USERS.has(path)).map(({ path }) => path);
@@ -46,7 +47,9 @@ test("vault tables stay inside the vault module (D223): no search, Today, or MCP
     // Wave 26 (Vault B): sharing, Activity, rotation, import and export, and the stored-bytes triggers.
     "vault/members.ts", "vault/events.ts", "vault/rotation.ts", "vault/transfer.ts", "migrations/037_vault_sharing.ts",
     // Wave 27 (Vault C): vault keys (their Activity rows and "Keys with access"), their REST routes, and 038.
-    "vault/keys.ts", "vault/rest.ts", "migrations/038_vault_keys.ts"
+    "vault/keys.ts", "vault/rest.ts", "migrations/038_vault_keys.ts",
+    // Wave 40: 039 rebuilds api_key_grants and re-creates 038's vault-shape trigger verbatim, which names vault_environments.
+    "migrations/039_agent_chat.ts"
   ]);
   const readers = (await sources()).filter(({ path, source }) => !allowed.has(path) && /\bvault_(secrets|values|value_versions|keys|environments|events)\b/.test(source)).map(({ path }) => path);
   expect(readers).toEqual([]);

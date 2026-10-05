@@ -11,13 +11,14 @@
  */
 import { MCP_SCOPES, normalizeScopes, type McpScope } from "./mcpScopes";
 
-export const GRANT_MODULES = ["notes", "files", "tasks", "today", "calendar", "collections", "team", "inbox", "bin", "whiteboards", "vault"] as const;
+export const GRANT_MODULES = ["notes", "files", "tasks", "today", "calendar", "collections", "team", "inbox", "bin", "whiteboards", "vault", "agents"] as const;
 export type GrantModule = typeof GRANT_MODULES[number];
 
-export const KEY_PERMISSIONS = ["read", "comment", "write", "draft", "publish", "create"] as const;
+// `run` (agent chat, D364) has no scope until AC-C ships `agents:run`; the table accepts it already (039).
+export const KEY_PERMISSIONS = ["read", "comment", "write", "draft", "publish", "create", "run"] as const;
 export type KeyPermission = typeof KEY_PERMISSIONS[number];
 
-export const RESOURCE_KINDS = ["folder", "note", "document", "board", "task_view", "collection", "calendar", "routine", "whiteboard", "vault"] as const;
+export const RESOURCE_KINDS = ["folder", "note", "document", "board", "task_view", "collection", "calendar", "routine", "whiteboard", "vault", "agent", "knowledge_base"] as const;
 export type ResourceKind = typeof RESOURCE_KINDS[number];
 
 export type KeyKind = "general" | "vault";
@@ -57,7 +58,8 @@ export const SCOPE_GRANTS: Record<McpScope, { module: GrantModule; permission: K
   "inbox:read": { module: "inbox", permission: "read" },
   "inbox:write": { module: "inbox", permission: "write" },
   "whiteboards:read": { module: "whiteboards", permission: "read" },
-  "whiteboards:write": { module: "whiteboards", permission: "write" }
+  "whiteboards:write": { module: "whiteboards", permission: "write" },
+  "agents:read": { module: "agents", permission: "read" }
 };
 
 export const scopeToGrant = (scope: McpScope) => SCOPE_GRANTS[scope];
