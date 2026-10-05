@@ -2246,6 +2246,46 @@ All routes: session, CSRF, Origin, TOTP gate; admins only (guests 404, everyone 
 
 Every write lands in `access_events` (`integration.created`, `integration.updated`, `integration.blocked`, `integration.unblocked`, `integration.deleted`, `integration.retired`, and the usual `key.*` rows with the admin as actor) and in the audit log (ids only). Team → Access activity shows them under "Google sign-in and integrations".
 
+## Agent chat (Wave 40, AC-A)
+
+[research/2026-09-30-agentic-chat-module.md](research/2026-09-30-agentic-chat-module.md) §12, D341–D370, T302–T326. Migration **039** (`agent_chat`) creates every table of the module and rebuilds `api_key_grants` with wider CHECK words. The module is on only with `AGENT_SECRETS_KEY`; every route below but `GET /api/agents/status` answers 503 `AGENTS_DISABLED` without it. Session, CSRF, Origin, and the TOTP gate apply; **guests get 404 on every path** (AC-O2); viewers chat through the write gate's allowlist while the `chat_roles` policy includes them. Responses are `no-store`; ids in paths that are not UUIDs are 404; missing and someone else's are the same 404. Errors are `{ error, code, ...details }`; validation is 400 `INVALID` naming fields only.
+
+Bounds (`shared/agents.ts`): a user message 32 KiB, an assistant message 256 KiB (cut with a marker), 2,000 messages per chat, 5,000 chats per person, 5 providers, agent name 60, description 280, system prompt 16 KiB, `maxSteps` 1–25 (default 8), 4 starters, chat title 120.
+
+| Route | Who | Body | Returns |
+| --- | --- | --- | --- |
+| `GET /api/agents/status` | everyone but guests | | `{ enabled, reason: "unset" \| "key_mismatch" \| null (admins only), canChat, canCreate, defaultModel }` |
+| `GET /api/agents/admin/settings` | admin (others 404) | | `{ settings: { createRoles, chatRoles, dailyTokensUser, dailyTokensKey, dailyTokensInstance, publicChatLinks (always false), auditRetentionDays, agentsPerUser, kbsPerUser, defaultProviderId, revision } }` |
+| `PUT /api/agents/admin/settings` | admin | any of those fields plus `expectedRevision` (the summed row revision) | `{ settings }`; 409 `REVISION_MISMATCH`; `publicChatLinks: true` is 400 (AC-O1, AC-D) |
+| `GET /api/agents/admin/providers` | admin | | `{ providers: [{ id, name, baseUrl, defaultModel, embeddingModel, embeddingDims, compat: { tokenParam, streamUsage, supportsTools, contextTokens }, isDefault, hasSecret, hint, revision, createdAt, updatedAt }] }` |
+| `POST /api/agents/admin/providers` | admin | `{ name, baseUrl? (default https://api.openai.com/v1), apiKey?, defaultModel? (default gpt-6-luna), embeddingModel?, embeddingDims?, compat?, isDefault? }` | 201 `{ provider }`; the first one is the default; 409 `LIMIT_REACHED` (5); 400 for a base URL the egress guard refuses (shape only, no DNS) |
+| `GET /api/agents/admin/providers/:id` | admin | | `{ provider }` (`hint` is `sk-…a1B2`; the key itself is never returned, D354) |
+| `PATCH /api/agents/admin/providers/:id` | admin | the create fields plus `expectedRevision`, `removeSecret?`; an empty or missing `apiKey` keeps the stored one | `{ provider }`; 409 `REVISION_MISMATCH`, 409 `DEFAULT_REQUIRED` |
+| `DELETE /api/agents/admin/providers/:id` | admin | `{}` | `{ ok }` (another provider becomes the default) |
+| `POST /api/agents/admin/providers/:id/test` | admin | `{}` | `{ test: { ok, models: { ok, count, latencyMs, error }, completion: { ok, model, latencyMs, error } } }`: `GET /models` and a one-token completion; errors are codes and bounded messages |
+| `GET /api/agents/admin/providers/:id/models` | admin | `?fresh=1` | `{ models: [ids], cachedAt }` (cached ten minutes); 502 `PROVIDER_ERROR` |
+| `GET /api/agents/admin/usage` | admin | `?from&to&group=user\|agent` | `{ from, to, group, rows: [{ day, id, name, runs, promptTokens, completionTokens }] }` (counts only, D73) |
+| `GET /api/agents/usage` | chatters | | `{ usage: { day, promptTokens, completionTokens, runs, budget } }` (the caller's own day) |
+| `GET /api/agents` | chatters | | `{ agents: [AgentSummary] }` (AC-A: the caller's own; no `systemPrompt`) |
+| `POST /api/agents` | `create_roles` | `{ name, description?, icon?, color? (#rrggbb), systemPrompt?, providerId?, model?, maxSteps?, temperature? (0–2), maxOutputTokens? (≤ 16384), starters? }` | 201 `{ agent }` (with `systemPrompt`); 403 `ROLE_REFUSED`; 409 `LIMIT_REACHED` |
+| `GET /api/agents/:id` | owner | | `{ agent }` with `systemPrompt` |
+| `PATCH /api/agents/:id` | owner | the create fields plus `expectedRevision` | `{ agent }`; 409 `REVISION_MISMATCH` |
+| `DELETE /api/agents/:id` | owner | `{}` | `{ ok, purgeAfter }`: to the Bin (type `agent`); its chats stay readable and cannot send until it is restored (409 `AGENT_GONE`) |
+| `GET /api/chats` | chatters | `?q=` (titles and the owner's messages, FTS) | `{ chats: [{ id, agentId, agentName, agentIcon, title, pinned, activeLeafId, revision, createdAt, updatedAt, running }] }`, pinned first then newest |
+| `POST /api/chats` | chatters | `{ agentId }` | 201 `{ chat }` (title "New chat" until the first message) |
+| `GET /api/chats/:id` | owner | | `{ chat, messages: [{ id, parentId, role, content, status, errorCode, model, usage, runId, createdAt, finishedAt }], activeRunId }` (the whole tree; the client shows the path to `activeLeafId`) |
+| `PATCH /api/chats/:id` | owner | `{ title?, pinned?, activeLeafId?, expectedRevision }` | `{ chat }`; 404 for a leaf of another chat; 409 `REVISION_MISMATCH` |
+| `DELETE /api/chats/:id` | owner | `{}` | `{ ok }`: to the Bin (type `chat`); a live run is cancelled |
+| `POST /api/chats/:id/messages` | owner | `{ content, parentId? }` (absent: under the active leaf; `null`: a new first message; a sibling of an edited message passes that message's parent) | 201 `{ runId, userMessage, assistantMessage }`; the run streams on `/api/runs/:runId/events`. 400 `TOO_LARGE`; 403 `ROLE_REFUSED`; 409 `RUN_ACTIVE`, `NO_PROVIDER`, `AGENT_GONE`; 429 `AGENT_BUSY` (2 per person, `Retry-After`), 429 `BUDGET_EXCEEDED` (`retryAfterSeconds` to midnight UTC); 503 `AGENT_BUSY` (the instance) |
+| `POST /api/chats/:id/messages/:mid/regenerate` | owner | `{}` | 201 `{ runId, userMessage: null, assistantMessage }`: a sibling assistant turn under the same user message (Retry on a user message makes a child) |
+| `GET /api/chats/:id/run` | owner | | `{ run: { id, messageId } \| null }` (the live run, for a returning tab) |
+| `GET /api/runs/:runId/events?after=<seq>` | the chat's owner (T325) | | `text/event-stream`, `no-store`: frames `id: <seq>` / `event: run \| delta \| usage \| error \| done` with JSON data (`delta` coalesced to one per 50 ms; a `: ping` comment every 15 s); replayed from the run's ring (last 2,000 events) after `after`, then live until `done`. When the ring moved past `after`, or the run ended and its ring is gone (5 minutes), one `snapshot` event `{ status, messageId, content, messageStatus, usage, errorCode }` replaces the replay and the stream ends |
+| `POST /api/runs/:runId/cancel` | the chat's owner | `{}` | `{ status: "cancelled" }` (or the ended run's status); the partial text is kept with status `cancelled` |
+
+Run states: `queued`, `running`, `ok`, `error` (`PROVIDER_ERROR`, `MODEL_TIMEOUT`, `EGRESS_REFUSED`, `TOO_LARGE`, `INTERNAL`), `cancelled`, `timeout` (the wall clock), `interrupted` (a restart), `step_limit`, `budget`. Message states: `streaming`, `complete`, `error`, `cancelled`, `interrupted`, `step_limit`. `features.agents` on sign-in and `/api/auth/me` says whether the person sees the module (never guests; admins also while it is off). The Bin lists `chat` and `agent` items to their owner (restore, purge, empty).
+
+**MCP** (`agents:read`, grant `{ module: "agents", permission: "read" }`): `list_agents` → `{ agents: [{ id, name, description, model, maxSteps, updatedAt }] }` (never the prompt); `list_chats({ query?, limit? })` → the key owner's chats with `url`; `get_chat({ chatId })` → the branch on screen (user and assistant turns, at most 200 and 256 KiB, `truncated`). All three declare `access: { mode: "own" }`, are read-only, and answer `NOT_FOUND` for other people's chats and while the module is off. `agents:run`, `run_agent`, and the REST runs are AC-C.
+
 ## Changes to existing note endpoints (Wave 4)
 
 - `DELETE /api/notes/:id`:

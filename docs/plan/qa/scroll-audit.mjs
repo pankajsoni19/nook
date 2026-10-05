@@ -226,13 +226,32 @@ async function seed() {
     for (let version = 1; version <= 21; version += 1) await api(admin, "PUT", `/vault/vaults/${vault.id}/secrets/${secretId}/values/${environments[0].id}`, { value: `scroll value v${version}`, expectedVersion: version });
     seeded.vault = { id: vault.id, envId: environments[1].id, secretId };
   }
+  // Chat (Wave 40): a provider at AGENT_FAKE_PROVIDER (tests/support/fakeProvider.ts, e.g.
+  // http://127.0.0.1:24423/v1, listed in AGENT_ALLOWED_PRIVATE_HOSTS), an agent, and one long chat.
+  seeded.chat = null;
+  if (process.env.AGENT_FAKE_PROVIDER && (await api(admin, "GET", "/agents/status")).body?.enabled) {
+    const providers = (await api(admin, "GET", "/agents/admin/providers")).body.providers ?? [];
+    if (!providers.length) await api(admin, "POST", "/agents/admin/providers", { name: "Scroll fake provider", baseUrl: process.env.AGENT_FAKE_PROVIDER, apiKey: "sk-test-scroll-0000", defaultModel: "gpt-6-luna" });
+    const agent = (await api(admin, "POST", "/agents", { name: `Scroll agent ${RUN}`, description: "Answers at length", systemPrompt: "Answer at length.", starters: ["Summarise my day", "Draft a reply"] })).body.agent;
+    const chat = (await api(admin, "POST", "/chats", { agentId: agent.id })).body.chat;
+    const paragraph = Array.from({ length: 12 }, (_, index) => `Paragraph ${index + 1} of a long answer that keeps going so the pane has to scroll. See [docs](https://docs.example.test/page?x=${index}) for more.`).join("\n\n");
+    for (let turn = 0; turn < 6; turn += 1) {
+      const started = await api(admin, "POST", `/chats/${chat.id}/messages`, { content: `echo:${paragraph}` });
+      if (started.status !== 201) break;
+      for (let wait = 0; wait < 50; wait += 1) {
+        await sleep(100);
+        if (!(await api(admin, "GET", `/chats/${chat.id}/run`)).body.run) break;
+      }
+    }
+    seeded.chat = { id: chat.id, agentId: agent.id };
+  }
   admin.browserContext().close();
   // Ids only: a later run against the same instance reuses them (SEED_FILE), under the registration limits.
   return {
     longNote: { id: seeded.longNote.id }, sharedNote: { id: seeded.sharedNote.id }, longFile: { id: seeded.longFile.id },
     board: { id: seeded.board.id }, card: { id: seeded.card.id }, collection: { id: seeded.collection.id }, row: { id: seeded.row.id },
     group: { id: seeded.group.id }, members: seeded.members.map((member) => ({ userId: member.userId })), inviteToken: seeded.inviteToken,
-    whiteboard: { id: seeded.whiteboard.id }, vault: seeded.vault, integration: { id: seeded.integration.id }
+    whiteboard: { id: seeded.whiteboard.id }, vault: seeded.vault, integration: { id: seeded.integration.id }, chat: seeded.chat
   };
 }
 
@@ -438,7 +457,7 @@ async function splitPanes(page) {
   }
   // Tab from the details pane's first control through every one: each is in view, below the header.
   const first = await page.evaluate(() => {
-    const control = document.querySelector(".team-detail-pane, .inbox-detail-pane")?.querySelector("button:not(:disabled), a[href], input:not([type=hidden]), [tabindex='0']");
+    const control = document.querySelector(".team-detail-pane, .inbox-detail-pane, .chat-pane")?.querySelector("button:not(:disabled), a[href], input:not([type=hidden]), [tabindex='0']");
     control?.focus();
     return Boolean(control);
   });
@@ -446,7 +465,7 @@ async function splitPanes(page) {
     const where = await page.evaluate((header) => {
       const element = document.activeElement;
       const pane = element?.closest(".split-pane");
-      if (!pane?.matches(".team-detail-pane, .inbox-detail-pane")) return null;
+      if (!pane?.matches(".team-detail-pane, .inbox-detail-pane, .chat-pane")) return null;
       const rect = element.getBoundingClientRect();
       const top = Math.max(document.querySelector(header).getBoundingClientRect().bottom, pane.getBoundingClientRect().top);
       const bottom = Math.min(innerHeight, pane.getBoundingClientRect().bottom);
@@ -601,6 +620,18 @@ const ROUTES = (s) => [
   ] : []),
   ["Inbox", "/inbox", null, { split: true, check: splitPanes }],
   ["Inbox routines", "/inbox/routines"],
+  // Chat (Wave 40): the list beside the chat on a computer (two panes), one screen at a time on a
+  // phone; the long chat scrolls inside its pane with the composer pinned. Only on an instance with
+  // AGENT_SECRETS_KEY and a provider (the seed adds a provider pointing at AGENT_FAKE_PROVIDER).
+  ...(s.chat ? [
+    ["Chat list", "/chat", null, SPLIT],
+    ["Chat (long thread)", `/chat/${s.chat.id}`, null, SPLIT],
+    ["Chat new", "/chat/new", null, SPLIT],
+    ["Chat external link sheet", `/chat/${s.chat.id}`, async (page) => { await tapText(page, ".chat-md-link", "docs"); await page.waitForSelector(".chat-link-sheet"); }, { scope: ".chat-link-sheet" }],
+    ["Settings · Agents", "/settings/agents", null, HUB],
+    ["Settings · Agent editor", `/settings/agents/${s.chat.agentId}`, null, HUB],
+    ["Settings · AI", "/settings/ai", null, HUB]
+  ] : []),
   ["Notifications", "/notifications"],
   // The Settings hub (Wave 37): a page with its nav beside the section on a computer; on a phone the
   // nav is the first screen (/settings) and each section a screen of its own.

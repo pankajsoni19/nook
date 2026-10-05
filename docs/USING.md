@@ -271,11 +271,32 @@ The **Vault** keeps a team's secrets (API keys, database URLs, service passwords
 | `/vault/<vault-id>/access` | Who has access, per environment |
 | `/vault/<vault-id>/activity` | The vault's Activity |
 
+## Chat
+
+**Chat** (`/chat`) is where you talk to **agents**: an agent is a prompt, a model, and a step limit that you make in **Settings → Agents**. Answers come from the **model endpoint an admin configured** in Settings → AI, so **every message you send, the agent's prompt, and every reply leave this Nook for that endpoint**; the composer says so. Chat appears only once an admin has set the server's key and a provider; guests never see it, and an admin decides which roles may chat (admins, members, and viewers to start) and who may create agents (admins and members).
+
+- **On a computer** the chats are on the left, grouped **Pinned**, **Today**, **Yesterday**, **Previous 7 days**, then by month, with a search box over titles and your messages; the chat is on the right. **On a phone** `/chat` is the list and a chat opens as a screen of its own with a back arrow (Back returns to the list, Forward reopens the chat).
+- **New chat** asks for an agent (a dropdown; the agent's starter prompts are offered on the empty chat), then your first message names the chat. An agent is fixed per chat: pick another agent for another chat.
+- **Writing.** <kbd>Enter</kbd> sends and <kbd>Shift</kbd>+<kbd>Enter</kbd> adds a line on a keyboard; on a phone Enter only adds a line and **Send** sends. While the agent answers, Send becomes **Stop**; stopping keeps what arrived. An answer keeps going when you leave the chat or the tab; the chat shows a dot in the list, and coming back resumes the stream where it was.
+- **Replies** render Markdown: headings, lists, task lists, quotes, tables (they scroll inside the reply), and code blocks with **Copy**. Images are never loaded (a chip names the image and its host). An outside link shows its host after the text and opens through a sheet that shows the full address first; a Nook link opens in Nook.
+- **Edit** a message of yours to send a changed version: it becomes a sibling of the original, and a **‹ 2 / 2 ›** switcher on the message moves between versions (nothing is deleted). **Regenerate** on a reply asks again as a sibling, with the same switcher; **Retry** does the same after an error, a stop, or a server restart ("Stopped: server restarted"). **Copy** copies a reply as text. Each reply shows its token count ("1,204 tokens", "est." when the provider reports none).
+- **The budget.** Under the composer, "12% of today's tokens" shows how much of your daily token budget is used (it resets at midnight UTC); once it is used up, sending is refused until then, and the whole Nook may have a budget too.
+- **⋯** on a chat: **Rename**, **Pin**, **Move to Bin** (30 days in the Bin, under the **Chat** items; a running answer stops). Deleting an agent moves it to the Bin too; its chats stay readable and can continue once it is restored.
+- **Errors** are shown under the reply with **Retry**: the provider did not answer or refused the key, the provider stopped answering, today's budget is used up, or no provider is configured.
+
+| URL | View |
+| --- | --- |
+| `/chat` | Your chats (on a computer, beside the chat on screen) |
+| `/chat/new` (optionally `?agent=<agent-id>`) | A new chat, with the agent to pick or preselected |
+| `/chat/<chat-id>` | One chat |
+| `/settings/agents`, `/settings/agents/<agent-id>`, `/settings/agents/new` | Your agents, and one agent's editor |
+| `/settings/ai` | Admins: model providers and the chat policy |
+
 ## Settings
 
 **Settings** is a page of its own at `/settings`. Open it with **Settings** in the account row or the Notes and Files sidebar footer. On a computer a nav on the left lists every section and the section you chose fills the rest of the window; the nav and the section scroll on their own. The header over the section shows your picture, name, team role, and the section's name.
 
-- **Account:** **Security** (password, two-factor, Google sign-in), **Notifications**, **My access** (not for guests), **API keys**, **Modules**, and **About**.
+- **Account:** **Security** (password, two-factor, Google sign-in), **Notifications**, **My access** (not for guests), **API keys**, **Agents** (not for guests), **AI** (admins), **Modules**, and **About**.
 - **Team:** for everyone but guests, **Members**; admins also get **Invites**, **Groups**, **Integrations**, **Keys**, **Policies**, **Templates**, **Access activity**, and **Email log**. Members, viewers, and guests see Team only while the Team module is on; admins always keep it here. The **Team** button in the account row opens **Members**.
 
 Each section has its own URL (`/settings/security`, `/settings/keys`, `/settings/team/groups`, …), so Back and Forward move between the sections you opened and then back to where you opened Settings. Older links still work and are rewritten in place: `/team/…` opens the same Team screen under `/settings/team/…`, and `/settings/mcp` opens `/settings/keys`.
@@ -285,6 +306,14 @@ Each section has its own URL (`/settings/security`, `/settings/keys`, `/settings
 Opening a Settings link directly (from an email or a bookmark) puts Home under it: Back from Settings goes to Home rather than off Nook. A guest who opens **My access** by its address sees **Security**; someone who is not an admin and opens an admin-only Team address sees **Members**, with a note saying that section is for admins.
 
 While a new API key is on screen (it is shown only once, in **API keys** or on an integration's page), leaving it by another section, the back arrow, Home, Bin, Inbox, the bell, **Sign out**, or browser Back or Forward asks first. Unsaved changes in **Team → Policies** ask the same way (Discard or Keep editing).
+
+### Settings → Agents
+
+**Agents** lists your agents and opens an editor for each (`/settings/agents/<agent-id>`; on a phone a screen of its own below the list, with its own back link): **Basics** (name, description, an emoji), **Instructions** (the system prompt, with its character count; a fixed preamble goes before it that marks tool results and documents as untrusted and forbids revealing secrets, so put no secrets in a prompt, and the prompt is not secret from people you later share the agent with), **Model** (a model override, the default is the provider's; **Max steps**, the model calls per answer, 8 by default, which matters once tools arrive; temperature), and **Starters** (up to four prompts offered on an empty chat). Save keeps the version you edited: if someone changed the agent meanwhile, "Changed elsewhere · Reload". **Chat with it** opens a new chat; **Move to Bin** keeps it 30 days. Tools, sharing, and knowledge bases come in later releases.
+
+### Settings → AI (admins)
+
+**AI** holds the **model providers** and the **chat policy**. A provider is a name, an OpenAI-compatible base URL (`https://api.openai.com/v1` by default; a private-network host such as an Ollama or LiteLLM container must be listed in `AGENT_ALLOWED_PRIVATE_HOSTS` on the server), an API key (**encrypted at rest; anyone with the server and its key can read these secrets**; after saving, only `sk-…a1B2` is shown, and leaving the field empty on an edit keeps the saved key), a default chat model (`gpt-6-luna` to start), and compatibility options (the output-token parameter, whether the server reports usage while streaming, the context window). **Test** lists the provider's models and runs a one-token completion, reporting counts and latency. One provider is the **default**; at most five. The **policy** sets who creates agents, who chats, tokens per person per day, tokens for the whole Nook per day, and agents per person. **Usage** (`/api/agents/admin/usage`) is counts per day per person or agent; admins never read chats. When the server has no `AGENT_SECRETS_KEY`, the page says what to set.
 
 ## Settings → Modules
 
@@ -298,6 +327,7 @@ Open **Settings → Modules** to choose which parts of Nook you see. Each module
 | Notifications | The bell and `/notifications`. Reminders are still created, and push notifications still arrive on devices where you turned them on. |
 | Inbox | The **Inbox** button, `/inbox`, and **Proposals awaiting you**. Agents can still suggest changes while it is off; nothing is applied until you approve it. Guests do not see this row. |
 | Vault | Its tile on Home and `/vault`. Hidden for guests, and for everyone but admins while the server has no vault key (then there is no switch either). |
+| Chat | Its tile on Home and `/chat`. Hidden for guests, and for everyone but admins while the server has no agent key (then there is no switch either). Agents, chats, and the Bin's Chat items stay as they are. |
 | Team | The **Team** button and Team in Settings (`/settings/team/…`). Guests do not see this row. Admins keep Team in Settings while the module is off. Roles and blocking apply as before. |
 
 **Back and Forward past a module that is off.** Back steps over an entry of a module that is off to the page before it. Forward cannot pass beyond such an entry: it stays where you are and shows the hint. For example, after Home, then Team, then Calendar, with Team turned off and Back to Home, Forward stops at Home, and Calendar is not reachable with Forward. Turning the module back on restores it: Forward then goes to Team and on to Calendar again.

@@ -140,6 +140,33 @@ What else to know:
 - Every reveal, copy, write, clear, restore, import, export, and access change, and every opening of a secret's comment, is recorded in the vault's own event log (ids and counts only, never values); owners read it as the vault's **Activity**, members see their own. The hourly sweep deletes events older than 90 days; newer events cannot be deleted. Reads and writes are limited to 300 each per 10 minutes per person; the limits survive a restart.
 - Vaults and secrets in the Bin count toward the limits of 100 vaults per person and 1,000 secrets per vault until they are purged. The vaults a person created may hold 64 MiB of stored ciphertext in total (values, their history, and comments, the Bin included); past that, writes that add data are refused until values are cleared or deleted items purged. When the creator stops being an owner, the longest-standing owner takes over that count.
 
+### Agent chat
+
+The **Chat** module (Wave 40) lets people chat with agents (a prompt, a model, a step limit) through an **OpenAI-compatible model endpoint an admin configures** in Settings → AI. This is the first outbound call Nook's server makes to a configurable host: **every message, system prompt, and reply leaves the host for that endpoint.** Nook bundles no model and runs no inference.
+
+The module is off until the key that seals provider API keys is set. Generate one, different from `TOTP_ENCRYPTION_KEY` and `VAULT_ENCRYPTION_KEY`:
+
+```sh
+openssl rand -base64 32
+```
+
+Set it as `AGENT_SECRETS_KEY` in `.env`, or put it in a root-only file (or a Docker secret) and set `AGENT_SECRETS_KEY_FILE` to that file's absolute path; not both. Nook refuses to start when the key is malformed, equal to either other key, or in a file inside `DATA_DIR` (the backup script archives that directory). At startup it logs one line: Chat is on, off because no key is set, or off because the key does not open the stored provider secrets (the rest of Nook keeps running). Without the key, admins see a "not configured" screen in Chat and Settings → AI, and everyone else does not see the module at all. Provider API keys are AES-256-GCM envelopes under this key, write-only in the API (reads show `sk-…a1B2`), and never logged; **anyone with the server and its key can read them.**
+
+**The outbound boundary.** Only `server/agents/egress.ts` makes these calls, and only to the base URL of a configured provider (`{baseUrl}/chat/completions` and `{baseUrl}/models`):
+
+- `https:` only, with no credentials in the URL and no fragment. Nook's own origins (`APP_ORIGINS`) are refused.
+- The host is resolved before **every** request and every address is checked: loopback, RFC 1918, CGNAT, link-local (including `169.254.169.254`), ULA, IPv4-mapped forms, and `0.0.0.0` are refused unless the host name, or a CIDR covering every address, is listed in `AGENT_ALLOWED_PRIVATE_HOSTS`. That list is the way to use an Ollama, vLLM, or LiteLLM container on the compose network (`http://ollama:11434/v1` with `AGENT_ALLOWED_PRIVATE_HOSTS=ollama`); plain `http:` works only for listed hosts. The check-then-connect race (DNS rebinding) is accepted and documented (T307).
+- Redirects are never followed; a 3xx is an error.
+- Responses are read under a byte cap (8 MiB per model stream, 1 MiB for the model list) and three timeouts (30 s to the first byte, 60 s idle between chunks, 180 s in total).
+- The only headers sent are the provider's `Authorization: Bearer <key>`, `Content-Type`, `Accept`, and `User-Agent: Nook/<version>`. No cookie, session, or Nook API key ever leaves.
+- Log lines carry status and durations, never URLs with queries, headers, prompts, or replies.
+
+**Budgets and limits.** Settings → AI sets who may create agents (admins and members by default), who may chat (admins, members, and viewers; guests never), tokens per person per day (500,000), tokens for the whole instance per day (0 = unlimited), and agents per person (50). A run is refused with 429 `BUDGET_EXCEEDED` before the model is called once the budget is used up; budgets reset at midnight UTC. At most `AGENT_MAX_CONCURRENT_RUNS` answers run at once (2 per person, 1 per chat); more get 429 or 503 `AGENT_BUSY`. An answer longer than `AGENT_RUN_TIMEOUT_S` is stopped. A run keeps going when the browser disconnects; Stop, deleting the chat, the wall clock, and a restart end it (a restart marks what was running `interrupted`, keeping the text already received). Provider failures end the run with an error the person can retry; the provider's error message is kept out of Nook's answer beyond a short letters-only excerpt.
+
+**What is stored.** Chats and their messages (a tree of user and assistant turns), each run's status and token counts, and daily usage counts per person and agent (Settings → AI → Usage shows counts only; admins never read chats, D73). Deleting a chat or an agent moves it to the Bin for 30 days; purging deletes its messages and runs. The audit log records run starts and ends with ids and counts, never message text.
+
+**Not in this release:** tool servers (MCP), Nook's own tools, confirmations, external `run_agent` and the Audit log, sharing and public links (the `public_chat_links` policy stays off), and knowledge bases. The MCP server gains read-only `list_agents`, `list_chats`, and `get_chat` for keys with **Read agents and chats** (your own agents, never the prompt; your own chats).
+
 ### Passwords
 
 People change their own password in **Settings → Security** (current password plus a two-factor code when they use one; other sessions are signed out). With email on, **Forgot password?** on the sign-in page mails a 30-minute, single-use link to an existing, unblocked, **verified** address; the answer is the same whether or not an account exists, and a reset on a two-factor account still needs a code or recovery code. A reset signs the account out everywhere and removes its push subscriptions; API keys are not revoked (the security email links to them). Requests are limited in memory like sign-in: 3 an hour per address and 10 an hour per client address. The link is built from `APP_ORIGIN`, never the request's Host header, so set it correctly behind a proxy.
@@ -309,6 +336,11 @@ Compose passes these variables from `.env` (see `.env.example`). Invalid values 
 | `TOTP_ENCRYPTION_KEY` | empty | Base64-encoded 32-byte key. Required when `TOTP_POLICY=required`. |
 | `VAULT_ENCRYPTION_KEY` | empty | The Vault's key: base64 of 32 bytes (`openssl rand -base64 32`), different from `TOTP_ENCRYPTION_KEY`. Empty keeps the Vault off. Keep it away from the backup location (see *Vault*). Never logged. |
 | `VAULT_ENCRYPTION_KEY_FILE` | empty | Instead of `VAULT_ENCRYPTION_KEY`: the absolute path of a file holding the key (a Docker secret or a root-only file), outside `DATA_DIR`. Setting both refuses to start. |
+| `AGENT_SECRETS_KEY` | empty | Agent chat's key: base64 of 32 bytes (`openssl rand -base64 32`), different from `TOTP_ENCRYPTION_KEY` and `VAULT_ENCRYPTION_KEY`. It seals the model providers' API keys. Empty keeps the Chat module off. Keep it away from the backup location (see *Agent chat*). Never logged. |
+| `AGENT_SECRETS_KEY_FILE` | empty | Instead of `AGENT_SECRETS_KEY`: the absolute path of a file holding the key, outside `DATA_DIR`. Setting both refuses to start. |
+| `AGENT_ALLOWED_PRIVATE_HOSTS` | empty | Model endpoints the server may call although they resolve to private, loopback, or link-local addresses: comma-separated host names (exact), IP addresses, or CIDR ranges (for example `ollama,10.0.0.0/8`). Plain `http:` is allowed only for these. At most 50 entries; checked at startup. |
+| `AGENT_MAX_CONCURRENT_RUNS` | `4` | Chat answers in flight for the whole instance (1–32). Each person has 2, each chat 1. |
+| `AGENT_RUN_TIMEOUT_S` | `600` | The wall clock of one chat answer in seconds (30–3600); a longer run is stopped and marked timed out. |
 | `SESSION_DAYS` | `14` | Session lifetime in days, at least 1. |
 | `MAX_MARKDOWN_BYTES` | `2000000` | Largest note body, at least 1024 bytes. |
 | `MAX_UPLOAD_BYTES` | `104857600` (100 MiB) | Largest single file. Integer from `1048576` (1 MiB) to `2147483648` (2 GiB). Bun's request body cap is this (or 2.1 MB, whichever is larger) plus 1 MiB; JSON bodies stay limited to 2.1 MB. |
