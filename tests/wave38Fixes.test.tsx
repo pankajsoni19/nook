@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { formatRoute, parseRoute, type Route } from "../src/router";
@@ -254,6 +254,10 @@ describe("guests have no Bin entry", () => {
     expect(app).toContain("const binShown = binEntryShown(session.user.role, binModuleEnabled);");
     expect(app).toContain('const binHidden = route.app === "bin" && !binShown;');
     expect(app).toContain('route.app === "bin" && !binEntryShown(session.user.role, binEnabled) ? "bin"');
+  });
+
+  // The Docker verify stage has no docs/: check the guide only where it exists.
+  test.skipIf(!existsSync(join(root, "docs/USING.md")))("USING.md says the Bin is for everyone except guests", () => {
     expect(read("docs/USING.md")).toContain("for everyone except guests");
   });
 });
