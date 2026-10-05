@@ -64,7 +64,8 @@ export function listMcpApiKeys(userId: string) {
 export const revokeMcpApiKey = (userId: string, keyId: string) => revokeOwnKey(userId, keyId);
 
 const mcpHandler = createMcpHandler(({ authInfo }) => {
-  const server = new McpServer({ name: "nook", version: config.appVersion });
+  // "nook" is the server's id and stays; the title is the display name (APP_NAME, Wave 39).
+  const server = new McpServer({ name: "nook", title: config.appName, version: config.appVersion });
   const key = authInfo?.extra?.key as McpKeyContext | undefined;
   if (key) {
     registerMcpTools(server, key);

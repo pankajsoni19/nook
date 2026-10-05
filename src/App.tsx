@@ -38,7 +38,7 @@ import {
 import QRCode from "qrcode";
 import { api, ApiError, setCsrfToken } from "./api";
 import { TodayHome } from "./today/TodayHome";
-import { BinApp } from "./bin/BinApp";
+import { BinSection } from "./bin/BinSection";
 import { InboxApp } from "./inbox/InboxApp";
 // Whiteboards (Wave 23) load as their own chunks: the list here, and the Excalidraw canvas inside it
 // (D191), so nobody who never opens Whiteboards downloads either.
@@ -51,8 +51,9 @@ const AiSettings = lazy(() => import("./chat/AiSettings").then((module) => ({ de
 const AgentsSettings = lazy(() => import("./chat/AgentsSettings").then((module) => ({ default: module.AgentsSettings })));
 import { lineDiff } from "./diff/lineDiff";
 import { TeamSection } from "./team/TeamApp";
+import { useBlockedCount } from "./team/blockedCount";
 import { SettingsHubShell } from "./settings/SettingsHub";
-import { hubBackAction, hubEntries, hubEntryLabel, hubEntryOf, hubListGoesUnder, hubPopRoute, isHubRoute, isNestedHubRoute, leaveGuardAction, settingsRoute, teamGroupShown, type HubEntry, type HubEntryId } from "./settings/hubModel";
+import { binEntryShown, hubBackAction, hubEntries, hubEntryLabel, hubEntryOf, hubListGoesUnder, hubPopRoute, isHubRoute, isNestedHubRoute, leaveGuardAction, settingsRoute, teamGroupShown, type HubEntry, type HubEntryId } from "./settings/hubModel";
 import { HubBeforeLeaveContext, type BeforeHubLeave } from "./settings/hubLeave";
 import { InviteRegister, InviteWhileSignedIn, type InviteRegisterBody } from "./auth/InviteRegister";
 import { initialInvite } from "./auth/inviteLink";
@@ -66,8 +67,8 @@ import { setSelfAvatar } from "./ui/selfAvatar";
 import { AccountAuthContext, asksForPassword, GoogleReauthNotice, reauthPassword, useAccountAuthLoader } from "./auth/accountAuth";
 import { RecoveryCodesDialog } from "./auth/RecoveryCodesDialog";
 import { GoogleAccountCard, googleSettingsNotice, GoogleResetNoticeBanner, PasswordStateCard, type GoogleResetNotice } from "./auth/GoogleAccountCard";
-import { AuthDivider, currentReturnPath, GOOGLE_ONLY_HINT, GoogleButton, googleErrorMessage, googleStartUrl, LINK_NOT_AUTHORITATIVE_PASSWORD, linkRequiredText, initialGoogleSettingsResult, initialGoogleSignInResult, initialGoogleTeamResult, type GoogleSettingsResult, type GoogleSignInResult } from "./auth/googleSignIn";
-import { AccountActions, InboxNavContext, SidebarInboxRow, TeamNavContext, useBinCount } from "./AppShell";
+import { AuthDivider, currentReturnPath, googleOnlyHint, GoogleButton, googleErrorMessage, googleStartUrl, LINK_NOT_AUTHORITATIVE_PASSWORD, linkRequiredText, initialGoogleSettingsResult, initialGoogleSignInResult, initialGoogleTeamResult, type GoogleSettingsResult, type GoogleSignInResult } from "./auth/googleSignIn";
+import { AccountActions, InboxNavContext, SidebarInboxRow, useBinCount } from "./AppShell";
 import { repeatDelta, useLeaveGuard } from "./ui/useLeaveGuard";
 import { canManageTeam, canWriteContent, type Role } from "./team/teamRoles";
 import { ReadOnlyBanner, RoleContext } from "./team/roleAccess";
@@ -82,6 +83,7 @@ import { publishedElsewhere, usePublishWatch } from "./editor/publishWatch";
 import { NotificationsContext } from "./notifications/notificationsApi";
 import { NotificationSettings } from "./notifications/NotificationSettings";
 import { forgetThisDevice } from "./notifications/pushClient";
+import { appName, setAppName } from "./appName";
 import { carriedCalendarState } from "./calendarNavigation";
 import { calendarHomeRoute, localDate } from "./calendarRoute";
 import { dialogPopDirection, popStateClosedDialog, takeDialogSentinelEntry, undoDialogPop, whenHistorySettled, type PopDirection } from "./historyDialogs";
@@ -110,7 +112,7 @@ import { notifyBinChanged } from "./bin/binApi";
 import { canPublish, DRAFT_CHANGED_MESSAGE, finalizeOpenNote, isDraftChangedError, mcpDraftBadge, shouldAutoPublish } from "./noteFinalization";
 import { formatRoute, hubDocumentTitle, locationUrl, parseRoute, routeFromLocation, SETTINGS_SECTION_NAMES, settingsDocumentTitle, settingsPath, type Route, type SettingsSection } from "./router";
 import { noteInFolder, notesRoute, resolveNotesPanel, resolveNotesRoute, type NotesRoute } from "./notesRoute";
-import type { Folder, NoteDetail, NoteSummary, User, Version } from "./types";
+import type { BinItem, Folder, NoteDetail, NoteSummary, User, Version } from "./types";
 import { SearchResults, searchListId, searchOptionId } from "./search/SearchResults";
 import { isSearchPushedEntry, markSearchPushed, nextSearchHint, readSearchHint, sameSearchHint, withSearchHint, type SearchHint } from "./search/searchHistory";
 import { SEARCH_MAX_CHARS, type NoteSearchHit } from "./search/searchApi";
@@ -123,7 +125,7 @@ import { usePreferences, type PreferencesStatus } from "./usePreferences";
 type TotpState = { enabled: boolean; required: boolean; setupRequired: boolean };
 // `preferences` comes with /api/auth/me only (not with sign-in); see usePreferences.
 // `notices` (Wave 35 review N2c) comes with /api/auth/me only.
-type SessionResponse = { user: User; csrfToken: string; totp: TotpState; preferences?: unknown; notices?: { googleReset?: GoogleResetNotice | null }; features?: { vault?: boolean; agents?: boolean } };
+type SessionResponse = { user: User; csrfToken: string; totp: TotpState; preferences?: unknown; notices?: { googleReset?: GoogleResetNotice | null }; features?: { vault?: boolean; agents?: boolean }; app?: { name?: string } };
 type ModulesSettingsProps = { disabledModules: readonly ModuleId[]; status: PreferencesStatus; onToggle: (id: ModuleId, enabled: boolean) => void; role?: Role; unavailable?: readonly ModuleId[] };
 type NoteSort = "updated-desc" | "updated-asc" | "created-desc" | "created-asc" | "title-asc" | "title-desc";
 
@@ -176,7 +178,7 @@ function AuthScreen({ onAuthenticated, onForgotPassword, googleResult = null }: 
 
   useEffect(() => {
     let live = true;
-    api<RegistrationInfo>("/about").then((info) => { if (live) setRegistration(info); }, () => { if (live) setRegistration("failed"); });
+    api<RegistrationInfo>("/about").then((info) => { if (live) { setAppName(info.appName); setRegistration(info); } }, () => { if (live) setRegistration("failed"); });
     return () => { live = false; };
   }, []);
 
@@ -267,7 +269,7 @@ function AuthScreen({ onAuthenticated, onForgotPassword, googleResult = null }: 
       <section className="auth-card">
         <div className="brand-mark"><Sparkles aria-hidden="true" /></div>
         <div className="auth-heading">
-          <span className="eyebrow">Nook</span>
+          <span className="eyebrow">{appName()}</span>
           <h1>{heading}</h1>
           <p>{googleCode ? "Google confirmed your account. Enter the code from your authenticator app to finish signing in." : "Your private workspace for ideas, passwords, and configuration notes."}</p>
         </div>
@@ -287,7 +289,7 @@ function AuthScreen({ onAuthenticated, onForgotPassword, googleResult = null }: 
             <button type="button" className="icon-button" aria-label="Dismiss" onClick={() => setLinkRequired(false)}><X /></button>
           </div>}
           {googleButton}
-          {googleButton && !methods.password && <p className="auth-google-only">{GOOGLE_ONLY_HINT}</p>}
+          {googleButton && !methods.password && <p className="auth-google-only">{googleOnlyHint()}</p>}
           {googleButton && methods.password && <AuthDivider />}
           {methods.password && <form onSubmit={submit} className="auth-form" noValidate onChange={(event) => { setError(""); fields.clear(fieldName(event.target)); }}>
             {registering && <label>Name<input name="displayName" autoComplete="name" maxLength={80} aria-invalid={fields.errors.displayName ? true : undefined} aria-describedby={fields.errors.displayName ? "auth-name-error" : undefined} /><FieldError id="auth-name-error" message={fields.errors.displayName} /></label>}
@@ -335,16 +337,19 @@ type SettingsPageProps = {
   flash: (message: string) => void;
   /** Absent while two-factor setup is required (Settings → Security is then the only screen). */
   onHome?: () => void;
-  onBin?: () => void;
   onSignOut: () => void;
   onSecurityChanged: (state: TotpState) => void;
   teamModuleEnabled: boolean;
+  /** Wave 38: the Bin is a hub section while its module is on (D92); off, /settings/bin opens Security. */
+  binModuleEnabled: boolean;
+  /** After Settings → Bin restored an item, so the owning app can refresh its lists. */
+  onBinRestored?: (item: BinItem) => void;
   /** "Turn on in Settings" (Q5): the module row Settings → Modules scrolls to and highlights once. */
   highlightModule?: ModuleId | null;
   onHighlightDone?: () => void;
 };
 
-/** The hub route on the URL: an account section, the list, or a Team section. */
+/** The hub route on the URL: an account section, the list, the Bin, or a Team section. */
 function hubRouteFromLocation(): Route {
   const route = routeFromLocation(window.location);
   return isHubRoute(route) ? route : settingsRoute(null);
@@ -354,9 +359,10 @@ function hubRouteFromLocation(): Route {
  * The Settings page (Wave 37; before, a dialog over the app). A route of its own: the list at
  * /settings, an account section at /settings/:section, and Team sections at /settings/team/…, each a
  * history entry, so Back returns through the sections to where Settings was opened. The account
- * sections are the ones the dialog had; Team (for the roles that see it) is TeamSection in the hub.
+ * sections are the ones the dialog had; Team (for the roles that see it) is TeamSection in the hub,
+ * and the Bin (Wave 38, /settings/bin) is BinSection.
  */
-function SettingsPage({ session, modules, googleResult = null, navigate, flash, onHome, onBin, onSignOut, onSecurityChanged, teamModuleEnabled, highlightModule = null, onHighlightDone }: SettingsPageProps) {
+function SettingsPage({ session, modules, googleResult = null, navigate, flash, onHome, onSignOut, onSecurityChanged, teamModuleEnabled, binModuleEnabled, onBinRestored, highlightModule = null, onHighlightDone }: SettingsPageProps) {
   const setupRequired = session.totp.setupRequired;
   const [locationRoute, setLocationRoute] = useState<Route>(hubRouteFromLocation);
   // Two-factor setup first: Security is the only screen, whatever the URL says.
@@ -370,7 +376,7 @@ function SettingsPage({ session, modules, googleResult = null, navigate, flash, 
   const googleNoticeLine = googleNotice && <p className={`settings-google-notice ${googleNotice.tone}`} role={googleNotice.tone === "error" ? "alert" : "status"}>{googleNotice.text}<button type="button" className="icon-button" aria-label="Dismiss" onClick={() => setGoogleNotice(null)}><X /></button></p>;
   const reauthField = asksForPassword(account) ? <input name="password" type="password" autoComplete="current-password" placeholder="Password" required /> : null;
   const reauthNotice = account && !asksForPassword(account) ? <GoogleReauthNotice account={account} returnTo="/settings/security" /> : null;
-  const [appInfo, setAppInfo] = useState<{ version: string; gitSha: string; twoFactor?: boolean; passwordReset?: boolean }>({ version: "0.24.0", gitSha: "development" });
+  const [appInfo, setAppInfo] = useState<{ version: string; gitSha: string; twoFactor?: boolean; passwordReset?: boolean }>({ version: "0.25.0", gitSha: "development" });
   const [state, setState] = useState<TotpState>(session.totp);
   const [secret, setSecret] = useState("");
   const [qrCode, setQrCode] = useState("");
@@ -381,7 +387,11 @@ function SettingsPage({ session, modules, googleResult = null, navigate, flash, 
   const { ask, confirmOpen, confirmElement } = useConfirm();
   // Q4: the codes shown right after turning two-factor on, until the person says they saved them.
   const [codesDialog, setCodesDialog] = useState(false);
-  const binCount = useBinCount(Boolean(onBin));
+  // Wave 38: the Bin entry (not for guests, review) and its item count (the top bar's Bin badge before).
+  const binShown = binEntryShown(session.user.role, binModuleEnabled);
+  const binCount = useBinCount(binShown && !setupRequired);
+  // Review L1: the blocked-account count on Team → Members (the top bar's Team badge before).
+  const blockedCount = useBlockedCount(canManageTeam(session.user.role) && !setupRequired);
 
   // A new key shown only once (C1): Settings → API keys, or (review R4) an integration's page in Team.
   const [mcpKeyPending, setMcpKeyPending] = useState(false);
@@ -442,19 +452,27 @@ function SettingsPage({ session, modules, googleResult = null, navigate, flash, 
   // module is off, D92) is read again once it settled, so the screen always follows the URL.
   const teamShownRef = useRef(teamGroupShown(session.user.role, teamModuleEnabled));
   teamShownRef.current = teamGroupShown(session.user.role, teamModuleEnabled);
+  const binShownRef = useRef(binShown);
+  binShownRef.current = binShown;
   useEffect(() => {
     let cancel = () => undefined as void;
+    let later: ReturnType<typeof setTimeout> | null = null;
     const follow = () => {
-      const next = hubPopRoute(routeFromLocation(window.location), teamShownRef.current);
+      const next = hubPopRoute(routeFromLocation(window.location), teamShownRef.current, binShownRef.current);
       if (next) setLocationRoute((current) => formatRoute(current) === formatRoute(next) ? current : next);
     };
     const onPopState = (event: PopStateEvent) => {
       cancel();
+      if (later) { clearTimeout(later); later = null; }
       if (popStateClosedDialog(event)) { cancel = whenHistorySettled(follow); return; }
       follow();
+      // Review M1: a hidden Bin entry is the route gate's to deal with, and it runs after this listener
+      // (Forward is undone, Back steps on past the entry, a depth-0 entry is replaced with Security):
+      // the URL is read once more after its move settled, so the screen follows what the gate chose.
+      if (routeFromLocation(window.location).app === "bin" && !binShownRef.current) later = setTimeout(() => { later = null; cancel = whenHistorySettled(follow); }, 0);
     };
     window.addEventListener("popstate", onPopState);
-    return () => { cancel(); window.removeEventListener("popstate", onPopState); };
+    return () => { cancel(); if (later) clearTimeout(later); window.removeEventListener("popstate", onPopState); };
   }, []);
 
   const go = useCallback((next: Route, options: { replace?: boolean } = {}) => {
@@ -468,24 +486,28 @@ function SettingsPage({ session, modules, googleResult = null, navigate, flash, 
     else go(settingsRoute(null), { replace: true });
   }, [go]);
 
-  const entries = useMemo(() => hubEntries(session.user.role, { teamModuleEnabled, setupRequired }), [session.user.role, setupRequired, teamModuleEnabled]);
+  const entries = useMemo(() => hubEntries(session.user.role, { teamModuleEnabled, binModuleEnabled, setupRequired, binCount, blockedCount }), [binCount, binModuleEnabled, blockedCount, session.user.role, setupRequired, teamModuleEnabled]);
   const listScreen = route.app === "settings" && route.section === null;
   // Q6: guests have no My access; its URL opens Security (replaced below).
   const guestAccess = route.app === "settings" && route.section === "access" && session.user.role === "guest";
   const section: SettingsSection | null = route.app === "settings" ? guestAccess ? "security" : route.section ?? "security" : null;
   const selected: HubEntryId = guestAccess ? "security" : hubEntryOf(route) ?? "security";
   useEffect(() => { if (guestAccess) go(settingsRoute("security"), { replace: true }); }, [go, guestAccess]);
-  const title = route.app === "team" ? hubEntryLabel(selected) : SETTINGS_SECTION_NAMES[section ?? "security"];
+  // Wave 38: with the Bin module off (D92), or for a guest, the Bin has no entry, and /settings/bin opens Security in place.
+  const binHidden = route.app === "bin" && !binShown;
+  useEffect(() => { if (binHidden) go(settingsRoute("security"), { replace: true }); }, [binHidden, go]);
+  const title = route.app === "settings" ? SETTINGS_SECTION_NAMES[section ?? "security"] : hubEntryLabel(selected);
 
-  // "Settings · Notifications · Nook"; Team's sections name themselves.
+  // "Settings · Notifications · Nook", "Settings · Bin · Nook"; Team's sections name themselves.
   useEffect(() => {
+    if (route.app === "bin") document.title = hubDocumentTitle(hubEntryLabel("bin"));
     if (route.app !== "settings") return;
     document.title = listScreen && isMobileViewport() ? hubDocumentTitle(null) : settingsDocumentTitle(section ?? "security");
   }, [listScreen, route.app, section]);
 
   useEffect(() => {
     api<TotpState>("/auth/totp/status").then(setState).catch((reason) => setError(reason instanceof Error ? reason.message : "Could not load security settings"));
-    api<{ version: string; gitSha: string; twoFactor?: boolean; passwordReset?: boolean }>("/about").then(setAppInfo).catch(() => undefined);
+    api<{ appName?: string; version: string; gitSha: string; twoFactor?: boolean; passwordReset?: boolean }>("/about").then((info) => { setAppName(info.appName); setAppInfo(info); }).catch(() => undefined);
   }, []);
 
   async function beginSetup(event: React.FormEvent<HTMLFormElement>) {
@@ -619,14 +641,16 @@ function SettingsPage({ session, modules, googleResult = null, navigate, flash, 
       <button className="primary-button" disabled={busy}>{busy ? "Preparing…" : "Set up authenticator"}</button>
     </form> : <div className="security-card enrollment-card">
       <div className="enrollment-grid">
-        <div className="qr-frame"><img src={qrCode} alt="QR code for Nook two-factor authentication" /></div>
-        <div><span className="step-label">1 · Scan the code</span><h4>Add Nook to Google Authenticator</h4><p>If you cannot scan it, enter the entire setup key manually in Google Authenticator. The groups of four are only for readability; copying removes all spaces. This key is not entered when signing in.</p><button className="secret-copy" onClick={copySecret}><code>{secret.match(/.{1,4}/g)?.join(" ")}</code><span>{copied ? <><Check />Copied</> : "Copy setup key without spaces"}</span></button></div>
+        <div className="qr-frame"><img src={qrCode} alt={`QR code for ${appName()} two-factor authentication`} /></div>
+        <div><span className="step-label">1 · Scan the code</span><h4>Add {appName()} to Google Authenticator</h4><p>If you cannot scan it, enter the entire setup key manually in Google Authenticator. The groups of four are only for readability; copying removes all spaces. This key is not entered when signing in.</p><button className="secret-copy" onClick={copySecret}><code>{secret.match(/.{1,4}/g)?.join(" ")}</code><span>{copied ? <><Check />Copied</> : "Copy setup key without spaces"}</span></button></div>
       </div>
       <form className="verify-totp-form" onSubmit={enable}><span className="step-label">2 · Verify setup</span><label>Authentication code<input name="code" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} placeholder="000000" required autoFocus /></label><button className="primary-button" disabled={busy}>{busy ? "Verifying…" : "Enable two-factor authentication"}</button></form>
     </div>}
   </section>;
 
-  const content = route.app === "team"
+  const content = route.app === "bin"
+    ? binHidden ? null : <BinSection flash={flash} onRestored={onBinRestored} />
+    : route.app === "team"
     ? <TeamSection route={route} role={session.user.role ?? "member"} totpEnabled={state.enabled} navigate={go} flash={flash} onLeave={() => go(settingsRoute(null), { replace: true })} guardLeave={guardLeave} onKeyPendingChange={onIntegrationKeyPending} />
     : section === "modules" ? <ModulesSettings {...modules} highlight={highlightModule} onHighlightDone={onHighlightDone} />
     : section === "mcp" ? <KeysSettings notice={googleNoticeLine} onPendingChange={onMcpKeyPending} totpEnabled={state.enabled} role={session.user.role} />
@@ -634,15 +658,15 @@ function SettingsPage({ session, modules, googleResult = null, navigate, flash, 
     : section === "notifications" ? <NotificationSettings />
     : section === "agents" ? <Suspense fallback={<section className="settings-content" aria-busy="true"><p className="sr-only" role="status">Loading agents…</p></section>}><AgentsSettings agentId={route.app === "settings" ? route.agentId ?? null : null} navigate={go} flash={flash} onOpenChat={(agentId) => navigate({ app: "chat", chatId: null, newChat: true, agentId })} /></Suspense>
     : section === "ai" ? (session.user.role === "admin" ? <Suspense fallback={<section className="settings-content" aria-busy="true"><p className="sr-only" role="status">Loading AI settings…</p></section>}><AiSettings flash={flash} /></Suspense> : <section className="settings-content"><p className="settings-warning">That section is for admins.</p></section>)
-    : section === "about" ? <section className="settings-content about-settings" aria-labelledby="about-heading"><div className="settings-section-heading"><span className="settings-icon"><Info /></span><div><h3 id="about-heading">About Nook</h3><p>A private, self-hosted workspace for notes, files, and ideas.</p></div></div><div className="about-card"><div className="brand-mark"><Sparkles /></div><div><h4>Nook</h4><p>Built by Pankaj</p></div><dl><div><dt>Version</dt><dd>{appInfo.version}</dd></div><div><dt>Git SHA</dt><dd><code>{appInfo.gitSha}</code></dd></div></dl><a href="https://github.com/pankajsoni19" target="_blank" rel="noopener noreferrer">github.com/pankajsoni19</a></div></section>
+    : section === "about" ? <section className="settings-content about-settings" aria-labelledby="about-heading"><div className="settings-section-heading"><span className="settings-icon"><Info /></span><div><h3 id="about-heading">About {appName()}</h3><p>A private, self-hosted workspace for notes, files, and ideas.</p></div></div><div className="about-card"><div className="brand-mark"><Sparkles /></div><div><h4>{appName()}</h4><p>{appName() === "Nook" ? "Built by Pankaj" : "Built on Nook by Pankaj"}</p></div><dl><div><dt>Version</dt><dd>{appInfo.version}</dd></div><div><dt>Git SHA</dt><dd><code>{appInfo.gitSha}</code></dd></div></dl><a href="https://github.com/pankajsoni19" target="_blank" rel="noopener noreferrer">github.com/pankajsoni19</a></div></section>
     : securitySection;
 
   // While setup is required there is nowhere else to go: Sign out is the only header action.
   const accountActions = setupRequired
     ? <div className="app-account" role="group" aria-label="Account"><button className="app-account-button" onClick={onSignOut} title="Sign out"><LogOut /><span className="app-account-label">Sign out</span></button></div>
-    : <AccountActions displayName={session.user.displayName} onSignOut={() => guardLeave(onSignOut)} onBin={onBin ? () => guardLeave(onBin) : undefined} binCount={binCount} />;
+    : <AccountActions displayName={session.user.displayName} onSignOut={() => guardLeave(onSignOut)} />;
   // Review M1: the header's Inbox button and the bell's items come from app-wide contexts; inside the
-  // hub they go through the same leave guard as Home, Bin, and Sign out.
+  // hub they go through the same leave guard as Home and Sign out.
   const inboxNav = useContext(InboxNavContext);
   const notificationsNav = useContext(NotificationsContext);
   const hubInboxNav = useMemo(() => inboxNav && { ...inboxNav, openInbox: () => guardLeave(inboxNav.openInbox) }, [guardLeave, inboxNav]);
@@ -923,6 +947,9 @@ export function App() {
   // (Team plan §6.2, formerly Settings → "Manage team"), so their Team routes pass the route gate.
   // Everyone else follows the toggle.
   const teamGateOpen = activeApp === "team" && canManageTeam(session?.user.role);
+  // Wave 38: the Bin is a Settings section; with its module off the hub itself opens Security in
+  // place of /settings/bin (no Home and hint), so the app-wide route gate leaves it to the hub.
+  const hubGatesItself = teamGateOpen || activeApp === "bin";
   // The module whose route was just replaced with Home, for the one-line hint (D92).
   const [moduleHint, setModuleHint] = useState<ModuleId | null>(null);
   // Q5: the module "Turn on in Settings" opened Settings → Modules for, scrolled to and highlighted once.
@@ -989,7 +1016,9 @@ export function App() {
 
   useEffect(() => {
     api<SessionResponse>("/auth/me")
-      .then((result) => { sessionUserRef.current = result.user.id; setCsrfToken(result.csrfToken); setSession(result); })
+      // Wave 39: the session carries APP_NAME, so in development (where Vite serves index.html as it
+      // is) the tab titles follow the name before any /api/about call.
+      .then((result) => { if (result.app?.name) setAppName(result.app.name); sessionUserRef.current = result.user.id; setCsrfToken(result.csrfToken); setSession(result); })
       .catch(() => undefined)
       .finally(() => setChecking(false));
   }, []);
@@ -1081,11 +1110,11 @@ export function App() {
     }
   }, [flash, session, loadNavigation, startupRetry]);
   useEffect(() => {
-    // The Settings hub names its own screens (Team's sections too).
-    if (activeApp === "settings" || activeApp === "team") return;
-    const sectionName = { home: "Home", notes: "Notes", files: "Files", tasks: "Tasks", collections: "Collections", calendar: "Calendar", notifications: "Notifications", bin: "Bin", inbox: "Inbox", whiteboards: "Whiteboards", vault: "Vault", chat: "Chat" }[activeApp];
+    // The Settings hub names its own screens (Team's sections and the Bin too).
+    if (activeApp === "settings" || activeApp === "team" || activeApp === "bin") return;
+    const sectionName = { home: "Home", notes: "Notes", files: "Files", tasks: "Tasks", collections: "Collections", calendar: "Calendar", notifications: "Notifications", inbox: "Inbox", whiteboards: "Whiteboards", vault: "Vault", chat: "Chat" }[activeApp];
     const detail = activeApp === "notes" && note && note.id === selectedNoteId ? note.title || "Untitled" : null;
-    document.title = session ? `${detail ? `${detail} · ` : ""}${sectionName} · Nook` : "Sign in · Nook";
+    document.title = session ? `${detail ? `${detail} · ` : ""}${sectionName} · ${appName()}` : `Sign in · ${appName()}`;
   }, [activeApp, note, selectedNoteId, session]);
   useEffect(() => {
     if (!session || selectionOwner !== session.user.id) return;
@@ -1825,7 +1854,6 @@ export function App() {
     showMobilePanel(fallback, "replace");
   }
 
-  // Re-registered every render so the handler never finalizes a note from a stale editor snapshot.
   // The depth of the entry on screen: read once per signed-in user, then kept by navigate() and by
   // every popstate (recordPopDepth), never re-read on render (see recordPopDepth).
   const sessionUserId = session?.user.id ?? null;
@@ -1837,59 +1865,76 @@ export function App() {
   // F6: End/Home/PageDown/PageUp scroll the Notes or Files panel on screen when focus is on the page.
   usePageScrollKeys(workspaceScroller);
 
-  useEffect(() => {
+  // The handler is rebuilt every render so it never finalizes a note from a stale editor snapshot,
+  // and the window listener is registered once and dispatches to the newest one (Wave 38 review M1):
+  // a listener re-registered per render was dropped mid-dispatch when an earlier listener's state
+  // change (the hub following the URL) rendered this component in the same popstate, so the route
+  // gate missed a move (a popstate's listeners are a snapshot; a removed one is skipped).
+  const onPopState = (event: PopStateEvent) => {
     if (!session) return;
-    const onPopState = (event: PopStateEvent) => {
-      if (resetLinkEvents.has(event)) return;
-      const poppedDepth = readHistoryDepth(event.state);
-      const previousDepth = recordPopDepth(historyDepthRef, poppedDepth);
-      // Back/Forward while a Files dialog is open only closes the dialog (D18).
-      if (popStateClosedDialog(event)) return;
-      if (session.totp.setupRequired) return;
-      const route = routeFromLocation(window.location);
-      // D92: Back or Forward onto a module that is off skips that entry instead of replacing it
-      // with a second Home entry. Depth 0 still falls through to the gate below, which replaces it.
-      const hiddenRoute = route.app === "team" && canManageTeam(session.user.role) ? null : hiddenModuleForApp(disabledModules, route.app);
-      const step = hiddenRoute ? hiddenEntryStep(dialogPopDirection(previousDepth, poppedDepth), poppedDepth) : "replace";
-      if (hiddenRoute && step !== "replace") {
-        setModuleHint(hiddenRoute);
-        if (step === "undo") {
-          historyDepthRef.current = previousDepth;
-          undoDialogPop("forward");
-        } else {
-          window.history.back();
-        }
+    if (resetLinkEvents.has(event)) return;
+    const poppedDepth = readHistoryDepth(event.state);
+    const previousDepth = recordPopDepth(historyDepthRef, poppedDepth);
+    // Back/Forward while a Files dialog is open only closes the dialog (D18).
+    if (popStateClosedDialog(event)) return;
+    if (session.totp.setupRequired) return;
+    const route = routeFromLocation(window.location);
+    // D92: Back or Forward onto a module that is off skips that entry instead of replacing it
+    // with a second Home entry. Depth 0 still falls through to the gate below, which replaces it.
+    // A guest's Bin entry (Wave 38: no entry for them) is skipped like one with the module off.
+    const hiddenRoute = route.app === "team" && canManageTeam(session.user.role) ? null : route.app === "bin" && !binEntryShown(session.user.role, binEnabled) ? "bin" : hiddenModuleForApp(disabledModules, route.app);
+    const step = hiddenRoute ? hiddenEntryStep(dialogPopDirection(previousDepth, poppedDepth), poppedDepth) : "replace";
+    if (hiddenRoute && step !== "replace") {
+      // The Bin's hint is the hub's (it opens Security in place); the hint is for Home.
+      if (hiddenRoute !== "bin") setModuleHint(hiddenRoute);
+      if (step === "undo") {
+        historyDepthRef.current = previousDepth;
+        undoDialogPop("forward");
+      } else {
+        window.history.back();
+      }
+      return;
+    }
+    const startup = startupRouteState(session.user.id, routeAppliedUserRef.current, startupFailedUserRef.current);
+    if (startup === "retry") {
+      retryStartup(route);
+      return;
+    }
+    if (startup === "loading") {
+      // The workspace is still loading; apply the newest URL once it is ready.
+      pendingRouteRef.current = route;
+      return;
+    }
+    if (hiddenRoute === "bin") {
+      // Wave 38 (review M1): a hidden Bin entry with nothing below it (or no known direction) opens
+      // Security in place, the hub's rule for /settings/bin, instead of Home and a hint.
+      setActiveApp("settings");
+      navigate(settingsRoute("security"), { replace: true });
+      return;
+    }
+    if (route.app !== "notes") {
+      if (activeApp === "notes") {
+        void leaveNotesFromHistory(route);
         return;
       }
-      const startup = startupRouteState(session.user.id, routeAppliedUserRef.current, startupFailedUserRef.current);
-      if (startup === "retry") {
-        retryStartup(route);
-        return;
-      }
-      if (startup === "loading") {
-        // The workspace is still loading; apply the newest URL once it is ready.
-        pendingRouteRef.current = route;
-        return;
-      }
-      if (route.app !== "notes") {
-        if (activeApp === "notes") {
-          void leaveNotesFromHistory(route);
-          return;
-        }
-        setActiveApp(route.app);
-        if (formatRoute(route) !== locationUrl(window.location)) navigate(route, { replace: true });
-        return;
-      }
-      // Each Notes entry records the search it showed; entries from before a search clear it.
-      const searchHint = readSearchHint(event.state, session.user.id);
-      searchHintRef.current = searchHint;
-      setQuery(searchHint?.query ?? "");
-      setSearchAll(searchHint?.all ?? false);
-      void restoreNotesRoute(route, readHistorySnapshot(event.state, session.user.id));
-    };
-    window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
-  });
+      setActiveApp(route.app);
+      if (formatRoute(route) !== locationUrl(window.location)) navigate(route, { replace: true });
+      return;
+    }
+    // Each Notes entry records the search it showed; entries from before a search clear it.
+    const searchHint = readSearchHint(event.state, session.user.id);
+    searchHintRef.current = searchHint;
+    setQuery(searchHint?.query ?? "");
+    setSearchAll(searchHint?.all ?? false);
+    void restoreNotesRoute(route, readHistorySnapshot(event.state, session.user.id));
+  };
+  const popStateRef = useRef(onPopState);
+  popStateRef.current = onPopState;
+  useEffect(() => {
+    const listen = (event: PopStateEvent) => popStateRef.current(event);
+    window.addEventListener("popstate", listen);
+    return () => window.removeEventListener("popstate", listen);
+  }, []);
 
   // D92: a route of a module that is turned off (a launcher link, a deep link, Back or Forward, a
   // notification, or turning it off while it is open) is replaced with Home and a hint. The entry is
@@ -1897,7 +1942,7 @@ export function App() {
   // above depth 0 skip it in onPopState instead, see hiddenEntryStep). The server is not involved: the
   // module's API still works and keeps its own access rules (T97).
   useEffect(() => {
-    const hidden = teamGateOpen ? null : hiddenModuleForApp(disabledModules, activeApp);
+    const hidden = hubGatesItself ? null : hiddenModuleForApp(disabledModules, activeApp);
     if (!session || session.totp.setupRequired || !hidden || leavingHiddenModuleRef.current) return;
     const app = activeApp;
     // A note that could not be saved keeps Notes open (the toast says why) until the choice changes.
@@ -1989,7 +2034,7 @@ export function App() {
     setSession(null);
   }
 
-  if (checking) return <main className="loading-page"><div className="brand-mark"><Sparkles /></div><span>Opening Nook…</span></main>;
+  if (checking) return <main className="loading-page"><div className="brand-mark"><Sparkles /></div><span>Opening {appName()}…</span></main>;
   const acceptSession = (result: SessionResponse) => {
     if (sessionUserRef.current !== result.user.id) clearCardSummaries();
     sessionUserRef.current = result.user.id;
@@ -2073,15 +2118,12 @@ export function App() {
     {!unavailable.includes(moduleHint) && <button className="secondary-button" onClick={() => { setHighlightModule(moduleHint); setModuleHint(null); openSettings("modules"); }}>Turn on in Settings</button>}
     <button className="icon-button" onClick={() => setModuleHint(null)} aria-label="Dismiss"><X /></button>
   </div>}</>;
-  const openBin = binEnabled ? () => { void openApp("bin"); } : undefined;
   // A hidden module's view never renders, even for the moment before the gate above replaces its route.
-  const shownApp: AppSection = activeApp !== "notes" && !teamGateOpen && !isAppEnabled(disabledModules, activeApp) ? "home" : activeApp;
+  const shownApp: AppSection = activeApp !== "notes" && !hubGatesItself && !isAppEnabled(disabledModules, activeApp) ? "home" : activeApp;
   const account = { displayName: session.user.displayName, onSettings: () => openSettings(), onSignOut: signOut };
 
   // Notifications off (D92): no provider, so every bell renders nothing and stops polling.
   const notificationsContext = isModuleEnabled(disabledModules, "notifications") ? { openList: () => { void openApp("notifications"); }, openPath: openNotificationPath } : null;
-  // The Settings hub lists Team in its nav, so the header's Team button stays off the whole hub.
-  const teamNav = { role: session.user.role, openTeam: () => { void openApp("team"); }, onTeam: shownApp === "team" || shownApp === "settings" };
   const inboxNav = { role: session.user.role, openInbox: () => { void openApp("inbox"); }, onInbox: shownApp === "inbox" };
   // The Inbox opens a proposal's target as a new entry: a note through the Notes loader, anything else by its route.
   const openInboxPath = (path: string) => {
@@ -2090,8 +2132,8 @@ export function App() {
     else openNotificationPath(path);
   };
 
-  // Wave 37: the Settings hub, one element for its account and Team routes (moving between them
-  // never remounts it). Its moves keep the app's section in step with the URL.
+  // Wave 37: the Settings hub, one element for its account, Bin (Wave 38), and Team routes (moving
+  // between them never remounts it). Its moves keep the app's section in step with the URL.
   const settingsPage = (setup: boolean) => <SettingsPage
     key="settings-hub"
     session={session}
@@ -2100,10 +2142,11 @@ export function App() {
     navigate={(route, options) => { navigate(route, options); setActiveApp(route.app); }}
     flash={flash}
     onHome={setup ? undefined : () => { void openHome(); }}
-    onBin={setup ? undefined : openBin}
     onSignOut={signOut}
     onSecurityChanged={securityChanged}
     teamModuleEnabled={isModuleEnabled(disabledModules, "team")}
+    binModuleEnabled={binEnabled}
+    onBinRestored={(item) => { if (item.type === "note") void loadNavigation().catch(() => undefined); }}
     highlightModule={highlightModule}
     onHighlightDone={() => setHighlightModule(null)}
   />;
@@ -2114,21 +2157,21 @@ export function App() {
     {toastStatus}
   </RoleContext.Provider></ModulesContext.Provider>;
 
-  if (shownApp !== "notes") return <ModulesContext.Provider value={disabledModules}><RoleContext.Provider value={session.user.role}><NotificationsContext.Provider value={notificationsContext}><TeamNavContext.Provider value={teamNav}><InboxNavContext.Provider value={inboxNav}>
+  if (shownApp !== "notes") return <ModulesContext.Provider value={disabledModules}><RoleContext.Provider value={session.user.role}><NotificationsContext.Provider value={notificationsContext}><InboxNavContext.Provider value={inboxNav}>
     {shownApp === "home" ? <TodayHome {...account} userId={session.user.id} onOpen={(section) => { void openApp(section); }} onOpenRoute={(route) => { void openTodayRoute(route); }} />
-      : shownApp === "files" ? <FilesApp {...account} userId={session.user.id} navigate={navigate} flash={flash} onHome={() => { void openHome(); }} onBin={openBin} onOpenWhiteboard={isModuleEnabled(disabledModules, "whiteboards") ? (id) => openNotificationPath(`/whiteboards/${id}`) : undefined} />
-      : shownApp === "tasks" ? <TasksApp {...account} userId={session.user.id} navigate={navigate} flash={flash} onHome={() => { void openHome(); }} onBin={openBin} />
-      : shownApp === "collections" ? <CollectionsApp {...account} userId={session.user.id} navigate={navigate} flash={flash} onHome={() => { void openHome(); }} onBin={openBin} />
-      : shownApp === "calendar" ? <CalendarApp key={calendarKey} {...account} userId={session.user.id} navigate={navigate} flash={flash} onHome={() => { void openHome(); }} onBin={openBin} onOpenNote={openLinkedNote} />
+      : shownApp === "files" ? <FilesApp {...account} userId={session.user.id} navigate={navigate} flash={flash} onHome={() => { void openHome(); }} onOpenWhiteboard={isModuleEnabled(disabledModules, "whiteboards") ? (id) => openNotificationPath(`/whiteboards/${id}`) : undefined} />
+      : shownApp === "tasks" ? <TasksApp {...account} userId={session.user.id} navigate={navigate} flash={flash} onHome={() => { void openHome(); }} />
+      : shownApp === "collections" ? <CollectionsApp {...account} userId={session.user.id} navigate={navigate} flash={flash} onHome={() => { void openHome(); }} />
+      : shownApp === "calendar" ? <CalendarApp key={calendarKey} {...account} userId={session.user.id} navigate={navigate} flash={flash} onHome={() => { void openHome(); }} onOpenNote={openLinkedNote} />
       : shownApp === "notifications" ? <NotificationsApp {...account} onHome={() => { void openHome(); }} onOpenPath={openNotificationPath} />
-      : shownApp === "settings" || shownApp === "team" ? settingsPage(false)
-      : shownApp === "inbox" ? <InboxApp {...account} navigate={navigate} flash={flash} onHome={() => { void openHome(); }} onBin={openBin} onOpenPath={openInboxPath} />
-      : shownApp === "vault" ? <Suspense fallback={<main className="app-page" aria-busy="true"><p className="sr-only" role="status">Loading the vault…</p></main>}><VaultApp {...account} role={session.user.role ?? "member"} navigate={navigate} flash={flash} onHome={() => { void openHome(); }} onBin={openBin} /></Suspense>
-      : shownApp === "chat" ? <Suspense fallback={<main className="app-page" aria-busy="true"><p className="sr-only" role="status">Loading chat…</p></main>}><ChatApp {...account} role={session.user.role ?? "member"} navigate={navigate} flash={flash} onHome={() => { void openHome(); }} onBin={openBin} onOpenAgents={(agentId) => { void openRoute({ app: "settings", section: "agents", ...(agentId ? { agentId } : {}) }); }} onOpenPath={openInboxPath} /></Suspense>
-      : shownApp === "whiteboards" ? <Suspense fallback={<main className="app-page" aria-busy="true"><p className="sr-only" role="status">Loading whiteboards…</p></main>}><WhiteboardsApp {...account} userId={session.user.id} navigate={navigate} flash={flash} onHome={() => { void openHome(); }} onBin={openBin} onOpenPath={openInboxPath} /></Suspense>
-      : <BinApp {...account} flash={flash} onHome={() => { void openHome(); }} onRestored={(item) => { if (item.type === "note") void loadNavigation().catch(() => undefined); }} />}
+      : shownApp === "inbox" ? <InboxApp {...account} navigate={navigate} flash={flash} onHome={() => { void openHome(); }} onOpenPath={openInboxPath} />
+      : shownApp === "vault" ? <Suspense fallback={<main className="app-page" aria-busy="true"><p className="sr-only" role="status">Loading the vault…</p></main>}><VaultApp {...account} role={session.user.role ?? "member"} navigate={navigate} flash={flash} onHome={() => { void openHome(); }} /></Suspense>
+      : shownApp === "chat" ? <Suspense fallback={<main className="app-page" aria-busy="true"><p className="sr-only" role="status">Loading chat…</p></main>}><ChatApp {...account} role={session.user.role ?? "member"} navigate={navigate} flash={flash} onHome={() => { void openHome(); }} onOpenAgents={(agentId) => { void openRoute({ app: "settings", section: "agents", ...(agentId ? { agentId } : {}) }); }} onOpenPath={openInboxPath} /></Suspense>
+      : shownApp === "whiteboards" ? <Suspense fallback={<main className="app-page" aria-busy="true"><p className="sr-only" role="status">Loading whiteboards…</p></main>}><WhiteboardsApp {...account} userId={session.user.id} navigate={navigate} flash={flash} onHome={() => { void openHome(); }} onOpenPath={openInboxPath} /></Suspense>
+      // Settings, Team, and the Bin (Wave 38) are the hub's routes.
+      : settingsPage(false)}
     {toastStatus}
-  </InboxNavContext.Provider></TeamNavContext.Provider></NotificationsContext.Provider></RoleContext.Provider></ModulesContext.Provider>;
+  </InboxNavContext.Provider></NotificationsContext.Provider></RoleContext.Provider></ModulesContext.Provider>;
 
   // Viewers and guests read notes; create, edit, share, and delete controls are hidden (Wave 15).
   const canWrite = canWriteContent(session.user.role);
@@ -2138,7 +2181,7 @@ export function App() {
     <main className={`workspace ${collapsed ? "nav-collapsed" : ""}`} data-mobile-panel={mobilePanel}>
       <aside className="folder-pane" id="note-folders">
         <header className="sidebar-header">
-          <button className="sidebar-brand sidebar-home-button" onClick={() => { void openHome(); }} aria-label="Open Nook home" title="Back to Home"><span className="brand-dot"><Sparkles /></span><span className="brand-text"><strong>Notes</strong></span></button>
+          <button className="sidebar-brand sidebar-home-button" onClick={() => { void openHome(); }} aria-label={`Open ${appName()} home`} title="Back to Home"><span className="brand-dot"><Sparkles /></span><span className="brand-text"><strong>Notes</strong></span></button>
           <button className="icon-button desktop-only" onClick={() => setCollapsed(true)} aria-label="Collapse folders sidebar" aria-controls="note-folders" aria-expanded={!collapsed} title="Collapse folders"><PanelLeftClose /></button>
         </header>
         <nav className="folder-nav" aria-label="Note folders">
@@ -2173,7 +2216,6 @@ export function App() {
             <strong className="footer-identity"><Avatar className="app-user-avatar" name={session.user.displayName} url={session.user.avatarUrl} /><span>{session.user.displayName}</span></strong>
             <span><Settings />Settings</span>
           </button>
-          {openBin && <button className="footer-bin" onClick={openBin}><Trash2 />Bin</button>}
           <SidebarInboxRow nav={inboxNav} />
           <button className="footer-signout" onClick={signOut}><LogOut />Sign out</button>
         </footer>

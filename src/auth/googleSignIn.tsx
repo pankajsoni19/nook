@@ -7,6 +7,7 @@
  */
 
 import "./auth.css";
+import { appName } from "../appName";
 
 export type GoogleIntent = "signin" | "link" | "reauth";
 
@@ -111,7 +112,9 @@ export function googleTeamResultFor(userId: string): GoogleSettingsResult {
   return result && (initialTeamPath.startsWith(`/team/${userId}`) || initialTeamPath.startsWith(`/settings/team/members/${userId}`)) ? result : null;
 }
 
-const MESSAGES: Record<string, string> = {
+// Wave 39: built when asked, so the app name (APP_NAME) is the one the server confirmed. "this Nook"
+// in not_allowed names the instance and keeps its product noun.
+const messages = (): Record<string, string> => ({
   denied: "Google sign-in was cancelled.",
   expired: "That sign-in took too long or was already used. Try again.",
   // QA G1d: the round trip expired or was pushed out by other sign-ins; an invite stays usable.
@@ -119,21 +122,24 @@ const MESSAGES: Record<string, string> = {
   failed: "Google sign-in did not complete. Try again.",
   unverified: "Google has not verified this account's email address, so it cannot be used here.",
   not_allowed: "This Google account cannot sign in to this Nook. Ask your admin.",
-  signup_closed: "No Nook account uses this Google address, and new accounts need an invite. Ask your admin for one.",
-  blocked: "This account has been blocked. Contact your Nook administrator.",
+  signup_closed: `No ${appName()} account uses this Google address, and new accounts need an invite. Ask your admin for one.`,
+  blocked: `This account has been blocked. Contact your ${appName()} administrator.`,
   invite_invalid: "This invite link is not valid. It may have been used already. Ask your admin for a new link.",
   invite_expired: "This invite link has expired. Ask your admin for a new link.",
   invite_mismatch: "This invite is for a different email address. Continue with the Google account for that address.",
-  already_linked: "This Nook account is linked to a different Google account.",
-  link_mismatch: "Choose the Google account for this Nook account's email address, managed by Google: a Gmail address, or a Google Workspace account on the address's own domain. A personal Google account that only uses the address does not count.",
-  reauth_mismatch: "Confirm with the Google account that is linked to this Nook account.",
+  already_linked: `This ${appName()} account is linked to a different Google account.`,
+  link_mismatch: `Choose the Google account for this ${appName()} account's email address, managed by Google: a Gmail address, or a Google Workspace account on the address's own domain. A personal Google account that only uses the address does not count.`,
+  reauth_mismatch: `Confirm with the Google account that is linked to this ${appName()} account.`,
   reauth_stale: "Google did not ask for your password again, so this does not count as a confirmation. Try again and sign in to Google when asked.",
   link_required: linkRequiredText(true),
   rate_limited: "Too many attempts. Try again soon."
-};
+});
 
-export const googleErrorMessage = (code: string, domain?: string) =>
-  code === "link_not_authoritative" ? linkNotAuthoritativeText(domain) : MESSAGES[code] ?? MESSAGES.failed!;
+export const googleErrorMessage = (code: string, domain?: string) => {
+  if (code === "link_not_authoritative") return linkNotAuthoritativeText(domain);
+  const all = messages();
+  return all[code] ?? all.failed!;
+};
 
 /**
  * Q1: the address is right, but Google does not say this Google account manages it (a personal Google
@@ -155,8 +161,8 @@ export const LINK_NOT_AUTHORITATIVE_PASSWORD = " Or sign in with your password."
  */
 export function linkRequiredText(passwordOn: boolean) {
   return passwordOn
-    ? "Google cannot link to it on its own. If you know its password, sign in with it below, then choose Settings → Security → Link Google. Otherwise ask your Nook admin to allow Google sign-in for your account."
-    : "Google cannot link to it on its own. Ask your Nook admin to allow Google sign-in for your account, then continue with Google again.";
+    ? `Google cannot link to it on its own. If you know its password, sign in with it below, then choose Settings → Security → Link Google. Otherwise ask your ${appName()} admin to allow Google sign-in for your account.`
+    : `Google cannot link to it on its own. Ask your ${appName()} admin to allow Google sign-in for your account, then continue with Google again.`;
 }
 
 /** Google's four-colour "G", inline so nothing is fetched from Google (D300). */
@@ -175,11 +181,11 @@ export function GoogleButton({ label = "Continue with Google", href, onClick, di
   return <button type="button" className="google-button" onClick={onClick} disabled={disabled}><GoogleMark /><span>{label}</span></button>;
 }
 
-/** QA U5: under the button when this Nook signs people in with Google only. */
-export const GOOGLE_ONLY_HINT = "This Nook signs people in with Google. Use the Google account with your Nook email address. If that does not work, ask your admin.";
+/** QA U5: under the button when this instance signs people in with Google only. Follows APP_NAME (Wave 39). */
+export const googleOnlyHint = () => `This ${appName()} signs people in with Google. Use the Google account with your ${appName()} email address. If that does not work, ask your admin.`;
 
-/** QA U1: the password pages and forms when passwords are off. */
-export const GOOGLE_ONLY_PASSWORD_TEXT = "This Nook signs people in with Google only, so there are no passwords to set or reset here.";
+/** QA U1: the password pages and forms when passwords are off. Follows APP_NAME (Wave 39). */
+export const googleOnlyPasswordText = () => `This ${appName()} signs people in with Google only, so there are no passwords to set or reset here.`;
 
 /** The "or" rule between Google and the password form. */
 export function AuthDivider() {

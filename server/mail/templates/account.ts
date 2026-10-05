@@ -1,3 +1,4 @@
+import { appName } from "../../config";
 import { layout, note, paragraph } from "../layout";
 import { appLink, paths } from "../links";
 import { formatInstant } from "../format";
@@ -24,17 +25,17 @@ export const inviteTemplate = defineTemplate<{ to: string; url: string; role: In
     const role = ROLE_LABELS[data.role];
     return layout({
       instanceName: context.instanceName,
-      subject: `${inviter} invited you to Nook`,
+      subject: `${inviter} invited you to ${appName()}`,
       preheader: `Join as a ${role}. The link works once.`,
       eyebrow: "Team · Invite",
-      title: `${inviter} invited you to Nook`,
+      title: `${inviter} invited you to ${appName()}`,
       lead: `You're invited as a ${role}. ${ROLE_LINES[data.role]}`,
       blocks: [
         note(`The link works once and expires on ${formatInstant(data.expiresAt, "UTC")}. It only works for ${data.to}.`),
         note("If you did not expect this email, ignore it: nothing happens until someone opens the link. Do not forward it; anyone with the link can use it.")
       ],
       action: { label: "Create your account", href: data.url },
-      footer: accountFooter(`You got this because an admin of this Nook invited ${data.to}.`, false)
+      footer: accountFooter(`You got this because an admin of this ${appName()} invited ${data.to}.`, false)
     });
   },
   fixture: () => ({ to: "dana@example.com", url: `${appLink("/register")}#invite=${"a".repeat(43)}`, role: "member", expiresAt: "2026-10-05T10:00:00.000Z", inviterName: "Priya Admin" })
@@ -47,14 +48,14 @@ export const verifyTemplate = defineTemplate<{ token: string; expiresAt: string;
   render(data, context) {
     return layout({
       instanceName: context.instanceName,
-      subject: "Verify your email for Nook",
-      preheader: "Confirm this address to get email from Nook.",
+      subject: `Verify your email for ${appName()}`,
+      preheader: `Confirm this address to get email from ${appName()}.`,
       eyebrow: "Account · Verify",
       title: "Confirm your email address",
-      lead: `Confirm that ${data.address} is yours, so Nook can send you assignments, shares, and other updates.`,
+      lead: `Confirm that ${data.address} is yours, so ${appName()} can send you assignments, shares, and other updates.`,
       blocks: [note(`The link works once, until ${formatInstant(data.expiresAt, context.tz)}. If you did not ask for this, ignore it.`)],
       action: { label: "Verify email", href: appLink(paths.verifyEmail(data.token)) },
-      footer: accountFooter("You got this because someone asked Nook to verify this address.")
+      footer: accountFooter(`You got this because someone asked ${appName()} to verify this address.`)
     });
   },
   fixture: () => ({ token: "b".repeat(43), expiresAt: "2026-09-29T09:00:00.000Z", address: "priya@example.com" })
@@ -67,10 +68,10 @@ export const testTemplate = defineTemplate<{ sentAt: string }>({
   render(data, context) {
     return layout({
       instanceName: context.instanceName,
-      subject: "Test email from Nook",
-      preheader: "Email from Nook reaches you.",
+      subject: `Test email from ${appName()}`,
+      preheader: `Email from ${appName()} reaches you.`,
       eyebrow: "Account · Test",
-      title: "Email from Nook works",
+      title: `Email from ${appName()} works`,
       lead: "You asked for a test email, and here it is. Nothing else to do.",
       blocks: [paragraph(`Sent ${formatInstant(data.sentAt, context.tz)}.`)],
       action: { label: "Open email settings", href: appLink(paths.settings("notifications")) },
@@ -90,11 +91,11 @@ export const passwordResetTemplate = defineTemplate<{ token: string; expiresAt: 
   render(data, context) {
     return layout({
       instanceName: context.instanceName,
-      subject: "Reset your Nook password",
+      subject: `Reset your ${appName()} password`,
       preheader: "Choose a new password. The link works once, for 30 minutes.",
       eyebrow: "Account · Password",
       title: "Reset your password",
-      lead: "Someone asked to reset the password for the Nook account with this address. Choose a new one with the button below.",
+      lead: `Someone asked to reset the password for the ${appName()} account with this address. Choose a new one with the button below.`,
       blocks: [
         note(`The link works once, until ${formatInstant(data.expiresAt, context.tz)}. Resetting signs out every device. If you use two-factor authentication, you will need a code from your app or a recovery code.`),
         note("If you did not ask for this, ignore this email: your password stays the same. Do not forward it; anyone with the link can use it.")

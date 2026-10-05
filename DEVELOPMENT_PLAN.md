@@ -672,6 +672,37 @@ Settings stops being a dialog over the app and becomes a page of its own, with T
 
 **Tests.** `tests/settingsHub.test.tsx` (routes and aliases both ways, nav per role, the 390 px history flow on a model history, the back arrow, the leave guard wiring); updated route, shell, scroll, and chrome tests; `docs/plan/qa/scroll-audit.mjs` covers every hub route (a hub check: the page does not scroll on a computer, the nav and section are bounded scrollers; Members adds the two-pane check), and its seeding waits out the per-admin team write limit.
 
+### Wave 38 — Bin in Settings, slimmer top bar (operator request, 2026-10-01)
+
+"Move bin into settings" and "from top nav remove the bin & team, as its moved into settings page". Client only: no server, contract, or migration change; no new dependency.
+
+**Route scheme.** The Bin keeps its `{ app: "bin" }` route with a new canonical URL in the hub:
+
+| Canonical URL | Screen | Aliases (still parsed, rewritten in place) |
+| --- | --- | --- |
+| `/settings/bin` | Settings → Bin | `/bin` (mail's `/bin` link and Today's "Leaving the Bin soon" href stay aliases) |
+
+`isHubRoute` now includes the Bin, so it renders inside `SettingsPage` (one element for the settings, team, and bin apps), the phone rule of Wave 37 applies (a Bin opened from outside the hub, such as **Open Bin** or a `/bin` deep link, gets the section list pushed under it; the back arrow is Back when the list is below), and the document title is "Settings · Bin · Nook".
+
+**What moved.**
+
+- `BinApp` became `BinSection` (`src/bin/BinSection.tsx`): no header of its own, a `.settings-content` section the hub's section scroller holds (the page does not scroll on a computer). The retention line, Empty Bin, filters, rows, and empty states are unchanged. Its row actions sheet is now a history layer (`useHistoryDialogGuard`, D18): Back closes only the sheet instead of leaving the Bin; Delete forever and Empty Bin keep `useConfirm`.
+- The hub nav has a **Workspace** group between Account and Team with one entry, **Bin**, for every role, carrying the item count (`useBinCount`, refreshed by `notifyBinChanged`). `hubEntries` takes `binModuleEnabled` and `binCount`.
+- Bin module off (D92): no entry, and `/settings/bin` (or `/bin`) opens Security in place (the hub redirects; the app-wide gate leaves the `bin` app to the hub via `hubGatesItself`, as admin Team routes do). Back or Forward onto a Bin entry with the module off is skipped as before; `hubPopRoute` ignores it.
+- Top bar (`AccountActions`): no Bin and no Team button (`onBin`, `binCount`, `TeamButton`, `TeamNavContext`, and the blocked-account count are gone). Order: Settings · Inbox · bell · picture and name · Sign out (rightmost); the hub still hides Settings. The Notes and Files sidebar footers lose their Bin row (Notes keeps Inbox and Sign out). Every app (`Files`, `Tasks`, `Collections`, `Calendar`, `Inbox`, `Vault`, `Whiteboards`, Today) drops its `onBin` prop. The whiteboard card's **Open Bin** opens `/settings/bin`.
+
+**Tests.** `tests/settingsBin.test.tsx` (routes and the alias both ways, entries per role and with the module off, the badge, the 390 px history model Home → list → Bin → row sheet → Back chain, the guards, the top-bar order); updated shell, hub, router, scroll, module, footer, and page-name tests. `docs/plan/qa/scroll-audit.mjs` covers `/settings/bin` and `/bin` with the hub check.
+
+**Fixes after review (wave38-fixes).**
+
+- *M1 (Forward onto a hidden Bin entry).* App's popstate listener was re-registered on every render; when the hub's own listener (registered earlier) changed state for the same popstate, React rendered App in the microtask between the two listeners, and the re-registered listener was skipped for that event (a dispatch invokes the listeners it started with, minus removed ones). After a page-load entry the hint's clear-render landed exactly there, so the route gate missed the skip's landing and the next Forward read an unknown direction: no undo, URL `/settings/bin`, screen Modules. The listener is now registered once and dispatches to the newest handler through a ref. The hub re-reads the URL on a tick after a popped hidden Bin entry (the gate runs after it), and a hidden Bin entry the gate cannot skip (depth 0, or no known direction) is replaced with Security in place rather than Home and a hint.
+- *L1.* The blocked-account count is back as a badge on Team → Members for admins (`useBlockedCount`, `src/team/blockedCount.ts`; Members reports its own list's count while on screen).
+- *L3.* Opening Settings → Bin asks `GET /api/bin` once: the section claims the count while mounted (`claimBinCount`) and reports its items; `useBinCount` loads only when no section does, and a reported count wins over a look in flight.
+- *Guests.* No Bin entry for guests (they can delete nothing); `/settings/bin` opens Security for them and Back/Forward skip their entry, as with the module off (`binEntryShown`).
+- *Docs.* Stale comments and test-plan lines from the Bin and Team buttons are marked superseded.
+
+**Smoke (headless Chrome, 1280 × 800 and 390 × 844, 44/44).** Top bar order on Home, Tasks, Collections, Calendar (desktop) and Home, Tasks (phone); Notes and Files footers without Bin; `/settings/bin` with Workspace → Bin selected, badge, title, no page scroll; restore updates the badge; Delete forever and Empty Bin confirms close on Back without deleting; nav Security → Bin → Back; `/bin` rewritten in place (Back goes Home); module off sends `/settings/bin` and `/bin` to Security with no entry; phone list → Bin → sheet → Back (sheet only) → confirm → Back (confirm only) → Back (list) → Back (Home), Forward twice reopens the Bin; a `/bin` deep link gets Home and the list under it. No page errors or native dialogs.
+
 ---
 
 ## 12. Gates for every commit, audit, and release

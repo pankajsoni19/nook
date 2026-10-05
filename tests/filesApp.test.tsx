@@ -18,11 +18,10 @@ test("the Files workspace renders its rail, list, and phone panels before data l
   expect(markup).not.toContain(">Upload</button>");
 });
 
-test("the Files rail footer offers the Bin between Settings and Sign out when the host wires it", () => {
+test("the Files rail footer offers Settings and Sign out; the Bin is Settings → Bin (Wave 38)", () => {
   const props = { userId: "u1", displayName: "Ada Lovelace", navigate: () => undefined, flash: () => undefined, onHome: () => undefined, onSettings: () => undefined, onSignOut: () => undefined };
   const footer = (markup: string) => markup.match(/<footer class="sidebar-footer">(.*?)<\/footer>/)?.[1] ?? "";
-  const wired = footer(renderToStaticMarkup(<FilesApp {...props} onBin={() => undefined} />));
-  expect([...wired.matchAll(/<button class="([\w-]+)"/g)].map((match) => match[1])).toEqual(["footer-settings", "footer-bin", "footer-signout"]);
-  expect(wired).toMatch(/<button class="footer-bin"><svg[^>]*>.*?<\/svg>Bin<\/button>/);
-  expect(footer(renderToStaticMarkup(<FilesApp {...props} />))).not.toContain("footer-bin");
+  const rendered = footer(renderToStaticMarkup(<FilesApp {...props} />));
+  expect([...rendered.matchAll(/<button class="([\w-]+)"/g)].map((match) => match[1])).toEqual(["footer-settings", "footer-signout"]);
+  expect(rendered).not.toContain("footer-bin");
 });

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { ChevronLeft, Copy, Download, Eye, EyeOff, History, House, KeyRound, Lock, Pencil, Plus, RotateCcw, Search, Settings2, ShieldAlert, Sparkles, Trash2, TriangleAlert, Upload, UsersRound } from "lucide-react";
-import { AccountActions, AppPageName, useBinCount } from "../AppShell";
+import { AccountActions, AppPageName } from "../AppShell";
 import { readHistoryDepth } from "../appShellNavigation";
 import { PHONE_QUERY, useMediaQuery } from "../calendar/hooks";
 import { relativeTime } from "../files/format";
@@ -26,6 +26,7 @@ import {
 } from "./vaultApi";
 import "../files/files.css";
 import "./vault.css";
+import { appName } from "../appName";
 
 type VaultNavigate = (route: Route, options?: { replace?: boolean; removed?: boolean }) => void;
 type VaultAppProps = {
@@ -34,7 +35,6 @@ type VaultAppProps = {
   navigate: VaultNavigate;
   flash: (message: string) => void;
   onHome: () => void;
-  onBin?: () => void;
   onSettings: () => void;
   onSignOut: () => void;
 };
@@ -58,8 +58,7 @@ type PageData = { vault: VaultSummary; secrets: SecretSummary[]; nextCursor: str
  * history entry; sheets and dialogs push none, so Back closes them first (D18). Values are masked
  * until revealed, hide again after 30 seconds, and never enter the URL, the title, or a toast.
  */
-export function VaultApp({ displayName, role, navigate, flash, onHome, onBin, onSettings, onSignOut }: VaultAppProps) {
-  const binCount = useBinCount(Boolean(onBin));
+export function VaultApp({ displayName, role, navigate, flash, onHome, onSettings, onSignOut }: VaultAppProps) {
   const [status, setStatus] = useState<VaultStatus | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [route, setRoute] = useState<VaultRoute>(currentRoute);
@@ -117,7 +116,7 @@ export function VaultApp({ displayName, role, navigate, flash, onHome, onBin, on
   const header = <header className="app-page-header">
     <button className="app-home-button" onClick={onHome}><House />Home</button>
     <span className="app-home-brand"><span className="brand-dot"><Sparkles /></span><span className="brand-text"><strong>Vault</strong></span></span><AppPageName name="Vault" />
-    <AccountActions displayName={displayName} onSettings={onSettings} onSignOut={onSignOut} onBin={onBin} binCount={binCount} />
+    <AccountActions displayName={displayName} onSettings={onSettings} onSignOut={onSignOut} />
   </header>;
 
   let body: React.ReactNode;
@@ -170,7 +169,7 @@ function NotConfigured({ status, admin }: { status: VaultStatus; admin: boolean 
     {admin && status.reason === "key_mismatch"
       ? <p>The server has a vault key, but it does not open the vaults stored here, so the vault stays off. Put back the key these vaults were created with, then check it on the host with <code>bun server/vault-admin.ts verify-key</code>.</p>
       : admin
-        ? <p>Set <code>VAULT_ENCRYPTION_KEY</code> (make one with <code>openssl rand -base64 32</code>; it must differ from <code>TOTP_ENCRYPTION_KEY</code>) and restart Nook. Keep the key away from where backups are stored. The operations guide's Vault section explains more.</p>
+        ? <p>Set <code>VAULT_ENCRYPTION_KEY</code> (make one with <code>openssl rand -base64 32</code>; it must differ from <code>TOTP_ENCRYPTION_KEY</code>) and restart {appName()}. Keep the key away from where backups are stored. The operations guide's Vault section explains more.</p>
         : <p>Ask an admin to set it up.</p>}
     <p className="vault-honest">{HONEST_LABEL}</p>
   </div>;
@@ -195,7 +194,7 @@ function VaultList({ onOpen, onReady, flash }: { onOpen: (vault: VaultSummary) =
     }
   }, []);
   useEffect(() => { void load(); }, [load]);
-  useEffect(() => { document.title = "Vault · Nook"; }, []);
+  useEffect(() => { document.title = `Vault · ${appName()}`; }, []);
   const ready = vaults !== null;
   useLayoutEffect(() => { if (ready) onReady(); }, [ready, onReady]);
 
@@ -319,7 +318,7 @@ function VaultPage({ vaultId, envId, cache, onBack, onReady, flash, ask, onEnvir
   }, [load, query]);
   const ready = data !== null;
   useLayoutEffect(() => { if (ready) onReady(); }, [ready, onReady]);
-  useEffect(() => { if (data) document.title = `${data.vault.name} · Vault · Nook`; }, [data]);
+  useEffect(() => { if (data) document.title = `${data.vault.name} · Vault · ${appName()}`; }, [data]);
 
   const actions = useValueActions(vaultId, flash, load, ask);
   const { hideAll } = actions;
@@ -484,7 +483,7 @@ function SecretPage({ vaultId, secretId, onBack, onReady, flash, ask, onMissing,
   useEffect(() => { void load(); }, [load]);
   const ready = data !== null;
   useLayoutEffect(() => { if (ready) onReady(); }, [ready, onReady]);
-  useEffect(() => { if (data) document.title = `${data.vault.name} · Vault · Nook`; }, [data]);
+  useEffect(() => { if (data) document.title = `${data.vault.name} · Vault · ${appName()}`; }, [data]);
   const actions = useValueActions(vaultId, flash, load, ask);
   const { hideAll } = actions;
   useEffect(() => hideAll, [hideAll]);

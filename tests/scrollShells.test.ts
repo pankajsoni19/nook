@@ -24,13 +24,13 @@ test("the body stays fixed, so every shell below must scroll on its own", async 
   expect(rule(await read("styles.css"), "body")).toContain("overflow: hidden");
 });
 
-test("module pages without their own shell (Settings and Team, Bin, Inbox, Notifications, Calendar) scroll as a page with a fixed header", async () => {
+test("module pages without their own shell (Settings with Team and the Bin, Inbox, Notifications, Calendar) scroll as a page with a fixed header", async () => {
   const shell = await read("appShell.css");
   const page = rule(shell, ".app-page:not(.tasks-app):not(.collections-app)");
   expect(bounded(page)).toBe(true);
   expect(rule(shell, ".app-page:not(.tasks-app):not(.collections-app) > .app-page-header")).toContain("position: sticky");
   // Each of those modules renders the `app-page` root the rule matches.
-  for (const [file, root] of [["settings/SettingsHub.tsx", "app-page settings-hub"], ["bin/BinApp.tsx", "app-page bin-app"], ["inbox/InboxApp.tsx", "app-page inbox-app"], ["notifications/NotificationsApp.tsx", "app-page notifications-app"], ["calendar/CalendarApp.tsx", "app-page calendar-app"]] as const) {
+  for (const [file, root] of [["settings/SettingsHub.tsx", "app-page settings-hub"], ["inbox/InboxApp.tsx", "app-page inbox-app"], ["notifications/NotificationsApp.tsx", "app-page notifications-app"], ["calendar/CalendarApp.tsx", "app-page calendar-app"]] as const) {
     expect({ file, root: (await read(file)).includes(root) }).toEqual({ file, root: true });
   }
 });
@@ -168,4 +168,17 @@ test("Wave 37: the Settings hub scrolls its nav and its section on their own on 
   const shell = await read("settings/SettingsHub.tsx");
   expect(shell).toContain("<main className={`app-page settings-hub");
   expect(shell).toContain(`<header className="app-page-header">`);
+});
+
+test("Wave 38: Settings → Bin scrolls inside the hub's section scroller, not as a page of its own", async () => {
+  const bin = await read("bin/BinSection.tsx");
+  // The section is the hub's `.settings-content`, the bounded scroller beside the nav on a computer.
+  expect(bin).toContain('<section className="settings-content bin-section" aria-labelledby="settings-hub-title">');
+  expect(bin).not.toContain("app-page");
+  const hub = await read("settings/settingsHub.css");
+  expect(hub).toContain(".settings-hub-main > .settings-content { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior-y: contain; }");
+  // The Bin's own stylesheet no longer sizes a page (no viewport width, no page padding).
+  const css = await read("bin/bin.css");
+  expect(css).not.toContain("100vw");
+  expect(css).not.toContain(".bin-app");
 });

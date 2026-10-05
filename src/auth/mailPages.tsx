@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { CheckCircle2, Link2Off, MailX, Sparkles } from "lucide-react";
 import { api, ApiError } from "../api";
 import { settingsPath } from "../router";
+import { appName } from "../appName";
 
 /**
  * The two pages mail links open (Wave 28, outbound email §E.4, §E.6). Both carry their token in the
@@ -83,7 +84,7 @@ export function VerifyEmailPage({ token, onContinue, signedIn }: { token: string
   const [message, setMessage] = useState("");
   const [emailEnabled, setEmailEnabled] = useState(true);
   const sent = useRef(false);
-  useEffect(() => { document.title = "Verify email · Nook"; }, []);
+  useEffect(() => { document.title = `Verify email · ${appName()}`; }, []);
   useEffect(() => {
     if (!token || sent.current) return;
     sent.current = true;
@@ -105,14 +106,14 @@ export function VerifyEmailPage({ token, onContinue, signedIn }: { token: string
     {state === "verified" && <div className="auth-heading" role="status">
       <span className="eyebrow">Email</span>
       <h1><CheckCircle2 aria-hidden="true" className="invite-register-icon" />Email verified</h1>
-      <p>Nook can now send you email about assignments, shares, and other updates. Choose which ones in Settings → Notifications.</p>
+      <p>{appName()} can now send you email about assignments, shares, and other updates. Choose which ones in Settings → Notifications.</p>
     </div>}
     {(state === "expired" || state === "invalid" || state === "error") && <div className="auth-heading" role="alert">
       <span className="eyebrow">Email</span>
       <h1><Link2Off aria-hidden="true" className="invite-register-icon" />{state === "expired" ? "This link expired" : state === "invalid" ? "This link is not valid" : "Could not verify your email"}</h1>
       <p>{verifyErrorText(state, message, emailEnabled)}</p>
     </div>}
-    {state !== "working" && <div className="auth-form"><button type="button" className="primary-button" onClick={onContinue}>{signedIn ? "Open Nook" : "Sign in"}</button></div>}
+    {state !== "working" && <div className="auth-form"><button type="button" className="primary-button" onClick={onContinue}>{signedIn ? `Open ${appName()}` : "Sign in"}</button></div>}
   </Card>;
 }
 
@@ -125,7 +126,7 @@ export function UnsubscribeDone({ label, onManage }: { label: string; onManage: 
     <span className="eyebrow">Email</span>
     <h1><CheckCircle2 aria-hidden="true" className="invite-register-icon" />Request received</h1>
     <p>If this link is current, “{label}” emails are now off. Check <a href={settingsPath("notifications")} onClick={(event) => { event.preventDefault(); onManage(); }}>Settings → Notifications → Email</a> to be sure.</p>
-    <p>You'll still see these in Nook. Security emails keep coming.</p>
+    <p>You'll still see these in {appName()}. Security emails keep coming.</p>
   </div>;
 }
 
@@ -133,7 +134,7 @@ export function UnsubscribePage({ token, onContinue, onManage }: { token: string
   const category = token ? unsubscribeCategory(token) : null;
   const label = category ? CATEGORY_LABELS[category] : null;
   const [state, setState] = useState<"confirm" | "working" | "done" | "error">("confirm");
-  useEffect(() => { document.title = "Email settings · Nook"; }, []);
+  useEffect(() => { document.title = `Email settings · ${appName()}`; }, []);
   async function turnOff() {
     if (!token) return;
     setState("working");
@@ -148,18 +149,18 @@ export function UnsubscribePage({ token, onContinue, onManage }: { token: string
     <div className="auth-heading" role="alert">
       <span className="eyebrow">Email</span>
       <h1><Link2Off aria-hidden="true" className="invite-register-icon" />This link is not valid</h1>
-      <p>Open the full link from the email, or change what Nook sends you in Settings → Notifications.</p>
+      <p>Open the full link from the email, or change what {appName()} sends you in Settings → Notifications.</p>
     </div>
     <div className="auth-form">
       <button type="button" className="primary-button" onClick={onManage}>Manage email settings</button>
-      <button type="button" className="text-button" onClick={onContinue}>Open Nook</button>
+      <button type="button" className="text-button" onClick={onContinue}>Open {appName()}</button>
     </div>
   </Card>;
   return <Card>
     {state === "done" ? <UnsubscribeDone label={label} onManage={onManage} /> : <div className="auth-heading">
       <span className="eyebrow">Email</span>
       <h1><MailX aria-hidden="true" className="invite-register-icon" />Turn off “{label}” emails?</h1>
-      <p>You'll still see these in Nook. Security emails keep coming.</p>
+      <p>You'll still see these in {appName()}. Security emails keep coming.</p>
       {state === "error" && <p className="form-error" role="alert">Could not save that. Try again, or use Settings → Notifications.</p>}
     </div>}
     <div className="auth-form">

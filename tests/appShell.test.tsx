@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { AccountActions } from "../src/AppShell";
 import { TodayHome } from "../src/today/TodayHome";
 import { storageText, TODAY_SECTIONS } from "../src/today/todaySections";
-import { BinApp } from "../src/bin/BinApp";
+import { BinSection } from "../src/bin/BinSection";
 
 const account = { displayName: "Ada Lovelace", onSettings: () => undefined, onSignOut: () => undefined };
 const home = () => renderToStaticMarkup(<TodayHome {...account} userId="u1" onOpen={() => undefined} onOpenRoute={() => undefined} />);
@@ -13,43 +13,39 @@ function accountButtons(markup: string) {
   return [...group.matchAll(/<button[^>]*>/g)].map(([tag]) => tag);
 }
 
-test("Home offers Settings, Bin, and Sign out in its header", () => {
+test("Home offers Settings and Sign out in its header; no Bin or Team (Wave 38: they live in Settings)", () => {
   const markup = home();
   // The header names the section only; the product name lives on the login page and the document title.
   expect(markup).toContain('<span class="brand-text"><strong>Home</strong></span>');
   expect(markup).not.toContain("<small>Nook</small>");
   const buttons = accountButtons(markup);
-  expect(buttons).toHaveLength(3);
-  // Wave 37: Bin · Settings · (Inbox · bell) · the person · Sign out, the rightmost action.
-  expect(buttons[0]).toContain('title="Bin"');
-  expect(buttons[0]).toContain('aria-label="Bin"');
-  expect(buttons[1]).toContain('aria-label="Open settings for Ada Lovelace"');
+  expect(buttons).toHaveLength(2);
+  // Wave 38: Settings · (Inbox · bell) · the person · Sign out, the rightmost action.
+  expect(buttons[0]).toContain('aria-label="Open settings for Ada Lovelace"');
   // Settings is a page now, not a dialog.
-  expect(buttons[1]).not.toContain("aria-haspopup");
-  expect(buttons[2]).toContain('title="Sign out"');
+  expect(buttons[0]).not.toContain("aria-haspopup");
+  expect(buttons[1]).toContain('title="Sign out"');
+  expect(markup).not.toContain('title="Bin"');
+  expect(markup).not.toContain('title="Team"');
   const group = markup.match(/<div class="app-account" role="group" aria-label="Account">(.*?)<\/div>/)?.[1] ?? "";
   expect(group.indexOf("app-home-user")).toBeGreaterThan(group.indexOf('title="Settings"'));
   expect(group.indexOf("app-home-user")).toBeLessThan(group.indexOf('title="Sign out"'));
-  // The count badge waits for the lazy Bin fetch, so the first render has none.
   expect(markup).not.toContain("app-account-badge");
 });
 
-test("the Home Bin button shows a count badge only when the Bin has items", () => {
-  const empty = renderToStaticMarkup(<AccountActions {...account} onBin={() => undefined} binCount={0} />);
-  expect(empty).not.toContain("app-account-badge");
-  const full = renderToStaticMarkup(<AccountActions {...account} onBin={() => undefined} binCount={3} />);
-  expect(full).toContain('aria-label="Bin, 3 items"');
-  expect(full).toContain('<span class="app-account-badge" aria-hidden="true">3</span>');
-  expect(renderToStaticMarkup(<AccountActions {...account} onBin={() => undefined} binCount={140} />)).toContain(">99+</span>");
+test("the account row takes no Bin or Team props any more (Wave 38)", () => {
+  const markup = renderToStaticMarkup(<AccountActions {...account} />);
+  expect(accountButtons(markup).map((tag) => /title="([^"]+)"/.exec(tag)?.[1])).toEqual(["Settings", "Sign out"]);
 });
 
-test("the Bin app offers Home and the same account actions", () => {
-  const markup = renderToStaticMarkup(<BinApp {...account} flash={() => undefined} onHome={() => undefined} />);
-  expect(accountButtons(markup)).toHaveLength(2);
-  expect(markup).toContain(">Sign out</span>");
-  expect(markup).toContain("<span class=\"brand-text\"><strong>Bin</strong></span>");
-  expect(markup).not.toContain("<small>Nook</small>");
-  expect(markup).toContain(">Home</button>");
+test("the Bin is a Settings section: no header of its own, its retention line, filters, and Empty Bin", () => {
+  const markup = renderToStaticMarkup(<BinSection flash={() => undefined} />);
+  // The hub brings the header (Home, the account row) and the title; the section is its scroller.
+  expect(markup).toMatch(/^<section class="settings-content bin-section" aria-labelledby="settings-hub-title">/);
+  expect(markup).not.toContain("app-page-header");
+  expect(markup).not.toContain(">Home</button>");
+  expect(markup).not.toContain("<h1");
+  expect(markup).toContain("stay here for 30 days, then they are deleted forever");
   // Nothing is loaded yet, so the list shows its loading state and Empty Bin is disabled.
   expect(markup).toContain("Loading the Bin…");
   expect(markup).toMatch(/<button class="bin-empty-button" disabled="">/);

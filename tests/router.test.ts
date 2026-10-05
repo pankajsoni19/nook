@@ -17,7 +17,8 @@ const rows: Array<[string, Route]> = [
   ["/tasks", { app: "tasks", boardId: null, cardId: null }],
   [`/tasks/${folderId}`, { app: "tasks", boardId: folderId, cardId: null }],
   [`/tasks/${folderId}/card/${noteId}`, { app: "tasks", boardId: folderId, cardId: noteId }],
-  ["/bin", { app: "bin" }]
+  // Wave 38: the Bin is Settings → Bin; /bin is an alias (below).
+  ["/settings/bin", { app: "bin" }]
 ];
 
 test("every route in the table parses and formats back to the same URL", () => {
@@ -33,7 +34,16 @@ test("trailing and doubled slashes are tolerated", () => {
   expect(parseRoute(`//notes//folder//${folderId}/`)).toEqual({ app: "notes", folder: folderId, noteId: null });
   expect(parseRoute(`/notes/${noteId}//`)).toEqual({ app: "notes", folder: "all", noteId });
   expect(parseRoute("/bin/")).toEqual({ app: "bin" });
+  expect(parseRoute("/settings/bin/")).toEqual({ app: "bin" });
   expect(parseRoute("")).toEqual({ app: "home" });
+});
+
+test("Wave 38: the old /bin opens Settings → Bin and formats to /settings/bin; both name the same screen", () => {
+  expect(parseRoute("/bin")).toEqual({ app: "bin" });
+  expect(formatRoute(parseRoute("/bin"))).toBe("/settings/bin");
+  expect(parseRoute("/settings/bin")).toEqual(parseRoute("/bin"));
+  // Anything below the Bin is not a Bin URL: the Settings list, or Home for the old prefix.
+  expect(parseRoute("/settings/bin/extra")).toEqual({ app: "settings", section: null });
 });
 
 test("malformed ids are dropped instead of thrown", () => {
@@ -68,7 +78,7 @@ test("uppercase ids normalise", () => {
 
 test("format never escapes origin", () => {
   const hostile = ["//evil", "javascript:x", "../x", "/\\evil.example", "%2F%2Fevil", `${noteId}/../../x`, "https://evil.example"];
-  const shape = /^\/(notes|files|tasks|bin)?(\/[a-z0-9/-]*)?$/;
+  const shape = /^\/(notes|files|tasks|settings)?(\/[a-z0-9/-]*)?$/;
   for (const value of hostile) {
     const routes: Route[] = [
       { app: "notes", folder: value, noteId: value },

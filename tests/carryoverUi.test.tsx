@@ -21,13 +21,13 @@ describe("C6: a muted calendar says Muted in words", () => {
   });
 });
 
-describe("C8: Calendar's header has the Bin button, as the other modules do", () => {
-  test("CalendarApp passes onBin and its count to AccountActions, and the app hands it the Bin", async () => {
+describe("C8 (superseded by Wave 38): Calendar's header has the same account row as the other modules, with no Bin button", () => {
+  test("CalendarApp passes the account row its Settings and Sign out; the Bin is Settings → Bin", async () => {
     const calendar = await read("calendar/CalendarApp.tsx");
-    expect(calendar).toContain("const binCount = useBinCount(Boolean(onBin));");
-    expect(calendar).toContain("<AccountActions displayName={displayName} onSettings={onSettings} onSignOut={onSignOut} onBin={onBin} binCount={binCount} />");
+    expect(calendar).not.toContain("useBinCount");
+    expect(calendar).toContain("<AccountActions displayName={displayName} onSettings={onSettings} onSignOut={onSignOut} />");
     const app = await read("App.tsx");
-    expect(app).toMatch(/<CalendarApp [^\n]*onBin=\{openBin\}/);
+    expect(app).not.toMatch(/onBin=/);
   });
 });
 

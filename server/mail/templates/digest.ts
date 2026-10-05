@@ -1,3 +1,4 @@
+import { appName } from "../../config";
 import { cleanLine, html, join } from "../html";
 import { context, FONT, COLORS, layout, type Block, type ContextRow } from "../layout";
 import { appLink, paths } from "../links";
@@ -90,14 +91,14 @@ export const digestTemplate = defineTemplate<DigestMail>({
     ];
     return layout({
       instanceName: ctx.instanceName,
-      subject: `${weekly ? "Your week" : "Your day"} in Nook: ${summary}`,
+      subject: `${weekly ? "Your week" : "Your day"} in ${appName()}: ${summary}`,
       preheader: summary,
       eyebrow: weekly ? "Weekly digest" : "Daily digest",
-      title: weekly ? `Your week in Nook · from ${day}` : `Your day in Nook · ${day}`,
+      title: weekly ? `Your week in ${appName()} · from ${day}` : `Your day in ${appName()} · ${day}`,
       blocks,
       action: { label: "Open Today", href: appLink(paths.home()) },
       footer: {
-        reason: `You got this because you turned on the ${weekly ? "weekly" : "daily"} digest in Nook.`,
+        reason: `You got this because you turned on the ${weekly ? "weekly" : "daily"} digest in ${appName()}.`,
         unsubscribe: ctx.unsubscribeHref ? { href: ctx.unsubscribeHref, label: "Turn off the digest" } : undefined,
         settingsHref: appLink(paths.settings("notifications"))
       }

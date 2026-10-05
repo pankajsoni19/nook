@@ -9,6 +9,7 @@ import { Select } from "../ui/Select";
 import { Avatar } from "../ui/Avatar";
 import { TeamGoogleCard } from "./TeamGoogle";
 import { useHistoryDialogGuard } from "../ui/useHistoryDialogGuard";
+import { blockedCountOf, claimBlockedCount, reportBlockedCount } from "./blockedCount";
 import { blockTeamMember, getTeamMember, listTeam, listTeamInvites, revokeTeamSessions, setTeamRole, unblockTeamMember, type TeamInviteList, type TeamMember, type TeamMemberDetail } from "./teamApi";
 import { TeamInvites } from "./TeamInvites";
 import { TeamEmailLog } from "./TeamEmailLog";
@@ -158,6 +159,9 @@ export function TeamSection({ route, role, totpEnabled = false, navigate, flash,
 
   const visibleToRole = canSeeTeam(role);
   useEffect(() => { if (visibleToRole) void loadList(); }, [loadList, visibleToRole]);
+  // Review L1: while on screen, this list is the Members entry's blocked-account badge.
+  useEffect(() => admin ? claimBlockedCount() : undefined, [admin]);
+  useEffect(() => { if (admin && members) reportBlockedCount(blockedCountOf(members)); }, [admin, members]);
 
   const invitesGeneration = useRef(0);
   const loadInvites = useCallback(async () => {

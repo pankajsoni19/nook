@@ -181,10 +181,23 @@ const appOriginUrl = new URL(appOrigin);
 const mailInstanceName = process.env.MAIL_INSTANCE_NAME?.trim() || appOriginUrl.hostname;
 if (!isInstanceName(mailInstanceName)) throw new Error("MAIL_INSTANCE_NAME must be one line of at most 40 characters");
 
-/** One printable line of at most 40 characters (it appears in every mail's band and footer, T228). */
+/** One printable line of 1 to 40 characters, counted in code points (it appears in every mail's band and footer, T228). */
 export function isInstanceName(value: string) {
-  return value.length >= 1 && value.length <= 40 && !/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069<>]/.test(value);
+  const length = [...value].length;
+  return length >= 1 && length <= 40 && !/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069<>]/.test(value);
 }
+
+// Wave 39: the name people see in titles, link previews, the web app manifest, and mail. Default "Nook";
+// internal ids (mynotes_, nkv_) never change with it.
+export const DEFAULT_APP_NAME = "Nook";
+/** APP_NAME trimmed: 1 to 40 characters, no control or bidi characters, no `<` or `>`. Unset or empty is "Nook". */
+export function parseAppName(raw: string | undefined) {
+  const value = raw?.trim() ?? "";
+  if (value === "") return DEFAULT_APP_NAME;
+  if (!isInstanceName(value)) throw new Error("APP_NAME must be one line of 1 to 40 characters without <, >, or control characters");
+  return value;
+}
+const appNameValue = parseAppName(process.env.APP_NAME);
 
 /**
  * A URL hostname that only reaches this machine: localhost and *.localhost, the whole 127.0.0.0/8
@@ -303,7 +316,9 @@ export const config = {
   /** Live plus binned document bytes per user; 0 means unlimited. */
   userStorageQuotaBytes: integerEnv("USER_STORAGE_QUOTA_BYTES", 10_737_418_240, 0, Number.MAX_SAFE_INTEGER),
   minFreeDiskBytes: integerEnv("MIN_FREE_DISK_BYTES", 1_073_741_824, 0, Number.MAX_SAFE_INTEGER),
-  appVersion: process.env.APP_VERSION ?? "0.24.0",
+  /** APP_NAME (Wave 39): titles, link previews, the manifest, mail, and MCP. Tests switch it in process. */
+  appName: appNameValue,
+  appVersion: process.env.APP_VERSION ?? "0.25.0",
   gitSha: (process.env.GIT_SHA ?? "development").slice(0, 40),
   pushEnabled: pushEnabledValue as "auto" | "true" | "false",
   pushSubject,
@@ -368,3 +383,6 @@ export function isOriginAllowed(origin: string | undefined | null) {
 export const passwordAuthEnabled = () => config.auth.methods !== "google";
 /** Whether Google sign-in is on (D295). */
 export const googleAuthEnabled = () => config.auth.methods !== "password" && Boolean(config.auth.google.clientId && config.auth.google.clientSecret);
+
+/** The app's display name (APP_NAME), read when used so tests can switch it. */
+export const appName = () => config.appName;

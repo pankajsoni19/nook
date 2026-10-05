@@ -31,6 +31,7 @@ import {
 } from "./whiteboardsApi";
 import { Avatar } from "../ui/Avatar";
 import { IntegrationBadge } from "../ui/IntegrationBadge";
+import { appName } from "../appName";
 
 /**
  * One board's canvas (whiteboard plan §10.3, D194, D202, D210): Excalidraw under Nook's 44 px header
@@ -218,7 +219,7 @@ export default function WhiteboardCanvas({ boardId, userId, folders, flash, onBa
         lastThumbAt.current = 0;
         thumbRevision.current = whiteboard.thumbRevision;
         setLoaded({ board: whiteboard, scene: initial });
-        document.title = `${whiteboardDisplayName(whiteboard.name)} · Whiteboards · Nook`;
+        document.title = `${whiteboardDisplayName(whiteboard.name)} · Whiteboards · ${appName()}`;
       } catch (reason) {
         if (!live) return;
         if (reason instanceof ApiError && reason.status === 404) loseAccess();

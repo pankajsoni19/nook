@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { ArrowRight, RotateCcw, RotateCw, SlidersHorizontal, Sparkles } from "lucide-react";
-import { AccountActions, useBinCount } from "../AppShell";
+import { AccountActions } from "../AppShell";
 import type { AppSection } from "../appShellNavigation";
 import { ApiError } from "../api";
-import { hiddenTodaySections, isModuleEnabled, useDisabledModules } from "../modules";
+import { hiddenTodaySections, useDisabledModules } from "../modules";
 import { formatRoute, type Route } from "../router";
 import { CustomizeSections } from "./CustomizeSections";
 import { DigestPrompt } from "./DigestPrompt";
@@ -157,9 +157,7 @@ async function loadVisibleToday(moduleHidden: readonly string[]): Promise<TodayR
 
 export function TodayHome({ userId, displayName, onOpen, onOpenRoute, onSettings, onSignOut }: TodayHomeProps) {
   const disabledModules = useDisabledModules();
-  const binEnabled = isModuleEnabled(disabledModules, "bin");
   const moduleHiddenKey = hiddenTodaySections(disabledModules).join(",");
-  const binCount = useBinCount(binEnabled);
   const [data, setData] = useState<TodayResponse | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -246,7 +244,7 @@ export function TodayHome({ userId, displayName, onOpen, onOpenRoute, onSettings
   return <main className="app-home today-home">
     <header className="app-home-header">
       <div className="app-home-brand"><span className="brand-dot"><Sparkles /></span><span className="brand-text"><strong>Home</strong></span></div>
-      <AccountActions displayName={displayName} onSettings={onSettings} onSignOut={onSignOut} onBin={binEnabled ? () => onOpen("bin") : undefined} binCount={binCount} />
+      <AccountActions displayName={displayName} onSettings={onSettings} onSignOut={onSignOut} />
     </header>
     <div className="today-content">
       <section className="today-intro" aria-labelledby="app-home-title">

@@ -3,7 +3,7 @@ import { distRoot, serveStaticFile } from "./staticFiles";
 import { HTTPException } from "hono/http-exception";
 import { secureHeaders } from "hono/secure-headers";
 import { ZodError } from "zod";
-import { config, googleAuthEnabled, isEmailAllowed, isOriginAllowed, passwordAuthEnabled } from "./config";
+import { config, DEFAULT_APP_NAME, googleAuthEnabled, isEmailAllowed, isOriginAllowed, passwordAuthEnabled } from "./config";
 import { audit, db, now, type NoteRow, type UserRow } from "./db";
 import { createAccount, RegistrationClosedError } from "./accounts";
 import { hashPassword, verifyPassword } from "./passwords";
@@ -160,6 +160,8 @@ app.get("/api/health", (c) => c.json({ status: "ok" }));
 // hasUsers and openRegistration let the login screen offer "Create the first account" only on a
 // fresh instance (QA note 13): a yes/no, never a count.
 app.get("/api/about", (c) => c.json({
+  // Wave 39: APP_NAME, so the sign-in page and every title use the operator's name from the first paint.
+  appName: config.appName,
   version: config.appVersion, gitSha: config.gitSha,
   hasUsers: db.query("SELECT 1 FROM users LIMIT 1").get() !== null, openRegistration: config.allowRegistration,
   // Wave 30: whether "Forgot password?" can mail a link (email on); an instance fact, never per account.
@@ -321,7 +323,9 @@ app.get("/api/auth/me", (c) => {
     // Wave 35 review N2c: an admin reset this account; shown once, then dismissed.
     notices: { googleReset: googleResetNotice(user.id) },
     // Wave 25: whether this person sees the Vault module (server/vault/status.ts); Wave 40: the Chat module. UI only (T97).
-    features: { vault: vaultFeature(user.role), agents: agentsFeature(user.role) }
+    features: { vault: vaultFeature(user.role), agents: agentsFeature(user.role) },
+    // Wave 39: APP_NAME, as /api/about has it.
+    app: { name: config.appName }
   });
 });
 
@@ -936,7 +940,7 @@ if (config.isProduction) {
   // The built client with long caching for hashed assets, no-cache for the rest, and
   // precompressed br/gzip twins (C14, server/staticFiles.ts).
   const root = distRoot();
-  app.on(["GET", "HEAD"], "/*", async (c) => (await serveStaticFile(c.req.raw, new URL(c.req.url).pathname, root)) ?? c.notFound());
+  app.on(["GET", "HEAD"], "/*", async (c) => (await serveStaticFile(c.req.raw, new URL(c.req.url).pathname, root, config.appName)) ?? c.notFound());
 }
 
 async function reconcilePublishedMirrors() {
@@ -968,6 +972,8 @@ try {
 }
 // Migrations ran when ./db loaded: say so loudly when the team has nobody who can manage it.
 warnIfNoActiveAdmin();
+// Wave 39: the effective APP_NAME, so an operator can see the override took.
+console.info(`App name: ${config.appName}${config.appName === DEFAULT_APP_NAME ? " (default)" : " (APP_NAME)"}`);
 // Wave 34 review S1: with proxies trusted but not named, anyone who reaches the app port directly can
 // choose their own X-Forwarded-For. One line, no addresses.
 if (config.trustedProxyHops >= 1 && config.trustedProxyAddresses.length === 0) {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { ArrowUpDown, Check, TriangleAlert, ChevronDown, Ellipsis, ChevronLeft, ChevronUp, Files, Folder as FolderIcon, FolderPlus, House, LayoutGrid, List as ListIcon, LogOut, Menu, PanelLeftClose, PanelLeftOpen, RotateCcw, Search, Settings, Sparkles, Trash2, Upload, Users, X } from "lucide-react";
+import { ArrowUpDown, Check, TriangleAlert, ChevronDown, Ellipsis, ChevronLeft, ChevronUp, Files, Folder as FolderIcon, FolderPlus, House, LayoutGrid, List as ListIcon, LogOut, Menu, PanelLeftClose, PanelLeftOpen, RotateCcw, Search, Settings, Sparkles, Upload, Users, X } from "lucide-react";
 import { api, ApiError } from "../api";
 import { restoreBinItem } from "../bin/binApi";
 import { restoredMessage } from "../bin/binFormat";
@@ -55,6 +55,7 @@ import "./files.css";
 import { Avatar } from "../ui/Avatar";
 import { useSelfAvatar } from "../ui/selfAvatar";
 import { ReadOnlyBanner, useRole } from "../team/roleAccess";
+import { appName } from "../appName";
 
 export type FilesNavigate = (route: Route, options?: { replace?: boolean; removed?: boolean; filesPanel?: FilesPanel }) => void;
 
@@ -64,8 +65,6 @@ type FilesAppProps = {
   navigate: FilesNavigate;
   flash: (message: string) => void;
   onHome: () => void;
-  /** Opens the Bin; the rail footer entry is hidden when the host does not wire it. */
-  onBin?: () => void;
   onSettings: () => void;
   onSignOut: () => void;
   /** Opens a whiteboard's canvas (Wave 23); unset while the Whiteboards module is off, so boards preview as files. */
@@ -109,7 +108,7 @@ export function leaveUploadsRequest(pending: number) {
   };
 }
 
-export function FilesApp({ userId, displayName, navigate, flash, onHome, onBin, onSettings, onSignOut, onOpenWhiteboard }: FilesAppProps) {
+export function FilesApp({ userId, displayName, navigate, flash, onHome, onSettings, onSignOut, onOpenWhiteboard }: FilesAppProps) {
   const selfAvatar = useSelfAvatar();
   // Viewers and guests read and download; upload, new folder, rename, move, share, and delete are hidden.
   const { canWrite } = useRole();
@@ -667,7 +666,7 @@ export function FilesApp({ userId, displayName, navigate, flash, onHome, onBin, 
   return <main className={`workspace files-workspace${collapsed ? " nav-collapsed" : ""}${selected ? " preview-open" : ""}`} data-mobile-panel={panel === "files" ? "notes" : panel === "preview" ? "editor" : "folders"}>
     <aside className="folder-pane" id="file-folders">
       <header className="sidebar-header">
-        <button className="sidebar-brand sidebar-home-button" onClick={() => { void leaveFiles(onHome); }} aria-label="Open Nook home" title="Back to Home"><span className="brand-dot"><Sparkles /></span><span className="brand-text"><strong>Files</strong></span></button>
+        <button className="sidebar-brand sidebar-home-button" onClick={() => { void leaveFiles(onHome); }} aria-label={`Open ${appName()} home`} title="Back to Home"><span className="brand-dot"><Sparkles /></span><span className="brand-text"><strong>Files</strong></span></button>
         <button className="icon-button desktop-only" onClick={() => setCollapsed(true)} aria-label="Collapse folders sidebar" aria-controls="file-folders" aria-expanded={!collapsed} title="Collapse folders"><PanelLeftClose /></button>
       </header>
       <nav className="folder-nav" aria-label="File folders">
@@ -697,7 +696,6 @@ export function FilesApp({ userId, displayName, navigate, flash, onHome, onBin, 
           <strong className="footer-identity"><Avatar className="app-user-avatar" name={displayName} url={selfAvatar} /><span>{displayName}</span></strong>
           <span><Settings />Settings</span>
         </button>
-        {onBin && <button className="footer-bin" onClick={() => { void leaveFiles(onBin); }}><Trash2 />Bin</button>}
         <button className="footer-signout" onClick={() => { void leaveFiles(onSignOut); }}><LogOut />Sign out</button>
       </footer>
     </aside>

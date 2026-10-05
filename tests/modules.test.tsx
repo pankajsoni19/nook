@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MODULE_IDS as SERVER_MODULE_IDS } from "../server/moduleIds";
-import { AccountActions, TeamNavContext } from "../src/AppShell";
+import { AccountActions } from "../src/AppShell";
+import { hubEntries } from "../src/settings/hubModel";
 import { ModulesSettings } from "../src/ModulesSettings";
 import {
   DEFAULT_PREFERENCES,
@@ -131,19 +132,17 @@ describe("gating (client only)", () => {
     expect(launcher(home(["calendar", "tasks", "vault", "agents"]))).toEqual(["notes", "files", "collections", "whiteboards"]);
   });
 
-  test("Bin off removes the Bin button from Home and from any header, even when the app passes onBin", () => {
-    expect(home([])).toContain('title="Bin"');
-    expect(home(["bin"])).not.toContain('title="Bin"');
-    const header = renderToStaticMarkup(<ModulesContext.Provider value={["bin"]}><AccountActions {...account} onBin={() => undefined} binCount={2} /></ModulesContext.Provider>);
-    expect(header).not.toContain('title="Bin"');
-    expect(header).toContain('title="Settings"');
-  });
-
-  test("Team off removes the Team button from the account row", () => {
-    const teamNav = { role: "member" as const, openTeam: () => undefined, onTeam: false };
-    const row = (disabled: ModuleId[]) => renderToStaticMarkup(<ModulesContext.Provider value={disabled}><TeamNavContext.Provider value={teamNav}><AccountActions {...account} /></TeamNavContext.Provider></ModulesContext.Provider>);
-    expect(row([])).toContain('title="Team"');
-    expect(row(["team"])).not.toContain('title="Team"');
+  test("Wave 38: no header has a Bin or Team button, whatever the modules; Bin off removes Settings → Bin", () => {
+    for (const disabled of [[], ["bin"], ["team"]] as ModuleId[][]) {
+      expect(home(disabled)).not.toContain('title="Bin"');
+      const row = renderToStaticMarkup(<ModulesContext.Provider value={disabled}><AccountActions {...account} /></ModulesContext.Provider>);
+      expect(row).not.toContain('title="Bin"');
+      expect(row).not.toContain('title="Team"');
+      expect(row).toContain('title="Settings"');
+    }
+    expect(hubEntries("member", { teamModuleEnabled: true }).map((entry) => entry.id)).toContain("bin");
+    expect(hubEntries("member", { teamModuleEnabled: true, binModuleEnabled: false }).map((entry) => entry.id)).not.toContain("bin");
+    expect(hubEntries("member", { teamModuleEnabled: false }).map((entry) => entry.id)).not.toContain("team-members");
   });
 
   test("the Today sections of modules that are off are hidden", () => {

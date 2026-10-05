@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { House, Sparkles } from "lucide-react";
-import { AccountActions, useBinCount, AppPageName } from "../AppShell";
+import { AccountActions, AppPageName } from "../AppShell";
 import { readHistoryDepth } from "../appShellNavigation";
 import { popStateClosedDialog } from "../historyDialogs";
 import { formatRoute, parseRoute, type Route } from "../router";
@@ -21,8 +21,6 @@ type CollectionsAppProps = {
   navigate: CollectionsNavigate;
   flash: (message: string) => void;
   onHome: () => void;
-  /** Opens the Bin from the header (Bin placement, Wave 10). */
-  onBin?: () => void;
   onSettings: () => void;
   onSignOut: () => void;
 };
@@ -39,8 +37,7 @@ export type GoOptions = { replace?: boolean; underlyingViewId?: string | null };
  * (/collections/:c/view/:v), and a row (/collections/:c/row/:r). Every view is a history entry;
  * dialogs and sheets push none. Back steps row → view → collection → list → Home.
  */
-export function CollectionsApp({ userId, displayName, navigate, flash, onHome, onBin, onSettings, onSignOut }: CollectionsAppProps) {
-  const binCount = useBinCount(Boolean(onBin));
+export function CollectionsApp({ userId, displayName, navigate, flash, onHome, onSettings, onSignOut }: CollectionsAppProps) {
   const [route, setRoute] = useState<CollectionsRoute>(currentRoute);
   const [underlyingViewId, setUnderlyingViewId] = useState<string | null>(() => underlyingViewFor(window.history.state, userId, currentRoute()));
   const routeRef = useRef(route);
@@ -103,7 +100,7 @@ export function CollectionsApp({ userId, displayName, navigate, flash, onHome, o
     <header className="app-page-header">
       <button className="app-home-button" onClick={onHome}><House />Home</button>
       <span className="app-home-brand"><span className="brand-dot"><Sparkles /></span><span className="brand-text"><strong>Collections</strong></span></span><AppPageName name="Collections" />
-      <AccountActions displayName={displayName} onSettings={onSettings} onSignOut={onSignOut} onBin={onBin} binCount={binCount} />
+      <AccountActions displayName={displayName} onSettings={onSettings} onSignOut={onSignOut} />
     </header>
     <ReadOnlyBanner />
     {route.collectionId

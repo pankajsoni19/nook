@@ -2,10 +2,11 @@ import { useState } from "react";
 import { Check, Copy, Download } from "lucide-react";
 import { KeysDialog } from "../keys/KeysDialog";
 import "../keys/keys.css";
+import { appName } from "../appName";
 
 /** The saved-file text: one code per line, with a short header (no account details). */
 export function recoveryCodesText(codes: readonly string[]) {
-  return `Nook recovery codes\nEach code works once, in place of the six-digit authenticator code.\n\n${codes.join("\n")}\n`;
+  return `${appName()} recovery codes\nEach code works once, in place of the six-digit authenticator code.\n\n${codes.join("\n")}\n`;
 }
 
 /**

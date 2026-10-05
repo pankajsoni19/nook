@@ -1,3 +1,4 @@
+import { appName } from "../../config";
 import { context, layout, note, type ContextRow } from "../layout";
 import { appLink, paths } from "../links";
 import { formatDay, formatInstant, plural } from "../format";
@@ -83,7 +84,7 @@ export const binExpiringTemplate = defineTemplate<BinExpiringMail>({
       eyebrow: "Bin · Clean-up",
       title: `${plural(data.total, "item")} will be deleted for good`,
       lead: `The first is deleted on ${formatInstant(data.soonest, ctx.tz)}. Restore anything you still need from the Bin.`,
-      blocks: [context(rows, { more: data.total - rows.length }), note("Nook deletes Bin items 30 days after they were moved there. This email comes at most once a week.")],
+      blocks: [context(rows, { more: data.total - rows.length }), note(`${appName()} deletes Bin items 30 days after they were moved there. This email comes at most once a week.`)],
       action: { label: "Open the Bin", href: appLink(paths.bin()) },
       footer: activityFooter("bin", "You got this because you turned on Bin clean-up emails.", ctx)
     });

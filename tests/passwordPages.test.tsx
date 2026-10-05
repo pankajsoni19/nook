@@ -154,8 +154,8 @@ describe("wiring", () => {
 
   test("the pages put the previous tab title back when they close (QA)", async () => {
     const source = await Bun.file(new URL("../src/auth/passwordPages.tsx", import.meta.url)).text();
-    expect(source).toContain('useEffect(() => pageTitle("Forgot password · Nook"), []);');
-    expect(source).toContain('useEffect(() => pageTitle("Reset password · Nook"), []);');
+    expect(source).toContain("useEffect(() => pageTitle(`Forgot password · ${appName()}`), []);");
+    expect(source).toContain("useEffect(() => pageTitle(`Reset password · ${appName()}`), []);");
   });
 
   test("links and switches on the password pages are 44 px targets", async () => {

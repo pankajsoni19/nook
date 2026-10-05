@@ -97,9 +97,10 @@ describe("the phone back arrow (review)", () => {
 });
 
 describe("the leave guard's reach (review)", () => {
-  test("the hub guards Home, Bin, Sign out, and (fixed, review M1) Inbox and the bell through hub-scoped contexts", () => {
+  test("the hub guards Home, Sign out, and (fixed, review M1) Inbox and the bell through hub-scoped contexts", () => {
     const app = read("App.tsx");
-    expect(app).toContain("<AccountActions displayName={session.user.displayName} onSignOut={() => guardLeave(onSignOut)} onBin={onBin ? () => guardLeave(onBin) : undefined} binCount={binCount} />");
+    // Wave 38: no Bin button in the account row (the Bin is a hub entry, behind the same guard as every entry).
+    expect(app).toContain("<AccountActions displayName={session.user.displayName} onSignOut={() => guardLeave(onSignOut)} />");
     // The app-wide contexts stay as they were; inside the hub they are replaced by guarded ones.
     expect(app).toContain('const inboxNav = { role: session.user.role, openInbox: () => { void openApp("inbox"); }, onInbox: shownApp === "inbox" };');
     expect(app).toContain("const hubInboxNav = useMemo(() => inboxNav && { ...inboxNav, openInbox: () => guardLeave(inboxNav.openInbox) }, [guardLeave, inboxNav]);");

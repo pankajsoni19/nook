@@ -30,7 +30,7 @@ export type ModuleDef = {
   launcher?: { section: LauncherSection; href: string };
   /** The Today sections it provides (keys of TODAY_SECTIONS and of the server's providers). */
   todaySections: readonly string[];
-  /** Shared chrome it owns: the Bin button, the notification bell, or the Notes search box and Ctrl/⌘+K. */
+  /** Shared chrome it owns: the Bin (Settings → Bin since Wave 38), the notification bell, or the Notes search box and Ctrl/⌘+K. */
   headerItem?: "bin" | "bell" | "search" | "inbox";
   /** Reserved for a later wave: accepted by the server, kept on by default, and not listed in Settings yet. */
   planned?: boolean;
@@ -52,9 +52,9 @@ export const MODULES: readonly ModuleDef[] = [
   // server keeps enforcing roles and budgets, and without AGENT_SECRETS_KEY it is hidden from everyone but admins (T97).
   { id: "agents", label: "Chat", description: "Chats with agents that call the model endpoint an admin configured. Every message you send leaves this Nook for that endpoint.", icon: MessagesSquare, routeApps: ["chat"], launcher: { section: "chat", href: "/chat" }, todaySections: [] },
   { id: "search", label: "Search", description: "The search box in Notes, Ctrl+K, and the text filter on boards. The Notes list and the other board filters stay.", icon: Search, routeApps: [], todaySections: [], headerItem: "search" },
-  { id: "bin", label: "Bin", description: "Hides the Bin button and Leaving the Bin soon. Deleting still moves items to the Bin, and they are still deleted forever after 30 days.", icon: Trash2, routeApps: ["bin"], todaySections: ["binSoon"], headerItem: "bin" },
+  { id: "bin", label: "Bin", description: "Hides Settings → Bin and Leaving the Bin soon. Deleting still moves items to the Bin, and they are still deleted forever after 30 days.", icon: Trash2, routeApps: ["bin"], todaySections: ["binSoon"], headerItem: "bin" },
   { id: "notifications", label: "Notifications", description: "Hides the bell and the Notifications page. Reminders and push notifications still arrive.", icon: Bell, routeApps: ["notifications"], todaySections: [], headerItem: "bell" },
-  { id: "team", label: "Team", description: "The Team button and the people in this workspace. Roles and blocking still apply.", icon: Users, routeApps: ["team"], todaySections: [] },
+  { id: "team", label: "Team", description: "Settings → Team and the people in this workspace. Roles and blocking still apply.", icon: Users, routeApps: ["team"], todaySections: [] },
   // Agent inbox (D157): an account-row button next to the bell, no launcher tile. Hiding it is not a
   // boundary: MCP keys can still suggest changes, which wait until it is turned on again (T97).
   { id: "inbox", label: "Inbox", description: "Proposals from agents and your routines, and Proposals awaiting you on Today. Agents can still suggest changes while it is off; nothing is applied until you approve.", icon: Inbox, routeApps: ["inbox"], todaySections: ["proposals"], headerItem: "inbox" }

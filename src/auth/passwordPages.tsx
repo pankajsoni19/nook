@@ -2,9 +2,10 @@ import { useEffect, useId, useRef, useState } from "react";
 import { CheckCircle2, Eye, EyeOff, KeyRound, Link2Off, Lock, MailX, Sparkles } from "lucide-react";
 import { api, ApiError } from "../api";
 import { passwordResetOffered, type RegistrationInfo } from "./registrationPrompt";
-import { GOOGLE_ONLY_PASSWORD_TEXT } from "./googleSignIn";
+import { googleOnlyPasswordText } from "./googleSignIn";
 import { collectProblems, confirmPasswordProblem, emailProblem, FieldError, fieldName, newPasswordProblem, secondFactorProblem, useFieldErrors } from "./fieldChecks";
 import "./auth.css";
+import { appName, setAppName } from "../appName";
 
 /**
  * Forgot / reset password (Wave 30, outbound email §A.5, §E.6). Both pages work signed out.
@@ -121,11 +122,12 @@ export function ForgotPasswordPage({ onBack }: { onBack: () => void }) {
   const [state, setState] = useState<"form" | "working" | "sent">("form");
   const [error, setError] = useState("");
   const fields = useFieldErrors();
-  useEffect(() => pageTitle("Forgot password · Nook"), []);
+  useEffect(() => pageTitle(`Forgot password · ${appName()}`), []);
   useEffect(() => {
     let live = true;
-    api<{ passwordReset?: boolean; authMethods?: { password: boolean } }>("/about").then((info) => {
+    api<{ appName?: string; passwordReset?: boolean; authMethods?: { password: boolean } }>("/about").then((info) => {
       if (!live) return;
+      setAppName(info.appName);
       setGoogleOnly(info.authMethods?.password === false);
       setAvailable(info.passwordReset === true);
     }, () => { if (live) setAvailable(true); });
@@ -152,7 +154,7 @@ export function ForgotPasswordPage({ onBack }: { onBack: () => void }) {
     {available === null ? <div className="auth-methods-placeholder" aria-busy="true" aria-label="Loading" /> : googleOnly ? <div className="auth-heading" role="status">
       <span className="eyebrow">Password</span>
       <h1><KeyRound aria-hidden="true" className="invite-register-icon" />Sign in with Google</h1>
-      <p>{GOOGLE_ONLY_PASSWORD_TEXT}</p>
+      <p>{googleOnlyPasswordText()}</p>
     </div> : available === false ? <div className="auth-heading" role="status">
       <span className="eyebrow">Password</span>
       <h1><MailX aria-hidden="true" className="invite-register-icon" />Email is off</h1>
@@ -166,7 +168,7 @@ export function ForgotPasswordPage({ onBack }: { onBack: () => void }) {
       <div className="auth-heading">
         <span className="eyebrow">Password</span>
         <h1>Forgot your password?</h1>
-        <p>Enter the email address of your Nook account. If it has a verified address, Nook emails you a link to choose a new password.</p>
+        <p>Enter the email address of your {appName()} account. If it has a verified address, {appName()} emails you a link to choose a new password.</p>
       </div>
       <form className="auth-form" onSubmit={submit} noValidate onChange={(event) => { setError(""); fields.clear(fieldName(event.target)); }}>
         <label>Email<input name="email" type="email" autoComplete="email" maxLength={254} disabled={state === "working" || available === null} autoFocus aria-invalid={fields.errors.email ? true : undefined} aria-describedby={fields.errors.email ? "forgot-email-error" : undefined} /><FieldError id="forgot-email-error" message={fields.errors.email} /></label>
@@ -175,7 +177,7 @@ export function ForgotPasswordPage({ onBack }: { onBack: () => void }) {
       </form>
     </>}
     <button type="button" className="text-button" onClick={onBack}>Back to sign in</button>
-    <p className="security-note"><Lock /> Nook never asks for your password by email.</p>
+    <p className="security-note"><Lock /> {appName()} never asks for your password by email.</p>
   </Card>;
 }
 
@@ -189,7 +191,7 @@ const DEAD_COPY = {
 
 function deadFrom(reason: unknown): ResetState {
   const code = reason instanceof ApiError ? (reason.payload as { code?: string } | undefined)?.code : undefined;
-  if (code === "PASSWORD_SIGNIN_DISABLED") return { kind: "dead", reason: "error", message: GOOGLE_ONLY_PASSWORD_TEXT };
+  if (code === "PASSWORD_SIGNIN_DISABLED") return { kind: "dead", reason: "error", message: googleOnlyPasswordText() };
   if (code === "TOKEN_EXPIRED") return { kind: "dead", reason: "expired" };
   if (code === "TOKEN_INVALID") return { kind: "dead", reason: "invalid" };
   return { kind: "dead", reason: "error", message: reason instanceof Error ? reason.message : "Something went wrong" };
@@ -208,7 +210,7 @@ export function ResetPasswordPage({ token, onSignIn, onForgot, signedIn = false,
   useEffect(() => {
     if (about !== undefined) return undefined;
     let live = true;
-    api<RegistrationInfo>("/about").then((result) => { if (live) setInfo(result); }, () => { if (live) setInfo("failed"); });
+    api<RegistrationInfo>("/about").then((result) => { if (live) { setAppName(result.appName); setInfo(result); } }, () => { if (live) setInfo("failed"); });
     return () => { live = false; };
   }, [about]);
   const offerNewLink = passwordResetOffered(info);
@@ -220,7 +222,7 @@ export function ResetPasswordPage({ token, onSignIn, onForgot, signedIn = false,
   const checked = useRef(false);
   const hintId = useId();
   const fields = useFieldErrors();
-  useEffect(() => pageTitle("Reset password · Nook"), []);
+  useEffect(() => pageTitle(`Reset password · ${appName()}`), []);
   useEffect(() => {
     if (!token || checked.current) return;
     checked.current = true;
@@ -267,10 +269,10 @@ export function ResetPasswordPage({ token, onSignIn, onForgot, signedIn = false,
         <h1><Link2Off aria-hidden="true" className="invite-register-icon" />{DEAD_COPY[state.reason].title}</h1>
         <p>{state.reason === "error" ? state.message : signedIn || info === null || offerNewLink ? DEAD_COPY[state.reason].body : DEAD_COPY[state.reason].body.replace(" Ask for a new one.", "")}</p>
         {/* QA G2: in google mode passwords are what is off, whatever email says. */}
-        {!signedIn && info !== null && !offerNewLink && state.reason !== "error" && <p>{googleOnly ? GOOGLE_ONLY_PASSWORD_TEXT : RESET_OFF_TEXT}</p>}
+        {!signedIn && info !== null && !offerNewLink && state.reason !== "error" && <p>{googleOnly ? googleOnlyPasswordText() : RESET_OFF_TEXT}</p>}
       </div>
       {(signedIn || offerNewLink) && <div className="auth-form">{signedIn
-        ? <button type="button" className="primary-button" onClick={onSignIn}>Open Nook</button>
+        ? <button type="button" className="primary-button" onClick={onSignIn}>Open {appName()}</button>
         : <button type="button" className="primary-button" onClick={onForgot}>Ask for a new link</button>}</div>}
     </>}
     {state.kind === "done" && <>
@@ -295,6 +297,6 @@ export function ResetPasswordPage({ token, onSignIn, onForgot, signedIn = false,
         <button className="primary-button" disabled={busy}>{busy ? "Saving…" : "Change password"}</button>
       </form>
     </>}
-    {state.kind !== "done" && !(signedIn && state.kind === "dead") && <button type="button" className="text-button" onClick={onSignIn}>{signedIn ? "Open Nook" : "Back to sign in"}</button>}
+    {state.kind !== "done" && !(signedIn && state.kind === "dead") && <button type="button" className="text-button" onClick={onSignIn}>{signedIn ? `Open ${appName()}` : "Back to sign in"}</button>}
   </Card>;
 }

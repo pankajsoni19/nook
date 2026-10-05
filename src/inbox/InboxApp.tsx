@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, CheckCheck, ChevronLeft, ExternalLink, House, Inbox, RotateCcw, Sparkles, TriangleAlert, X } from "lucide-react";
 import { ApiError } from "../api";
-import { AccountActions, useBinCount, AppPageName } from "../AppShell";
+import { AccountActions, AppPageName } from "../AppShell";
 import { readHistoryDepth } from "../appShellNavigation";
 import { diffStats, lineDiff } from "../diff/lineDiff";
 import { relativeTime } from "../files/format";
@@ -24,6 +24,7 @@ import {
 import { actionLabel, BULK_CONFIRM_OVER, bulkConfirmText, bulkSummary, expiresText, failureText, groupTitle, inboxBackAction, rejectedText, rejectEffectText, runLine, statusLabel } from "./inboxFormat";
 import { RoutinesPane } from "./RoutinesPane";
 import "./inbox.css";
+import { appName } from "../appName";
 
 type InboxRoute = Extract<Route, { app: "inbox" }>;
 type InboxNavigate = (route: Route, options?: { replace?: boolean }) => void;
@@ -33,7 +34,6 @@ type InboxAppProps = {
   navigate: InboxNavigate;
   flash: (message: string) => void;
   onHome: () => void;
-  onBin?: () => void;
   onSettings: () => void;
   onSignOut: () => void;
   /** Opens an in-app path (a card, event, row, or note) as a new history entry. */
@@ -64,9 +64,8 @@ const refLabel: Record<ProposalRef["type"], string> = { note: "Open note", card:
  * wrote is rendered as text under "Written by the agent" (T127). Approve is for members and admins;
  * viewers may reject (D152).
  */
-export function InboxApp({ displayName, navigate, flash, onHome, onBin, onSettings, onSignOut, onOpenPath }: InboxAppProps) {
+export function InboxApp({ displayName, navigate, flash, onHome, onSettings, onSignOut, onOpenPath }: InboxAppProps) {
   const { canWrite } = useRole();
-  const binCount = useBinCount(Boolean(onBin));
   const [route, setRoute] = useState<InboxRoute>(currentRoute);
   const [groups, setGroups] = useState<ProposalGroup[] | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -178,7 +177,7 @@ export function InboxApp({ displayName, navigate, flash, onHome, onBin, onSettin
   }, [loadDetail, route.proposalId]);
 
   useEffect(() => {
-    document.title = detail && route.proposalId === detail.id ? `${detail.kindLabel} · Inbox · Nook` : route.view === "history" ? "History · Inbox · Nook" : route.view === "routines" ? "Routines · Inbox · Nook" : "Inbox · Nook";
+    document.title = detail && route.proposalId === detail.id ? `${detail.kindLabel} · Inbox · ${appName()}` : route.view === "history" ? `History · Inbox · ${appName()}` : route.view === "routines" ? `Routines · Inbox · ${appName()}` : `Inbox · ${appName()}`;
   }, [detail, route.proposalId, route.view]);
 
   const back = useCallback(() => {
@@ -314,7 +313,7 @@ export function InboxApp({ displayName, navigate, flash, onHome, onBin, onSettin
     <header className="app-page-header">
       <button className="app-home-button" onClick={onHome}><House />Home</button>
       <span className="app-home-brand"><span className="brand-dot"><Sparkles /></span><span className="brand-text"><strong>Inbox</strong></span></span><AppPageName name="Inbox" />
-      <AccountActions displayName={displayName} onSettings={onSettings} onSignOut={onSignOut} onBin={onBin} binCount={binCount} />
+      <AccountActions displayName={displayName} onSettings={onSettings} onSignOut={onSignOut} />
     </header>
     <ReadOnlyBanner />
 

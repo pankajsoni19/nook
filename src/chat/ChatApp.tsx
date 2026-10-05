@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Bot, Check, ChevronLeft, ChevronRight, Copy, Ellipsis, House, MessagesSquare, Pencil, Pin, Plus, RotateCcw, Search, Send, Sparkles, Square, Trash2, X } from "lucide-react";
-import { AccountActions, AppPageName, useBinCount } from "../AppShell";
+import { AccountActions, AppPageName } from "../AppShell";
+import { appName } from "../appName";
 import { readHistoryDepth } from "../appShellNavigation";
 import { ApiError } from "../api";
 import { PHONE_QUERY, useMediaQuery } from "../calendar/hooks";
@@ -24,7 +25,6 @@ type ChatAppProps = {
   navigate: ChatNavigate;
   flash: (message: string) => void;
   onHome: () => void;
-  onBin?: () => void;
   onSettings: () => void;
   onSignOut: () => void;
   /** Opens Settings → Agents (the editor), a hub route. */
@@ -56,8 +56,7 @@ const ERROR_TEXT: Record<string, string> = {
  * no history entry and close on Back (D18). A run keeps going when the tab leaves; the chat resumes
  * its stream from the ring when it comes back.
  */
-export function ChatApp({ displayName, role, navigate, flash, onHome, onBin, onSettings, onSignOut, onOpenAgents, onOpenPath }: ChatAppProps) {
-  const binCount = useBinCount(Boolean(onBin));
+export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings, onSignOut, onOpenAgents, onOpenPath }: ChatAppProps) {
   const phone = useMediaQuery(PHONE_QUERY);
   const [route, setRoute] = useState<ChatRoute>(currentRoute);
   const routeRef = useRef(route);
@@ -260,8 +259,9 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onBin, onS
   }, [follow, stopFollowing]);
 
   useEffect(() => {
-    if (route.chatId && detail?.chat.id === route.chatId) document.title = `${detail.chat.title} · Chat · Nook`;
-    else document.title = route.newChat ? "New chat · Chat · Nook" : "Chat · Nook";
+    // Wave 39: the app's own name follows APP_NAME.
+    if (route.chatId && detail?.chat.id === route.chatId) document.title = `${detail.chat.title} · Chat · ${appName()}`;
+    else document.title = route.newChat ? `New chat · Chat · ${appName()}` : `Chat · ${appName()}`;
   }, [detail, route.chatId, route.newChat]);
 
   useEffect(() => { setNewAgentId(route.newChat ? route.agentId ?? null : null); setDraft(""); resetComposer(); }, [route.newChat, route.agentId, route.chatId]);
@@ -409,7 +409,7 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onBin, onS
   const agentOptions = useMemo(() => (agents ?? []).map((agent) => ({ value: agent.id, label: `${agent.icon ? `${agent.icon} ` : ""}${agent.name}`, description: agent.description || (agent.model ?? status?.defaultModel ?? "") })), [agents, status?.defaultModel]);
   const newAgent = agents?.find((agent) => agent.id === newAgentId) ?? null;
   const chatAgent = detail ? agents?.find((agent) => agent.id === detail.chat.agentId) ?? null : null;
-  const account = <AccountActions displayName={displayName} onSettings={onSettings} onSignOut={onSignOut} onBin={onBin} binCount={binCount} />;
+  const account = <AccountActions displayName={displayName} onSettings={onSettings} onSignOut={onSignOut} />;
 
   // --- Screens the module shows instead of chats ---
   const notice = statusError ? <section className="chat-state chat-error" role="alert"><p>{statusError}</p><button className="secondary-button" onClick={() => { void loadStatus(); }}>Retry</button></section>
