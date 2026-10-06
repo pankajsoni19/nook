@@ -54,7 +54,7 @@ export function Templates({ onBack, flash }: { onBack: () => void; flash: (messa
         <h2 id="team-templates-title">Templates</h2>
         <p className="team-muted">A team role and groups for new people. Choose one on an invite and the new account joins those groups when it registers. A template never opens anything by itself: groups reach only what owners shared with them.</p>
       </div>
-      <button type="button" className="primary-button ma-header-button" onClick={() => setEditing("new")} aria-haspopup="dialog"><Plus />New template</button>
+      <button type="button" className="action-button" onClick={() => setEditing("new")} aria-haspopup="dialog"><Plus />New template</button>
     </header>
     {error && <div className="team-state team-error" role="alert">
       <span className="team-state-icon"><TriangleAlert /></span>

@@ -21,7 +21,8 @@ export const SECRET_HONESTY = "Encrypted at rest; anyone with the server and its
 const STATUS_TEXT: Record<ToolServerSummary["status"], string> = { unknown: "Not synced yet", ok: "Reachable", auth_failed: "Credential refused", unreachable: "Unreachable", error: "Error" };
 const AVAILABILITY_LABELS: Record<ServerAvailability, string> = { admins: "Admins only", all: "Everyone who can chat" };
 
-export function ToolServersSection({ flash }: { flash: (message: string) => void }) {
+/** `onCountChange` (Settings → AI's tab count): the number of servers, once loaded and after every change. */
+export function ToolServersSection({ flash, onCountChange }: { flash: (message: string) => void; onCountChange?: (count: number) => void }) {
   const [list, setList] = useState<ToolServerList | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<ToolServerSummary | "new" | { adopt: DeclaredStdioServer } | null>(null);
@@ -38,6 +39,8 @@ export function ToolServersSection({ flash }: { flash: (message: string) => void
     }
   }, []);
   useEffect(() => { void load(); }, [load]);
+  const count = list?.servers.length;
+  useEffect(() => { if (count !== undefined) onCountChange?.(count); }, [count, onCountChange]);
 
   async function sync(server: ToolServerSummary) {
     setSyncing(server.id);
@@ -123,7 +126,7 @@ export function ToolServersSection({ flash }: { flash: (message: string) => void
       </li>)}
     </ul>
     <p className="policy-copy">{SECRET_HONESTY} A tool marked read-only by its server runs on its own by default; every other tool asks first, and annotations never loosen a policy you set.</p>
-    <button type="button" className="secondary-button ai-add" onClick={() => setEditing("new")} disabled={!list || list.servers.length >= AGENT_BOUNDS.toolServers}><Plus />Add tool server</button>
+    <button type="button" className="action-button secondary ai-add" onClick={() => setEditing("new")} disabled={!list || list.servers.length >= AGENT_BOUNDS.toolServers}><Plus />Add tool server</button>
     {list?.stdio.enabled && <div className="security-card ai-stdio">
       <strong>Declared by the host (AGENT_MCP_STDIO)</strong>
       <p className="chat-muted">stdio servers come only from the host's declaration file. Adopt one only if you trust it as much as Nook itself.</p>

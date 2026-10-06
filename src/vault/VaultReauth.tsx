@@ -9,11 +9,12 @@ import { reauth, reauthStatus, type ReauthStatus } from "./vaultApi";
 import { errorCode, messageOf } from "./VaultDialogs";
 
 /**
- * Protected environments (D226, V-O2; Wave 26): the server refuses reading, writing, importing, or
- * exporting their values with 403 `REAUTH_REQUIRED` until this session re-authenticates (password
- * plus TOTP, valid 15 minutes). `run(action)` does the action; on that refusal it opens the
- * re-authentication dialog (the app's shared ReauthFields, a history layer that Back closes) and,
- * once confirmed, does the action once more. Cancelling rejects with `ReauthCancelled`.
+ * Protected environments (D226, V-O2; Wave 26): the server refuses reading (reveal, copy, a version,
+ * export) their values with 403 `REAUTH_REQUIRED` until this session re-authenticates (password
+ * plus TOTP, valid 15 minutes). Writes never ask (2026-10-06 operator), so only reads, lifting
+ * protection, and deleting a protected environment go through `run`. `run(action)` does the
+ * action; on that refusal it opens the re-authentication dialog (the app's shared ReauthFields, a
+ * history layer that Back closes) and, once confirmed, does the action once more. Cancelling rejects with `ReauthCancelled`.
  */
 
 export class ReauthCancelled extends Error {

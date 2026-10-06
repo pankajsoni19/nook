@@ -146,7 +146,7 @@ export function KeysSettings({ onPendingChange, onNestedDialogChange, totpEnable
     <div className="mcp-card keys-card">
       <div className="keys-card-head">
         <div><h4 ref={headingRef} tabIndex={-1}>{integration ? `Keys of ${integration.name}` : "Your keys"}</h4><p>{data ? keyPolicyLine(data.policy, data.liveCount, dialog?.kind === "create" ? creatingKind : "general") : "Loading…"}</p></div>
-        {!guest && <button ref={newKeyRef} type="button" className="primary-button keys-new" onClick={() => { setStatus(""); openDialog({ kind: "create" }); }} disabled={!data || atLimit || Boolean(newToken) || needsGoogle}><Plus aria-hidden="true" />New key</button>}
+        {!guest && <button ref={newKeyRef} type="button" className="action-button" onClick={() => { setStatus(""); openDialog({ kind: "create" }); }} disabled={!data || atLimit || Boolean(newToken) || needsGoogle}><Plus aria-hidden="true" />New key</button>}
       </div>
       {/* Q2: the confirmation state too ("Confirmed with Google until …"), not only the button. */}
       {!guest && account && !asksForPassword(account) && <GoogleReauthNotice account={account} returnTo={keysApi.returnTo} />}
@@ -202,7 +202,7 @@ function AllowlistField({ available, pinned, value, onChange, disabled, mode = "
     : "One IPv4 or IPv6 address or CIDR range per line, up to 10. Leave empty to allow any address. Adding a limit later narrows the key; widening or removing it needs a rotation.";
   return <label className="keys-input">Allowed addresses (optional)
     <textarea value={value} onChange={(event) => onChange(event.target.value)} rows={3} placeholder={"203.0.113.10\n198.51.100.0/24"} disabled={disabled} spellCheck={false} autoComplete="off"
-      aria-invalid={checked.error ? true : undefined} className={checked.error ? "invalid" : undefined} />
+      aria-invalid={checked.error ? true : undefined} className={checked.error ? "keys-mono invalid" : "keys-mono"} />
     {checked.error && <small className="keys-field-error" role="alert">{checked.error}</small>}
     {!checked.error && checked.changed.length > 0 && <small className="keys-field-note">Saved as: {checked.changed.join(", ")}</small>}
     <small>{help}</small>

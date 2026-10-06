@@ -70,7 +70,11 @@ describe("review: the protected-environment window is per session (D226)", () =>
       expect({ path, status: response.status, code: response.body.code }).toEqual({ path, status: 403, code: "REAUTH_REQUIRED" });
     }
     expect((await call(stolen, "POST", `${base(vault.id)}/reveal`, { cells: [{ secretId: secret.id, envId: vault.envs.prod }] })).body.code).toBe("REAUTH_REQUIRED");
-    expect((await call(stolen, "POST", `${base(vault.id)}/environments/${vault.envs.prod}/import`, { entries: [{ name: "X", value: "y" }], dryRun: true })).body.code).toBe("REAUTH_REQUIRED");
+    // Writes need no window (2026-10-06 operator, an accepted trade-off): a copied cookie can preview
+    // an import into prod, but the answer carries no value.
+    const preview = await call(stolen, "POST", `${base(vault.id)}/environments/${vault.envs.prod}/import`, { entries: [{ name: "X", value: "y" }], dryRun: true });
+    expect(preview.status).toBe(200);
+    expect(preview.text).not.toContain("prod-secret");
     // Another person's session is not opened by the owner's window.
     expect((await call(member, "GET", valuePath(vault, secret.id, "prod"))).body.code).toBe("REAUTH_REQUIRED");
     await unlock(member);

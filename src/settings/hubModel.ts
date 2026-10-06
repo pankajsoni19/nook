@@ -1,8 +1,8 @@
 // The Settings hub (Wave 37): which entries its left nav lists for a role, which entry a route
 // selects, and where the phone's back arrow goes. Pure, so it is unit tested directly.
 import { readHistoryDepth } from "../appShellNavigation";
-import type { Route, SettingsSection } from "../router";
-import { formatRoute, SETTINGS_SECTION_NAMES } from "../router";
+import type { AiTab, Route, SettingsSection } from "../router";
+import { AI_TABS, formatRoute, SETTINGS_SECTION_NAMES } from "../router";
 import { canManageTeam, canSeeTeam, type Role } from "../team/teamRoles";
 
 export type TeamEntryId = "members" | "invites" | "groups" | "integrations" | "keys" | "policies" | "templates" | "activity" | "email";
@@ -168,4 +168,29 @@ export function leaveGuardAction(target: Route, current: Route): "section" | "le
  */
 export function hubListGoesUnder(target: Route, current: Route, mobile: boolean) {
   return mobile && isHubRoute(target) && !(target.app === "settings" && target.section === null) && !isHubRoute(current);
+}
+
+/** Settings → AI's tab labels. */
+export const AI_TAB_LABELS: Record<AiTab, string> = { providers: "Model providers", tools: "Tool servers", policy: "Chat policy" };
+
+/**
+ * The Settings → AI tabs a role sees, in tab order. The whole page is for admins (its nav entry and
+ * App's gate; the server's /agents/admin routes check the same), so admins see every tab and anyone
+ * else none.
+ */
+export function aiTabsFor(role: Role | undefined): AiTab[] {
+  return role === "admin" ? [...AI_TABS] : [];
+}
+
+/**
+ * Where a Settings → AI route goes instead (replaced in place): bare /settings/ai, an unknown tab
+ * (parsed as bare AI), or a tab the role does not see opens the first tab it sees. Null to stay, or
+ * when the role sees no tab (the page says it is for admins).
+ */
+export function aiTabRedirect(route: Route, role: Role | undefined): Route | null {
+  if (route.app !== "settings" || route.section !== "ai") return null;
+  const tabs = aiTabsFor(role);
+  const first = tabs[0];
+  if (!first || (route.aiTab && tabs.includes(route.aiTab))) return null;
+  return { app: "settings", section: "ai", aiTab: first };
 }
