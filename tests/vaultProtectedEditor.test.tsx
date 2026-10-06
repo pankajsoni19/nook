@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ApiError } from "../src/api";
-import { FRESH_VALUE_NOTE, opensFresh, protectedHint, ValueFields } from "../src/vault/VaultDialogs";
+import { commentToSend, FRESH_COMMENT_LABEL, FRESH_VALUE_NOTE, opensFresh, protectedHint, SHOW_REPLACES_DRAFT, ValueFields } from "../src/vault/VaultDialogs";
 import { DEFAULT_ENVIRONMENTS } from "../shared/vault";
 
 /**
@@ -89,5 +89,40 @@ describe("other writes no longer ask; reads still do", () => {
     for (const name of ["VaultDialogs.tsx", "VaultTransfer.tsx", "VaultHistory.tsx", "VaultApp.tsx"]) {
       expect(source(name)).not.toMatch(/(revealing, editing|editing, importing)[^"]*confirm it's you/);
     }
+  });
+});
+
+describe("review fixes (2026-10-06)", () => {
+  test("M1: in \"New value\" mode an empty comment is omitted (the server keeps the current one); otherwise the field is sent as shown", () => {
+    expect(commentToSend(true, "")).toEqual({});
+    expect(commentToSend(true, "   ")).toEqual({});
+    expect(commentToSend(true, " rotated ")).toEqual({ comment: "rotated" });
+    // The normal editor showed the current comment, so empty still clears it, explicitly.
+    expect(commentToSend(false, "")).toEqual({ comment: null });
+    expect(commentToSend(false, "kept")).toEqual({ comment: "kept" });
+    expect(FRESH_COMMENT_LABEL).toBe("New comment (leave empty to keep the current one)");
+    const dialogs = source("VaultDialogs.tsx");
+    expect(dialogs).toContain("const sent = commentToSend(fresh, comment);");
+    expect(dialogs).toContain("{ value: payload, ...sent, expectedVersion }");
+    expect(dialogs).not.toContain("comment: comment.trim() || null, expectedVersion");
+    expect(dialogs).toContain("{fresh ? FRESH_COMMENT_LABEL : \"Comment for this value (encrypted)\"}");
+  });
+
+  test("L1: Show asks with the app's confirm before replacing a typed draft (never window.confirm)", () => {
+    expect(SHOW_REPLACES_DRAFT).toMatchObject({ title: "Replace what you typed?", confirmLabel: "Show current value" });
+    const dialogs = source("VaultDialogs.tsx");
+    expect(dialogs).toContain("if (typed && !await ask(SHOW_REPLACES_DRAFT)) return;");
+    expect(dialogs).not.toMatch(/window\.confirm|[^.\w]confirm\(/);
+    // Both editors get the app's confirm.
+    expect(source("VaultApp.tsx").match(/<ValueEditorDialog [^>]*ask=\{ask\}/g)).toHaveLength(2);
+  });
+
+  test("L2: \"Load the latest\" in \"New value\" mode only takes the versions, never reading or asking", () => {
+    const dialogs = source("VaultDialogs.tsx");
+    const body = dialogs.slice(dialogs.indexOf("async function loadLatest()"), dialogs.indexOf("return <><ModalDialog title={`${secret.name} · ${env.name}`}"));
+    const freshBranch = body.slice(body.indexOf("if (fresh) {"), body.indexOf("} else if"));
+    expect(freshBranch).toContain("setExpectedVersion(mine.currentVersion)");
+    expect(freshBranch).not.toContain("loadCurrent");
+    expect(freshBranch).not.toContain("run(");
   });
 });

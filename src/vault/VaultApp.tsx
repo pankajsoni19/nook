@@ -445,7 +445,7 @@ function VaultPage({ vaultId, envId, cache, onBack, onReady, flash, ask, onEnvir
       onClear={() => { const { secret, env } = openDialog; setDialog(null); void actions.clear(secret!, env!); }}
       onOpenSecret={() => { setDialog(null); onOpenSecret(dialog.secretId); }}
       onClose={() => { actions.hide(cellKey(dialog.secretId, dialog.envId)); setDialog(null); }} />}
-    {openDialog?.secret && openDialog.env && dialog?.kind === "edit" && <ValueEditorDialog vault={vault} secret={openDialog.secret} env={openDialog.env}
+    {openDialog?.secret && openDialog.env && dialog?.kind === "edit" && <ValueEditorDialog vault={vault} secret={openDialog.secret} env={openDialog.env} ask={ask}
       onCancel={() => setDialog(null)}
       onSaved={(message) => { actions.hideAll(); setDialog(null); flash(message); void load(); }} />}
     {openDialog?.secret && openDialog.env && dialog?.kind === "history" && <VersionHistoryDialog vaultId={vault.id} secret={openDialog.secret} env={openDialog.env} ask={ask} flash={flash}
@@ -553,7 +553,7 @@ function SecretPage({ vaultId, secretId, onBack, onReady, flash, ask, onMissing,
       })}
     </ul>
     <p className="vault-honest"><ShieldAlert aria-hidden="true" />{HONEST_LABEL}</p>
-    {editEnv && <ValueEditorDialog vault={vault} secret={secret} env={editEnv} onCancel={() => setDialog(null)}
+    {editEnv && <ValueEditorDialog vault={vault} secret={secret} env={editEnv} ask={ask} onCancel={() => setDialog(null)}
       onSaved={(message) => { actions.hideAll(); setDialog(null); flash(message); void load(); }} />}
     {historyEnv && <VersionHistoryDialog vaultId={vaultId} secret={secret} env={historyEnv} ask={ask} flash={flash} onClose={() => setDialog(null)} onRestored={() => { void load(); }} />}
     {dialog?.kind === "meta" && <SecretMetaDialog vault={vault} secret={secret} onCancel={() => setDialog(null)}

@@ -178,3 +178,75 @@ describe("protected environments: writes need no window, reads still do", () => 
     expect((await call(owner, "DELETE", `/vaults/${vault.id}/environments/${prod}`)).body.code).toBe("REAUTH_REQUIRED");
   });
 });
+
+describe("review fixes (2026-10-06)", () => {
+  test("M1: a write that omits the comment keeps the current one (single and batch), never returning it; null and \"\" clear it", async () => {
+    const owner = await createUser("PW comment owner");
+    const writer = await createUser("PW comment writer");
+    const vault = await newVault(owner);
+    const prod = vault.envs.prod!;
+    const dev = vault.envs.dev!;
+    const created = await call(owner, "POST", `/vaults/${vault.id}/secrets`, { name: "PW_COMMENTED", values: { [prod]: { value: OLD, comment: "prod-comment-5d1" }, [dev]: { value: "d", comment: "dev-comment-8c2" } } });
+    expect(created.status).toBe(201);
+    const secretId = created.body.secret.id as string;
+    await share(owner, vault, [{ session: writer, levels: { dev: "write", prod: "write" } }]);
+    const value = (envId: string) => `/vaults/${vault.id}/secrets/${secretId}/values/${envId}`;
+    const commentOf = async (envId: string) => (await call(owner, "GET", value(envId))).body.value.comment;
+
+    // Single, without the window: kept, and not in the answer.
+    const put = await call(writer, "PUT", value(prod), { value: NEW, expectedVersion: 1 });
+    expect(put.status).toBe(200);
+    expect(put.text).not.toContain("prod-comment-5d1");
+    expectNoPlaintext(put);
+    expect(await commentOf(prod)).toBe("prod-comment-5d1");
+    // The kept comment belongs to the new version too.
+    expect((await call(owner, "GET", `${value(prod)}/versions/2`)).body.version.comment).toBe("prod-comment-5d1");
+
+    // Batch: each environment keeps its own.
+    const batch = await call(writer, "PUT", `/vaults/${vault.id}/secrets/${secretId}/values`, { values: [{ envId: prod, value: BATCH, expectedVersion: 2 }, { envId: dev, value: BATCH, expectedVersion: 1 }] });
+    expect(batch.status).toBe(200);
+    expect(batch.text).not.toContain("comment-");
+    expect(await commentOf(prod)).toBe("prod-comment-5d1");
+    expect(await commentOf(dev)).toBe("dev-comment-8c2");
+
+    // An explicit null or "" clears it.
+    expect((await call(writer, "PUT", value(prod), { value: NEW, comment: null, expectedVersion: 3 })).status).toBe(200);
+    expect(await commentOf(prod)).toBeNull();
+    expect((await call(writer, "PUT", value(dev), { value: NEW, comment: "", expectedVersion: 2 })).status).toBe(200);
+    expect(await commentOf(dev)).toBeNull();
+    // A new comment replaces it.
+    expect((await call(writer, "PUT", value(prod), { value: NEW, comment: "fresh-comment", expectedVersion: 4 })).status).toBe(200);
+    expect(await commentOf(prod)).toBe("fresh-comment");
+    // Keeping a comment is not a read: no value.read for the writer, and no read charge.
+    expect(db.query("SELECT 1 FROM vault_events WHERE vault_id = ? AND actor_id = ? AND event IN ('value.read', 'version.read')").get(vault.id, writer.userId)).toBeNull();
+    expect(db.query("SELECT 1 FROM vault_rate_limits WHERE bucket = ?").get(`read:${writer.userId}`)).toBeNull();
+  });
+
+  test("L4: without the window an import preview is no equality oracle (same and different plaintexts answer alike, in every mode)", async () => {
+    const owner = await createUser("PW oracle owner");
+    const writer = await createUser("PW oracle writer");
+    const vault = await newVault(owner);
+    const prod = vault.envs.prod!;
+    await newSecret(owner, vault, "PW_SAME_VALUE", { prod: IMPORTED });
+    await newSecret(owner, vault, "PW_OTHER_VALUE", { prod: OLD });
+    await share(owner, vault, [{ session: writer, levels: { prod: "write" } }]);
+    resetVaultLimits();
+    const entries = [{ name: "PW_SAME_VALUE", value: IMPORTED }, { name: "PW_OTHER_VALUE", value: IMPORTED }];
+    const path = `/vaults/${vault.id}/environments/${prod}/import`;
+    for (const body of [
+      { entries, dryRun: true }, { entries, mode: "skip", dryRun: true }, { entries, mode: "overwrite", dryRun: true }, { entries, mode: "skip" }
+    ]) {
+      const response = await call(writer, "POST", path, body);
+      expect(response.status).toBe(200);
+      const [same, other] = response.body.entries as Array<{ name: string; status: string; reason: string | null }>;
+      expect({ status: same!.status, reason: same!.reason }).toEqual({ status: other!.status, reason: other!.reason });
+      expect(same!.status).not.toBe("same");
+      expect(response.body.counts.same).toBe(0);
+      expectNoPlaintext(response);
+    }
+    // Skip wrote nothing; nothing was read or charged as a read.
+    expect((db.query("SELECT COUNT(*) AS count FROM vault_values v JOIN vault_secrets s ON s.id = v.secret_id WHERE s.vault_id = ? AND v.version > 1").get(vault.id) as { count: number }).count).toBe(0);
+    expect(db.query("SELECT 1 FROM vault_events WHERE vault_id = ? AND actor_id = ? AND event IN ('value.read', 'version.read')").get(vault.id, writer.userId)).toBeNull();
+    expect(db.query("SELECT 1 FROM vault_rate_limits WHERE bucket = ?").get(`read:${writer.userId}`)).toBeNull();
+  });
+});
