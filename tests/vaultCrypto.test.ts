@@ -147,6 +147,8 @@ describe("grants (D213, T181)", () => {
     expect(() => openValue(requireEnvGrant(access, vault.envs.staging!, "read"), row)).toThrow("Vault grant refused");
     // Prod is protected: without a session window no grant is minted at all (D226).
     expect(() => requireEnvGrant(access, vault.envs.prod!, "read")).toThrow("protected");
+    // Writing needs no window (2026-10-06 operator): the write grant is minted.
+    expect(requireEnvGrant(access, vault.envs.prod!, "write").envId).toBe(vault.envs.prod!);
     expect(() => openValue({ ...grant }, row)).toThrow("Vault grant refused");
     // Sealing needs write.
     db.query("UPDATE users SET role = 'viewer' WHERE id = ?").run(owner.userId);
