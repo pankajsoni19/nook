@@ -6,9 +6,11 @@ import { db } from "../db";
 import { parseJson, uuid } from "../validation";
 import { AGENT_BOUNDS, AGENT_ROLE_OPTIONS, DEFAULT_MODEL, SERVER_AUTH_KINDS, SERVER_AVAILABILITIES, TOOL_POLICIES } from "../../shared/agents";
 import { createAgent, deleteAgent, agentDetail, listUsableAgents, manageableAgent, updateAgent, usableAgent } from "./agentsService";
-import { chatDetail, createChat, deleteChat, listChats, messageOf, updateChat } from "./chats";
+import { chatDetail, createChat, deleteChat, forkChat, listChats, listSharedChats, messageOf, readableChat, updateChat } from "./chats";
+import { publicLinkFor, publicLinksOn, publicLinkState, revokePublicLink, roleMayPublish, upsertPublicLink } from "./publicShares";
+import { readShareAccess, writeShareAccess, type ShareKind } from "./sharing";
 import { createProvider, deleteProvider, listProviders, providerModels, providerRow, providerSummary, testProvider, updateProvider } from "./providers";
-import { activeRunForChat, cancelChatRuns, cancelRun, confirmRun, dailyUsage, pendingConfirmationFor, runOwnedBy, runSnapshot, startChatRun } from "./runs";
+import { activeRunForChat, cancelChatRuns, cancelRun, confirmRun, dailyUsage, pendingConfirmationFor, runReadableBy, runSnapshot, startChatRun } from "./runs";
 import { readAgentSettings, roleMayChat, roleMayCreate, writeAgentSettings } from "./settings";
 import { AgentError, adminRecoveryAllowed, agentsStatus, recheckAgentsStatus, requireAgentsEnabled } from "./status";
 import { declaredStdioServers, stdioEnabled } from "./stdio";
@@ -108,6 +110,16 @@ const messageSchema = z.object({
   parentId: uuid.nullable().optional()
 }).strict();
 const emptySchema = z.object({}).strict();
+// Wave 43 (AC-D): the Access sheet's body (src/access/accessApi.ts), Continue as a copy, and the public link.
+const sharePrincipal = z.object({ id: uuid, level: z.enum(["view", "manage", "comment", "edit"]) }).strict();
+const shareAccessSchema = z.object({
+  audience: z.enum(["private", "selected", "all_users", "inherit"]),
+  audienceLevel: z.enum(["view", "comment", "edit", "manage"]).optional(),
+  people: z.array(sharePrincipal).max(100).default([]),
+  groups: z.array(sharePrincipal).max(20).default([])
+}).strict();
+const forkSchema = z.object({ messageId: uuid }).strict();
+const publicLinkSchema = z.object({ includeToolResults: z.boolean().default(false), newLink: z.boolean().optional() }).strict();
 
 /** Ids in the path: anything that is not a UUID is the same 404 as a missing item. */
 function id(c: Context<AppEnv>, name: string) {
@@ -192,7 +204,9 @@ export function registerAgentRoutes(app: Hono<AppEnv>) {
     return c.json({
       enabled: status.enabled, reason: role === "admin" ? status.reason : null, canChat: status.enabled && roleMayChat(role), canCreate: status.enabled && roleMayCreate(role), defaultModel: DEFAULT_MODEL,
       // AC-C: whether the Audit log link shows (admins, and people with `agents:run` keys or runs).
-      auditVisible: status.enabled && auditVisibleTo({ userId: c.get("user").id, role })
+      auditVisible: status.enabled && auditVisibleTo({ userId: c.get("user").id, role }),
+      // AC-D (AC-O1): whether this person may create public chat links now (the policy on, member and above).
+      publicChatLinks: status.enabled && roleMayPublish(role) && publicLinksOn()
     });
   });
 
@@ -309,17 +323,56 @@ export function registerAgentRoutes(app: Hono<AppEnv>) {
   // --- Agents (plan §5.1): own agents in this slice ---
   app.get("/api/agents", handle(chatter((c) => ({ agents: listUsableAgents(c.get("user").id) }))));
   app.post("/api/agents", handle(async (c) => c.json({ agent: createAgent(actorOf(c), await parseJson(c.req.raw, agentCreateSchema)) }, 201)));
-  app.get("/api/agents/:agentId", handle(chatter((c) => ({ agent: agentDetail(manageableAgent(id(c, "agentId"), c.get("user").id), c.get("user").id) }))));
+  app.get("/api/agents/:agentId", handle(chatter((c) => ({ agent: agentDetail(usableAgent(id(c, "agentId"), c.get("user").id), c.get("user").id) }))));
   app.patch("/api/agents/:agentId", handle(async (c) => ({ agent: updateAgent(actorOf(c), id(c, "agentId"), await parseJson(c.req.raw, agentPatchSchema)) })));
   app.delete("/api/agents/:agentId", handle((c) => deleteAgent(actorOf(c), id(c, "agentId"))));
 
+  // --- Sharing (AC-D, plan §6.2, D356, D361): the Access sheet for agents (owner and managers) and chats (owner) ---
+  const shareRoutes = (kind: ShareKind, path: string, param: string) => {
+    app.get(path, handle(chatter((c) => {
+      const access = readShareAccess(kind, id(c, param), c.get("user").id);
+      c.header("ETag", access.etag);
+      return access;
+    })));
+    app.put(path, handle(chatter(async (c) => {
+      const itemId = id(c, param);
+      const body = await parseJson(c.req.raw, shareAccessSchema);
+      const access = writeShareAccess(kind, itemId, { userId: c.get("user").id }, body, c.req.header("If-Match"));
+      c.header("ETag", access.etag);
+      return access;
+    })));
+  };
+  shareRoutes("agent", "/api/agents/:agentId/access", "agentId");
+  shareRoutes("chat", "/api/chats/:chatId/access", "chatId");
+
   // --- Chats (plan §6.1) ---
-  app.get("/api/chats", handle(chatter((c) => ({ chats: listChats(c.get("user").id, { q: c.req.query("q")?.slice(0, 200) }) }))));
+  app.get("/api/chats", handle(chatter((c) => {
+    const q = c.req.query("q")?.slice(0, 200);
+    // AC-D: `?shared=1` lists the chats others shared with the caller ("Shared with me").
+    return c.req.query("shared") === "1" ? { chats: listSharedChats(c.get("user").id, { q }) } : { chats: listChats(c.get("user").id, { q }) };
+  })));
   app.post("/api/chats", handle(chatter(async (c) => c.json({ chat: createChat(c.get("user").id, (await parseJson(c.req.raw, chatCreateSchema)).agentId) }, 201))));
   app.get("/api/chats/:chatId", handle(chatter((c) => {
     const detail = chatDetail(id(c, "chatId"), c.get("user").id);
-    return { ...detail, pendingConfirmation: pendingConfirmationFor(detail.activeRunId) };
+    const owner = detail.chat.yourLevel === "owner";
+    // Recipients read the transcript (tool calls and results included); the confirmation card and the public link are the owner's.
+    return { ...detail, pendingConfirmation: owner ? pendingConfirmationFor(detail.activeRunId) : null, ...(owner ? { publicLink: publicLinkState(detail.chat.id) } : {}) };
   })));
+  // Continue as a copy (D361): the caller's own chat holding the branch up to `messageId`.
+  app.post("/api/chats/:chatId/fork", handle(chatter(async (c) => {
+    const chatId = id(c, "chatId");
+    const body = await parseJson(c.req.raw, forkSchema);
+    return c.json({ chat: forkChat(c.get("user").id, chatId, body.messageId.toLowerCase()) }, 201);
+  })));
+  // Public link (AC-O1, D362): owner only, behind `public_chat_links`; every route 404 with the policy off.
+  app.get("/api/chats/:chatId/public", handle(chatter((c) => publicLinkFor(actorOf(c), id(c, "chatId")))));
+  app.put("/api/chats/:chatId/public", handle(chatter(async (c) => {
+    const chatId = id(c, "chatId");
+    if (!publicLinksOn()) throw new AgentError(404, "NOT_FOUND", "Not found");
+    const body = await parseJson(c.req.raw, publicLinkSchema);
+    return upsertPublicLink(actorOf(c), chatId, body);
+  })));
+  app.delete("/api/chats/:chatId/public", handle(chatter((c) => revokePublicLink(actorOf(c), id(c, "chatId")))));
   app.patch("/api/chats/:chatId", handle(chatter(async (c) => ({ chat: updateChat(c.get("user").id, id(c, "chatId"), await parseJson(c.req.raw, chatPatchSchema)) }))));
   app.delete("/api/chats/:chatId", handle(chatter((c) => {
     const chatId = id(c, "chatId");
@@ -344,7 +397,7 @@ export function registerAgentRoutes(app: Hono<AppEnv>) {
   })));
   app.get("/api/chats/:chatId/run", handle(chatter((c) => {
     const chatId = id(c, "chatId");
-    chatDetail(chatId, c.get("user").id);
+    readableChat(chatId, c.get("user").id);
     const live = activeRunForChat(chatId);
     return { run: live ? { id: live.runId, messageId: live.messageId } : null };
   })));
@@ -365,7 +418,8 @@ export function registerAgentRoutes(app: Hono<AppEnv>) {
       requireAgentsEnabled();
       if (!roleMayChat(c.get("user").role)) throw new AgentError(403, "ROLE_REFUSED", "Your role cannot chat with agents");
       const runId = id(c, "runId");
-      const run = runOwnedBy(runId, c.get("user").id);
+      // AC-D: the chat's owner, or someone it is shared with (read-only, re-checked per request, T325).
+      const run = runReadableBy(runId, c.get("user").id);
       const afterRaw = c.req.query("after") ?? "0";
       const after = /^\d{1,9}$/.test(afterRaw) ? Number(afterRaw) : 0;
       const channel = channelOf(runId);
@@ -386,8 +440,8 @@ export function registerAgentRoutes(app: Hono<AppEnv>) {
       const follow = async (stream: Parameters<Parameters<typeof streamSSE>[1]>[0]) => {
         const send = (event: SequencedEvent) => stream.write(sseFrame(event));
         const snapshot = async () => {
-          const fresh = runOwnedBy(runId, userId);
-          await stream.write(`id: 0\nevent: snapshot\ndata: ${JSON.stringify(runSnapshot(fresh))}\n\n`);
+          const fresh = runReadableBy(runId, userId);
+          await stream.write(`id: 0\nevent: snapshot\ndata: ${JSON.stringify(runSnapshot(fresh, { owner: fresh.owner }))}\n\n`);
         };
         if (!channel) {
           await snapshot();

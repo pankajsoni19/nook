@@ -25,6 +25,7 @@ import { readableDocumentPredicate } from "./documentAccess";
 import { whiteboardDisplayName } from "../shared/whiteboardScene";
 import { editableCalendarPredicate, readableCalendarPredicate } from "./calendar/access";
 import { environmentOfVault, isVaultNarrowing, validateVaultGrants, vaultEffectiveGrants, vaultGrantInactive, vaultGrantInput, vaultGrantNames, VaultKeyError, type VaultGrantInput } from "./vault/keys";
+import { shareReadableSql } from "./agents/sharing";
 
 /**
  * Nook keys (docs/plan/research/2026-09-28-access-management-api-keys.md §C.4, D261–D283): one
@@ -416,9 +417,9 @@ export function resourceReachable(userId: string, kind: ResourceKind, id: string
     case "task_view": return !write && ownedView(userId, id);
     // Routines are private to their owner.
     case "routine": return Boolean(db.query("SELECT 1 FROM routines WHERE id = ? AND owner_id = ?").get(id, userId));
-    // Wave 42 (AC-C, D364): an agent the holder can view now. Agents are owner-private until AC-D
-    // shares them, so that is their own live agent (not in the Bin); server/agents/agentsService.ts usableAgent.
-    case "agent": return Boolean(db.query("SELECT 1 FROM agents WHERE id = ? AND owner_id = ? AND deleted_at IS NULL").get(id, userId));
+    // Wave 42 (AC-C, D364): an agent the holder can view now; Wave 43 (AC-D): their own or one shared
+    // with them (server/agents/sharing.ts), live, not in the Bin. Re-checked on every run and step.
+    case "agent": return Boolean(db.query(`SELECT 1 FROM agents a WHERE a.id = $id AND ${shareReadableSql("agent", "a")}`).get({ id, userId }));
     default: return false;
   }
 }
@@ -438,7 +439,7 @@ function resourceName(userId: string, kind: ResourceKind, id: string): string | 
     case "document": return (db.query(`SELECT d.name FROM documents d WHERE d.id = $id AND d.purpose = 'file' AND ${readableDocumentPredicate}`).get({ id, userId }) as { name: string } | null)?.name ?? null;
     case "task_view": return (db.query(`SELECT v.name FROM task_views v JOIN users u ON u.id = v.owner_id WHERE v.id = $id AND ${readableViewPredicate}`).get({ id, userId }) as { name: string } | null)?.name ?? null;
     case "routine": return (db.query("SELECT name FROM routines WHERE id = ? AND owner_id = ?").get(id, userId) as { name: string } | null)?.name ?? null;
-    case "agent": return (db.query("SELECT name FROM agents WHERE id = ? AND owner_id = ? AND deleted_at IS NULL").get(id, userId) as { name: string } | null)?.name ?? null;
+    case "agent": return (db.query(`SELECT a.name FROM agents a WHERE a.id = $id AND ${shareReadableSql("agent", "a")}`).get({ id, userId }) as { name: string } | null)?.name ?? null;
     default: return null;
   }
 }

@@ -7,13 +7,13 @@ import { readAgentSettings } from "./settings";
 /**
  * Chats and agents in the Bin (plan §6.1, D363), registered with server/bin.ts as providers. The
  * owner alone lists, restores, and purges them. Purging a chat deletes its messages and runs by
- * cascade (and its public snapshot, once AC-D adds them); purging an agent deletes its tool rows
+ * cascade, its public snapshot, and its access rows; purging an agent deletes its tool rows
  * and access rows, and its chats stay (they are the owner's, readable, with "agent in the Bin").
  * Everything lives in SQLite, so a purge is one transaction.
  */
 
 const providedDefaults = { size_bytes: null, board_id: null, board_name: null, attachment: false, attachment_of: null, attachment_kind: null } as const;
-type Binned = { id: string; owner_id: string; title: string; deleted_at: string | null; purge_after: string | null; purge_started_at: string | null };
+type Binned = { id: string; owner_id: string; title: string; deleted_at: string | null; purge_after: string | null; purge_started_at: string | null; visibility: "private" | "selected" | "all_users" };
 
 function purgeNow(table: "chats" | "agents", id: string, options: { reason: PurgeReason; actorId: string | null; dueBy?: string }): PurgeOutcome {
   return db.transaction((): PurgeOutcome => {
@@ -51,7 +51,7 @@ export async function sweepTable(table: "chats" | "agents", cutoff: string): Pro
 }
 
 function provider(table: "chats" | "agents", type: "chat" | "agent", folderName: string, nameColumn: "title" | "name") {
-  const select = `SELECT id, owner_id, ${nameColumn} AS title, deleted_at, purge_after, purge_started_at FROM ${table}`;
+  const select = `SELECT id, owner_id, ${nameColumn} AS title, deleted_at, purge_after, purge_started_at, visibility FROM ${table}`;
   registerBinProvider(type, {
     list(userId) {
       const rows = db.query(`${select} WHERE owner_id = ? AND deleted_at IS NOT NULL ORDER BY deleted_at DESC, id LIMIT 500`).all(userId) as Binned[];
@@ -72,7 +72,8 @@ function provider(table: "chats" | "agents", type: "chat" | "agent", folderName:
         const restored = db.query(`UPDATE ${table} SET deleted_at = NULL, deleted_by = NULL, purge_after = NULL, updated_at = ? WHERE id = ? AND deleted_at IS NOT NULL AND purge_started_at IS NULL`).run(now(), id);
         if (restored.changes !== 1) return { status: "purging" };
         audit(userId, null, type === "chat" ? "agents.chat.restore" : "agents.agent.restore", { id });
-        return { status: "restored", folderId: id, folderName, visibility: "private" };
+        // Wave 43 (AC-D): sharing is kept while binned (recipients reach nothing then) and applies again now.
+        return { status: "restored", folderId: id, folderName, visibility: row.visibility };
       });
     },
     purge(id, userId) {

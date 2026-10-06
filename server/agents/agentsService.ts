@@ -2,13 +2,16 @@ import { audit, db, now } from "../db";
 import { purgeAfterFrom } from "../bin";
 import { AGENT_BOUNDS, type AgentDetail, type AgentSummary, type AgentToolRef } from "../../shared/agents";
 import { readAgentSettings, roleMayCreate } from "./settings";
+import { shareLevel, shareReadableSql, type ShareLevel } from "./sharing";
 import { AgentError } from "./status";
 import { agentToolRefs, linkStateOf, setAgentTools, trifectaOf } from "./tools";
 
 /**
- * Agents (plan §5.1, D355): owner-private in AC-A (sharing through `agent_access` is AC-D). Create
- * needs the `create_roles` policy; the owner reads, edits (CAS on `revision`), and moves to the Bin.
- * Anyone who may chat lists the agents they can use: in this slice, their own.
+ * Agents (plan §5.1, D355, D356). Create needs the `create_roles` policy. Wave 43 (AC-D) shares
+ * them through `agent_access` (server/agents/sharing.ts): viewers chat with an agent and see its
+ * name, description, model, and starters, never its system prompt or its tools configuration;
+ * managers edit it (CAS on `revision`); only the owner moves it to the Bin. Anyone who may chat
+ * lists the agents they can use: their own and those shared with them.
  */
 
 export type AgentRow = {
@@ -27,30 +30,58 @@ const starters = (json: string): string[] => {
   }
 };
 
-export const agentSummary = (row: AgentRow, userId: string): AgentSummary => {
+const ownerNameQuery = db.query("SELECT display_name FROM users WHERE id = ?");
+
+export const agentSummary = (row: AgentRow, userId: string, level: ShareLevel = shareLevel("agent", row, userId)): AgentSummary => {
   const tools = agentToolRefs(row.id);
   const link = linkStateOf(row.id, userId).state;
+  // D356: below manage, no tools configuration leaves the server; the trifecta warning and "uses Nook" do.
+  const configVisible = level === "owner" || level === "manage";
   return {
     id: row.id, ownerId: row.owner_id, name: row.name, description: row.description, icon: row.icon, color: row.color,
     providerId: row.provider_id, model: row.model, maxSteps: row.max_steps, temperature: row.temperature, maxOutputTokens: row.max_output_tokens,
     starters: starters(row.starters_json), revision: row.revision, createdAt: row.created_at, updatedAt: row.updated_at, isOwner: row.owner_id === userId,
-    tools, nookDirectWrites: row.nook_direct_writes === 1, linked: link === "live", linkState: link, trifecta: trifectaOf(tools)
+    tools: configVisible ? tools : [], nookDirectWrites: configVisible && row.nook_direct_writes === 1, linked: link === "live", linkState: link, trifecta: trifectaOf(tools),
+    yourLevel: level === "owner" ? "owner" : level === "manage" ? "manage" : "view",
+    ownerName: (ownerNameQuery.get(row.owner_id) as { display_name: string } | null)?.display_name ?? "Former member",
+    usesNook: tools.some((tool) => tool.source === "nook")
   };
 };
-export const agentDetail = (row: AgentRow, userId: string): AgentDetail => ({ ...agentSummary(row, userId), systemPrompt: row.system_prompt });
+export const agentDetail = (row: AgentRow, userId: string): AgentDetail => {
+  const level = shareLevel("agent", row, userId);
+  return { ...agentSummary(row, userId, level), systemPrompt: level === "owner" || level === "manage" ? row.system_prompt : null };
+};
 
-/** A live agent the person may use (AC-A: their own), or the 404. */
+const liveAgent = (id: string) => db.query("SELECT * FROM agents WHERE id = ? AND deleted_at IS NULL").get(id) as AgentRow | null;
+
+/** A live agent the person may chat with (their own, or shared with them at view or above), or the 404. */
 export function usableAgent(id: string, userId: string): AgentRow {
-  const row = db.query("SELECT * FROM agents WHERE id = ? AND deleted_at IS NULL").get(id) as AgentRow | null;
-  if (!row || row.owner_id !== userId) throw new AgentError(404, "NOT_FOUND", "Not found");
+  const row = liveAgent(id);
+  if (!row || shareLevel("agent", row, userId) === "none") throw new AgentError(404, "NOT_FOUND", "Not found");
   return row;
 }
 
-/** A live agent the person may edit (AC-A: the owner), or the 404. */
-export const manageableAgent = usableAgent;
+/** A live agent the person may edit (the owner or a manager); a viewer gets 403, everyone else the 404. */
+export function manageableAgent(id: string, userId: string): AgentRow {
+  const row = liveAgent(id);
+  const level = row ? shareLevel("agent", row, userId) : "none";
+  if (!row || level === "none") throw new AgentError(404, "NOT_FOUND", "Not found");
+  if (level === "view") throw new AgentError(403, "READ_ONLY", "You can chat with this agent; only its owner and managers edit it");
+  return row;
+}
 
+/** A live agent the person owns (delete, D356: managers never delete); others who can see it get 403. */
+export function ownedAgent(id: string, userId: string): AgentRow {
+  const row = liveAgent(id);
+  const level = row ? shareLevel("agent", row, userId) : "none";
+  if (!row || level === "none") throw new AgentError(404, "NOT_FOUND", "Not found");
+  if (level !== "owner") throw new AgentError(403, "OWNER_ONLY", "Only the agent's owner can move it to the Bin");
+  return row;
+}
+
+/** The agents the person can chat with: their own first, then those shared with them, newest first. */
 export function listUsableAgents(userId: string): AgentSummary[] {
-  return (db.query("SELECT * FROM agents WHERE owner_id = ? AND deleted_at IS NULL ORDER BY updated_at DESC").all(userId) as AgentRow[]).map((row) => agentSummary(row, userId));
+  return (db.query(`SELECT a.* FROM agents a WHERE ${shareReadableSql("agent", "a")} ORDER BY (a.owner_id = $userId) DESC, a.updated_at DESC LIMIT 500`).all({ userId }) as AgentRow[]).map((row) => agentSummary(row, userId));
 }
 
 export type AgentInput = {
@@ -105,14 +136,14 @@ export function updateAgent(actor: { userId: string; role: string }, id: string,
       input.nookDirectWrites !== undefined ? (input.nookDirectWrites ? 1 : 0) : row.nook_direct_writes, now(), id
     );
     if (input.tools) setAgentTools(id, actor.role, input.tools);
-    audit(actor.userId, null, "agents.agent.update", { agentId: id, ...(input.tools ? { tools: input.tools.length } : {}) });
+    audit(actor.userId, null, "agents.agent.update", { agentId: id, ...(input.tools ? { tools: input.tools.length } : {}), ...(row.owner_id !== actor.userId ? { asManager: true } : {}) });
     return agentDetail(usableAgent(id, actor.userId), actor.userId);
   })();
 }
 
 /** Moves the agent to the Bin (D363 parity). Its chats stay, readable; sending needs a live agent. */
 export function deleteAgent(actor: { userId: string }, id: string) {
-  manageableAgent(id, actor.userId);
+  ownedAgent(id, actor.userId);
   const timestamp = now();
   db.query("UPDATE agents SET deleted_at = ?, deleted_by = ?, purge_after = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL").run(timestamp, actor.userId, purgeAfterFrom(new Date(timestamp)), timestamp, id);
   audit(actor.userId, null, "agents.agent.delete", { agentId: id });

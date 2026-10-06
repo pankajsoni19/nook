@@ -18,6 +18,7 @@ import { readAgentSettings, roleMayChat } from "./settings";
 import { AgentError, agentsStatus } from "./status";
 import { identityOf, liveToolFailure, liveToolFor, resolveTools, type ExternalToolOptions, type ResolvedTool } from "./tools";
 import { sessionFor } from "./toolServers";
+import { shareLevel, shareReadableSql } from "./sharing";
 
 /**
  * API and MCP runs (Wave 42 "AC-C", plan §7.1, §7.2, D364, D365): the agent loop for a general
@@ -88,9 +89,9 @@ export function effectiveRight(keyId: string, surface: "mcp" | "rest", agentId: 
   if (!hasScope(actor.scopes, "agents:run") || !reachCovers(keyReach(actor, "agents:run"), [{ kind: "agent", id: agentId }])) return null;
   const owner = db.query("SELECT role, display_name FROM users WHERE id = ? AND disabled_at IS NULL").get(actor.userId) as { role: string; display_name: string } | null;
   if (!owner || !roleMayChat(owner.role)) return null;
-  // The owner can view the agent now: until AC-D shares agents, their own live agent (agentsService.usableAgent).
-  const agent = db.query("SELECT * FROM agents WHERE id = ? AND owner_id = ? AND deleted_at IS NULL").get(agentId, actor.userId) as AgentRow | null;
-  if (!agent) return null;
+  // The key's owner can view the agent now (Wave 43, AC-D): their own, or one shared with them, live (re-checked every call and step).
+  const agent = db.query("SELECT * FROM agents WHERE id = ? AND deleted_at IS NULL").get(agentId) as AgentRow | null;
+  if (!agent || shareLevel("agent", agent, actor.userId) === "none") return null;
   return { key: actor, agent, owner: { role: owner.role, displayName: owner.display_name } };
 }
 
@@ -102,7 +103,7 @@ export function runnableAgents(keyId: string, surface: "mcp" | "rest"): Array<{ 
   const owner = db.query("SELECT role FROM users WHERE id = ? AND disabled_at IS NULL").get(actor.userId) as { role: string } | null;
   if (!owner || !roleMayChat(owner.role)) return [];
   const reach = keyReach(actor, "agents:run");
-  const agents = db.query("SELECT * FROM agents WHERE owner_id = ? AND deleted_at IS NULL ORDER BY name COLLATE NOCASE LIMIT 200").all(actor.userId) as AgentRow[];
+  const agents = db.query(`SELECT a.* FROM agents a WHERE ${shareReadableSql("agent", "a")} ORDER BY a.name COLLATE NOCASE LIMIT 200`).all({ userId: actor.userId }) as AgentRow[];
   return agents.filter((agent) => reachCovers(reach, [{ kind: "agent", id: agent.id }])).map((agent) => ({
     agent, tools: resolveTools(agent, { userId: actor.userId, role: owner.role }, { nookKey: actor, surface }).map((tool) => tool.kind === "nook" ? `nook/${tool.toolName}` : `${tool.server}/${tool.toolName}`)
   }));

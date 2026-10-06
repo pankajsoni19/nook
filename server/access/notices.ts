@@ -2,6 +2,7 @@ import { db, now } from "../db";
 import { presentItem } from "./effective";
 import { ACCESS_KINDS, type AccessKind, type Level } from "./levels";
 import { vaultTitleFor } from "../vault/access";
+import { sharedTitleFor } from "../agents/sharing";
 
 const LEVEL_WORDS: Record<Level, string> = { view: "Can view", comment: "Can comment", edit: "Can edit", manage: "Manager" };
 
@@ -27,14 +28,17 @@ export type AccessNoticeKind = "share_removed" | "share_lowered" | "access_reset
   // Wave 27 (Vault C): one of your vault keys hit its per-key rate limit (at most one notice a day per key).
   | "key_vault_limited"
   // Wave 27 fixes (V-O6): one of your vault keys read more than 500 values today (`count`: how many), once a day per key.
-  | "key_vault_volume";
+  | "key_vault_volume"
+  // Wave 43 (AC-D): an agent or a chat was shared with you, by name or through a group. The line names
+  // it only while you can open it (the agent's name or the chat's title), never a prompt or a message.
+  | "agent_shared" | "chat_shared";
 
 export type AccessNotice = {
   userId: string;
   kind: AccessNoticeKind;
   actorId: string | null;
   targetUserId?: string | null;
-  resource?: { kind: AccessKind | "vault"; id: string } | null;
+  resource?: { kind: AccessKind | "vault" | "agent" | "chat"; id: string } | null;
   groupId?: string | null;
   keyId?: string | null;
   count?: number | null;
@@ -81,9 +85,17 @@ function line(row: NoticeRow, recipientId: string) {
       return `${actor}'s change in Team took ${people} off ${title ? `the vault “${title}”` : "a vault"}. Its data key is being rotated; rotate the real credentials they could read where they are issued.`;
     }
   }
+  if ((row.resource_kind === "agent" || row.resource_kind === "chat") && row.resource_id) {
+    const title = sharedTitleFor(row.resource_kind, row.resource_id, recipientId);
+    const noun = row.resource_kind === "agent" ? "agent" : "chat";
+    if (row.kind === "agent_shared" || row.kind === "chat_shared") return title ? `${row.actor_name ?? "Someone"} shared the ${noun} “${title}” with you` : `A${noun === "agent" ? "n" : ""} ${noun} shared with you is no longer available to you`;
+  }
   const target = row.target_name ?? "someone";
   const item = isAccessKind(row.resource_kind) && row.resource_id ? presentItem(row.resource_kind, row.resource_id, recipientId) : null;
-  const itemText = item ? (item.titleHidden ? `a ${item.title.split(" owned by ")[0]!.toLowerCase()}` : `“${item.title}”`) : "an item that is gone";
+  const sharedKind = row.resource_kind === "agent" || row.resource_kind === "chat" ? row.resource_kind : null;
+  const sharedTitle = sharedKind && row.resource_id ? sharedTitleFor(sharedKind, row.resource_id, recipientId) : null;
+  const itemText = sharedKind ? (sharedTitle ? `the ${sharedKind} “${sharedTitle}”` : sharedKind === "agent" ? "an agent" : "a chat")
+    : item ? (item.titleHidden ? `a ${item.title.split(" owned by ")[0]!.toLowerCase()}` : `“${item.title}”`) : "an item that is gone";
   // A group that is gone gets its own sentence, not "the group a group…" (C15a).
   const group = row.group_name ? `the group “${row.group_name}”` : "a group that has since been deleted";
   switch (row.kind) {
@@ -168,7 +180,11 @@ export function listAccessNotices(userId: string, options: { unread: boolean; li
     .all({ userId, unread: options.unread ? 1 : 0, limit: options.limit }) as NoticeRow[];
   return rows.map((row) => ({
     id: row.id, title: line(row, userId), href: row.resource_kind === "vault" && row.resource_id && (row.kind === "vault_shared" || row.kind === "vault_key_rotated") && vaultTitleFor(userId, row.resource_id)
-      ? `/vault/${row.resource_id}` : ACCESS_NOTICE_HREF,
+      ? `/vault/${row.resource_id}`
+      // Wave 43: an agent opens a new chat with it; a chat opens read-only, while the recipient can still open it.
+      : row.kind === "agent_shared" && row.resource_id && sharedTitleFor("agent", row.resource_id, userId) !== null ? `/chat/new?agent=${row.resource_id}`
+      : row.kind === "chat_shared" && row.resource_id && sharedTitleFor("chat", row.resource_id, userId) !== null ? `/chat/${row.resource_id}`
+      : ACCESS_NOTICE_HREF,
     late: false, read: row.read_at !== null, createdAt: row.created_at, occurrenceStart: null
   }));
 }

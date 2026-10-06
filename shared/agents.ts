@@ -200,8 +200,16 @@ export type AgentSummary = {
   tools: AgentToolRef[]; nookDirectWrites: boolean; linked: boolean; trifecta: boolean;
   /** Wave 41 QA Q4: `linked` is true only for a live key; a link whose key died says so, to link another. */
   linkState: LinkState;
+  /**
+   * Wave 43 (AC-D, D356): the caller's level (owner, manage, or view) and the owner's name. Below
+   * `manage` the tools configuration is not sent (`tools` empty, `nookDirectWrites` false); `usesNook`
+   * still says whether Nook's tools are picked, so a viewer knows to link their own key.
+   */
+  yourLevel: AgentLevel; ownerName: string; usesNook: boolean;
 };
-export type AgentDetail = AgentSummary & { systemPrompt: string };
+export type AgentLevel = "owner" | "manage" | "view";
+/** The system prompt is null below `manage` (D356: viewers chat, they never read the prompt). */
+export type AgentDetail = AgentSummary & { systemPrompt: string | null };
 
 /** The admin's view of a tool server (plan §4.1); the credential is write-only (`hasSecret`, `hint`). */
 export type CatalogTool = { name: string; title: string | null; description: string; inputSchema: Record<string, unknown>; readOnly: boolean; openWorld: boolean; destructive: boolean; policy: ToolPolicy };
@@ -227,6 +235,12 @@ export type NookLink = { keyId: string; name: string; prefix: string; state: str
 export type ChatSummary = {
   id: string; agentId: string | null; agentName: string | null; agentIcon: string | null; title: string; pinned: boolean; activeLeafId: string | null;
   revision: number; createdAt: string; updatedAt: string; running: boolean;
+  /** Wave 43 (AC-D): `view` for a chat shared with the caller (read-only), with its owner's name. */
+  yourLevel: "owner" | "view"; ownerName: string;
+  /** "Copied from <owner>'s chat" (Continue as a copy, D361): the name as it was then, or null. */
+  copiedFrom: string | null;
+  /** Who can open it besides the owner (the owner sees it; recipients get null). */
+  audience: "private" | "selected" | "all_users" | null;
 };
 export type ChatMessage = {
   id: string; parentId: string | null; role: "user" | "assistant" | "tool"; content: string; status: MessageStatus; errorCode: string | null;
@@ -235,6 +249,14 @@ export type ChatMessage = {
   toolCalls: ToolCallView[];
 };
 export type ChatDetail = { chat: ChatSummary; messages: ChatMessage[]; activeRunId: string | null; pendingConfirmation: PendingConfirmation | null };
+
+/** A chat's public link as its owner sees it (Wave 43, AC-O1): never the token, which is shown once. */
+export type PublicLinkState = { createdAt: string; updatedAt: string; includeToolResults: boolean };
+/** The frozen snapshot a public link serves (`GET /api/public/chat-shares/:token`): names only, no ids, no email. */
+export type PublicChatSnapshot = {
+  version: 1; title: string; agentName: string | null; ownerName: string; snapshotAt: string; includeToolResults: boolean; truncated: boolean;
+  messages: Array<{ role: "user" | "assistant"; content: string; createdAt: string; toolCalls: Array<{ tool: string; server: string; ok: boolean | null; args?: string; result?: string | null }> }>;
+};
 
 /** A name as it may appear inside a marker: only `[A-Za-z0-9_.-]`, at most 128 characters. */
 export const markerName = (name: string) => name.replace(/[^A-Za-z0-9_.-]/g, "_").slice(0, 128) || "_";
