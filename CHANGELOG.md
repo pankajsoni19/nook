@@ -2,6 +2,15 @@
 
 Release notes for Nook, newest first. Upgrade steps for each release are in [docs/OPERATIONS.md](docs/OPERATIONS.md#upgrades).
 
+## v0.28.0 — 2026-10-06
+
+- **Run agents from scripts and CI**: create an API key in Settings → API keys with **Chat → Run agents** (on all your agents or chosen ones) and call `POST /api/v1/agents/<id>/runs` with `{"input": "…"}` or a short `messages` conversation; add `"stream": true` for server-sent events. `GET /api/v1/agents` lists what the key may run (never the system prompt). MCP clients get `run_agent` and `list_agents`. These runs never create chats.
+- **Only safe tools run unattended**: API runs use only tools set to run on their own; anything that would ask first is never offered, and Nook writes stay Inbox proposals.
+- **Audit log** (Chat → Audit log): every API and MCP run with its input, steps, tool calls and results, output, tokens and timings, filterable by key, agent, status and date (filters live in the address), exportable as JSON. Admins see metadata only, never content. Kept 30 days by default (`AGENT_AUDIT_RETENTION_DAYS`, 7–365); records cannot be edited.
+- **Limits per key**: 2 runs at a time, 20 a minute, 500 a day, plus your own and the instance's run slots and token budgets. A revoked key stops a run within about 2 seconds, even mid-answer; cancelled and stopped runs are charged for what they used.
+- **No agent loops**: `run_agent` is refused inside a run, tool servers may not hold Nook keys, keys linked to an agent cannot run agents, and Nook marks outbound tool calls so a server that forwards the mark is refused calling back.
+- Migration 040 runs on the first boot, so back up first. New optional setting: `AGENT_AUDIT_RETENTION_DAYS`. See [docs/OPERATIONS.md](docs/OPERATIONS.md#upgrades).
+
 ## v0.27.0 — 2026-10-06
 
 - **Tools for agents**: an admin adds MCP tool servers in **Settings → AI → Tool servers** (a Streamable HTTP URL and an optional credential stored encrypted), syncs their tools, and sets each tool's policy: runs on its own, asks first, or off. Anyone allowed picks tools for their agents in **Settings → Agents**.

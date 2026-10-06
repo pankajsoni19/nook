@@ -8,7 +8,7 @@ Internal identifiers keep the original `mynotes` prefix for compatibility with e
 
 1. Clone the repository and copy `.env.example` to `.env` if you need to override the defaults.
 2. Ensure `/srv/mynotes` exists and is writable by UID 1000, or set `MYNOTES_DATA_DIR` to another host directory.
-3. Run `APP_VERSION=0.27.0 GIT_SHA=$(git rev-parse --short HEAD) docker compose up -d --build`.
+3. Run `APP_VERSION=0.28.0 GIT_SHA=$(git rev-parse --short HEAD) docker compose up -d --build`.
 4. Open `http://localhost:2026` and create the first account.
 
 ### Accounts
@@ -393,7 +393,7 @@ Compose passes these variables from `.env` (see `.env.example`). Invalid values 
 | `MAIL_TRANSPORT` | `resend` | `resend`, or `file` for development and tests only (refused when `NODE_ENV=production`). |
 | `MAIL_FILE_PATH` | empty | With `MAIL_TRANSPORT=file`: the absolute path of the JSON file messages are written to. |
 | `GOOGLE_OIDC_TEST_BASE_URL` | empty | Tests and local QA only: a fake Google issuer (`tests/support/fakeGoogle.ts`). Refused when `NODE_ENV=production`. |
-| `APP_VERSION` | `0.27.0` | Build metadata shown in Settings → About and reported by the MCP server. |
+| `APP_VERSION` | `0.28.0` | Build metadata shown in Settings → About and reported by the MCP server. |
 | `GIT_SHA` | `development` | Commit shown in Settings → About (first 40 characters). |
 
 Fixed limits that are not configurable: 3 uploads in progress per user on the server (the app sends 2 at a time), 30-day Bin retention, 1 MiB text previews, 20 searches per 10 seconds per user, and an hourly sweeper.
@@ -476,6 +476,8 @@ curl http://localhost:2026/api/health
 ```
 
 Every image carries immutable numbered migrations under `server/migrations`. They run transactionally and are recorded in SQLite's `schema_migrations` table before the HTTP server accepts requests. New schema changes are always added as a new migration; released migrations are never edited.
+
+**Upgrading to 0.28.0:** back up first with `./scripts/backup.sh --force`. Migration 040 (agent audit: the append-only triggers on the audit tables, a guarded retention table, persistent per-key run limits, and reader indexes) runs once on the first boot and can only be undone by restoring that backup. New optional setting `AGENT_AUDIT_RETENTION_DAYS` (default 30, 7–365; an admin's value in Settings → AI wins). `AGENT_MAX_CONCURRENT_RUNS` is now capped at 16, and plain (non-streaming) API runs may hold at most half of the REST and MCP request slots. See *Agent chat* for what a leaked `agents:run` key can do and how to revoke it. Pull, rebuild with `APP_VERSION=0.28.0`, and restart as above.
 
 **Upgrading to 0.27.0:** no migration. Chat gains tools: admins add MCP tool servers in Settings → AI → Tool servers, and every call to them goes through the same outbound guard as model providers (see *Agent chat*). Two new optional settings, `AGENT_MCP_STDIO` and `AGENT_MCP_STDIO_FILE`, are off by default; turning stdio on gives the declared programs full trust (they run as Nook's user and can read its keys and data), so prefer an HTTP bridge container. `@modelcontextprotocol/core` is now an explicit dependency. Pull, rebuild with `APP_VERSION=0.27.0`, and restart as above.
 
