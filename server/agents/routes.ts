@@ -4,14 +4,17 @@ import { z, ZodError } from "zod";
 import type { AppEnv } from "../auth";
 import { db } from "../db";
 import { parseJson, uuid } from "../validation";
-import { AGENT_BOUNDS, AGENT_ROLE_OPTIONS, DEFAULT_MODEL } from "../../shared/agents";
-import { createAgent, deleteAgent, agentDetail, listUsableAgents, manageableAgent, updateAgent } from "./agentsService";
+import { AGENT_BOUNDS, AGENT_ROLE_OPTIONS, DEFAULT_MODEL, SERVER_AUTH_KINDS, SERVER_AVAILABILITIES, TOOL_POLICIES } from "../../shared/agents";
+import { createAgent, deleteAgent, agentDetail, listUsableAgents, manageableAgent, updateAgent, usableAgent } from "./agentsService";
 import { chatDetail, createChat, deleteChat, listChats, messageOf, updateChat } from "./chats";
 import { createProvider, deleteProvider, listProviders, providerModels, providerRow, providerSummary, testProvider, updateProvider } from "./providers";
-import { activeRunForChat, cancelChatRuns, cancelRun, dailyUsage, runOwnedBy, runSnapshot, startChatRun } from "./runs";
+import { activeRunForChat, cancelChatRuns, cancelRun, confirmRun, dailyUsage, pendingConfirmationFor, runOwnedBy, runSnapshot, startChatRun } from "./runs";
 import { readAgentSettings, roleMayChat, roleMayCreate, writeAgentSettings } from "./settings";
 import { AgentError, adminRecoveryAllowed, agentsStatus, recheckAgentsStatus, requireAgentsEnabled } from "./status";
+import { declaredStdioServers, stdioEnabled } from "./stdio";
 import { channelOf, sseFrame, type SequencedEvent } from "./stream";
+import { catalogFor, currentLink, linkableKeys, setLink } from "./tools";
+import { createServer, deleteServer, listServers, serverRow, serverSummary, setPolicies, syncServer, updateServer } from "./toolServers";
 import { ProviderError } from "./loop";
 import "./bin";
 
@@ -57,6 +60,30 @@ const settingsSchema = z.object({
   expectedRevision: z.number().int().min(0)
 }).strict();
 const starters = z.array(z.string().trim().min(1).max(AGENT_BOUNDS.starterLength)).max(AGENT_BOUNDS.starters);
+// AC-B: tool servers (admin), the agent's picks, the link, and confirmations.
+const toolName = z.string().min(1).max(128);
+const serverCreateSchema = z.object({
+  name: line(AGENT_BOUNDS.serverName),
+  slug: z.string().trim().min(1).max(AGENT_BOUNDS.serverSlug).optional(),
+  url: z.string().trim().min(8).max(AGENT_BOUNDS.serverUrl).nullish(),
+  stdioId: z.string().trim().min(1).max(24).nullish(),
+  authKind: z.enum(SERVER_AUTH_KINDS).optional(),
+  authHeader: z.string().trim().min(1).max(64).nullish(),
+  secret: z.string().trim().max(4096).nullish(),
+  timeoutMs: z.number().int().min(AGENT_BOUNDS.toolTimeoutMs.min).max(AGENT_BOUNDS.toolTimeoutMs.max).optional(),
+  resultCapBytes: z.number().int().min(AGENT_BOUNDS.resultCapBytes.min).max(AGENT_BOUNDS.resultCapBytes.max).optional(),
+  availability: z.enum(SERVER_AVAILABILITIES).optional(),
+  enabled: z.boolean().optional()
+}).strict();
+const serverPatchSchema = serverCreateSchema.partial().extend({ expectedRevision: revision, removeSecret: z.boolean().optional() }).strict();
+const policiesSchema = z.object({ policies: z.record(toolName, z.enum(TOOL_POLICIES)).refine((value) => Object.keys(value).length <= 500, "too many tools") }).strict();
+const toolRefSchema = z.discriminatedUnion("source", [
+  z.object({ source: z.literal("server"), serverId: uuid, toolName, policy: z.enum(["confirm", "off"]).nullable() }).strict(),
+  z.object({ source: z.literal("nook"), toolName }).strict()
+]);
+const linkSchema = z.object({ nookKeyId: uuid.nullable() }).strict();
+// Review M1: the card is named by the server's nonce and the arguments' hash, never the model's call id.
+const confirmSchema = z.object({ confirmationId: z.string().regex(/^[0-9a-f]{32}$/), argsHash: z.string().regex(/^[0-9a-f]{64}$/), decision: z.enum(["once", "deny"]) }).strict();
 const agentCreateSchema = z.object({
   name: line(AGENT_BOUNDS.agentName),
   description: z.string().trim().max(AGENT_BOUNDS.description).optional(),
@@ -68,7 +95,9 @@ const agentCreateSchema = z.object({
   maxSteps: z.number().int().min(AGENT_BOUNDS.maxSteps.min).max(AGENT_BOUNDS.maxSteps.max).optional(),
   temperature: z.number().min(0).max(2).nullish(),
   maxOutputTokens: z.number().int().min(1).max(AGENT_BOUNDS.maxOutputTokens.max).nullish(),
-  starters: starters.optional()
+  starters: starters.optional(),
+  tools: z.array(toolRefSchema).max(200).optional(),
+  nookDirectWrites: z.boolean().optional()
 }).strict();
 const agentPatchSchema = agentCreateSchema.partial().extend({ expectedRevision: revision }).strict();
 const chatCreateSchema = z.object({ agentId: uuid }).strict();
@@ -189,6 +218,24 @@ export function registerAgentRoutes(app: Hono<AppEnv>) {
       throw new AgentError(502, "PROVIDER_ERROR", error instanceof ProviderError ? error.adminMessage : error instanceof Error && "code" in error ? error.message : "The provider could not be reached");
     }
   })));
+  // --- Admin: tool servers (plan §4.1, AC-B) ---
+  app.get("/api/agents/admin/servers", handle(adminOnly(() => {
+    const servers = listServers();
+    const adopted = new Set(servers.map((server) => server.stdioId).filter((id): id is string => id !== null));
+    const declared = stdioEnabled() ? declaredStdioServers() : [];
+    return { servers, stdio: { enabled: stdioEnabled(), declared: declared.map((entry) => ({ id: entry.id, name: entry.name, command: entry.command, args: entry.args, envNames: Object.keys(entry.env), adopted: adopted.has(entry.id) })) } };
+  })));
+  app.post("/api/agents/admin/servers", handle(adminOnly(async (c) => c.json({ server: createServer(c.get("user").id, await parseJson(c.req.raw, serverCreateSchema)) }, 201))));
+  app.get("/api/agents/admin/servers/:serverId", handle(adminOnly((c) => ({ server: serverSummary(serverRow(id(c, "serverId"))) }))));
+  app.patch("/api/agents/admin/servers/:serverId", handle(adminOnly(async (c) => ({ server: updateServer(c.get("user").id, id(c, "serverId"), await parseJson(c.req.raw, serverPatchSchema)) }))));
+  app.delete("/api/agents/admin/servers/:serverId", handle(adminOnly((c) => { deleteServer(c.get("user").id, id(c, "serverId")); return { ok: true }; })));
+  app.post("/api/agents/admin/servers/:serverId/sync", handle(adminOnly(async (c) => {
+    const serverId = id(c, "serverId");
+    await parseJson(c.req.raw, emptySchema);
+    return { server: await syncServer(c.get("user").id, serverId) };
+  })));
+  app.put("/api/agents/admin/servers/:serverId/policies", handle(adminOnly(async (c) => ({ server: setPolicies(c.get("user").id, id(c, "serverId"), (await parseJson(c.req.raw, policiesSchema)).policies) }))));
+
   // Usage (counts only, D73): tokens and runs per day per person or agent.
   app.get("/api/agents/admin/usage", handle(adminOnly((c) => {
     const group = c.req.query("group") === "agent" ? "agent" : "user";
@@ -204,6 +251,26 @@ export function registerAgentRoutes(app: Hono<AppEnv>) {
 
   // The caller's own usage today, for the budget indicator (before the :agentId routes).
   app.get("/api/agents/usage", handle(chatter((c) => ({ usage: dailyUsage(c.get("user").id) }))));
+  // The tool picker's catalog (plan §12): servers the caller may use, and Nook's tools (bounded by the linked key when `agentId` is given).
+  app.get("/api/agents/catalog", handle(chatter((c) => {
+    const raw = c.req.query("agentId");
+    const agentId = raw ? uuid.safeParse(raw.toLowerCase()) : null;
+    if (agentId && !agentId.success) throw new AgentError(404, "NOT_FOUND", "Not found");
+    if (agentId) usableAgent(agentId.data, c.get("user").id);
+    return { catalog: catalogFor(c.get("user").role, agentId ? agentId.data : null, c.get("user").id) };
+  })));
+  // Link Nook key (plan §5.3, D359): the caller's own live general key with the MCP surface, a pointer never a token.
+  app.get("/api/agents/:agentId/link", handle(chatter((c) => {
+    const agentId = id(c, "agentId");
+    usableAgent(agentId, c.get("user").id);
+    return { link: currentLink(agentId, c.get("user").id), keys: linkableKeys(c.get("user").id) };
+  })));
+  app.put("/api/agents/:agentId/link", handle(chatter(async (c) => {
+    const agentId = id(c, "agentId");
+    usableAgent(agentId, c.get("user").id);
+    const body = await parseJson(c.req.raw, linkSchema);
+    return { link: setLink(c.get("user").id, agentId, body.nookKeyId) };
+  })));
   // --- Agents (plan §5.1): own agents in this slice ---
   app.get("/api/agents", handle(chatter((c) => ({ agents: listUsableAgents(c.get("user").id) }))));
   app.post("/api/agents", handle(async (c) => c.json({ agent: createAgent(actorOf(c), await parseJson(c.req.raw, agentCreateSchema)) }, 201)));
@@ -214,7 +281,10 @@ export function registerAgentRoutes(app: Hono<AppEnv>) {
   // --- Chats (plan §6.1) ---
   app.get("/api/chats", handle(chatter((c) => ({ chats: listChats(c.get("user").id, { q: c.req.query("q")?.slice(0, 200) }) }))));
   app.post("/api/chats", handle(chatter(async (c) => c.json({ chat: createChat(c.get("user").id, (await parseJson(c.req.raw, chatCreateSchema)).agentId) }, 201))));
-  app.get("/api/chats/:chatId", handle(chatter((c) => chatDetail(id(c, "chatId"), c.get("user").id))));
+  app.get("/api/chats/:chatId", handle(chatter((c) => {
+    const detail = chatDetail(id(c, "chatId"), c.get("user").id);
+    return { ...detail, pendingConfirmation: pendingConfirmationFor(detail.activeRunId) };
+  })));
   app.patch("/api/chats/:chatId", handle(chatter(async (c) => ({ chat: updateChat(c.get("user").id, id(c, "chatId"), await parseJson(c.req.raw, chatPatchSchema)) }))));
   app.delete("/api/chats/:chatId", handle(chatter((c) => {
     const chatId = id(c, "chatId");
@@ -244,11 +314,16 @@ export function registerAgentRoutes(app: Hono<AppEnv>) {
     return { run: live ? { id: live.runId, messageId: live.messageId } : null };
   })));
 
-  // --- Runs (plan §2.3): resume and cancel ---
+  // --- Runs (plan §2.3): resume, cancel, and confirm (plan §5.4) ---
   app.post("/api/runs/:runId/cancel", handle(chatter(async (c) => {
     const runId = id(c, "runId");
     await parseJson(c.req.raw, emptySchema);
     return cancelRun(runId, c.get("user").id);
+  })));
+  app.post("/api/runs/:runId/confirm", handle(chatter(async (c) => {
+    const runId = id(c, "runId");
+    const body = await parseJson(c.req.raw, confirmSchema);
+    return confirmRun(runId, c.get("user").id, { confirmationId: body.confirmationId, argsHash: body.argsHash }, body.decision);
   })));
   app.get("/api/runs/:runId/events", (c) => {
     try {

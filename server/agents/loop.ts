@@ -13,9 +13,17 @@ import { EgressError, egressFetch, readEgressText, type EgressResponse } from ".
  */
 
 export type ProviderConnection = { id: string; baseUrl: string; apiKey: string | null; model: string; compat: ProviderCompat };
-export type ChatTurn = { role: "system" | "user" | "assistant"; content: string };
-export type CompletionRequest = { messages: ChatTurn[]; model?: string; temperature?: number | null; maxOutputTokens?: number };
-export type CompletionResult = { content: string; finishReason: string | null; usage: TokenUsage; model: string | null; toolCalls: Array<{ id: string; name: string; arguments: string }> };
+/** A tool call as the model emitted it (plan §2.1): `arguments` is the raw JSON text. */
+export type ModelToolCall = { id: string; name: string; arguments: string };
+/** The wire turns (OpenAI Chat Completions): an assistant turn may carry `tool_calls`; a `tool` turn answers one. */
+export type ChatTurn =
+  | { role: "system" | "user"; content: string }
+  | { role: "assistant"; content: string; tool_calls?: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }> }
+  | { role: "tool"; tool_call_id: string; content: string };
+/** A tool as offered to the model (`tools: [{type: "function", function}]`). */
+export type ModelTool = { name: string; description: string; parameters: Record<string, unknown> };
+export type CompletionRequest = { messages: ChatTurn[]; model?: string; temperature?: number | null; maxOutputTokens?: number; tools?: ModelTool[] };
+export type CompletionResult = { content: string; finishReason: string | null; usage: TokenUsage; model: string | null; toolCalls: ModelToolCall[] };
 
 export class ProviderError extends Error {
   /** The fuller excerpt for admin surfaces (Test, the models list); `message` is what a chat's owner sees (review L3). */
@@ -137,6 +145,10 @@ export async function completeStreaming(connection: ProviderConnection, request:
     [connection.compat.tokenParam]: request.maxOutputTokens ?? 4096
   };
   if (typeof request.temperature === "number") body.temperature = request.temperature;
+  if (request.tools && request.tools.length > 0) {
+    body.tools = request.tools.map((tool) => ({ type: "function", function: { name: tool.name, description: tool.description, parameters: tool.parameters } }));
+    body.tool_choice = "auto";
+  }
   let response: Awaited<ReturnType<typeof egressFetch>>;
   try {
     response = await egressFetch(`${connection.baseUrl}/chat/completions`, { method: "POST", headers: headersFor(connection, "text/event-stream"), body: JSON.stringify(body), signal },
@@ -203,13 +215,15 @@ export async function completeStreaming(connection: ProviderConnection, request:
     rethrow(error);
   }
   if (!usage) {
-    const promptChars = request.messages.reduce((sum, turn) => sum + turn.content.length, 0);
+    const promptChars = request.messages.reduce((sum, turn) => sum + (turn.content?.length ?? 0), 0);
     usage = { promptTokens: Math.ceil(promptChars / 4), completionTokens: estimateTokens(content), estimated: true };
   }
   return { content, finishReason, usage, model, toolCalls: [...calls.entries()].sort((a, b) => a[0] - b[0]).map(([, call]) => call) };
 }
 
 export type LoopSink = { delta: (text: string) => void; usage: (usage: TokenUsage, model: string | null) => void };
+/** What a tool call produced: the text the model sees (already capped and marked by the executor). */
+export type ToolExecution = { content: string };
 export type LoopInput = {
   connection: ProviderConnection;
   messages: ChatTurn[];
@@ -218,31 +232,100 @@ export type LoopInput = {
   maxOutputTokens: number | null;
   signal: AbortSignal;
   sink: LoopSink;
-  /** Charged after every step; throws to stop the run (budgets, revocation). */
-  charge: (usage: TokenUsage) => void;
+  /** Charged after every step; `more` says another step follows. Throws to stop the run (budgets, revocation). */
+  charge: (usage: TokenUsage, more: boolean) => void;
+  /**
+   * AC-B (plan §2.1): the tools the model may call at this step, re-resolved every step (rights
+   * are live, D358). Not called on the last step, which goes out without tools (D342).
+   */
+  tools?: (step: number) => Promise<ModelTool[]> | ModelTool[];
+  /** Runs one call (gate, confirmation, timeout, cap, and marker are the executor's); returns the tool turn's content. */
+  execute?: (call: ModelToolCall, step: number) => Promise<ToolExecution>;
+  /** Why no tools were offered, when the run knows (a linked key that died, QA Q4); the answer then ends with it. */
+  noToolsReason?: () => string | null;
+  /** Calls run per step and per run (defaults: AGENT_BOUNDS); calls past either are dropped, not executed. */
+  limits?: { perStep: number; perRun: number };
 };
-export type LoopResult = { status: "stop" | "step_limit"; content: string; steps: number; usage: TokenUsage; model: string | null };
+export type LoopResult = { status: "stop" | "step_limit"; content: string; steps: number; usage: TokenUsage; model: string | null; toolCalls: number; droppedToolCalls: number };
 
-/** The loop (plan §2.1). Without tools every run ends at step 1 with `stop`. */
+/** The one line an old tool result becomes once it falls out of the run's window (review L4). */
+export const OMITTED_TOOL_RESULT = "[An earlier tool result was omitted to keep the conversation short; call the tool again if you need it.]";
+
+/**
+ * Keeps the last `keep` tool results of the run whole and replaces older ones with a one-line
+ * placeholder (the `tool` turns stay, so every call still has its answer on the wire).
+ */
+export function windowToolResults(messages: ChatTurn[], keep: number) {
+  let seen = 0;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const turn = messages[index]!;
+    if (turn.role !== "tool") continue;
+    seen += 1;
+    if (seen > keep && turn.content !== OMITTED_TOOL_RESULT) turn.content = OMITTED_TOOL_RESULT;
+  }
+}
+
+/**
+ * The loop (plan §2.1, D342, D343). Each step is one model call. Tool calls run one at a time in
+ * the model's order; their results go back as `tool` turns and the loop continues. The last step
+ * goes out without tools and ends `step_limit` when the model still wanted one. Without tools
+ * offered, a call the model invents anyway ends the run as a plain answer.
+ */
 export async function runLoop(input: LoopInput): Promise<LoopResult> {
   const total: TokenUsage = { promptTokens: 0, completionTokens: 0, estimated: false };
   let content = "";
   let model: string | null = null;
+  let toolCalls = 0;
+  let droppedToolCalls = 0;
+  let offeredAny = false;
+  const perStep = input.limits?.perStep ?? AGENT_BOUNDS.toolCallsPerStep;
+  const perRun = input.limits?.perRun ?? AGENT_BOUNDS.toolCallsPerRun;
   for (let step = 1; step <= input.maxSteps; step += 1) {
-    // AC-B resolves the tool catalogue here per step (empty on the last step, D342); AC-A offers none.
-    const tools: unknown[] = [];
-    const reply = await completeStreaming(input.connection, { messages: input.messages, temperature: input.temperature, maxOutputTokens: input.maxOutputTokens ?? undefined }, input.signal, input.sink.delta);
+    const last = step === input.maxSteps;
+    const tools = last || !input.tools || !input.connection.compat.supportsTools || toolCalls >= perRun ? [] : await input.tools(step);
+    offeredAny ||= tools.length > 0;
+    windowToolResults(input.messages, AGENT_BOUNDS.toolResultsWindow);
+    const reply = await completeStreaming(input.connection, { messages: input.messages, temperature: input.temperature, maxOutputTokens: input.maxOutputTokens ?? undefined, tools }, input.signal, input.sink.delta);
     total.promptTokens += reply.usage.promptTokens;
     total.completionTokens += reply.usage.completionTokens;
     total.estimated = total.estimated || reply.usage.estimated;
     model = reply.model ?? model;
-    content += reply.content;
+    if (reply.content) content += (content && reply.toolCalls.length === 0 && !content.endsWith("\n") ? "\n\n" : "") + reply.content;
     input.sink.usage(reply.usage, reply.model);
-    input.charge(reply.usage);
-    input.messages.push({ role: "assistant", content: reply.content });
-    // With no tools offered, a call the model invents anyway ends the run as a plain answer; AC-B
-    // executes real calls here and continues the loop.
-    if (reply.toolCalls.length === 0 || tools.length === 0) return { status: "stop", content, steps: step, usage: total, model };
+    const execute = input.execute;
+    const wantedCalls = tools.length > 0 && execute ? reply.toolCalls.filter((call) => call.name) : [];
+    // Per step and per run (review L4): calls past either cap are dropped here, never executed, with
+    // no event or audit row each; the run's finish row counts them, and the model is told once.
+    const room = Math.max(0, Math.min(perStep, perRun - toolCalls));
+    // Call ids are Nook's, never the model's (review M1): `call_<step>_<index>`, unique in the run.
+    const calls = wantedCalls.slice(0, room).map((call, index) => ({ ...call, id: `call_${step}_${index}` }));
+    const dropped = wantedCalls.length - calls.length;
+    droppedToolCalls += dropped;
+    // Charged after every step; with more steps ahead a used-up budget ends the run here (plan §2.2).
+    input.charge(reply.usage, calls.length > 0);
+    if (calls.length === 0 || !execute) {
+      input.messages.push({ role: "assistant", content: reply.content });
+      // On the last step the model got no tools (D342); still wanting one after earlier steps had them is the step limit.
+      const wanted = last && offeredAny && reply.toolCalls.length > 0;
+      // A tool call nothing could run (none offered at this step) ends the answer with a reason, never an empty reply (Wave 41 QA L9).
+      if (reply.toolCalls.some((call) => call.name)) {
+        const reason = wanted ? null : input.noToolsReason?.() ?? null;
+        const note = wanted
+          ? "[The answer reached its step limit while the model still wanted to use a tool.]"
+          : `[The model tried to use a tool, but no tools were available to it here, so the answer stops.${reason ? ` ${reason}` : ""}]`;
+        const lead = content ? "\n\n" : "";
+        content += lead + note;
+        input.sink.delta(lead + note);
+      }
+      return { status: wanted ? "step_limit" : "stop", content, steps: step, usage: total, model, toolCalls, droppedToolCalls };
+    }
+    input.messages.push({ role: "assistant", content: reply.content, tool_calls: calls.map((call) => ({ id: call.id, type: "function", function: { name: call.name, arguments: call.arguments } })) });
+    for (const [index, call] of calls.entries()) {
+      toolCalls += 1;
+      const outcome = await execute(call, step);
+      const note = dropped > 0 && index === calls.length - 1 ? `\n[${dropped} more tool ${dropped === 1 ? "call" : "calls"} in this step ${dropped === 1 ? "was" : "were"} dropped: at most ${perStep} calls run per step and ${perRun} per answer.]` : "";
+      input.messages.push({ role: "tool", tool_call_id: call.id, content: outcome.content + note });
+    }
   }
-  return { status: "step_limit", content, steps: input.maxSteps, usage: total, model };
+  return { status: "step_limit", content, steps: input.maxSteps, usage: total, model, toolCalls, droppedToolCalls };
 }

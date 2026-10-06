@@ -1,8 +1,9 @@
 import { audit, db, now } from "../db";
 import { purgeAfterFrom } from "../bin";
-import { AGENT_BOUNDS, type AgentDetail, type AgentSummary } from "../../shared/agents";
+import { AGENT_BOUNDS, type AgentDetail, type AgentSummary, type AgentToolRef } from "../../shared/agents";
 import { readAgentSettings, roleMayCreate } from "./settings";
 import { AgentError } from "./status";
+import { agentToolRefs, linkStateOf, setAgentTools, trifectaOf } from "./tools";
 
 /**
  * Agents (plan §5.1, D355): owner-private in AC-A (sharing through `agent_access` is AC-D). Create
@@ -26,11 +27,16 @@ const starters = (json: string): string[] => {
   }
 };
 
-export const agentSummary = (row: AgentRow, userId: string): AgentSummary => ({
-  id: row.id, ownerId: row.owner_id, name: row.name, description: row.description, icon: row.icon, color: row.color,
-  providerId: row.provider_id, model: row.model, maxSteps: row.max_steps, temperature: row.temperature, maxOutputTokens: row.max_output_tokens,
-  starters: starters(row.starters_json), revision: row.revision, createdAt: row.created_at, updatedAt: row.updated_at, isOwner: row.owner_id === userId
-});
+export const agentSummary = (row: AgentRow, userId: string): AgentSummary => {
+  const tools = agentToolRefs(row.id);
+  const link = linkStateOf(row.id, userId).state;
+  return {
+    id: row.id, ownerId: row.owner_id, name: row.name, description: row.description, icon: row.icon, color: row.color,
+    providerId: row.provider_id, model: row.model, maxSteps: row.max_steps, temperature: row.temperature, maxOutputTokens: row.max_output_tokens,
+    starters: starters(row.starters_json), revision: row.revision, createdAt: row.created_at, updatedAt: row.updated_at, isOwner: row.owner_id === userId,
+    tools, nookDirectWrites: row.nook_direct_writes === 1, linked: link === "live", linkState: link, trifecta: trifectaOf(tools)
+  };
+};
 export const agentDetail = (row: AgentRow, userId: string): AgentDetail => ({ ...agentSummary(row, userId), systemPrompt: row.system_prompt });
 
 /** A live agent the person may use (AC-A: their own), or the 404. */
@@ -50,6 +56,8 @@ export function listUsableAgents(userId: string): AgentSummary[] {
 export type AgentInput = {
   name: string; description?: string; icon?: string | null; color?: string | null; systemPrompt?: string; providerId?: string | null; model?: string | null;
   maxSteps?: number; temperature?: number | null; maxOutputTokens?: number | null; starters?: string[];
+  /** AC-B: the picked tools (replaces the list) and the direct-writes flag (AC-O11). */
+  tools?: AgentToolRef[]; nookDirectWrites?: boolean;
 };
 
 function providerExists(id: string | null | undefined) {
@@ -66,13 +74,14 @@ export function createAgent(actor: { userId: string; role: string }, input: Agen
     if (owned >= settings.agentsPerUser) throw new AgentError(409, "LIMIT_REACHED", `You can have up to ${settings.agentsPerUser} agents`);
     const id = crypto.randomUUID();
     const timestamp = now();
-    db.query(`INSERT INTO agents (id, owner_id, name, description, icon, color, system_prompt, starters_json, provider_id, model, max_steps, temperature, max_output_tokens, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+    db.query(`INSERT INTO agents (id, owner_id, name, description, icon, color, system_prompt, starters_json, provider_id, model, max_steps, temperature, max_output_tokens, nook_direct_writes, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
       id, actor.userId, input.name.trim(), input.description?.trim() ?? "", input.icon ?? null, input.color ?? null, input.systemPrompt ?? "",
       JSON.stringify((input.starters ?? []).slice(0, AGENT_BOUNDS.starters)), providerExists(input.providerId), input.model?.trim() || null,
-      input.maxSteps ?? AGENT_BOUNDS.maxSteps.default, input.temperature ?? null, input.maxOutputTokens ?? null, timestamp, timestamp
+      input.maxSteps ?? AGENT_BOUNDS.maxSteps.default, input.temperature ?? null, input.maxOutputTokens ?? null, input.nookDirectWrites ? 1 : 0, timestamp, timestamp
     );
-    audit(actor.userId, null, "agents.agent.create", { agentId: id });
+    if (input.tools) setAgentTools(id, actor.role, input.tools);
+    audit(actor.userId, null, "agents.agent.create", { agentId: id, tools: input.tools?.length ?? 0 });
     return agentDetail(usableAgent(id, actor.userId), actor.userId);
   })();
 }
@@ -84,7 +93,7 @@ export function updateAgent(actor: { userId: string; role: string }, id: string,
     const row = manageableAgent(id, actor.userId);
     if (row.revision !== input.expectedRevision) throw new AgentError(409, "REVISION_MISMATCH", "This agent changed elsewhere; reload and try again", { revision: row.revision });
     db.query(`UPDATE agents SET name = ?, description = ?, icon = ?, color = ?, system_prompt = ?, starters_json = ?, provider_id = ?, model = ?, max_steps = ?, temperature = ?, max_output_tokens = ?,
-      revision = revision + 1, updated_at = ? WHERE id = ?`).run(
+      nook_direct_writes = ?, revision = revision + 1, updated_at = ? WHERE id = ?`).run(
       (input.name ?? row.name).trim(), input.description !== undefined ? input.description.trim() : row.description,
       input.icon !== undefined ? input.icon : row.icon, input.color !== undefined ? input.color : row.color,
       input.systemPrompt !== undefined ? input.systemPrompt : row.system_prompt,
@@ -92,9 +101,11 @@ export function updateAgent(actor: { userId: string; role: string }, id: string,
       input.providerId !== undefined ? providerExists(input.providerId) : row.provider_id,
       input.model !== undefined ? input.model?.trim() || null : row.model,
       input.maxSteps ?? row.max_steps, input.temperature !== undefined ? input.temperature : row.temperature,
-      input.maxOutputTokens !== undefined ? input.maxOutputTokens : row.max_output_tokens, now(), id
+      input.maxOutputTokens !== undefined ? input.maxOutputTokens : row.max_output_tokens,
+      input.nookDirectWrites !== undefined ? (input.nookDirectWrites ? 1 : 0) : row.nook_direct_writes, now(), id
     );
-    audit(actor.userId, null, "agents.agent.update", { agentId: id });
+    if (input.tools) setAgentTools(id, actor.role, input.tools);
+    audit(actor.userId, null, "agents.agent.update", { agentId: id, ...(input.tools ? { tools: input.tools.length } : {}) });
     return agentDetail(usableAgent(id, actor.userId), actor.userId);
   })();
 }

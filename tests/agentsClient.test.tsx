@@ -10,7 +10,10 @@ import { parseFrame } from "../src/chat/chatApi";
 import { hubEntries, isNestedHubRoute } from "../src/settings/hubModel";
 import { MODULES, MODULE_IDS, unavailableModules } from "../src/modules";
 import { MODULE_IDS as SERVER_MODULE_IDS } from "../server/moduleIds";
-import type { ChatMessage } from "../shared/agents";
+import type { ChatMessage, ToolCallView } from "../shared/agents";
+import { hasRef, nookGroups, nookWriteMode, orphanRefs, pickCounts, policyOptions, refKey, setRefPolicy, toggleRef } from "../src/chat/toolPicker";
+import { grantSummary } from "../src/chat/LinkNookKeySheet";
+import { callLabel, callOutcome, ConfirmationCard, ToolCallsDisclosure, TrifectaBadge } from "../src/chat/ToolDisclosure";
 
 /**
  * The Chat client (Wave 40, agent chat plan §8, §13, §15 items 12 and 13): routes, the module
@@ -205,5 +208,87 @@ describe("history and shells (§13.3)", () => {
     expect(css).toContain(".chat-app.chat-detail-open .chat-list-pane { display: none; }");
     expect(css).not.toMatch(/\.chat-app\s*\{[^}]*overflow/);
     expect(read("chat/AiSettings.tsx")).toContain("useHistoryDialogGuard(true, onCancel, { blocked: busy })");
+  });
+});
+
+describe("tools (Wave 41 AC-B: the picker model, disclosure, the confirmation card, history)", () => {
+  const catalog = {
+    servers: [{ id: "11111111-1111-4111-8111-111111111111", slug: "gh", name: "GitHub", enabled: true, status: "ok" as const, availability: "all" as const, tools: [
+      { name: "search", title: null, description: "Search", readOnly: true, openWorld: true, policy: "auto" as const },
+      { name: "create_issue", title: null, description: "Create", readOnly: false, openWorld: true, policy: "confirm" as const },
+      { name: "nuke", title: null, description: "", readOnly: false, openWorld: true, policy: "off" as const }
+    ] }],
+    nook: { linked: true, linkState: "live" as const, tools: [
+      { name: "list_notes", title: "List notes", module: "notes", write: false, proposable: false, scope: "notes:read", proposalScope: null },
+      { name: "create_card", title: "Create a card", module: "tasks", write: true, proposable: true, scope: "tasks:write", proposalScope: "tasks:read" },
+      { name: "move_card", title: "Move a card", module: "tasks", write: true, proposable: false, scope: "tasks:write", proposalScope: null }
+    ] }
+  };
+  const serverId = catalog.servers[0]!.id;
+
+  test("picks toggle, policies only get stricter, groups and counts follow the catalog, orphans are listed", () => {
+    let refs = toggleRef([], { source: "server", serverId, toolName: "search", policy: null });
+    refs = toggleRef(refs, { source: "nook", toolName: "list_notes" });
+    expect(refs.length).toBe(2);
+    expect(hasRef(refs, { source: "nook", toolName: "list_notes" })).toBe(true);
+    expect(toggleRef(refs, { source: "nook", toolName: "list_notes" }).length).toBe(1);
+    refs = setRefPolicy(refs, serverId, "search", "confirm");
+    expect(refs[0]).toEqual({ source: "server", serverId, toolName: "search", policy: "confirm" });
+    expect(policyOptions("auto").map((option) => option.value)).toEqual(["admin", "confirm", "off"]);
+    expect(policyOptions("confirm").map((option) => option.value)).toEqual(["admin", "off"]);
+    expect(policyOptions("off").map((option) => option.value)).toEqual(["admin"]);
+    expect(nookGroups(catalog.nook.tools).map((group) => [group.label, group.tools.length])).toEqual([["Notes", 1], ["Tasks", 2]]);
+    const counts = pickCounts(refs, catalog);
+    expect(counts.perServer.get(serverId)).toBe(1);
+    expect(counts.nook).toBe(1);
+    expect(counts.total).toBe(2);
+    expect(orphanRefs([...refs, { source: "server", serverId, toolName: "gone", policy: null }, { source: "nook", toolName: "submit_proposals" }], catalog).map(refKey)).toEqual([`server:${serverId}:gone`, "nook:submit_proposals"]);
+    expect(nookWriteMode(catalog.nook.tools[0]!, false)).toBe("read");
+    expect(nookWriteMode(catalog.nook.tools[1]!, false)).toBe("proposal");
+    expect(nookWriteMode(catalog.nook.tools[2]!, false)).toBe("needs-direct");
+    expect(nookWriteMode(catalog.nook.tools[2]!, true)).toBe("direct");
+    expect(grantSummary([{ module: "notes", permission: "read", resource: null, active: true }, { module: "tasks", permission: "write", resource: { kind: "board", name: "Ops" }, active: true }, { module: "files", permission: "read", resource: null, active: false }])).toBe("Notes: read · Tasks: write (Ops)");
+  });
+
+  test("the disclosure names each call with its outcome; the confirmation card shows the arguments, Allow once, and Deny", () => {
+    const calls: ToolCallView[] = [
+      { id: "c1", tool: "search", server: "gh", serverId, argsPreview: "{\n  \"q\": \"bug\"\n}", resultPreview: "[{\"n\":1}]", ok: true, truncated: true, durationMs: 420, decision: null, proposalId: null },
+      { id: "c2", tool: "create_card", server: "nook", serverId: null, argsPreview: "{}", resultPreview: "{\"proposed\":true}", ok: true, truncated: false, durationMs: 12, decision: "allowed", proposalId: "p1" },
+      { id: "c3", tool: "create_issue", server: "gh", serverId, argsPreview: "{}", resultPreview: "{\"error\":\"refused\",\"code\":\"DENIED\"}", ok: false, truncated: false, durationMs: 3, decision: "denied", proposalId: null },
+      { id: "c4", tool: "slow", server: "gh", serverId, argsPreview: "{}", resultPreview: null, ok: null, truncated: false, durationMs: null, decision: null, proposalId: null }
+    ];
+    expect(callLabel(calls[0]!)).toBe("Called gh/search");
+    expect(calls.map(callOutcome)).toEqual(["Done", "Proposed in the Inbox", "Denied", "Running…"]);
+    expect(callOutcome({ ...calls[2]!, decision: null, resultPreview: "{\"error\":\"x\",\"code\":\"TOOL_TIMEOUT\"}" })).toBe("The tool did not answer in time");
+    const collapsed = renderToStaticMarkup(<ToolCallsDisclosure calls={calls} running />);
+    expect(collapsed).toContain("Using 4 tools");
+    expect(collapsed).toContain("(search, create_card, create_issue, slow)");
+    expect(collapsed).toContain("aria-expanded=\"false\"");
+    expect(collapsed).not.toContain("Called gh/search");
+    expect(renderToStaticMarkup(<ToolCallsDisclosure calls={[]} running={false} />)).toBe("");
+    const card = renderToStaticMarkup(<ConfirmationCard confirmation={{ confirmationId: "n3", argsHash: "h3", callId: "c3", tool: "create_issue", server: "gh", args: { title: "Refund bug", body: "<script>x</script>" }, expiresAt: new Date().toISOString(), proposal: false }} busy={false} onDecide={() => undefined} />);
+    expect(card).toContain("The agent wants to run create_issue on gh");
+    expect(card).toContain("&quot;title&quot;: &quot;Refund bug&quot;");
+    expect(card).not.toContain("<script>");
+    expect(card).toContain(">Allow once</button>");
+    expect(card).toContain(">Deny</button>");
+    expect(card).toContain("tabindex=\"-1\"");
+    const proposal = renderToStaticMarkup(<ConfirmationCard confirmation={{ confirmationId: "n2", argsHash: "h2", callId: "c2", tool: "create_card", server: "nook", args: {}, expiresAt: new Date().toISOString(), proposal: true }} busy onDecide={() => undefined} />);
+    expect(proposal).toContain("propose create_card in your Inbox");
+    expect(proposal).toContain("disabled");
+    expect(renderToStaticMarkup(<TrifectaBadge />)).toContain("reach outside services");
+  });
+
+  test("the new chat files set no inner HTML and use no native select; every sheet closes on Back", () => {
+    for (const path of ["chat/ToolServers.tsx", "chat/LinkNookKeySheet.tsx", "chat/ToolDisclosure.tsx", "chat/AgentsSettings.tsx"]) {
+      const source = read(path);
+      expect({ path, innerHtml: /dangerouslySetInnerHTML|innerHTML/.test(source) }).toEqual({ path, innerHtml: false });
+      expect({ path, nativeSelect: /<select[\s>]|window\.confirm\(/.test(source) }).toEqual({ path, nativeSelect: false });
+    }
+    expect(read("chat/ToolServers.tsx")).toContain("useHistoryDialogGuard(true, onCancel, { blocked: busy })");
+    expect(read("chat/LinkNookKeySheet.tsx")).toContain("useHistoryDialogGuard(true, onClose, { blocked: busy })");
+    // The confirmation card is inline (no history entry); the run's pending state comes back from the ring and the chat detail.
+    expect(read("chat/ToolDisclosure.tsx")).not.toContain("useHistoryDialogGuard");
+    expect(read("chat/ChatApp.tsx")).toContain("freshLive(next.activeRunId, message?.id ?? \"\", next.pendingConfirmation)");
   });
 });

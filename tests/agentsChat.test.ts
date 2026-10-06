@@ -204,14 +204,14 @@ describe("the loop against the fake provider (§2.1–§2.4)", () => {
     expect(second.events.at(-1)!.data.status).toBe("ok");
   });
 
-  test("estimated usage when the server sends none; a tool call the model emits is ignored in AC-A", async () => {
+  test("estimated usage when the server sends none; a tool call the model emits with no tools offered ends the answer with a reason (Wave 41 QA L9)", async () => {
     const agent = await newAgent(member);
     const chat = await newChat(member, agent.id);
     const { events } = await sendAndWait(member, chat.id, "nousage:Four words of text");
     expect(events.find((event) => event.type === "usage")!.data.usage.estimated).toBe(true);
     const { events: tool } = await sendAndWait(member, chat.id, "tool:");
     expect(tool.at(-1)!.data.status).toBe("ok");
-    expect(textOf(tool)).toBe("");
+    expect(textOf(tool)).toBe("[The model tried to use a tool, but no tools were available to it here, so the answer stops.]");
   });
 
   test("Stop cancels mid-stream and keeps the partial text; a second stream resumes from the ring with ?after", async () => {

@@ -40,6 +40,7 @@ import { registerVaultRoutes } from "./vault/routes";
 import { registerAgentRoutes } from "./agents/routes";
 import { agentsFeature, initAgentsStatus } from "./agents/status";
 import { markInterruptedRuns } from "./agents/runs";
+import { initStdioDeclarations } from "./agents/stdio";
 import { initVaultStatus, vaultFeature } from "./vault/status";
 import { scheduleRotationRun } from "./vault/rotation";
 import { reconcileWhiteboardSearchIndex } from "./whiteboards/service";
@@ -965,6 +966,8 @@ await reconcilePublishedMirrors();
 if (initVaultStatus().enabled) scheduleRotationRun();
 // Wave 40 (D344): the Chat module is on only with AGENT_SECRETS_KEY; runs the previous process left live are marked interrupted.
 initAgentsStatus();
+// Wave 41 (D348): host-declared stdio MCP servers are read once here, and only with AGENT_MCP_STDIO=on.
+initStdioDeclarations();
 try {
   markInterruptedRuns();
 } catch (error) {

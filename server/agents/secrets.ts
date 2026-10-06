@@ -64,6 +64,9 @@ export function openSecret(owner: SecretOwner, rowId: string, envelope: string, 
  * only for secrets of at least 16 characters (review L8: seven of a short key's characters would
  * be most of it); shorter ones show `…`.
  */
+/** The hint a read returns (Wave 41 QA L5): null without a secret or when it was too short to hint at (the UI says "Saved"). */
+export const shownHint = (ciphertext: string | null, hint: string | null) => ciphertext && hint && hint !== "…" ? hint : null;
+
 export function secretHint(plaintext: string) {
   const text = plaintext.trim();
   if (text.length < 16) return "…";
@@ -94,13 +97,16 @@ export function rotateSecretsKey(oldKey: Buffer, newKey: Buffer): { providers: n
   }).immediate();
 }
 
-/** Startup check: whether every stored provider secret opens under `key`. Counts only. */
+/** Startup check: whether every stored provider and tool-server secret opens under `key`. Counts only. */
 export function verifySecrets(key: Buffer): { total: number; failed: number } {
-  const rows = db.query("SELECT id, api_key_ct FROM agent_providers WHERE api_key_ct IS NOT NULL").all() as Array<{ id: string; api_key_ct: string }>;
+  const rows = [
+    ...(db.query("SELECT id, api_key_ct AS ct FROM agent_providers WHERE api_key_ct IS NOT NULL").all() as Array<{ id: string; ct: string }>).map((row) => ({ owner: "provider" as const, ...row })),
+    ...(db.query("SELECT id, secret_ct AS ct FROM agent_tool_servers WHERE secret_ct IS NOT NULL").all() as Array<{ id: string; ct: string }>).map((row) => ({ owner: "server" as const, ...row }))
+  ];
   let failed = 0;
   for (const row of rows) {
     try {
-      openSecret("provider", row.id, row.api_key_ct, key);
+      openSecret(row.owner, row.id, row.ct, key);
     } catch {
       failed += 1;
     }

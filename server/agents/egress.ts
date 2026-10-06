@@ -90,6 +90,22 @@ async function resolveBounded(host: string): Promise<string[]> {
 }
 
 /**
+ * The save-time rules for an endpoint an admin stores (a provider's base URL, a tool server's URL;
+ * QA Q7, Wave 41 QA Q1): the shape check, plain http only for hosts in
+ * AGENT_ALLOWED_PRIVATE_HOSTS, and a private literal address only when listed. No DNS here (the
+ * request-time check resolves and re-checks every call).
+ */
+export function checkSavedEndpoint(value: string): URL {
+  const url = checkEgressUrl(value);
+  const host = url.hostname.toLowerCase().replace(/\.$/, "").replace(/^\[|\]$/g, "");
+  const literal = isIP(host) ? [host] : [];
+  const listed = privateHostAllowed(host, literal);
+  if (url.protocol === "http:" && !listed) throw new EgressError("URL_REFUSED", "Plain http is allowed only for hosts in AGENT_ALLOWED_PRIVATE_HOSTS");
+  if (!listed && literal.some((address) => isPrivateAddress(address))) throw new EgressError("PRIVATE_ADDRESS", "The endpoint is a private or local address; list it in AGENT_ALLOWED_PRIVATE_HOSTS to allow it");
+  return url;
+}
+
+/**
  * Shape plus DNS plus the private-range rule: the URL when it may be called now, else an
  * `EgressError`. Called before every request.
  */
@@ -131,7 +147,7 @@ export type EgressResponse = { status: number; headers: Headers; body: AsyncIter
  * the first-byte and total timeouts abort the request. `init.headers` must carry only what the
  * provider needs.
  */
-export async function egressFetch(value: string, init: { method: "GET" | "POST"; headers?: Record<string, string>; body?: string; signal?: AbortSignal }, caps: EgressCaps): Promise<EgressResponse> {
+export async function egressFetch(value: string, init: { method: "GET" | "POST" | "DELETE"; headers?: Record<string, string>; body?: string; signal?: AbortSignal }, caps: EgressCaps): Promise<EgressResponse> {
   const target = await resolveEgressTarget(value);
   const { url } = target;
   const pinned = pinnedUrl(target);

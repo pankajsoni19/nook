@@ -1,11 +1,14 @@
-import { useCallback, useEffect, useId, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { Bot, ChevronLeft, Plus } from "lucide-react";
 import { ApiError } from "../api";
 import { hubDocumentTitle, NEW_AGENT, type Route } from "../router";
 import { Select } from "../ui/Select";
 import { useConfirm } from "../ui/useConfirm";
-import { AGENT_BOUNDS, type AgentDetail, type AgentSummary } from "../../shared/agents";
-import { agentsStatus, createAgent, deleteAgent, errorCode, getAgent, listAgents, messageOf, updateAgent, type AgentsStatus } from "./chatApi";
+import { AGENT_BOUNDS, type AgentDetail, type AgentSummary, type AgentToolRef, type LinkState, type NookLink, type ToolCatalog } from "../../shared/agents";
+import { agentsStatus, createAgent, deleteAgent, errorCode, getAgent, listAgents, messageOf, toolCatalog, updateAgent, type AgentsStatus } from "./chatApi";
+import { LinkNookKeySheet } from "./LinkNookKeySheet";
+import { TrifectaBadge } from "./ToolDisclosure";
+import { hasRef, nookGroups, nookWriteMode, orphanRefs, pickCounts, POLICY_BADGES, policyOptions, refKey, setRefPolicy, toggleRef } from "./toolPicker";
 import "./chat.css";
 
 type Navigate = (route: Route, options?: { replace?: boolean }) => void;
@@ -30,14 +33,16 @@ export function AgentsSettings({ agentId, navigate, flash, onOpenChat }: { agent
       setError(messageOf(reason, "Could not load agents"));
     }
   }, []);
-  // Reloaded whenever the list comes back on screen (after the editor created, saved, or binned one).
-  useEffect(() => { if (!agentId) void load(); }, [agentId, load]);
+  // Reloaded whenever the list comes back on screen (after the editor created, saved, or binned one), and
+  // once for a deep link to the editor (Wave 41): `canCreate` comes from the status, so /settings/agents/new
+  // opened directly must load it too.
+  useEffect(() => { void load(); }, [agentId, load]);
   useEffect(() => { if (!agentId) document.title = hubDocumentTitle("Agents"); }, [agentId]);
 
   if (agentId) return <AgentEditor agentId={agentId} navigate={navigate} flash={flash} canCreate={status?.canCreate ?? false} onOpenChat={onOpenChat} />;
   const toList = { app: "settings" as const, section: "agents" as const };
   return <section className="settings-content agents-settings" aria-labelledby="agents-heading">
-    <div className="settings-section-heading"><span className="settings-icon"><Bot /></span><div><h3 id="agents-heading">Agents</h3><p>An agent is a prompt, a model, and a step limit. Your prompts are not secret: anyone you later share an agent with can read what it says through the model.</p></div></div>
+    <div className="settings-section-heading"><span className="settings-icon"><Bot /></span><div><h3 id="agents-heading">Agents</h3><p>An agent is a prompt, a model, a step limit, and the tools it may call. Your prompts are not secret: anyone you later share an agent with can read what it says through the model.</p></div></div>
     {error && <p className="form-error" role="alert">{error}</p>}
     {status && !status.enabled && <p className="settings-warning">Chat is not configured on this server{status.reason ? " (see Settings → AI)" : ""}.</p>}
     {status?.enabled && !status.canChat && <p className="settings-warning">Chat is off for your role.</p>}
@@ -53,6 +58,15 @@ export function AgentsSettings({ agentId, navigate, flash, onOpenChat }: { agent
   </section>;
 }
 
+export type EditorForm = { name: string; description: string; icon: string; systemPrompt: string; model: string; maxSteps: number; temperature: string; starters: string; directWrites: boolean; tools: AgentToolRef[] };
+
+/** Whether the editor's fields differ from the agent as loaded (Wave 41 QA Q2): such a form is never refilled by a background load. */
+export function editorDiffers(agent: AgentDetail, form: EditorForm) {
+  return form.name !== agent.name || form.description !== agent.description || form.icon !== (agent.icon ?? "") || form.systemPrompt !== agent.systemPrompt
+    || form.model !== (agent.model ?? "") || form.maxSteps !== agent.maxSteps || form.temperature !== (agent.temperature === null ? "" : String(agent.temperature))
+    || form.starters !== agent.starters.join("\n") || form.directWrites !== agent.nookDirectWrites || JSON.stringify(form.tools) !== JSON.stringify(agent.tools);
+}
+
 function AgentEditor({ agentId, navigate, flash, canCreate, onOpenChat }: { agentId: string; navigate: Navigate; flash: (message: string) => void; canCreate: boolean; onOpenChat: (agentId: string) => void }) {
   const creating = agentId === NEW_AGENT;
   const [agent, setAgent] = useState<AgentDetail | null>(null);
@@ -64,11 +78,15 @@ function AgentEditor({ agentId, navigate, flash, canCreate, onOpenChat }: { agen
   const [maxSteps, setMaxSteps] = useState<number>(AGENT_BOUNDS.maxSteps.default);
   const [temperature, setTemperature] = useState("");
   const [starters, setStarters] = useState("");
+  const [tools, setTools] = useState<AgentToolRef[]>([]);
+  const [directWrites, setDirectWrites] = useState(false);
+  const [catalog, setCatalog] = useState<ToolCatalog | null>(null);
+  const [linking, setLinking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [stale, setStale] = useState(false);
   const confirm = useConfirm();
-  const ids = { name: useId(), description: useId(), icon: useId(), prompt: useId(), model: useId(), steps: useId(), temperature: useId(), starters: useId() };
+  const ids = { name: useId(), description: useId(), icon: useId(), prompt: useId(), model: useId(), steps: useId(), temperature: useId(), starters: useId(), direct: useId() };
   const toList = { app: "settings" as const, section: "agents" as const };
 
   const fill = useCallback((detail: AgentDetail) => {
@@ -81,19 +99,43 @@ function AgentEditor({ agentId, navigate, flash, canCreate, onOpenChat }: { agen
     setMaxSteps(detail.maxSteps);
     setTemperature(detail.temperature === null ? "" : String(detail.temperature));
     setStarters(detail.starters.join("\n"));
+    setTools(detail.tools);
+    setDirectWrites(detail.nookDirectWrites);
     setStale(false);
   }, []);
-  const load = useCallback(async () => {
+  const loadCatalog = useCallback(async () => {
+    try {
+      setCatalog((await toolCatalog(creating ? null : agentId)).catalog);
+    } catch {
+      setCatalog(null);
+    }
+  }, [agentId, creating]);
+  // Wave 41 QA Q2: `flash` and `navigate` are new functions on every parent render (a toast clearing
+  // re-renders it); kept in refs so `load` does not re-run then and wipe what is being typed.
+  const flashRef = useRef(flash);
+  flashRef.current = flash;
+  const navigateRef = useRef(navigate);
+  navigateRef.current = navigate;
+  // The form differs from the agent as loaded: never refilled behind the person's back (only Reload does).
+  const dirtyRef = useRef<string | null>(null);
+  dirtyRef.current = agent !== null && editorDiffers(agent, { name, description, icon, systemPrompt, model, maxSteps, temperature, starters, directWrites, tools }) ? agent.id : null;
+  const load = useCallback(async (force = false) => {
+    void loadCatalog();
     if (creating) return;
     try {
-      fill((await getAgent(agentId)).agent);
+      const detail = (await getAgent(agentId)).agent;
+      if (!force && dirtyRef.current === detail.id) return;
+      fill(detail);
     } catch (reason) {
-      if (reason instanceof ApiError && reason.status === 404) { flash("Agent not found"); navigate(toList, { replace: true }); return; }
+      if (reason instanceof ApiError && reason.status === 404) { flashRef.current("Agent not found"); navigateRef.current({ app: "settings", section: "agents" }, { replace: true }); return; }
       setError(messageOf(reason, "Could not load the agent"));
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agentId, creating, fill, flash, navigate]);
+  }, [agentId, creating, fill, loadCatalog]);
   useEffect(() => { void load(); }, [load]);
+  const onLinkChanged = useCallback((link: NookLink) => {
+    setAgent((current) => current ? { ...current, linked: link !== null && (link.state === "active" || link.state === "grace"), linkState: link === null ? "none" : link.state === "active" || link.state === "grace" ? "live" : link.state === "revoked" ? "revoked" : link.state === "expired" ? "expired" : "inactive" } : current);
+    void loadCatalog();
+  }, [loadCatalog]);
   useEffect(() => { document.title = hubDocumentTitle(creating ? "New agent" : agent?.name ?? "Agent"); }, [agent?.name, creating]);
 
   async function save(event: FormEvent) {
@@ -103,7 +145,7 @@ function AgentEditor({ agentId, navigate, flash, canCreate, onOpenChat }: { agen
     if (temp !== null && (!Number.isFinite(temp) || temp < 0 || temp > 2)) return setError("Temperature is between 0 and 2.");
     setBusy(true);
     setError(null);
-    const input = { name: name.trim(), description: description.trim(), icon: icon.trim() || null, systemPrompt, model: model.trim() || null, maxSteps, temperature: temp, starters: starters.split("\n").map((line) => line.trim()).filter(Boolean).slice(0, AGENT_BOUNDS.starters) };
+    const input = { name: name.trim(), description: description.trim(), icon: icon.trim() || null, systemPrompt, model: model.trim() || null, maxSteps, temperature: temp, starters: starters.split("\n").map((line) => line.trim()).filter(Boolean).slice(0, AGENT_BOUNDS.starters), tools, nookDirectWrites: directWrites };
     try {
       if (creating) {
         const { agent: created } = await createAgent(input);
@@ -135,9 +177,9 @@ function AgentEditor({ agentId, navigate, flash, canCreate, onOpenChat }: { agen
   if (creating && !canCreate) return <div className="settings-content settings-team-content"><button type="button" className="team-back team-back-visible" onClick={() => navigate(toList)}><ChevronLeft />Agents</button><p className="settings-warning">Your role cannot create agents.</p></div>;
   return <div className="settings-content settings-team-content agents-editor">
     <button type="button" className="team-back team-back-visible" onClick={() => navigate(toList)}><ChevronLeft />Agents</button>
-    <div className="settings-section-heading"><span className="settings-icon"><Bot /></span><div><h3>{creating ? "New agent" : agent?.name ?? "Agent"}</h3><p>Basics, instructions, and the model. Tools arrive in a later release.</p></div></div>
+    <div className="settings-section-heading"><span className="settings-icon"><Bot /></span><div><h3>{creating ? "New agent" : agent?.name ?? "Agent"}</h3><p>Basics, instructions, the model, and the tools it may call.</p></div></div>
     {error && <p className="form-error" role="alert">{error}</p>}
-    {stale && <p className="settings-warning">Changed elsewhere. <button type="button" className="chat-link" onClick={() => { void load(); }}>Reload</button></p>}
+    {stale && <p className="settings-warning">Changed elsewhere. <button type="button" className="chat-link" onClick={() => { void load(true); }}>Reload</button></p>}
     {(creating || agent) && <form className="file-dialog-form agents-form" onSubmit={save}>
       <h4>Basics</h4>
       <label htmlFor={ids.name}>Name</label>
@@ -158,6 +200,11 @@ function AgentEditor({ agentId, navigate, flash, canCreate, onOpenChat }: { agen
       <p className="file-dialog-hint">Model calls per answer. Without tools an answer is one call; the limit matters once tools arrive.</p>
       <label htmlFor={ids.temperature}>Temperature</label>
       <input id={ids.temperature} value={temperature} inputMode="decimal" autoComplete="off" placeholder="Provider default" onChange={(event) => setTemperature(event.target.value)} />
+      <h4>Tools{catalog && <small> · {pickCounts(tools, catalog).total} picked</small>}</h4>
+      {agent?.trifecta && <TrifectaBadge />}
+      <ToolPicker catalog={catalog} tools={tools} directWrites={directWrites} linked={agent?.linked ?? false} linkState={agent?.linkState ?? "none"} creating={creating} onChange={setTools} onLink={() => setLinking(true)} />
+      <label className="ai-check" htmlFor={ids.direct}><input id={ids.direct} type="checkbox" checked={directWrites} onChange={(event) => setDirectWrites(event.target.checked)} />Allow direct Nook writes (otherwise every Nook change becomes an Inbox proposal)</label>
+      <p className="file-dialog-hint">Direct writes also need the linked key's write grant, and they still ask first in chats.</p>
       <h4>Starters</h4>
       <label htmlFor={ids.starters}>One per line, at most {AGENT_BOUNDS.starters}</label>
       <textarea id={ids.starters} value={starters} rows={3} onChange={(event) => setStarters(event.target.value)} />
@@ -167,6 +214,73 @@ function AgentEditor({ agentId, navigate, flash, canCreate, onOpenChat }: { agen
         <button type="submit" className="primary-button" disabled={busy || stale}>{busy ? "Saving…" : creating ? "Create agent" : "Save"}</button>
       </footer>
     </form>}
+    {linking && agent && <LinkNookKeySheet agentId={agent.id} agentName={agent.name} onClose={() => setLinking(false)} onChanged={onLinkChanged} onOpenKeys={() => { setLinking(false); navigate({ app: "settings", section: "mcp" }); }} />}
     {confirm.confirmElement}
+  </div>;
+}
+
+type ToolPickerProps = { catalog: ToolCatalog | null; tools: AgentToolRef[]; directWrites: boolean; linked: boolean; linkState: LinkState; creating: boolean; onChange: (tools: AgentToolRef[]) => void; onLink: () => void };
+
+/** The picker (plan §5.2): a section per server with a checkbox per tool and an optional stricter policy; Nook's tools by module once a key is linked. */
+/** A link whose key is no longer live (Wave 41 QA Q4). */
+const LINK_DEAD: Record<LinkState, string> = { none: "", live: "", revoked: "Key revoked", expired: "Key expired", inactive: "Key inactive" };
+
+function ToolPicker({ catalog, tools, directWrites, linked, linkState, creating, onChange, onLink }: ToolPickerProps) {
+  const dead = !linked && linkState !== "none" && linkState !== "live";
+  const [open, setOpen] = useState<Record<string, boolean>>({});
+  if (!catalog) return <p className="chat-muted">Loading the tool catalog…</p>;
+  const counts = pickCounts(tools, catalog);
+  const orphans = orphanRefs(tools, catalog);
+  const isOpen = (key: string, fallback: boolean) => open[key] ?? fallback;
+  return <div className="agents-tools">
+    {catalog.servers.length === 0 && <p className="chat-muted">No tool servers are available to you. An admin adds them in Settings → AI.</p>}
+    {catalog.servers.map((server) => {
+      const picked = counts.perServer.get(server.id) ?? 0;
+      const expanded = isOpen(server.id, picked > 0);
+      return <section key={server.id} className="agents-tools-group" aria-label={server.name}>
+        <div className="agents-tools-head">
+          <button type="button" className="chat-link" aria-expanded={expanded} onClick={() => setOpen({ ...open, [server.id]: !expanded })}><strong>{server.name}{!server.enabled && <span className="ai-badge">Disabled</span>}</strong></button>
+          <small>{picked} of {server.tools.length} picked{server.status !== "ok" ? ` · ${server.status === "unknown" ? "not synced" : server.status.replace("_", " ")}` : ""}</small>
+        </div>
+        {expanded && (server.tools.length === 0 ? <p className="chat-muted">This server has no synced tools yet.</p> : server.tools.map((tool) => {
+          const ref: AgentToolRef = { source: "server", serverId: server.id, toolName: tool.name, policy: null };
+          const current = tools.find((item): item is Extract<AgentToolRef, { source: "server" }> => item.source === "server" && item.serverId === server.id && item.toolName === tool.name);
+          return <div key={tool.name} className="agents-tool">
+            <label><input type="checkbox" checked={current !== undefined} disabled={tool.policy === "off"} onChange={() => onChange(toggleRef(tools, ref))} />
+              <span className="agents-tool-text"><span><code>{tool.name}</code><span className="agents-tool-badges"><span className={`ai-badge${tool.readOnly ? " ai-badge-ok" : ""}`}>{tool.readOnly ? "Read-only" : "Not read-only"}</span>{tool.openWorld && <span className="ai-badge ai-badge-warn">Open world</span>}<span className="ai-badge">{POLICY_BADGES[tool.policy]}</span></span></span><small>{tool.description || "No description"}</small></span>
+            </label>
+            {current && tool.policy !== "off" && <Select<"admin" | "confirm" | "off"> label={`Policy for ${tool.name}`} value={current.policy ?? "admin"} onChange={(value) => onChange(setRefPolicy(tools, server.id, tool.name, value === "admin" ? null : value))} options={policyOptions(tool.policy)} variant="compact" />}
+          </div>;
+        }))}
+      </section>;
+    })}
+    <section className="agents-tools-group" aria-label="Nook">
+      <div className="agents-tools-head">
+        <strong>Nook{linked && <span className="ai-badge ai-badge-ok">Key linked</span>}{dead && <span className="ai-badge ai-badge-warn">{LINK_DEAD[linkState]} — link another</span>}</strong>
+        <small>{counts.nook} picked</small>
+      </div>
+      <div className="agents-link-row">
+        {creating ? <p className="chat-muted">Create the agent first, then link one of your Nook keys to give it Nook's tools.</p>
+          : <><button type="button" className="secondary-button" onClick={onLink}>{linked ? "Change linked key" : dead ? "Link another key" : "Link Nook key"}</button>
+            <p className="chat-muted">{linked ? "Nook's tools run through your linked key; the list shows what that key reaches." : dead ? `The linked key is ${LINK_DEAD[linkState].toLowerCase()}: this agent gets none of Nook's tools until you link another key.` : "Without a key this agent gets none of Nook's tools. Link a key to see and pick the tools it reaches."}</p></>}
+      </div>
+      {linked && nookGroups(catalog.nook.tools).map((group) => <div key={group.module}>
+        <p className="agents-nook-module">{group.label}</p>
+        {group.tools.map((tool) => {
+          const ref: AgentToolRef = { source: "nook", toolName: tool.name };
+          const mode = nookWriteMode(tool, directWrites);
+          return <div key={tool.name} className="agents-tool">
+            <label><input type="checkbox" checked={hasRef(tools, ref)} onChange={() => onChange(toggleRef(tools, ref))} />
+              <span className="agents-tool-text"><span><code>{tool.name}</code><span className="agents-tool-badges">{mode === "read" ? <span className="ai-badge ai-badge-ok">Read-only</span> : mode === "proposal" ? <span className="ai-badge">Proposal · asks first</span> : mode === "direct" ? <span className="ai-badge ai-badge-warn">Direct write · asks first</span> : <span className="ai-badge">Needs direct writes</span>}</span></span><small>{tool.title} · {mode === "proposal" && tool.proposalScope ? `needs inbox:write and ${tool.proposalScope}` : `needs a key with ${tool.scope}`}</small></span>
+            </label>
+          </div>;
+        })}
+      </div>)}
+      {!linked && !creating && counts.nook > 0 && <p className="chat-muted">{counts.nook} Nook {counts.nook === 1 ? "tool is" : "tools are"} picked but inactive until a key is linked.</p>}
+    </section>
+    {orphans.length > 0 && <div className="agents-tools-group">
+      <div className="agents-tools-head"><strong>No longer available</strong><small>{orphans.length}</small></div>
+      {orphans.map((ref) => <div key={refKey(ref)} className="agents-tool"><label><input type="checkbox" checked onChange={() => onChange(toggleRef(tools, ref))} /><span className="agents-tool-text"><code>{ref.toolName}</code><small>{ref.source === "server" ? "Its server or tool is gone; untick to clear it." : "Not offered any more; untick to clear it."}</small></span></label></div>)}
+    </div>}
   </div>;
 }

@@ -653,7 +653,7 @@ function SettingsPage({ session, modules, googleResult = null, navigate, flash, 
     : route.app === "team"
     ? <TeamSection route={route} role={session.user.role ?? "member"} totpEnabled={state.enabled} navigate={go} flash={flash} onLeave={() => go(settingsRoute(null), { replace: true })} guardLeave={guardLeave} onKeyPendingChange={onIntegrationKeyPending} />
     : section === "modules" ? <ModulesSettings {...modules} highlight={highlightModule} onHighlightDone={onHighlightDone} />
-    : section === "mcp" ? <KeysSettings notice={googleNoticeLine} onPendingChange={onMcpKeyPending} totpEnabled={state.enabled} role={session.user.role} />
+    : section === "mcp" ? <KeysSettings notice={googleNoticeLine} onPendingChange={onMcpKeyPending} totpEnabled={state.enabled} role={session.user.role} vaultAvailable={session.features?.vault !== false} />
     : section === "access" ? <MyAccess />
     : section === "notifications" ? <NotificationSettings />
     : section === "agents" ? <Suspense fallback={<section className="settings-content" aria-busy="true"><p className="sr-only" role="status">Loading agents…</p></section>}><AgentsSettings agentId={route.app === "settings" ? route.agentId ?? null : null} navigate={go} flash={flash} onOpenChat={(agentId) => navigate({ app: "chat", chatId: null, newChat: true, agentId })} /></Suspense>
