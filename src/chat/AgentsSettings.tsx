@@ -4,8 +4,8 @@ import { ApiError } from "../api";
 import { hubDocumentTitle, NEW_AGENT, type Route } from "../router";
 import { Select } from "../ui/Select";
 import { useConfirm } from "../ui/useConfirm";
-import { AGENT_BOUNDS, type AgentDetail, type AgentSummary, type AgentToolRef, type LinkState, type NookLink, type ToolCatalog } from "../../shared/agents";
-import { agentsStatus, createAgent, deleteAgent, errorCode, getAgent, listAgents, messageOf, toolCatalog, updateAgent, type AgentsStatus } from "./chatApi";
+import { AGENT_BOUNDS, type AgentApiUsage, type AgentDetail, type AgentSummary, type AgentToolRef, type LinkState, type NookLink, type ToolCatalog } from "../../shared/agents";
+import { agentApiUsage, agentsStatus, createAgent, deleteAgent, errorCode, getAgent, listAgents, messageOf, toolCatalog, updateAgent, type AgentsStatus } from "./chatApi";
 import { LinkNookKeySheet } from "./LinkNookKeySheet";
 import { TrifectaBadge } from "./ToolDisclosure";
 import { hasRef, nookGroups, nookWriteMode, orphanRefs, pickCounts, POLICY_BADGES, policyOptions, refKey, setRefPolicy, toggleRef } from "./toolPicker";
@@ -214,16 +214,50 @@ function AgentEditor({ agentId, navigate, flash, canCreate, onOpenChat }: { agen
         <button type="submit" className="primary-button" disabled={busy || stale}>{busy ? "Saving…" : creating ? "Create agent" : "Save"}</button>
       </footer>
     </form>}
+    {agent && !creating && <AgentApiRuns agentId={agent.id} />}
     {linking && agent && <LinkNookKeySheet agentId={agent.id} agentName={agent.name} onClose={() => setLinking(false)} onChanged={onLinkChanged} onOpenKeys={() => { setLinking(false); navigate({ app: "settings", section: "mcp" }); }} />}
     {confirm.confirmElement}
   </div>;
 }
+
+/**
+ * The agent's API and MCP runs for the people who manage it (Wave 42 "AC-C", D366): runs, failures,
+ * and tokens per day over 30 days. Counts only; the runs themselves are in their key owner's Audit log.
+ */
+export function AgentApiRuns({ agentId }: { agentId: string }) {
+  const [usage, setUsage] = useState<AgentApiUsage | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    agentApiUsage(agentId).then((result) => { if (!cancelled) setUsage(result.usage); }, () => { if (!cancelled) setFailed(true); });
+    return () => { cancelled = true; };
+  }, [agentId]);
+  if (failed) return null;
+  return <section className="agent-api-usage" aria-labelledby={`${agentId}-api-runs`}>
+    <h4 id={`${agentId}-api-runs`}>API and MCP runs <small>· last 30 days</small></h4>
+    {!usage ? <p className="chat-muted" role="status">Loading…</p>
+      : usage.totals.runs === 0 ? <p className="chat-muted">No runs through API keys yet. A key with “Run agents” on this agent can run it; each run lands in its owner's Audit log.</p>
+      : <>
+        <p className="chat-muted">{apiRunsSummary(usage)}</p>
+        <div className="agent-api-usage-wrap"><table>
+          <thead><tr><th scope="col">Day</th><th scope="col">Runs</th><th scope="col">Failed</th><th scope="col">Tokens</th></tr></thead>
+          <tbody>{usage.days.slice(0, 14).map((day) => <tr key={day.day}><td>{day.day}</td><td>{day.runs}</td><td>{day.errors}</td><td>{(day.promptTokens + day.completionTokens).toLocaleString()}</td></tr>)}</tbody>
+        </table></div>
+      </>}
+  </section>;
+}
+
+/** "12 runs, 1 failed, 34,567 tokens". */
+export const apiRunsSummary = (usage: AgentApiUsage) =>
+  `${usage.totals.runs} ${usage.totals.runs === 1 ? "run" : "runs"}, ${usage.totals.errors} failed, ${(usage.totals.promptTokens + usage.totals.completionTokens).toLocaleString()} tokens`;
 
 type ToolPickerProps = { catalog: ToolCatalog | null; tools: AgentToolRef[]; directWrites: boolean; linked: boolean; linkState: LinkState; creating: boolean; onChange: (tools: AgentToolRef[]) => void; onLink: () => void };
 
 /** The picker (plan §5.2): a section per server with a checkbox per tool and an optional stricter policy; Nook's tools by module once a key is linked. */
 /** A link whose key is no longer live (Wave 41 QA Q4). */
 const LINK_DEAD: Record<LinkState, string> = { none: "", live: "", revoked: "Key revoked", expired: "Key expired", inactive: "Key inactive" };
+/** The hint's sentence per state (AC-B verification L1): "The linked key was revoked", never "is key revoked". */
+export const LINK_DEAD_SENTENCE: Record<LinkState, string> = { none: "", live: "", revoked: "The linked key was revoked", expired: "The linked key has expired", inactive: "The linked key is inactive" };
 
 function ToolPicker({ catalog, tools, directWrites, linked, linkState, creating, onChange, onLink }: ToolPickerProps) {
   const dead = !linked && linkState !== "none" && linkState !== "live";
@@ -262,7 +296,7 @@ function ToolPicker({ catalog, tools, directWrites, linked, linkState, creating,
       <div className="agents-link-row">
         {creating ? <p className="chat-muted">Create the agent first, then link one of your Nook keys to give it Nook's tools.</p>
           : <><button type="button" className="secondary-button" onClick={onLink}>{linked ? "Change linked key" : dead ? "Link another key" : "Link Nook key"}</button>
-            <p className="chat-muted">{linked ? "Nook's tools run through your linked key; the list shows what that key reaches." : dead ? `The linked key is ${LINK_DEAD[linkState].toLowerCase()}: this agent gets none of Nook's tools until you link another key.` : "Without a key this agent gets none of Nook's tools. Link a key to see and pick the tools it reaches."}</p></>}
+            <p className="chat-muted">{linked ? "Nook's tools run through your linked key; the list shows what that key reaches." : dead ? `${LINK_DEAD_SENTENCE[linkState]}: this agent gets none of Nook's tools until you link another key.` : "Without a key this agent gets none of Nook's tools. Link a key to see and pick the tools it reaches."}</p></>}
       </div>
       {linked && nookGroups(catalog.nook.tools).map((group) => <div key={group.module}>
         <p className="agents-nook-module">{group.label}</p>

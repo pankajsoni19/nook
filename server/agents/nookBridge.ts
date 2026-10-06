@@ -97,7 +97,11 @@ function proposalReach(spec: McpToolSpec, key: McpKeyContext) {
 }
 
 export type NookMode = "read" | "proposal" | "direct";
-export type NookResolved = { toolName: string; description: string; parameters: Record<string, unknown>; policy: "auto" | "confirm"; mode: NookMode; keyId: string; spec?: McpToolSpec };
+/**
+ * `surface` (AC-C): the surface the key's calls are made and counted on: `mcp` for a chat's linked
+ * key (it must have MCP), and the calling key's own surface for an API or MCP run.
+ */
+export type NookResolved = { toolName: string; description: string; parameters: Record<string, unknown>; policy: "auto" | "confirm"; mode: NookMode; keyId: string; spec?: McpToolSpec; surface?: "mcp" | "rest" };
 
 /** The agent's picked Nook tools this key may run now, each in the mode the rights allow (D353, D359). */
 export function nookToolsFor(key: McpKeyContext, agent: Pick<AgentRow, "nook_direct_writes">, picked: readonly string[]): Omit<NookResolved, "spec">[] {
@@ -122,6 +126,22 @@ export function nookToolsFor(key: McpKeyContext, agent: Pick<AgentRow, "nook_dir
   return out;
 }
 
+/**
+ * The scope a live key now lacks to run a Nook tool in the mode it was offered in (AC-B
+ * verification M2), or null when it has them: a read or direct tool needs the tool's own scope;
+ * a proposal needs `inbox:write` and the kind's module scope.
+ */
+export function missingNookScope(key: McpKeyContext, toolName: string, mode: NookMode): McpScope | null {
+  const spec = nookToolSpec(toolName);
+  if (!spec) return null;
+  if (mode === "proposal") {
+    if (!hasScope(key.scopes, "inbox:write")) return "inbox:write";
+    const kind = TOOL_KIND[spec.name];
+    return kind && keyReach(key, PROPOSAL_KIND_DEFS[kind].scope) === null ? PROPOSAL_KIND_DEFS[kind].scope : null;
+  }
+  return toolVisible(spec, key) ? null : spec.scopes[0] ?? null;
+}
+
 export type NookOutcome = { text: string; ok: boolean; proposalId: string | null };
 
 const titleOf = (spec: McpToolSpec, args: Record<string, unknown>) => {
@@ -138,23 +158,24 @@ function proposalPayload(name: string, args: Record<string, unknown>): Record<st
  * Runs one Nook tool for the runner's key inside the run's audit context. A proposal-mode call
  * files an inbox proposal instead of writing (the result says so and names the proposal).
  */
-export async function runNookTool(resolved: NookResolved, args: Record<string, unknown>, context: { runId: string; agentId: string; agentName: string }): Promise<NookOutcome> {
+export async function runNookTool(resolved: NookResolved, args: Record<string, unknown>, context: { runId: string; agentId: string; agentName: string; via?: "chat" | "api" | "mcp" }): Promise<NookOutcome> {
   const spec = resolved.spec ?? nookToolSpec(resolved.toolName);
   if (!spec || !agentMayUse(spec.name)) return { text: JSON.stringify({ error: "Unknown tool", code: "NOT_FOUND" }), ok: false, proposalId: null };
-  // An agent's call is a use of the key like an MCP call (Wave 41 QA L4): Settings → API keys shows it as last used.
-  markKeyUsed(resolved.keyId, "mcp");
+  const surface = resolved.surface ?? "mcp";
+  // An agent's call is a use of the key on its surface (Wave 41 QA L4): Settings → API keys shows it as last used.
+  markKeyUsed(resolved.keyId, surface);
   return withAuditContext({ via: "agent", runId: context.runId, agentId: context.agentId }, async () => {
     if (resolved.mode === "proposal") {
       const kind = TOOL_KIND[spec.name];
       if (!kind) return { text: JSON.stringify({ error: "This change cannot be proposed through the Inbox, and the agent may not make it directly", code: "KIND_NOT_ALLOWED" }), ok: false, proposalId: null };
-      const key = loadLiveKey(resolved.keyId, "mcp");
+      const key = loadLiveKey(resolved.keyId, surface);
       if (!key) return { text: JSON.stringify({ error: "The linked Nook key is no longer active", code: "KEY_INACTIVE" }), ok: false, proposalId: null };
       // The key's rights as they stand now (review M2): `inbox:write` and the kind's module reach, as `submit_proposals` checks.
       if (!proposalReach(spec, key)) return { text: JSON.stringify({ error: "The linked Nook key can no longer file this proposal (it needs inbox:write and the module's scope)", code: "SCOPE_REQUIRED" }), ok: false, proposalId: null };
       try {
         const parsed = spec.inputSchema.safeParse(args);
         if (!parsed.success) return { text: JSON.stringify({ error: "Invalid arguments", code: "INVALID", details: parsed.error.issues.map((issue) => `${issue.path.join(".") || "body"}: ${issue.message}`) }), ok: false, proposalId: null };
-        const result = await submitProposal(key, { kind, title: titleOf(spec, args), rationale: `Suggested by the agent ${context.agentName} in a chat.`, payload: proposalPayload(spec.name, parsed.data as Record<string, unknown>) });
+        const result = await submitProposal(key, { kind, title: titleOf(spec, args), rationale: `Suggested by the agent ${context.agentName} ${context.via === "api" ? "in an API run" : context.via === "mcp" ? "in an MCP run" : "in a chat"}.`, payload: proposalPayload(spec.name, parsed.data as Record<string, unknown>) });
         // A note_draft proposal writes the draft at once (D149); only the published note waits on review (review L11).
         const note = kind === "note_draft"
           ? "The draft was saved for review. The published note is unchanged until the person approves this proposal in their Nook Inbox."
@@ -165,7 +186,7 @@ export async function runNookTool(resolved: NookResolved, args: Record<string, u
         throw error;
       }
     }
-    const result = await runTool(spec, args, resolved.keyId, "mcp");
+    const result = await runTool(spec, args, resolved.keyId, surface);
     return { text: result.content.map((part) => part.text).join("\n"), ok: result.isError !== true, proposalId: null };
   });
 }

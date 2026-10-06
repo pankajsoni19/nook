@@ -43,11 +43,45 @@ export type Route =
   | { app: "vault"; vaultId: string | null; envId: string | null; secretId: string | null; page: "access" | "activity" | null }
   // Agent chat (Wave 40, plan §13.1): the list at /chat (desktop: the list beside an empty state),
   // a new chat at /chat/new (optionally `?agent=<id>` preselects the agent), and one chat at /chat/:chatId.
-  | { app: "chat"; chatId: string | null; newChat?: true; agentId?: string }
+  // Wave 42 (AC-C, plan §13.3): the Audit log at /chat/audit, and one run at /chat/audit/:runId.
+  // Its filters ride in the query (QA L4): ?key=&agent=&status=&from=&to=, on the list and on a run opened from it.
+  | { app: "chat"; chatId: string | null; newChat?: true; agentId?: string; audit?: true; runId?: string; auditFilter?: AuditQuery }
   // The Settings hub (Wave 37): a page at /settings (the section list on phones), and one account
   // section at /settings/:section. Team sections are `team` routes under /settings/team/… (above).
   // Wave 40: Settings → Agents has an editor below it at /settings/agents/:agentId (or /settings/agents/new).
   | { app: "settings"; section: SettingsSection | null; agentId?: string };
+
+/** The Audit log's filters in its URL (Wave 42 QA L4); anything malformed is dropped. */
+export type AuditQuery = { key?: string; agent?: string; status?: string; from?: string; to?: string };
+export const AUDIT_STATUSES = ["ok", "failed", "cancelled", "step_limit", "running"] as const;
+const AUDIT_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+export function parseAuditQuery(search: string): AuditQuery | undefined {
+  const params = new URLSearchParams(search);
+  const query: AuditQuery = {};
+  const key = params.get("key");
+  const agent = params.get("agent");
+  const status = params.get("status");
+  const from = params.get("from");
+  const to = params.get("to");
+  if (key && isRouteId(key)) query.key = key.toLowerCase();
+  if (agent && isRouteId(agent)) query.agent = agent.toLowerCase();
+  if (status && (AUDIT_STATUSES as readonly string[]).includes(status)) query.status = status;
+  if (from && AUDIT_DAY.test(from)) query.from = from;
+  if (to && AUDIT_DAY.test(to)) query.to = to;
+  return Object.keys(query).length ? query : undefined;
+}
+
+export function formatAuditQuery(query: AuditQuery | undefined) {
+  if (!query) return "";
+  const params = new URLSearchParams();
+  for (const name of ["key", "agent", "status", "from", "to"] as const) {
+    const value = query[name];
+    if (value) params.set(name, value);
+  }
+  const text = params.toString();
+  return text ? `?${text}` : "";
+}
 
 const idPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -168,9 +202,16 @@ export function parseRoute(pathname: string, search = ""): Route {
 
 export const NEW_AGENT = "new";
 
-// /chat, /chat/new (with ?agent=<id>), and /chat/:chatId. Anything malformed opens the list.
+// /chat, /chat/new (with ?agent=<id>), /chat/:chatId, /chat/audit, and /chat/audit/:runId. Anything malformed opens the list.
 function parseChat(segments: string[], search: string): Route {
   const [first] = segments;
+  if (first === "audit") {
+    const runId = segments[1];
+    const filter = parseAuditQuery(search);
+    const list: Route = filter ? { app: "chat", chatId: null, audit: true, auditFilter: filter } : { app: "chat", chatId: null, audit: true };
+    if (segments.length === 1) return list;
+    return segments.length === 2 && runId && isRouteId(runId) ? { ...list, runId: runId.toLowerCase() } : list;
+  }
   if (first === undefined || segments.length !== 1) return { app: "chat", chatId: null };
   if (first === "new") {
     const agent = new URLSearchParams(search).get("agent");
@@ -285,6 +326,7 @@ export function formatRoute(route: Route): string {
     return route.section && SETTINGS_SECTIONS.includes(route.section) ? settingsPath(route.section) : "/settings";
   }
   if (route.app === "chat") {
+    if (route.audit) return `${route.runId && isRouteId(route.runId) ? `/chat/audit/${route.runId.toLowerCase()}` : "/chat/audit"}${formatAuditQuery(route.auditFilter)}`;
     if (route.chatId && isRouteId(route.chatId)) return `/chat/${route.chatId.toLowerCase()}`;
     if (route.newChat) return route.agentId && isRouteId(route.agentId) ? `/chat/new?agent=${route.agentId.toLowerCase()}` : "/chat/new";
     return "/chat";
@@ -378,8 +420,8 @@ export const routeFromLocation = (location: { pathname: string; search: string }
  * on Tasks URLs (the only app whose URLs carry one).
  */
 export function locationUrl(location: { pathname: string; search: string }) {
-  // Tasks URLs carry the board query; /chat/new carries the preselected agent (Wave 40).
-  return /^\/tasks(\/|$)/.test(location.pathname) || location.pathname === "/chat/new" ? `${location.pathname}${location.search}` : location.pathname;
+  // Tasks URLs carry the board query; /chat/new carries the preselected agent (Wave 40); the Audit log its filters (Wave 42).
+  return /^\/tasks(\/|$)/.test(location.pathname) || location.pathname === "/chat/new" || /^\/chat\/audit(\/|$)/.test(location.pathname) ? `${location.pathname}${location.search}` : location.pathname;
 }
 
 export function sameRoute(left: Route, right: Route) {

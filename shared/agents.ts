@@ -136,7 +136,7 @@ export const preambleFor = (displayName: string) =>
 export type TokenUsage = { promptTokens: number; completionTokens: number; cachedTokens?: number; estimated: boolean };
 
 /** Error codes a run can end with (plan §2.2, §4.2). */
-export type RunErrorCode = "PROVIDER_ERROR" | "MODEL_TIMEOUT" | "BUDGET_EXCEEDED" | "NO_PROVIDER" | "EGRESS_REFUSED" | "TOO_LARGE" | "INTERNAL";
+export type RunErrorCode = "PROVIDER_ERROR" | "MODEL_TIMEOUT" | "BUDGET_EXCEEDED" | "NO_PROVIDER" | "EGRESS_REFUSED" | "TOO_LARGE" | "ACCESS_REVOKED" | "INTERNAL";
 
 /**
  * One tool call as a message keeps it (AC-B, plan §6.1 and §13.2 "Used N tools"): the tool's own
@@ -249,3 +249,79 @@ export const toolResultEnd = (nonce: string) => `[End of untrusted tool result $
 /** The lethal-trifecta badge (plan §5.2 [14]). */
 export const TRIFECTA_TEXT = "This agent can read your data and reach outside services. Content it reads could steer it.";
 export type DailyUsage = { day: string; promptTokens: number; completionTokens: number; runs: number; budget: number };
+
+// --- AC-C (Wave 42): external runs and the Audit log (plan §7) ---------------------------------------
+
+/** A run's label is one line of text (Wave 42 review L3): no control characters (C0, DEL, C1) and no line or paragraph separators. */
+export const isOneLineLabel = (value: string) => !/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/.test(value);
+
+/** Bounds of an API or MCP run (plan §7.2) and of what the Audit log keeps (plan §7.3). */
+export const EXTERNAL_BOUNDS = {
+  /** `{input}`: one user message, in UTF-8 bytes. */
+  inputBytes: 32 * 1024,
+  /** `{messages}`: at most this many turns, this many UTF-8 bytes in total. */
+  messages: 50,
+  messagesBytes: 128 * 1024,
+  label: 60,
+  /** The run's wall clock (plan §2.2: 5 minutes for API and MCP runs), capped by AGENT_RUN_TIMEOUT_S. */
+  runTimeoutS: 300,
+  /** A step's text, a tool call's arguments, and its result, in UTF-8 bytes (longer ones are cut and flagged). */
+  stepTextBytes: 16 * 1024,
+  /** The Audit log's pages, and the most runs one export holds. */
+  page: 50,
+  exportMax: 1000
+} as const;
+
+export const AUDIT_VIAS = ["api", "mcp"] as const;
+export type AuditVia = typeof AUDIT_VIAS[number];
+
+/**
+ * One API or MCP run in the Audit log list (D366). Metadata only, for every reader: agent, key,
+ * owner, status, counts, tokens, and timings. `label` (set by the caller) and `clientAddress` reach
+ * the key's owner only; `full` says whether this reader may open the run's content.
+ */
+export type AuditRunSummary = {
+  id: string; via: AuditVia; agentId: string; agentName: string | null;
+  key: { id: string; name: string; prefix: string } | null;
+  owner: { id: string; displayName: string | null };
+  status: RunStatus; errorCode: string | null; model: string;
+  steps: number; toolCalls: number; promptTokens: number; completionTokens: number; estimated: boolean;
+  queuedAt: string; startedAt: string | null; firstTokenAt: string | null; finishedAt: string | null; durationMs: number | null;
+  label: string | null; full: boolean;
+};
+
+/** One step of a run's timeline: content fields (`text`, `args`, `result`) are null below the key's owner. */
+export type AuditStepView = {
+  seq: number; kind: "model" | "tool"; server: string | null; tool: string | null; ok: boolean | null; truncated: boolean;
+  durationMs: number; promptTokens: number | null; completionTokens: number | null;
+  text: string | null; args: string | null; result: string | null;
+};
+
+/** A run's detail (D366): the key's owner gets input, output, and every step in full; an admin who is not the owner gets metadata and tool names. */
+export type AuditRunDetail = AuditRunSummary & {
+  input: string | null; output: string | null; timeline: AuditStepView[]; toolNames: string[];
+  agentRevision: number; preambleVersion: number; clientAddress: string | null; purgeAfter: string | null;
+};
+
+/** The REST and MCP answer for a run (plan §7.2), also the stream's final `done` event. */
+export type ExternalRunResult = {
+  runId: string; agentId: string; status: RunStatus; output: string; steps: number;
+  toolCalls: Array<{ name: string; server: string; ok: boolean | null; durationMs: number | null }>;
+  usage: { promptTokens: number; completionTokens: number; estimated: boolean };
+  timings: { queuedMs: number | null; firstTokenMs: number | null; totalMs: number | null };
+  error: { code: string; message: string } | null;
+  label: string | null;
+};
+
+/** The per-agent counts its managers see (D366): API and MCP runs per day, never content. */
+/**
+ * The Audit log's filter choices (Wave 42 QA M3, GET /api/agents/audit/facets): the reader's own
+ * keys that can or did run agents and their own agents; for admins also the keys and agents of
+ * every run they can see, as names only (`own: false`, with the key's owner).
+ */
+export type AuditFacets = {
+  keys: Array<{ id: string; name: string; prefix: string; own: boolean; ownerName: string | null }>;
+  agents: Array<{ id: string; name: string | null; own: boolean }>;
+};
+
+export type AgentApiUsage = { days: Array<{ day: string; runs: number; errors: number; promptTokens: number; completionTokens: number }>; totals: { runs: number; errors: number; promptTokens: number; completionTokens: number } };

@@ -8,7 +8,7 @@ import { PHONE_QUERY, useMediaQuery } from "../calendar/hooks";
 import { ModalDialog } from "../files/Dialog";
 import { popStateClosedDialog } from "../historyDialogs";
 import { routeFromLocation, type Route } from "../router";
-import { chatBackAction, chatGroup, chatRoute, type ChatRoute } from "../chatRoute";
+import { auditRoute, chatBackAction, chatGroup, chatRoute, type ChatRoute } from "../chatRoute";
 import { Select } from "../ui/Select";
 import { useConfirm } from "../ui/useConfirm";
 import { useHistoryDialogGuard } from "../ui/useHistoryDialogGuard";
@@ -18,6 +18,7 @@ import { leafForSibling, shownBranch, type Shown } from "./chatTree";
 import { LinkNookKeySheet } from "./LinkNookKeySheet";
 import { Markdown, type RenderContext } from "./markdown/render";
 import { ConfirmationCard, ToolCallsDisclosure, TrifectaBadge } from "./ToolDisclosure";
+import { AuditLog } from "./AuditLog";
 import "./chat.css";
 
 type ChatNavigate = (route: Route, options?: { replace?: boolean; removed?: boolean }) => void;
@@ -50,6 +51,7 @@ const ERROR_TEXT: Record<string, string> = {
   NO_PROVIDER: "No model provider is configured",
   EGRESS_REFUSED: "The provider's address is not allowed",
   TOO_LARGE: "The reply was too large",
+  ACCESS_REVOKED: "You can no longer chat with this agent; the answer stopped",
   INTERNAL: "Something went wrong while answering"
 };
 
@@ -278,8 +280,8 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
   useEffect(() => {
     // Wave 39: the app's own name follows APP_NAME.
     if (route.chatId && detail?.chat.id === route.chatId) document.title = `${detail.chat.title} · Chat · ${appName()}`;
-    else document.title = route.newChat ? `New chat · Chat · ${appName()}` : `Chat · ${appName()}`;
-  }, [detail, route.chatId, route.newChat]);
+    else document.title = route.audit ? `Audit log · Chat · ${appName()}` : route.newChat ? `New chat · Chat · ${appName()}` : `Chat · ${appName()}`;
+  }, [detail, route.audit, route.chatId, route.newChat]);
 
   useEffect(() => { setNewAgentId(route.newChat ? route.agentId ?? null : null); setDraft(""); resetComposer(); }, [route.newChat, route.agentId, route.chatId]);
 
@@ -437,7 +439,7 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
   }
 
   const renderContext = useMemo<RenderContext>(() => ({ onExternalLink: (href) => setExternalLink(href), onNookLink: (path) => onOpenPath(path) }), [onOpenPath]);
-  const detailOpen = Boolean(route.chatId || route.newChat);
+  const detailOpen = Boolean(route.chatId || route.newChat || (route.audit && route.runId));
   const agentOptions = useMemo(() => (agents ?? []).map((agent) => ({ value: agent.id, label: `${agent.icon ? `${agent.icon} ` : ""}${agent.name}`, description: agent.description || (agent.model ?? status?.defaultModel ?? "") })), [agents, status?.defaultModel]);
   const newAgent = agents?.find((agent) => agent.id === newAgentId) ?? null;
   const chatAgent = detail ? agents?.find((agent) => agent.id === detail.chat.agentId) ?? null : null;
@@ -448,7 +450,7 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
     : status && !status.enabled ? <section className="chat-state"><span className="chat-state-icon"><Bot /></span><h2>Chat is not configured</h2>
       {role === "admin" ? <p>{status.reason === "key_mismatch" ? "AGENT_SECRETS_KEY does not open the stored provider secrets. Restore the key the providers were saved with, or remove and re-enter their API keys." : "Set AGENT_SECRETS_KEY (openssl rand -base64 32, different from the TOTP and vault keys) on the server, restart, then add a model provider in Settings → AI."} See docs/OPERATIONS.md, Agent chat.</p> : <p>Ask an admin to configure it.</p>}
     </section>
-    : status && !status.canChat ? <section className="chat-state"><span className="chat-state-icon"><Bot /></span><h2>Chat is off for your role</h2><p>An admin decides which roles may chat with agents (Settings → AI).</p></section>
+    : status && !status.canChat && !route.audit ? <section className="chat-state"><span className="chat-state-icon"><Bot /></span><h2>Chat is off for your role</h2><p>An admin decides which roles may chat with agents (Settings → AI).</p></section>
     : null;
 
   const groups = useMemo(() => {
@@ -475,6 +477,7 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
     </div>)}
     <div className="chat-list-foot">
       <button type="button" className="chat-link" onClick={() => onOpenAgents(null)}>Agents</button>
+      {status?.auditVisible && <button type="button" className="chat-link" onClick={() => go(auditRoute())}>Audit log</button>}
       {role === "admin" && <button type="button" className="chat-link" onClick={onSettings}>Settings</button>}
     </div>
   </section>;
@@ -558,7 +561,7 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
       <span className="app-home-brand"><span className="brand-dot"><Sparkles /></span><span className="brand-text"><strong>Chat</strong></span></span><AppPageName name="Chat" />
       {account}
     </header>
-    {notice ?? <div className="chat-layout split-layout">{list}{pane}</div>}
+    {notice ?? (route.audit ? <AuditLog route={route} role={role} phone={phone} go={go} back={back} context={renderContext} /> : <div className="chat-layout split-layout">{list}{pane}</div>)}
     {renaming && detail && <RenameDialog title={detail.chat.title} onCancel={() => setRenaming(false)} onSave={(title) => { void rename(title); }} />}
     {externalLink && <ExternalLinkSheet href={externalLink} onClose={() => setExternalLink(null)} />}
     {linking && chatAgent && <LinkNookKeySheet agentId={chatAgent.id} agentName={chatAgent.name} onClose={() => setLinking(false)} onChanged={() => { void loadAgents(); }} />}

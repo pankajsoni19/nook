@@ -1,4 +1,4 @@
-import type { Route } from "./router";
+import type { AuditQuery, Route } from "./router";
 
 export type ChatRoute = Extract<Route, { app: "chat" }>;
 
@@ -9,14 +9,23 @@ export function chatRoute(chatId: string | null = null, options: { newChat?: boo
   return { app: "chat", chatId: null };
 }
 
+/** The Audit log (Wave 42, plan §13.3): the list, or one run's timeline; the list's filters ride along (QA L4). */
+export function auditRoute(runId: string | null = null, filter?: { [K in keyof AuditQuery]?: string | null } | null): ChatRoute {
+  const clean = filter ? Object.fromEntries(Object.entries(filter).filter(([, value]) => typeof value === "string" && value)) as AuditQuery : null;
+  const base: ChatRoute = clean && Object.keys(clean).length ? { app: "chat", chatId: null, audit: true, auditFilter: clean } : { app: "chat", chatId: null, audit: true };
+  return runId ? { ...base, runId } : base;
+}
+
 /**
  * In-app Back (the ‹ in a chat's header on phones, and the list's Home): step back through entries
  * this visit pushed (the `mynotes.depth` counter), so it matches the browser's Back; from a deep
- * link replace the chat with the list; from the list go Home. It never leaves Nook.
+ * link replace the chat with the list (a run with the Audit log, the Audit log with the chats); from
+ * the list go Home. It never leaves Nook.
  */
 export function chatBackAction(route: ChatRoute, depth: number): { kind: "history" } | { kind: "replace"; route: ChatRoute } | { kind: "home" } {
-  if (!route.chatId && !route.newChat) return { kind: "home" };
+  if (!route.chatId && !route.newChat && !route.audit) return { kind: "home" };
   if (depth > 0) return { kind: "history" };
+  if (route.audit && route.runId) return { kind: "replace", route: auditRoute(null, route.auditFilter) };
   return { kind: "replace", route: chatRoute() };
 }
 

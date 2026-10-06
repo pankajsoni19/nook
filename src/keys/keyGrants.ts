@@ -9,7 +9,7 @@ import { MCP_PERMISSIONS, offeredMcpPermissions, type McpScope } from "../mcpPer
 
 export type GrantModule = "notes" | "files" | "tasks" | "today" | "calendar" | "collections" | "team" | "inbox" | "bin" | "whiteboards" | "agents";
 export type KeyPermission = "read" | "comment" | "write" | "draft" | "publish" | "create" | "run";
-export type ResourceKind = "folder" | "note" | "document" | "board" | "task_view" | "collection" | "calendar" | "routine" | "whiteboard";
+export type ResourceKind = "folder" | "note" | "document" | "board" | "task_view" | "collection" | "calendar" | "routine" | "whiteboard" | "agent";
 export type KeySurfaces = "mcp" | "rest" | "both";
 
 export const GRANT_MODULES: readonly GrantModule[] = ["notes", "files", "tasks", "today", "calendar", "collections", "team", "inbox", "bin", "whiteboards", "agents"];
@@ -30,7 +30,8 @@ export const GRANT_SCOPES: Record<GrantModule, Partial<Record<KeyPermission, Mcp
   inbox: { read: "inbox:read", write: "inbox:write" },
   bin: { write: "bin:write" },
   whiteboards: { read: "whiteboards:read", write: "whiteboards:write" },
-  agents: { read: "agents:read" }
+  // Wave 42 (AC-C): run agents over REST and MCP.
+  agents: { read: "agents:read", run: "agents:run" }
 };
 
 export const scopeFor = (module: GrantModule, permission: KeyPermission) => GRANT_SCOPES[module][permission] ?? null;
@@ -50,11 +51,13 @@ export const SELECTOR_KINDS: Partial<Record<GrantModule, { kinds: readonly Resou
   collections: { kinds: ["collection"], one: "collection", many: "collections" },
   calendar: { kinds: ["calendar"], one: "calendar", many: "calendars" },
   inbox: { kinds: ["routine"], one: "routine", many: "routines" },
-  whiteboards: { kinds: ["whiteboard"], one: "whiteboard", many: "whiteboards" }
+  whiteboards: { kinds: ["whiteboard"], one: "whiteboard", many: "whiteboards" },
+  // Wave 42 (AC-C): run all your agents or chosen ones; reading always covers all (ALL_ONLY).
+  agents: { kinds: ["agent"], one: "agent", many: "agents" }
 };
 
 export const KIND_LABELS: Record<ResourceKind, string> = {
-  folder: "Folder", note: "Note", document: "File", board: "Board", task_view: "View", collection: "Collection", calendar: "Calendar", routine: "Routine", whiteboard: "Whiteboard"
+  folder: "Folder", note: "Note", document: "File", board: "Board", task_view: "View", collection: "Collection", calendar: "Calendar", routine: "Routine", whiteboard: "Whiteboard", agent: "Agent"
 };
 
 /**
@@ -63,8 +66,11 @@ export const KIND_LABELS: Record<ResourceKind, string> = {
  */
 export const CREATE_ONLY: ReadonlySet<string> = new Set(["whiteboards:write"]);
 
-/** The chosen-item kinds a row offers: none for modules without items or create-only permissions. */
-export const selectorFor = (module: GrantModule, permission: KeyPermission) => CREATE_ONLY.has(`${module}:${permission}`) ? undefined : SELECTOR_KINDS[module];
+/** Permissions that always cover every item (mirrors server/keyGrants.ts ALL_ONLY): reading agents and your chats. */
+export const ALL_ONLY: ReadonlySet<string> = new Set(["agents:read"]);
+
+/** The chosen-item kinds a row offers: none for modules without items, create-only, or all-only permissions. */
+export const selectorFor = (module: GrantModule, permission: KeyPermission) => CREATE_ONLY.has(`${module}:${permission}`) || ALL_ONLY.has(`${module}:${permission}`) ? undefined : SELECTOR_KINDS[module];
 
 /** Kinds a key can only read through (a saved view is a query, never a write target). */
 export const READ_ONLY_KINDS: readonly ResourceKind[] = ["task_view"];
@@ -174,7 +180,7 @@ export function rowsToGrants(rows: readonly GrantRow[]): { grants: GrantPayload[
     const id = `${row.module}:${row.permission}`;
     if (seen.has(id)) return { grants: [], error: `${MODULE_LABELS[row.module]}: ${permissionLabel(row.module, row.permission)} is listed twice.` };
     seen.add(id);
-    if (row.applies === "chosen" && !CREATE_ONLY.has(`${row.module}:${row.permission}`)) {
+    if (row.applies === "chosen" && !CREATE_ONLY.has(`${row.module}:${row.permission}`) && !ALL_ONLY.has(`${row.module}:${row.permission}`)) {
       const selector = SELECTOR_KINDS[row.module];
       if (!selector) return { grants: [], error: `${MODULE_LABELS[row.module]} covers every item.` };
       if (!row.resourceIds.length) return { grants: [], error: `Choose at least one ${selector.one} for ${MODULE_LABELS[row.module]}, or pick All ${selector.many}.` };
@@ -235,7 +241,8 @@ export function grantChips(grants: readonly KeyGrantView[]) {
 
 const KIND_NOUNS: Record<ResourceKind, readonly [string, string]> = {
   folder: ["folder", "folders"], note: ["note", "notes"], document: ["file", "files"], board: ["board", "boards"], task_view: ["view", "views"],
-  collection: ["collection", "collections"], calendar: ["calendar", "calendars"], routine: ["routine", "routines"], whiteboard: ["whiteboard", "whiteboards"]
+  collection: ["collection", "collections"], calendar: ["calendar", "calendars"], routine: ["routine", "routines"], whiteboard: ["whiteboard", "whiteboards"],
+  agent: ["agent", "agents"]
 };
 
 /** One sentence under the builder: what the key can do, and what no key ever does (D265). */
@@ -243,8 +250,9 @@ export function grantSummary(rows: readonly GrantRow[]) {
   if (!rows.length) return "This key can do nothing yet. Add a permission.";
   const parts = rows.map((row) => {
     const selector = SELECTOR_KINDS[row.module];
-    // Creating a whiteboard makes a new, private board: it is not "on" any existing ones (QA Q7).
-    const createOnly = row.module === "whiteboards" && row.permission === "write";
+    // Creating a whiteboard makes a new, private board: it is not "on" any existing ones (QA Q7);
+    // reading agents and chats is about everything you have (Wave 42).
+    const createOnly = (row.module === "whiteboards" && row.permission === "write") || ALL_ONLY.has(`${row.module}:${row.permission}`);
     const kinds = new Set(row.resourceIds.map((token) => parseResourceToken(token)?.kind));
     const only = kinds.size === 1 ? [...kinds][0] : undefined;
     const noun = only ? KIND_NOUNS[only] : ["item", "items"] as const;

@@ -258,3 +258,59 @@
 .chat-trifecta { display: inline-flex; align-items: flex-start; gap: 6px; border: 1px solid #5a3d1f; border-radius: 10px; padding: 6px 10px; background: #2a1f14; color: #f3b56e; font-size: .82rem; line-height: 1.4; }
 .chat-trifecta svg { width: 16px; flex: none; margin-top: 1px; }
 .chat-trifecta-compact { min-height: 32px; align-items: center; border-radius: 999px; padding: 0 10px; font-size: .76rem; }
+
+/* AC-C (Wave 42): the Audit log, list → run timeline; the filter sheet; an agent's API run counts */
+.audit-top { display: grid; gap: 10px; margin-bottom: 16px; }
+.audit-back-link { display: inline-flex; align-items: center; gap: 2px; min-height: 36px; justify-self: start; text-decoration: none; }
+.audit-back-link svg { width: 16px; }
+.audit-title { display: flex; align-items: center; gap: 8px; margin: 0; color: #fafafa; font-size: 1.05rem; }
+.audit-title svg { width: 20px; color: #c9a85c; }
+.audit-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.audit-actions .secondary-button, .audit-export-one { min-height: 44px; display: inline-flex; align-items: center; gap: 6px; margin: 0; padding: 0 14px; font-size: .86rem; text-decoration: none; }
+.audit-actions svg, .audit-export-one svg { width: 16px; }
+.audit-cards { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.audit-card { width: 100%; min-height: 64px; display: grid; gap: 3px; border: 1px solid #26262a; border-radius: 12px; padding: 10px 12px; background: #0f0f11; color: #e1e1e3; text-align: left; cursor: pointer; }
+.audit-card:hover { background: var(--panel-hover); }
+.audit-card.active { border-color: #6b582f; background: #1f1d16; }
+.audit-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.audit-card-agent { overflow: hidden; font-size: .92rem; text-overflow: ellipsis; white-space: nowrap; }
+.audit-card-meta { color: #8d8d94; font-size: .76rem; line-height: 1.4; overflow-wrap: anywhere; }
+.audit-chip { display: inline-flex; align-items: center; flex: none; min-height: 22px; border-radius: 999px; padding: 0 9px; font-size: .72rem; font-weight: 600; }
+.audit-chip-ok { background: #13281c; color: #86efac; }
+.audit-chip-warn { background: #2a2414; color: #f3ce79; }
+.audit-chip-danger { background: #2e1419; color: #fda4af; }
+.audit-chip-muted { background: #1d1d21; color: #b8b8bf; }
+.audit-more { min-height: 44px; margin-top: 12px; }
+.audit-run { display: grid; gap: 14px; min-width: 0; }
+/* The sticky band encloses its row evenly (QA L9): the Export button sits inside it, not on its top edge. */
+.audit-run-header { flex-wrap: wrap; margin: 0 -12px; padding: 10px 12px; border-radius: 12px; }
+.audit-agent { cursor: default; }
+.audit-export-one { margin-left: auto; }
+.audit-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); gap: 10px 18px; margin: 0; }
+.audit-facts div { min-width: 0; }
+.audit-facts dt { color: #7c7c83; font-size: .7rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.audit-facts dd { display: flex; align-items: center; gap: 6px; margin: 2px 0 0; color: #e1e1e3; font-size: .86rem; overflow-wrap: anywhere; }
+.audit-facts dd svg { width: 14px; flex: none; color: #8d8d94; }
+.audit-notice { margin: 0; border: 1px solid #303035; border-radius: 10px; padding: 10px 12px; background: #141416; color: #c9c9ce; font-size: .84rem; line-height: 1.45; }
+.audit-block h3 { margin: 0 0 6px; color: #7c7c83; font-size: .72rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+.audit-pre { margin: 0; max-height: 320px; overflow: auto; border: 1px solid #2c2c31; border-radius: 8px; padding: 8px 10px; background: #0b0b0d; color: #ededee; font-size: .8rem; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.audit-timeline { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
+.audit-step { position: relative; display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 10px; padding-bottom: 14px; }
+.audit-step::before { content: ""; position: absolute; top: 30px; bottom: 0; left: 14px; width: 2px; background: #26262a; }
+.audit-step:last-child::before { display: none; }
+.audit-step-icon { width: 30px; height: 30px; display: grid; place-items: center; border: 1px solid #303035; border-radius: 9px; background: #19191c; color: #c9a85c; }
+.audit-step-icon svg { width: 15px; }
+.audit-step-body { display: grid; gap: 6px; min-width: 0; }
+.audit-step-title { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0 0; color: #e1e1e3; font-size: .86rem; }
+.audit-step-title code { overflow-wrap: anywhere; }
+.audit-pre-text { max-height: 200px; }
+.audit-details summary { min-height: 36px; display: flex; align-items: center; color: #c9a85c; font-size: .82rem; cursor: pointer; }
+.audit-details h4 { margin: 8px 0 4px; color: #8d8d94; font-size: .74rem; font-weight: 600; }
+.audit-filter-fields { display: grid; gap: 12px; padding: 4px 0 8px; }
+.audit-field { display: grid; gap: 6px; color: #c9c9ce; font-size: .84rem; }
+.audit-field input { min-height: 44px; border: 1px solid #333338; border-radius: 10px; padding: 0 12px; background: #0b0b0d; color: #ededee; font: inherit; color-scheme: dark; }
+.agent-api-usage { display: grid; gap: 8px; }
+.agent-api-usage table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+.agent-api-usage th, .agent-api-usage td { padding: 6px 8px; border-bottom: 1px solid #26262a; text-align: right; }
+.agent-api-usage th:first-child, .agent-api-usage td:first-child { text-align: left; }
+.agent-api-usage-wrap { overflow-x: auto; }

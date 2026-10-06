@@ -1,9 +1,24 @@
 import { api, ApiError, getCsrfToken, noteRequestOutcome } from "../api";
-import type { AgentDetail, AgentSettings, AgentSummary, AgentToolRef, ChatDetail, ChatMessage, ChatSummary, DailyUsage, DeclaredStdioServer, LinkableKey, NookLink, ProviderCompat, ProviderSummary, RunEvent, ServerAuthKind, ServerAvailability, ToolCatalog, ToolPolicy, ToolServerSummary } from "../../shared/agents";
+import type { AgentApiUsage, AuditFacets, AuditRunDetail, AuditRunSummary, AgentDetail, AgentSettings, AgentSummary, AgentToolRef, ChatDetail, ChatMessage, ChatSummary, DailyUsage, DeclaredStdioServer, LinkableKey, NookLink, ProviderCompat, ProviderSummary, RunEvent, ServerAuthKind, ServerAvailability, ToolCatalog, ToolPolicy, ToolServerSummary } from "../../shared/agents";
 
 /** The agent chat API (docs/plan/API_CONTRACTS.md § Agent chat), plus the SSE reader for runs. */
 
-export type AgentsStatus = { enabled: boolean; reason: "unset" | "key_mismatch" | null; canChat: boolean; canCreate: boolean; defaultModel: string };
+export type AgentsStatus = { enabled: boolean; reason: "unset" | "key_mismatch" | null; canChat: boolean; canCreate: boolean; defaultModel: string; auditVisible?: boolean };
+
+// The Audit log (AC-C, plan §7.3): the key's owner in full, admins metadata only.
+export type AuditFilter = { key?: string | null; agent?: string | null; status?: string | null; from?: string | null; to?: string | null };
+const auditQuery = (filter: AuditFilter, extra: Record<string, string> = {}) => {
+  const params = new URLSearchParams();
+  for (const [name, value] of Object.entries({ ...filter, ...extra })) if (value) params.set(name, value);
+  const text = params.toString();
+  return text ? `?${text}` : "";
+};
+export const listAudit = (filter: AuditFilter, cursor?: string | null) => api<{ runs: AuditRunSummary[]; nextCursor: string | null }>(`/agents/audit${auditQuery(filter, cursor ? { cursor } : {})}`);
+export const auditFacets = () => api<{ facets: AuditFacets }>("/agents/audit/facets");
+export const getAuditRun = (runId: string) => api<{ run: AuditRunDetail }>(`/agents/audit/${runId}`);
+/** The export's URL (a same-origin GET with the session; the browser saves the attachment). */
+export const auditExportUrl = (filter: AuditFilter, runId?: string | null) => `/api/agents/audit/export${auditQuery(filter, runId ? { runId } : {})}`;
+export const agentApiUsage = (agentId: string) => api<{ usage: AgentApiUsage }>(`/agents/${agentId}/api-usage`);
 export const agentsStatus = () => api<AgentsStatus>("/agents/status");
 
 export const listAgents = () => api<{ agents: AgentSummary[] }>("/agents");

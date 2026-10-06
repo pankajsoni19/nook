@@ -11,8 +11,9 @@ import { connectionFor } from "./providers";
 import { readAgentSettings, roleMayChat } from "./settings";
 import { AgentError } from "./status";
 import { channelOf, openChannel, type RunChannel } from "./stream";
-import { identityOf, inactiveLinkMessage, liveRunner, liveToolFor, resolveTools, type ResolvedTool } from "./tools";
+import { identityOf, inactiveLinkMessage, liveRunner, liveToolFailure, liveToolFor, resolveTools, type ResolvedTool } from "./tools";
 import { sessionFor } from "./toolServers";
+import { withinAgentRun } from "./depth";
 
 /**
  * Runs (plan §2.2, §2.3, §2.4, D344, D345): every run is an `agent_runs` row and an in-memory
@@ -28,17 +29,25 @@ import { sessionFor } from "./toolServers";
 
 /** A confirmation the run waits on (plan §5.4, D352, T324): a server nonce and the arguments' hash, single use (review M1). */
 type PendingState = { confirmation: PendingConfirmation; resolve: (decision: "allowed" | "denied") => void };
-export type ActiveRun = { runId: string; chatId: string; userId: string; messageId: string; controller: AbortController; startedAt: number; pending: PendingState | null; toolCalls: ToolCallView[] };
+/**
+ * A live run. Chat runs carry their chat and assistant message; API and MCP runs (AC-C,
+ * server/agents/external.ts) carry no chat and their key instead. All of them share the slots.
+ */
+export type ActiveRun = { runId: string; chatId: string | null; keyId: string | null; userId: string; messageId: string; controller: AbortController; startedAt: number; pending: PendingState | null; toolCalls: ToolCallView[] };
 const active = new Map<string, ActiveRun>();
 
 export const activeRuns = () => [...active.values()];
 export const activeRunForChat = (chatId: string) => [...active.values()].find((run) => run.chatId === chatId) ?? null;
+/** AC-C: an API or MCP run takes its slots here and gives them back when it ends. */
+export const registerActiveRun = (run: ActiveRun) => { active.set(run.runId, run); };
+export const releaseActiveRun = (runId: string) => { active.delete(runId); };
+export const activeRun = (runId: string) => active.get(runId) ?? null;
 
 export const dayOf = (time = Date.now()) => new Date(time).toISOString().slice(0, 10);
 
-/** Tokens the person used today, every agent included (`agent_usage_daily`). */
+/** Tokens the person used today, every agent included (`agent_usage_daily`), their chats and their keys' API and MCP runs (AC-C) alike. */
 export function dailyUsage(userId: string, day = dayOf()): DailyUsage {
-  const row = db.query("SELECT COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens, COALESCE(SUM(completion_tokens), 0) AS completion_tokens, COALESCE(SUM(runs), 0) AS runs FROM agent_usage_daily WHERE day = ? AND user_id = ? AND key_id = ''").get(day, userId) as { prompt_tokens: number; completion_tokens: number; runs: number };
+  const row = db.query("SELECT COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens, COALESCE(SUM(completion_tokens), 0) AS completion_tokens, COALESCE(SUM(runs), 0) AS runs FROM agent_usage_daily WHERE day = ? AND user_id = ?").get(day, userId) as { prompt_tokens: number; completion_tokens: number; runs: number };
   return { day, promptTokens: row.prompt_tokens, completionTokens: row.completion_tokens, runs: row.runs, budget: readAgentSettings().dailyTokensUser };
 }
 
@@ -59,19 +68,33 @@ export function assertBudget(userId: string) {
   }
 }
 
-const secondsToMidnight = () => Math.max(1, Math.ceil((Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate() + 1) - Date.now()) / 1000));
+export const secondsToMidnight = () => Math.max(1, Math.ceil((Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate() + 1) - Date.now()) / 1000));
 
-function chargeUsage(userId: string, agentId: string, usage: TokenUsage, runs: number) {
-  db.query(`INSERT INTO agent_usage_daily (day, user_id, key_id, agent_id, runs, prompt_tokens, completion_tokens) VALUES (?, ?, '', ?, ?, ?, ?)
+/** Adds a step's tokens (or a finished run) to today's row; `keyId` is '' for chats and the calling key for API and MCP runs (AC-C). */
+export function chargeUsage(userId: string, agentId: string, usage: TokenUsage, runs: number, keyId = "") {
+  db.query(`INSERT INTO agent_usage_daily (day, user_id, key_id, agent_id, runs, prompt_tokens, completion_tokens) VALUES (?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(day, user_id, key_id, agent_id) DO UPDATE SET runs = runs + excluded.runs, prompt_tokens = prompt_tokens + excluded.prompt_tokens, completion_tokens = completion_tokens + excluded.completion_tokens`)
-    .run(dayOf(), userId, agentId, runs, usage.promptTokens, usage.completionTokens);
+    .run(dayOf(), userId, keyId, agentId, runs, usage.promptTokens, usage.completionTokens);
+}
+
+/**
+ * Concurrency for an API or MCP run (plan §2.2, §7.2; AC-C): 2 per key and 2 per person (429
+ * `AGENT_BUSY`, shared with the person's chats), and the instance's slots (503).
+ */
+export function assertKeySlots(userId: string, keyId: string) {
+  const runs = [...active.values()];
+  if (runs.filter((run) => run.keyId === keyId).length >= RUN_SLOTS.key) throw new AgentError(429, "AGENT_BUSY", `This API key can run ${RUN_SLOTS.key} agents at once; wait for one to finish`, { retryAfterSeconds: 5, scope: "key" });
+  if (runs.filter((run) => run.userId === userId).length >= RUN_SLOTS.user) throw new AgentError(429, "AGENT_BUSY", `The key's owner already has ${RUN_SLOTS.user} runs going (chats or API); wait for one to finish`, { retryAfterSeconds: 5, scope: "owner" });
+  if (runs.length >= config.agents.maxConcurrentRuns) throw new AgentError(503, "AGENT_BUSY", "This Nook is running as many agents as it can; try again in a moment", { retryAfterSeconds: 5, scope: "instance" });
 }
 
 /** Concurrency slots (plan §2.2): 503 for the instance, 429 per user, 409 per chat. */
 function assertSlots(userId: string, chatId: string) {
   const runs = [...active.values()];
   if (runs.some((run) => run.chatId === chatId)) throw new AgentError(409, "RUN_ACTIVE", "This chat is already answering; stop it first");
-  if (runs.filter((run) => run.userId === userId).length >= RUN_SLOTS.user) throw new AgentError(429, "AGENT_BUSY", `You can run ${RUN_SLOTS.user} chats at once; wait for one to finish`, { retryAfterSeconds: 5 });
+  // The person's slots are shared by their chats and their keys' API and MCP runs (Wave 42 QA L8).
+  const mine = runs.filter((run) => run.userId === userId).length;
+  if (mine >= RUN_SLOTS.user) throw new AgentError(429, "AGENT_BUSY", `You have ${mine} runs going (chats or API); wait for one to finish`, { retryAfterSeconds: 5 });
   if (runs.length >= config.agents.maxConcurrentRuns) throw new AgentError(503, "AGENT_BUSY", "This Nook is answering as many chats as it can; try again in a moment", { retryAfterSeconds: 5 });
 }
 
@@ -137,16 +160,19 @@ export function startChatRun(actor: { userId: string; role: string; displayName:
   })();
 
   const controller = new AbortController();
-  const run: ActiveRun = { runId, chatId: chat.id, userId: actor.userId, messageId: assistantMessage.id, controller, startedAt: Date.now(), pending: null, toolCalls: [] };
+  const run: ActiveRun = { runId, chatId: chat.id, keyId: null, userId: actor.userId, messageId: assistantMessage.id, controller, startedAt: Date.now(), pending: null, toolCalls: [] };
   active.set(runId, run);
   const channel = openChannel(runId);
   channel.emit({ type: "run", data: { runId, chatId: chat.id, messageId: assistantMessage.id, userMessageId: userMessage?.id ?? null } });
   audit(actor.userId, null, "agents.run.start", { runId, chatId: chat.id, agentId: agent.id });
-  void execute(run, channel, agent, actor, chat, assistantMessage.id, parentId, connection);
+  // Inside the depth guard's frame (AC-C, T318): nothing this run does can start another run.
+  void withinAgentRun({ runId, via: "chat" }, () => execute(run, channel, agent, actor, chat, assistantMessage.id, parentId, connection));
   return { runId, userMessage, assistantMessage };
 }
 
 type CancelReason = "stop" | "timeout" | "chat_deleted";
+
+const ACCESS_REVOKED_TEXT = "You can no longer chat with this agent: your access or the agent changed during the answer";
 
 const preview = (value: string) => value.length > AGENT_BOUNDS.toolPreviewChars ? `${value.slice(0, AGENT_BOUNDS.toolPreviewChars - 1)}…` : value;
 const argsPreviewOf = (raw: string) => {
@@ -223,11 +249,11 @@ function toolExecutor(run: ActiveRun, channel: RunChannel, agent: AgentRow, mess
     // Rights are live per call (review M3): the tool is re-resolved against the live agent row, role,
     // server row (same revision), policy, and key before the gate, and again after any confirmation.
     const identity = identityOf(offered);
+    // The card says why (AC-B verification M2): a dead key, a scope the key lost, or anything else that changed.
     const unavailable = () => {
-      const dead = identity.kind === "nook" ? inactiveLinkMessage(agent.id, run.userId) : null;
-      return dead ? fail("KEY_INACTIVE", dead) : unavailableTool();
+      const why = liveToolFailure(agent.id, run.userId, identity);
+      return fail(why.code, why.message);
     };
-    const unavailableTool = () => fail("TOOL_UNAVAILABLE", "This tool is no longer available to this agent (it was disabled, removed, changed, or the rights changed); the call was not run");
     let tool = liveToolFor(agent.id, run.userId, identity);
     if (!tool) return unavailable();
     if (tool.policy === "confirm") {
@@ -279,7 +305,7 @@ function toolExecutor(run: ActiveRun, channel: RunChannel, agent: AgentRow, mess
   return { tools, execute };
 }
 
-function withTimeout<T>(promise: Promise<T>, ms: number, signal: AbortSignal): Promise<T> {
+export function withTimeout<T>(promise: Promise<T>, ms: number, signal: AbortSignal): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => reject(new McpClientError("MCP_TIMEOUT", "The tool did not answer in time")), ms);
     const onAbort = () => { clearTimeout(timer); reject(new Error("cancelled")); };
@@ -401,6 +427,13 @@ async function execute(run: ActiveRun, channel: RunChannel, agent: AgentRow, act
     flushAssistantText(messageId, text);
   };
   let usage: TokenUsage | null = null;
+  // Every step's usage as it is charged, a stopped step's included (Wave 42 QA M2): what the run cost when it ends early.
+  let spent: TokenUsage | null = null;
+  const spend = (more: TokenUsage) => { spent = { promptTokens: (spent?.promptTokens ?? 0) + more.promptTokens, completionTokens: (spent?.completionTokens ?? 0) + more.completionTokens, estimated: (spent?.estimated ?? false) || more.estimated }; };
+  /** The chat's owner may still chat with this agent (QA M1): before every model call and while one streams. */
+  const stillAllowed = () => {
+    if (!liveRunner(agent.id, run.userId)) throw new AgentError(403, "ACCESS_REVOKED", ACCESS_REVOKED_TEXT);
+  };
   let model: string | null = null;
   let status: RunStatus = "running";
   let errorCode: RunErrorCode | null = null;
@@ -436,11 +469,27 @@ async function execute(run: ActiveRun, channel: RunChannel, agent: AgentRow, act
           persist();
         },
         usage: (stepUsage, stepModel) => {
+          // The step's text goes out before its usage (QA L6).
+          if (deltaTimer) clearTimeout(deltaTimer);
+          flushDelta();
           channel.emit({ type: "usage", data: { messageId, usage: stepUsage } });
           model = stepModel ?? model;
+        },
+        // A model call that ended early (Stop, the wall clock, lost access; QA M1, M2): its text stays, its usage is charged.
+        interrupted: (step) => {
+          spend(step.usage);
+          model = step.model ?? model;
+          try {
+            chargeUsage(run.userId, agent.id, step.usage, 0);
+          } catch (error) {
+            console.error("Agent run could not charge a stopped step", error instanceof Error ? error.name : "Unknown error");
+          }
         }
       },
+      beforeStep: stillAllowed,
+      watch: stillAllowed,
       charge: (stepUsage, more) => {
+        spend(stepUsage);
         chargeUsage(run.userId, agent.id, stepUsage, 0);
         // The next step would exceed the budget (plan §2.2): the run ends `budget` before another model call.
         if (more) assertBudget(run.userId);
@@ -466,6 +515,10 @@ async function execute(run: ActiveRun, channel: RunChannel, agent: AgentRow, act
       status = "budget";
       errorCode = "BUDGET_EXCEEDED";
       errorMessage = error.message;
+    } else if (error instanceof AgentError && error.code === "ACCESS_REVOKED") {
+      status = "error";
+      errorCode = "ACCESS_REVOKED";
+      errorMessage = error.message;
     } else {
       status = "error";
       errorCode = "INTERNAL";
@@ -478,6 +531,8 @@ async function execute(run: ActiveRun, channel: RunChannel, agent: AgentRow, act
     flushDelta();
     active.delete(run.runId);
   }
+  // An answer that ended early still cost what its steps used (QA M2): the message and the run say so.
+  usage ??= spent;
   const messageStatus = status === "ok" ? "complete" : status === "step_limit" ? "step_limit" : status === "cancelled" || status === "timeout" ? "cancelled" : "error";
   // A call still open when the run ended (Stop during a tool, a timeout) is closed on the message.
   for (const view of run.toolCalls) if (view.ok === null) { view.ok = false; view.resultPreview ??= status === "cancelled" || status === "timeout" ? "Stopped" : "The run ended before the tool answered"; }

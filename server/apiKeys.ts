@@ -6,7 +6,7 @@ import { addressBucket } from "./clientAddress";
 import { recordAccessEvent, type AccessVia } from "./access/events";
 import { notifyAccess } from "./access/notices";
 import {
-  CREATE_ONLY, dedupeGrants, GENERAL_KEY_MODULES, grantKey, grantsToScopes, isNarrowing, permissionsForModule, READ_ONLY_KINDS, RESOURCE_KINDS, SCOPE_GRANTS, scopeFor, SELECTOR_KINDS,
+  ALL_ONLY, CREATE_ONLY, dedupeGrants, GENERAL_KEY_MODULES, grantKey, grantsToScopes, isNarrowing, permissionsForModule, READ_ONLY_KINDS, RESOURCE_KINDS, SCOPE_GRANTS, scopeFor, SELECTOR_KINDS,
   type Grant, type GrantModule, type KeyKind, type KeyPermission, type KeySurfaces, type ResourceKind
 } from "./keyGrants";
 import type { McpScope } from "./mcpScopes";
@@ -61,7 +61,8 @@ export const hashKeyToken = (token: string) => createHash("sha256").update(token
 const uuid = z.string().uuid().transform((value) => value.toLowerCase());
 export const grantInput = z.object({
   module: z.enum(GENERAL_KEY_MODULES as [GrantModule, ...GrantModule[]]),
-  permission: z.enum(["read", "comment", "write", "draft", "publish", "create"]),
+  // `run` (Wave 42, D364): agents only; validateGrants refuses it elsewhere (permissionsForModule).
+  permission: z.enum(["read", "comment", "write", "draft", "publish", "create", "run"]),
   /** Omitted or null (with no `resources`): every resource in the module. Ids of the module's main kind (SELECTOR_KINDS[module][0]). */
   resourceIds: z.array(uuid).min(1).max(MAX_RESOURCE_IDS).nullish(),
   /** Chosen items of any kind the module offers (Wave 34: notes in folders and single notes, boards and views). */
@@ -415,6 +416,9 @@ export function resourceReachable(userId: string, kind: ResourceKind, id: string
     case "task_view": return !write && ownedView(userId, id);
     // Routines are private to their owner.
     case "routine": return Boolean(db.query("SELECT 1 FROM routines WHERE id = ? AND owner_id = ?").get(id, userId));
+    // Wave 42 (AC-C, D364): an agent the holder can view now. Agents are owner-private until AC-D
+    // shares them, so that is their own live agent (not in the Bin); server/agents/agentsService.ts usableAgent.
+    case "agent": return Boolean(db.query("SELECT 1 FROM agents WHERE id = ? AND owner_id = ? AND deleted_at IS NULL").get(id, userId));
     default: return false;
   }
 }
@@ -434,6 +438,7 @@ function resourceName(userId: string, kind: ResourceKind, id: string): string | 
     case "document": return (db.query(`SELECT d.name FROM documents d WHERE d.id = $id AND d.purpose = 'file' AND ${readableDocumentPredicate}`).get({ id, userId }) as { name: string } | null)?.name ?? null;
     case "task_view": return (db.query(`SELECT v.name FROM task_views v JOIN users u ON u.id = v.owner_id WHERE v.id = $id AND ${readableViewPredicate}`).get({ id, userId }) as { name: string } | null)?.name ?? null;
     case "routine": return (db.query("SELECT name FROM routines WHERE id = ? AND owner_id = ?").get(id, userId) as { name: string } | null)?.name ?? null;
+    case "agent": return (db.query("SELECT name FROM agents WHERE id = ? AND owner_id = ? AND deleted_at IS NULL").get(id, userId) as { name: string } | null)?.name ?? null;
     default: return null;
   }
 }
@@ -456,6 +461,7 @@ export function chosenResources(input: GrantInput): Array<{ kind: ResourceKind; 
   const kinds = SELECTOR_KINDS[input.module];
   if (!kinds) throw new KeyError(400, "INVALID_GRANT", `Keys for ${input.module} cover every item`);
   if (CREATE_ONLY.has(`${input.module}:${input.permission}`)) throw new KeyError(400, "INVALID_GRANT", `${input.module}: ${input.permission} only creates new items, so it cannot name chosen ones`);
+  if (ALL_ONLY.has(`${input.module}:${input.permission}`)) throw new KeyError(400, "INVALID_GRANT", `${input.module}: ${input.permission} covers every item, so it cannot name chosen ones`);
   const items = input.resources ?? input.resourceIds!.map((id) => ({ kind: kinds[0]!, id }));
   const seen = new Set<string>();
   const out: Array<{ kind: ResourceKind; id: string }> = [];
@@ -600,6 +606,21 @@ function insertGrantRows(keyId: string, grants: readonly Grant[], createdAt: str
   }
 }
 
+/**
+ * A key linked as an agent's Nook key (`agent_user_links`) never runs agents (Wave 42 review M1,
+ * T318): the agent's Nook tools use that key, so with `agents:run` on it a run's tools would hold
+ * the right to start runs. Checked on create, rotate, and narrow here, and on link
+ * (server/agents/tools.ts setLink).
+ */
+export const keyLinkedToAgent = (keyId: string) => db.query("SELECT 1 FROM agent_user_links WHERE nook_key_id = ? LIMIT 1").get(keyId) !== null;
+export const keyHoldsAgentRun = (keyId: string) => db.query("SELECT 1 FROM api_key_grants WHERE key_id = ? AND module = 'agents' AND permission = 'run' LIMIT 1").get(keyId) !== null;
+export function assertRunGrantUnlinked(keyId: string, grants: readonly Pick<Grant, "module" | "permission">[]) {
+  if (!grants.some((grant) => grant.module === "agents" && grant.permission === "run")) return;
+  if (keyLinkedToAgent(keyId)) {
+    throw new KeyError(409, "KEY_LINKED_TO_AGENT", "This key is linked as an agent's Nook key, so it cannot run agents. Remove “Run agents” from it, or link another key to the agent first.");
+  }
+}
+
 const grantSummary = (grants: readonly Grant[]) => grants.map((grant) => `${grant.module}:${grant.permission}${grant.resourceId ? `@${grant.resourceKind}` : ""}${grant.envId ? "+env" : ""}`);
 
 /**
@@ -619,6 +640,8 @@ export function createApiKey(userId: string, input: { name: string; description?
   const actorId = options.actorId ?? userId;
   return db.transaction(() => {
     const created = insertKey({ userId, name: input.name, description: input.description ?? null, kind, surfaces: input.surfaces, grants: input.grants, expiresAt, limits: input.limits ?? {}, createdAt, ipAllowlist: input.ipAllowlist ?? null, createdBy: options.actorId ?? null, vaultFlags: kind === "vault" ? input.vaultFlags ?? null : null });
+    // A new key is never linked yet; the check keeps the rule in one place (review M1).
+    assertRunGrantUnlinked(created.id, input.grants);
     // The audit shape predates grants (Wave 8): keyId, name, and the scopes the grants amount to.
     audit(actorId, null, "mcp.key_created", { keyId: created.id, name: input.name, scopes: created.scopes, ...(actorId !== userId ? { ownerId: userId } : {}) });
     recordAccessEvent({ actorId, via: options.via ?? "web", action: "key.created", targetUserId: userId, keyId: created.id,
@@ -773,6 +796,8 @@ export function narrowApiKey(userId: string, keyId: string, patch: z.infer<typeo
   const description = patch.description === undefined ? row.description : (patch.description?.trim() || null);
   if (patch.description !== undefined && description !== row.description) changed.push("description");
   if (!changed.length) return { changed };
+  // A linked key still holding "Run agents" (one linked before the rule) must drop it or be unlinked (review M1).
+  assertRunGrantUnlinked(row.id, nextGrants ?? current);
   db.transaction(() => {
     const timestamp = now();
     const scopes = nextGrants ? grantsToScopes(nextGrants) : null;
@@ -848,6 +873,8 @@ export function checkRotation(userId: string, keyId: string, graceHours: typeof 
     }
   }
   if (!grants.length) throw new KeyError(409, "NO_GRANTS", "This key has no permissions left. Create a new key instead.");
+  // Rotating a key linked as an agent's Nook key never gives its successor "Run agents" (review M1).
+  assertRunGrantUnlinked(row.id, grants);
   const ipAllowlist = changes.ipAllowlist === undefined ? storedAllowlist(row.ip_allowlist)
     : changes.ipAllowlist === null ? null : checkCreateAllowlist(changes.ipAllowlist);
   if (graceHours > 0) checkKeyCount(userId, policies);

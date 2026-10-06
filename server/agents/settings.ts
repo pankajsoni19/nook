@@ -1,3 +1,4 @@
+import { config } from "../config";
 import { db, now } from "../db";
 import { AGENT_ROLE_OPTIONS, DEFAULT_AGENT_SETTINGS, type AgentRole, type AgentSettings } from "../../shared/agents";
 import { AgentError } from "./status";
@@ -19,7 +20,8 @@ const integer = (value: unknown, min: number, max: number) => typeof value === "
 
 export function readAgentSettings(): AgentSettings & { revision: number } {
   const rows = db.query("SELECT key, value_json, revision FROM agent_settings").all() as Array<{ key: string; value_json: string; revision: number }>;
-  const settings: AgentSettings = { ...DEFAULT_AGENT_SETTINGS, createRoles: [...DEFAULT_AGENT_SETTINGS.createRoles], chatRoles: [...DEFAULT_AGENT_SETTINGS.chatRoles] };
+  // Audit retention (Wave 42, D366): AGENT_AUDIT_RETENTION_DAYS (default 30) unless an admin stored a policy value.
+  const settings: AgentSettings = { ...DEFAULT_AGENT_SETTINGS, createRoles: [...DEFAULT_AGENT_SETTINGS.createRoles], chatRoles: [...DEFAULT_AGENT_SETTINGS.chatRoles], auditRetentionDays: config.agents.auditRetentionDays };
   let revision = 0;
   for (const row of rows) {
     revision += row.revision;

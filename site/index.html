@@ -543,8 +543,9 @@ docker compose ps</code></pre></div></article></div>
           <tr><td><code>AGENT_SECRETS_KEY</code></td><td>empty</td><td>Agent chat's base64 32-byte key, different from the TOTP and Vault keys; it seals model-provider API keys. Empty keeps Chat off. Keep it away from the backups.</td></tr>
           <tr><td><code>AGENT_SECRETS_KEY_FILE</code></td><td>empty</td><td>Instead of the variable: an absolute path to a file holding the key, outside <code>DATA_DIR</code>.</td></tr>
           <tr><td><code>AGENT_ALLOWED_PRIVATE_HOSTS</code></td><td>empty</td><td>Model endpoints on private networks the server may call (host names, IP addresses, or CIDR ranges, comma-separated); plain <code>http:</code> only for these.</td></tr>
-          <tr><td><code>AGENT_MAX_CONCURRENT_RUNS</code></td><td><code>4</code></td><td>Chat answers in flight for the whole instance (1–32).</td></tr>
-          <tr><td><code>AGENT_RUN_TIMEOUT_S</code></td><td><code>600</code></td><td>The wall clock of one chat answer in seconds (30–3600).</td></tr>
+          <tr><td><code>AGENT_MAX_CONCURRENT_RUNS</code></td><td><code>4</code></td><td>Agent runs in flight for the whole instance, chats and API runs together (1–16).</td></tr>
+          <tr><td><code>AGENT_RUN_TIMEOUT_S</code></td><td><code>600</code></td><td>The wall clock of one chat answer in seconds (30–3600); API and MCP runs stop at 5 minutes, or at this value if lower.</td></tr>
+          <tr><td><code>AGENT_AUDIT_RETENTION_DAYS</code></td><td><code>30</code></td><td>Days the Audit log keeps API and MCP runs (7–365); an admin's stored policy value takes precedence.</td></tr>
           <tr><td><code>AGENT_MCP_STDIO</code></td><td><code>off</code></td><td><code>on</code> lets the host declare stdio MCP servers in a file; never from the UI. Off, the file is ignored.</td></tr>
           <tr><td><code>AGENT_MCP_STDIO_FILE</code></td><td>empty</td><td>With the flag on: the absolute path of the JSON declaration file, read once at startup.</td></tr>
           <tr><td><code>SESSION_DAYS</code></td><td><code>14</code></td><td>Session lifetime in days, minimum one.</td></tr>

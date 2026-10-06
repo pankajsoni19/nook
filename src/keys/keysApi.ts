@@ -110,6 +110,11 @@ export async function loadResources(module: GrantModule): Promise<ResourceOption
     const { whiteboards } = await api<{ whiteboards: Array<{ id: string; name: string } & Owned> }>("/whiteboards");
     return whiteboards.map((item) => ({ value: resourceToken("whiteboard", item.id), label: item.name.replace(/\.excalidraw$/i, ""), description: ownerNote(item), writable: item.is_owner === 1 }));
   }
+  if (module === "agents") {
+    // Wave 42 (AC-C): your own agents (until AC-D shares them); a run grant may name some of them.
+    const { agents } = await api<{ agents: Array<{ id: string; name: string; description: string; model: string | null; isOwner: boolean }> }>("/agents");
+    return agents.filter((agent) => agent.isOwner).map((agent) => ({ value: resourceToken("agent", agent.id), label: agent.name, description: agent.description || undefined, writable: true }));
+  }
   if (module === "calendar") {
     const { calendars } = await api<{ calendars: Array<{ id: string; name: string; role: string } & Owned> }>("/calendars");
     return calendars.map((item) => ({ value: resourceToken("calendar", item.id), label: item.name, description: ownerNote(item), writable: item.role !== "viewer" }));

@@ -46,8 +46,11 @@ export const can = (role: Role, capability: Capability) => CAPABILITIES[role].in
 /** MCP scopes only admins may hold (D79: read only, no emails). */
 export const ADMIN_ONLY_SCOPES: readonly McpScope[] = ["team:read"];
 
-/** MCP scopes only members and admins may hold: the inbox exists to produce writes (D152). */
-export const MEMBER_ONLY_SCOPES: readonly McpScope[] = ["inbox:read", "inbox:write"];
+/**
+ * MCP scopes only members and admins may hold: the inbox exists to produce writes (D152), and
+ * running agents spends the instance's model budget and drives tools (D357, agent chat plan §7.1).
+ */
+export const MEMBER_ONLY_SCOPES: readonly McpScope[] = ["inbox:read", "inbox:write", "agents:run"];
 
 /**
  * The MCP scopes a key of a user with `role` may use (§5.2.4, §7). Effective scopes are the stored

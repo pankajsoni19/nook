@@ -1,5 +1,6 @@
 import { CallToolResultSchema, InitializeResultSchema, ListToolsResultSchema } from "@modelcontextprotocol/core";
 import { config } from "../config";
+import { AGENT_RUN_HEADER, currentAgentRun } from "./depth";
 import { EgressError, egressFetch, type EgressResponse } from "./egress";
 
 /**
@@ -79,6 +80,9 @@ export class McpHttpTransport implements McpTransport {
     const headers: Record<string, string> = { ...this.target.headers, "Content-Type": "application/json", Accept: "application/json, text/event-stream" };
     if (this.initialized) headers["MCP-Protocol-Version"] = MCP_PROTOCOL_VERSION;
     if (this.sessionId) headers["Mcp-Session-Id"] = this.sessionId;
+    // Inside a run, say so (Wave 42 review M1, T318): a server that calls Nook back with it cannot start a run.
+    const run = currentAgentRun();
+    if (run) headers[AGENT_RUN_HEADER] = run.runId;
     return headers;
   }
 

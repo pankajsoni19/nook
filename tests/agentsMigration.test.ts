@@ -70,7 +70,8 @@ const schemaOf = (db: Database, type: "index" | "trigger") => (db.query(`SELECT 
 
 describe("migration 039 agent chat", () => {
   test("is registered last, as 39, and creates every table of the plan", () => {
-    expect(registeredMigrationIds.at(-1)).toBe(39);
+    // Wave 42: 040 (the Audit log guards) follows it.
+    expect(registeredMigrationIds.slice(registeredMigrationIds.indexOf(39))).toEqual([39, 40]);
     expect(agentChatMigration.name).toBe("agent_chat");
     const db = openDb();
     const tables = (db.query("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all() as Array<{ name: string }>).map((row) => row.name);
@@ -132,9 +133,9 @@ describe("migration 039 agent chat", () => {
     const db = new Database(":memory:", { strict: true });
     db.exec("PRAGMA foreign_keys = ON");
     db.exec("CREATE TABLE IF NOT EXISTS schema_migrations (id INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL)");
-    db.query("INSERT INTO schema_migrations (id, name, applied_at) VALUES (39, 'skipped', ?)").run(at);
+    for (const skipped of [39, 40]) db.query("INSERT INTO schema_migrations (id, name, applied_at) VALUES (?, 'skipped', ?)").run(skipped, at);
     runMigrations(db);
-    db.query("DELETE FROM schema_migrations WHERE id = 39").run();
+    db.query("DELETE FROM schema_migrations WHERE id IN (39, 40)").run();
     const normalize = (list: Array<{ name: string; sql: string }>) => list.map((row) => ({ name: row.name, sql: row.sql.replace(/\s+/g, " ").trim() }));
     const before = { triggers: normalize(schemaOf(db, "trigger")), indexes: normalize(schemaOf(db, "index")), columns: db.query("PRAGMA table_info(api_key_grants)").all() };
     expect(before.triggers).toHaveLength(6);

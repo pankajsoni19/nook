@@ -110,6 +110,14 @@ export type McpErrorCode =
   | "VALUE_NOT_SET"
   | "VAULT_INTEGRITY"
   | "VAULT_DISABLED"
+  // Agent runs (Wave 42 "AC-C", T318): `run_agent` called from inside an agent run; a module or provider not ready.
+  | "AGENT_RECURSION"
+  | "AGENTS_DISABLED"
+  // run_agent's refusals (Wave 42 review L5), by the run's own codes: slots, budgets, a missing provider, a sealed secret.
+  | "AGENT_BUSY"
+  | "BUDGET_EXCEEDED"
+  | "NO_PROVIDER"
+  | "AGENT_SECRET_INTEGRITY"
   | "INTERNAL";
 
 /**

@@ -129,8 +129,15 @@ export function parseAllowedPrivateHosts(value: string | undefined) {
 }
 const agentAllowedPrivateHosts = parseAllowedPrivateHosts(process.env.AGENT_ALLOWED_PRIVATE_HOSTS);
 if (agentAllowedPrivateHosts.length > 50) throw new Error("AGENT_ALLOWED_PRIVATE_HOSTS takes at most 50 entries");
-const agentMaxConcurrentRuns = integerEnv("AGENT_MAX_CONCURRENT_RUNS", 4, 1, 32);
+// At most 16 (Wave 42 review L2): with the held-run caps, runs never take more than their share of the request slots.
+const agentMaxConcurrentRuns = integerEnv("AGENT_MAX_CONCURRENT_RUNS", 4, 1, 16);
 const agentRunTimeoutS = integerEnv("AGENT_RUN_TIMEOUT_S", 600, 30, 3600);
+/**
+ * The agent Audit log's retention (Wave 42, plan §7.3, D366): API and MCP runs are kept this many
+ * days, then the hourly sweeper deletes them. An admin's Settings → AI policy may set another value
+ * in the same range; unset, this one applies.
+ */
+const agentAuditRetentionDays = integerEnv("AGENT_AUDIT_RETENTION_DAYS", 30, 7, 365);
 /**
  * stdio MCP servers (Wave 41, plan §3.3, D348): never from the UI. Only with `AGENT_MCP_STDIO=on`
  * does Nook read the host's declaration file (`AGENT_MCP_STDIO_FILE`, an absolute path), at startup.
@@ -318,7 +325,7 @@ export const config = {
    * Agent chat (Wave 40): the secrets key (null = module off), the private hosts the server may
    * call, and the run caps. Tests switch these in process.
    */
-  agents: { key: agentSecretsKey.key, source: agentSecretsKey.source, allowedPrivateHosts: agentAllowedPrivateHosts, maxConcurrentRuns: agentMaxConcurrentRuns, runTimeoutS: agentRunTimeoutS, stdio: agentMcpStdioRaw === "on", stdioFile: agentMcpStdioFile },
+  agents: { key: agentSecretsKey.key, source: agentSecretsKey.source, allowedPrivateHosts: agentAllowedPrivateHosts, maxConcurrentRuns: agentMaxConcurrentRuns, runTimeoutS: agentRunTimeoutS, stdio: agentMcpStdioRaw === "on", stdioFile: agentMcpStdioFile, auditRetentionDays: agentAuditRetentionDays },
   signupRole,
   sessionDays: Math.max(1, Number(process.env.SESSION_DAYS ?? 14)),
   maxMarkdownBytes: Math.max(1024, Number(process.env.MAX_MARKDOWN_BYTES ?? 2_000_000)),
