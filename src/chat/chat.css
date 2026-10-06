@@ -179,6 +179,7 @@
 .agents-form h4 { margin: 12px 0 0; color: #fafafa; font-size: .95rem; }
 .agents-form label small { font-weight: 500; letter-spacing: normal; text-transform: none; }
 .agents-prompt { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .86rem; }
+.agents-icon-row { display: flex; align-items: center; gap: 8px; }
 .agents-icon-input { width: 90px; }
 .agents-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 8px; }
 .agents-actions .secondary-button { min-height: 44px; padding: 0 14px; }
