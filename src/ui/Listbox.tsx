@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import { Check, X } from "lucide-react";
 import { trapTabKey } from "../files/Dialog";
 import { groupRuns } from "./listNavigation";
@@ -196,7 +197,10 @@ function DropdownPopup({ anchorRef, onClose, search, footer, children }: Surface
 function DropdownSheet({ title, onClose, search, footer, children }: SurfaceProps) {
   // D69: Back closes only this sheet; on the entry the page was loaded on it holds the sentinel entry.
   useHistoryDialogGuard(true, onClose);
-  return <div className="ui-sheet-layer">
+  // Rendered on the body (Wave 40 QA Q3): a `position: fixed` layer inside a sticky or blurred host
+  // (the chat thread header) would be sized by that host and clip the options. Inline without a
+  // document (server rendering in tests), where React events still reach the host through the tree.
+  const layer = <div className="ui-sheet-layer">
     <button type="button" className="ui-sheet-scrim" aria-label="Close" tabIndex={-1} onClick={onClose} />
     <div className="ui-sheet" role="dialog" aria-modal="true" aria-label={title}
       onKeyDown={(event) => {
@@ -214,6 +218,7 @@ function DropdownSheet({ title, onClose, search, footer, children }: SurfaceProp
       {footer}
     </div>
   </div>;
+  return typeof document === "undefined" ? layer : createPortal(layer, document.body);
 }
 
 /** The search box above the options (Select with `searchable`, and the Combobox phone sheet). */

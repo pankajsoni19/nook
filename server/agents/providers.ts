@@ -1,6 +1,8 @@
 import { audit, db, now } from "../db";
 import { AGENT_BOUNDS, DEFAULT_BASE_URL, DEFAULT_COMPAT, DEFAULT_MODEL, type ProviderCompat, type ProviderSummary } from "../../shared/agents";
-import { checkEgressUrl, EgressError } from "./egress";
+import { isIP } from "node:net";
+import { isPrivateAddress } from "../calendar/push";
+import { checkEgressUrl, EgressError, privateHostAllowed } from "./egress";
 import { completeStreaming, listModels, ProviderError, type ProviderConnection } from "./loop";
 import { openSecret, sealSecret, secretHint } from "./secrets";
 import { readAgentSettings } from "./settings";
@@ -50,12 +52,23 @@ export type ProviderInput = {
   compat?: Partial<ProviderCompat>; isDefault?: boolean;
 };
 
+/**
+ * The shape check at save time (QA Q7): scheme, credentials, fragment, Nook's own origin, plain http
+ * only for a listed host, and a literal private or loopback address only when listed. No DNS here;
+ * names are resolved and checked before every call.
+ */
 function normalizeBaseUrl(value: string) {
   const trimmed = value.trim().replace(/\/+$/, "");
   try {
-    checkEgressUrl(trimmed);
+    const url = checkEgressUrl(trimmed);
+    const host = url.hostname.toLowerCase().replace(/\.$/, "").replace(/^\[|\]$/g, "");
+    const literal = isIP(host) ? [host] : [];
+    const listed = privateHostAllowed(host, literal);
+    if (url.protocol === "http:" && !listed) throw new EgressError("URL_REFUSED", "Plain http is allowed only for hosts in AGENT_ALLOWED_PRIVATE_HOSTS");
+    if (!listed && literal.some((address) => isPrivateAddress(address))) throw new EgressError("PRIVATE_ADDRESS", "The endpoint is a private or local address; list it in AGENT_ALLOWED_PRIVATE_HOSTS to allow it");
   } catch (error) {
-    throw new AgentError(400, "INVALID", error instanceof EgressError ? error.message : "The base URL is not valid", { field: "baseUrl" });
+    if (error instanceof EgressError) throw new AgentError(400, "EGRESS_REFUSED", error.message, { field: "baseUrl" });
+    throw new AgentError(400, "INVALID", "The base URL is not valid", { field: "baseUrl" });
   }
   return trimmed;
 }
@@ -162,7 +175,8 @@ export type ProviderTest = {
   completion: { ok: boolean; model: string | null; latencyMs: number | null; error: string | null };
 };
 
-const describe = (error: unknown) => error instanceof ProviderError || error instanceof EgressError || error instanceof AgentError ? `${error.code}: ${error.message}` : "Failed";
+/** Admin-only surfaces (Settings → AI → Test), so the fuller excerpt (review L3). */
+const describe = (error: unknown) => error instanceof ProviderError ? `${error.code}: ${error.adminMessage}` : error instanceof EgressError || error instanceof AgentError ? `${error.code}: ${error.message}` : "Failed";
 
 /** Test (plan §4.1): the model list and a one-token completion, reported as latency and counts only. */
 export async function testProvider(id: string): Promise<ProviderTest> {

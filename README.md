@@ -102,7 +102,7 @@ You need Git, Docker Engine, and Docker Compose.
 git clone https://github.com/pankajsoni19/nook.git && cd nook
 cp .env.example .env            # set ALLOWED_EMAILS, TOTP_POLICY, APP_ORIGINS as needed
 sudo mkdir -p /srv/mynotes && sudo chown 1000:1000 /srv/mynotes   # or set MYNOTES_DATA_DIR
-APP_VERSION=0.25.0 GIT_SHA=$(git rev-parse --short HEAD) docker compose up -d --build
+APP_VERSION=0.26.0 GIT_SHA=$(git rev-parse --short HEAD) docker compose up -d --build
 curl http://localhost:2026/api/health   # then open http://localhost:2026 and create the first account (the admin)
 ```
 
@@ -111,6 +111,16 @@ Later registrations stay disabled unless you set `ALLOW_REGISTRATION=true`. `APP
 ## Upgrading
 
 Back up first (`./scripts/backup.sh --force`), pull, rebuild, and let migrations run on the first boot. Release-specific steps are in [docs/OPERATIONS.md](docs/OPERATIONS.md#upgrades).
+
+## What's new in v0.26.0
+
+- **Chat (first slice)**: chat with your own agents through any OpenAI-compatible model provider. An admin adds a provider in **Settings → AI** (base URL, API key, default model; the key is stored encrypted and never shown again, only its last characters) and sets who may chat and daily token budgets. Anyone allowed creates agents in **Settings → Agents** (a system prompt, an optional model, and a step limit) and chats with them in the new **Chat** app: replies stream in as they are written, **Stop** keeps what arrived, **Regenerate** and **Edit** keep every version with a 2 / 3 switcher, chats are searchable, pinnable, renamable, and go to the Bin. Two columns on a computer; list and chat screens with working Back on a phone.
+- **Safe rendering**: replies are Markdown (tables, code with Copy, lists) built without HTML strings; images are never loaded, and outside links open through a sheet that shows the full address.
+- **The first outbound connection Nook makes**: only to the providers an admin configures, https only (plain http only for hosts listed in `AGENT_ALLOWED_PRIVATE_HOSTS`), private and loopback addresses refused unless listed, no redirects, size and time limits, the address pinned between the check and the connection, and no cookies or Nook headers sent.
+- **Private in this release**: agents and chats are their owner's alone; tools, the external API and Audit log, sharing, and knowledge bases follow in the next releases.
+- **For developers using MCP**: `list_agents`, `list_chats`, and `get_chat` for keys with the new `agents:read` permission (your own agents and chats only).
+- **New settings**: `AGENT_SECRETS_KEY` (or `AGENT_SECRETS_KEY_FILE`; Chat is off without it), `AGENT_ALLOWED_PRIVATE_HOSTS`, `AGENT_MAX_CONCURRENT_RUNS`, `AGENT_RUN_TIMEOUT_S`. `bun server/agent-admin.ts verify-key | rotate-key` checks and rotates the key.
+- Migration 039 runs on the first boot, so back up first: it adds the Chat tables and rebuilds the API key grants table once so keys can be granted Chat (and, later, Messages) permissions; every existing key and grant is kept exactly. See [docs/OPERATIONS.md](docs/OPERATIONS.md#upgrades).
 
 ## What's new in v0.25.0
 

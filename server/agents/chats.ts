@@ -12,7 +12,7 @@ import { AgentError } from "./status";
  */
 
 export type ChatRow = {
-  id: string; owner_id: string; agent_id: string; title: string; pinned: number; active_leaf_id: string | null; always_allow_json: string; visibility: string;
+  id: string; owner_id: string; agent_id: string | null; title: string; pinned: number; active_leaf_id: string | null; always_allow_json: string; visibility: string;
   revision: number; created_at: string; updated_at: string; deleted_at: string | null; deleted_by: string | null; purge_after: string | null; purge_started_at: string | null;
 };
 export type MessageRow = {
@@ -50,7 +50,8 @@ export const messageOf = (row: MessageRow): ChatMessage => ({
 const LIVE_RUN = "SELECT 1 FROM agent_runs r WHERE r.chat_id = c.id AND r.status IN ('queued','running','awaiting_confirmation')";
 
 function summaryRows(where: string, params: Record<string, string>): ChatSummary[] {
-  const rows = db.query(`SELECT c.*, a.name AS agent_name, a.icon AS agent_icon, EXISTS (${LIVE_RUN}) AS running FROM chats c JOIN agents a ON a.id = c.agent_id WHERE ${where}`).all(params) as Array<ChatRow & { agent_name: string; agent_icon: string | null; running: number }>;
+  // LEFT JOIN: a purged agent leaves agent_id NULL and the chat stays listed (review M2).
+  const rows = db.query(`SELECT c.*, a.name AS agent_name, a.icon AS agent_icon, EXISTS (${LIVE_RUN}) AS running FROM chats c LEFT JOIN agents a ON a.id = c.agent_id WHERE ${where}`).all(params) as Array<ChatRow & { agent_name: string | null; agent_icon: string | null; running: number }>;
   return rows.map((row) => ({
     id: row.id, agentId: row.agent_id, agentName: row.agent_name, agentIcon: row.agent_icon, title: row.title, pinned: row.pinned === 1, activeLeafId: row.active_leaf_id,
     revision: row.revision, createdAt: row.created_at, updatedAt: row.updated_at, running: row.running === 1
@@ -62,8 +63,10 @@ export function listChats(userId: string, options: { q?: string; limit?: number 
   const limit = Math.min(Math.max(options.limit ?? 200, 1), 500);
   const q = options.q?.trim();
   if (q) {
-    const terms = q.split(/\s+/).filter(Boolean).slice(0, 8).map((term) => `"${term.replace(/"/g, "")}"*`).join(" ");
-    const ids = (db.query("SELECT DISTINCT chat_id FROM chat_fts WHERE chat_fts MATCH ? LIMIT 500").all(terms) as Array<{ chat_id: string }>).map((row) => row.chat_id);
+    const terms = q.split(/\s+/).filter(Boolean).slice(0, 8).map((term) => `"${term.replace(/"/g, "")}"*`).filter((term) => term !== '""*').join(" ");
+    if (!terms) return [];
+    // Owner-scoped inside the FTS stage (review L4): other people's matches never fill the 500 before the owner's.
+    const ids = (db.query("SELECT DISTINCT chat_id FROM chat_fts WHERE chat_fts MATCH ? AND owner_id = ? LIMIT 500").all(terms, userId) as Array<{ chat_id: string }>).map((row) => row.chat_id);
     if (ids.length === 0) return [];
     const marks = ids.map((_, index) => `$id${index}`).join(",");
     return summaryRows(`c.owner_id = $userId AND c.deleted_at IS NULL AND c.id IN (${marks}) ORDER BY c.pinned DESC, c.updated_at DESC LIMIT ${limit}`, { userId, ...Object.fromEntries(ids.map((id, index) => [`id${index}`, id])) });
@@ -95,13 +98,14 @@ export function createChat(userId: string, agentId: string): ChatSummary {
     const id = crypto.randomUUID();
     const timestamp = now();
     db.query("INSERT INTO chats (id, owner_id, agent_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)").run(id, userId, agent.id, "New chat", timestamp, timestamp);
-    db.query("INSERT INTO chat_fts (chat_id, title, body) VALUES (?, ?, '')").run(id, "New chat");
+    db.query("INSERT INTO chat_fts (chat_id, owner_id, title, body) VALUES (?, ?, ?, '')").run(id, userId, "New chat");
     return summaryRows("c.id = $id", { id })[0]!;
   })();
 }
 
-/** The chat's agent, which must still be live to send (binned agents keep their chats readable). */
+/** The chat's agent, which must still be live to send (binned agents keep their chats readable; purged ones leave them read-only). */
 export function chatAgent(chat: ChatRow): AgentRow {
+  if (chat.agent_id === null) throw new AgentError(409, "AGENT_GONE", "This chat's agent was deleted; start a new chat with another agent");
   const row = db.query("SELECT * FROM agents WHERE id = ? AND deleted_at IS NULL").get(chat.agent_id) as AgentRow | null;
   if (!row) throw new AgentError(409, "AGENT_GONE", "This chat's agent is in the Bin; restore it to continue");
   return row;
@@ -173,7 +177,7 @@ export function insertUserMessage(chat: ChatRow, userId: string, content: string
     const first = count === 0;
     db.query("UPDATE chats SET active_leaf_id = ?, title = CASE WHEN ? THEN ? ELSE title END, revision = revision + 1, updated_at = ? WHERE id = ?").run(id, first ? 1 : 0, titleFrom(content), timestamp, chat.id);
     const fts = db.query("SELECT title FROM chats WHERE id = ?").get(chat.id) as { title: string };
-    db.query("INSERT INTO chat_fts (chat_id, title, body) VALUES (?, ?, ?)").run(chat.id, first ? fts.title : "", content.slice(0, 4096));
+    db.query("INSERT INTO chat_fts (chat_id, owner_id, title, body) VALUES (?, ?, ?, ?)").run(chat.id, chat.owner_id, first ? fts.title : "", content.slice(0, 4096));
     return chatMessage(chat.id, id);
   })();
 }
@@ -195,6 +199,14 @@ export function flushAssistantText(messageId: string, content: string) {
   db.query("UPDATE chat_messages SET content = ? WHERE id = ? AND status = 'streaming'").run(content.slice(0, AGENT_BOUNDS.assistantMessageChars), messageId);
 }
 
+export const TRUNCATION_MARKER = "\n\n[truncated: the reply was longer than allowed]";
+
+/** The stored form of a reply: cut so that text plus marker fit the bound exactly (QA Q4: the old cut overshot the CHECK). */
+export function boundedAssistantText(content: string) {
+  if (content.length <= AGENT_BOUNDS.assistantMessageChars) return content;
+  return `${content.slice(0, AGENT_BOUNDS.assistantMessageChars - TRUNCATION_MARKER.length)}${TRUNCATION_MARKER}`;
+}
+
 /** The stored tool-call list, bounded (AC-B): the newest calls are kept when the list would be too long. */
 const toolCallsJson = (calls: readonly ToolCallView[]) => {
   let list = [...calls];
@@ -212,7 +224,7 @@ export function flushToolCalls(messageId: string, calls: readonly ToolCallView[]
 }
 
 export function finishAssistantMessage(messageId: string, result: { status: ChatMessage["status"]; content: string; errorCode?: string | null; usage: TokenUsage | null; model: string | null; toolCalls?: readonly ToolCallView[] }) {
-  const cut = result.content.length > AGENT_BOUNDS.assistantMessageChars ? `${result.content.slice(0, AGENT_BOUNDS.assistantMessageChars - 40)}\n\n[truncated: the reply was longer than allowed]` : result.content;
+  const cut = boundedAssistantText(result.content);
   db.query("UPDATE chat_messages SET content = ?, status = ?, error_code = ?, usage_json = ?, model = COALESCE(?, model), tool_calls_json = COALESCE(?, tool_calls_json), finished_at = ? WHERE id = ?")
     .run(cut, result.status, result.errorCode ?? null, result.usage ? JSON.stringify(result.usage) : null, result.model, result.toolCalls ? toolCallsJson(result.toolCalls) : null, now(), messageId);
 }

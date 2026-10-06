@@ -59,11 +59,39 @@ export function openSecret(owner: SecretOwner, rowId: string, envelope: string, 
   }
 }
 
-/** The mask shown after a save (plan §4.2): the first three and last four characters, `sk-…a1B2`. */
+/**
+ * The mask shown after a save (plan §4.2): the first three and last four characters, `sk-…a1B2`,
+ * only for secrets of at least 16 characters (review L8: seven of a short key's characters would
+ * be most of it); shorter ones show `…`.
+ */
 export function secretHint(plaintext: string) {
   const text = plaintext.trim();
-  if (text.length <= 8) return "…";
+  if (text.length < 16) return "…";
   return `${text.slice(0, 3)}…${text.slice(-4)}`;
+}
+
+/**
+ * Re-seals every stored secret (provider API keys, and tool-server credentials once AC-B stores
+ * them) from `oldKey` to `newKey` in one `BEGIN IMMEDIATE` transaction (`server/agent-admin.ts
+ * rotate-key`, review M3). Each new envelope is opened once before it is written. Plaintext lives
+ * only inside the loop. Counts only.
+ */
+export function rotateSecretsKey(oldKey: Buffer, newKey: Buffer): { providers: number; servers: number } {
+  return db.transaction(() => {
+    const providers = db.query("SELECT id, api_key_ct FROM agent_providers WHERE api_key_ct IS NOT NULL").all() as Array<{ id: string; api_key_ct: string }>;
+    for (const row of providers) {
+      const resealed = sealSecret("provider", row.id, openSecret("provider", row.id, row.api_key_ct, oldKey), newKey);
+      openSecret("provider", row.id, resealed, newKey);
+      db.query("UPDATE agent_providers SET api_key_ct = ? WHERE id = ?").run(resealed, row.id);
+    }
+    const servers = db.query("SELECT id, secret_ct FROM agent_tool_servers WHERE secret_ct IS NOT NULL").all() as Array<{ id: string; secret_ct: string }>;
+    for (const row of servers) {
+      const resealed = sealSecret("server", row.id, openSecret("server", row.id, row.secret_ct, oldKey), newKey);
+      openSecret("server", row.id, resealed, newKey);
+      db.query("UPDATE agent_tool_servers SET secret_ct = ? WHERE id = ?").run(resealed, row.id);
+    }
+    return { providers: providers.length, servers: servers.length };
+  }).immediate();
 }
 
 /** Startup check: whether every stored provider and tool-server secret opens under `key`. Counts only. */

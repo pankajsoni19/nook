@@ -209,8 +209,9 @@ export type ToolCatalog = {
 /** A key the person may link to an agent (plan §5.3): their own live general key with the MCP surface. */
 export type LinkableKey = { id: string; name: string; prefix: string; state: string; expiresAt: string | null; grants: Array<{ module: string; permission: string; resource: { kind: string; name: string | null } | null; active: boolean }> };
 export type NookLink = { keyId: string; name: string; prefix: string; state: string } | null;
+/** `agentId` and `agentName` are null once the chat's agent was purged from the Bin; the chat stays readable. */
 export type ChatSummary = {
-  id: string; agentId: string; agentName: string; agentIcon: string | null; title: string; pinned: boolean; activeLeafId: string | null;
+  id: string; agentId: string | null; agentName: string | null; agentIcon: string | null; title: string; pinned: boolean; activeLeafId: string | null;
   revision: number; createdAt: string; updatedAt: string; running: boolean;
 };
 export type ChatMessage = {

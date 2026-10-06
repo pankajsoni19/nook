@@ -86,6 +86,8 @@ export function createAgent(actor: { userId: string; role: string }, input: Agen
 }
 
 export function updateAgent(actor: { userId: string; role: string }, id: string, input: Partial<AgentInput> & { expectedRevision: number }): AgentDetail {
+  // The same policy as create (review L11): a role removed from `create_roles` keeps its agents but cannot reshape them.
+  if (!roleMayCreate(actor.role)) throw new AgentError(403, "ROLE_REFUSED", "Your role cannot edit agents");
   return db.transaction(() => {
     const row = manageableAgent(id, actor.userId);
     if (row.revision !== input.expectedRevision) throw new AgentError(409, "REVISION_MISMATCH", "This agent changed elsewhere; reload and try again", { revision: row.revision });

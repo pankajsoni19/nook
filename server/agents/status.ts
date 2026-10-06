@@ -1,6 +1,7 @@
 import { config } from "../config";
 import { db } from "../db";
 import { verifySecrets } from "./secrets";
+import { roleMayChat } from "./settings";
 
 /**
  * Whether the agent chat module is on (plan §4.2, D354). Off when AGENT_SECRETS_KEY is unset, and
@@ -42,11 +43,31 @@ export function initAgentsStatus(log: (line: string) => void = (line) => console
 export const agentsStatus = (): AgentsStatus => status;
 
 /**
- * Whether this person sees the Chat module (`features.agents` on sign-in and /api/auth/me): never
- * for guests (AC-O2); with the module off, only admins (they get its "not configured" screen). UI
- * only (T97): the routes enforce access themselves.
+ * Whether an admin may use the provider routes right now (review M3): with the module on, or while
+ * it is off because the key does not open a stored secret. That is the state the documented remedy
+ * ("remove and re-enter their API keys") has to work in; with no key at all nothing can be sealed.
  */
-export const agentsFeature = (role: string) => role !== "guest" && (status.enabled || role === "admin");
+export const adminRecoveryAllowed = () => status.enabled || status.reason === "key_mismatch";
+
+/** After an admin removed or re-entered a provider key while off by mismatch: decide again, quietly. */
+export function recheckAgentsStatus() {
+  if (status.reason !== "key_mismatch") return status;
+  return initAgentsStatus((line) => console.log(line));
+}
+
+/**
+ * Whether this person sees the Chat module (`features.agents` on sign-in and /api/auth/me): never
+ * for guests (AC-O2); admins always (they get the "not configured" and "add a provider" screens);
+ * everyone else only once the module is on, a provider exists, and their role may chat (QA Q5):
+ * until then the tile and /chat would show a module they cannot use. UI only (T97): the routes
+ * enforce access themselves.
+ */
+export function agentsFeature(role: string) {
+  if (role === "guest") return false;
+  if (role === "admin") return true;
+  if (!status.enabled || !roleMayChat(role)) return false;
+  return db.query("SELECT 1 FROM agent_providers LIMIT 1").get() !== null;
+}
 
 /** 503 AGENTS_DISABLED while the module is off. */
 export function requireAgentsEnabled() {

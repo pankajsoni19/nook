@@ -14,7 +14,8 @@ import type { Migration } from "./types";
  *   with the Bin columns.
  * - `agent_access`: module-local sharing rows (AC-D).
  * - `chats`, `chat_messages`: a chat is a tree of messages (`parent_id`, `active_leaf_id`, D360),
- *   with the Bin columns on the chat; `chat_fts` indexes titles and user messages.
+ *   with the Bin columns on the chat; `chats.agent_id` becomes NULL when the agent is purged (the
+ *   chats stay the owner's); `chat_fts` indexes titles and user messages, tagged with the owner.
  * - `chat_public_shares`: AC-D (frozen snapshots behind the `public_chat_links` policy, AC-O1).
  * - `agent_runs`, `agent_audit_entries`, `agent_audit_steps`: every run is a row (D344); the audit
  *   content tables are written by AC-C only. `agent_usage_daily` backs the budgets (§2.4).
@@ -149,7 +150,8 @@ export const agentChatMigration: Migration = {
       CREATE TABLE IF NOT EXISTS chats (
         id TEXT PRIMARY KEY,
         owner_id TEXT NOT NULL REFERENCES users(id),
-        agent_id TEXT NOT NULL REFERENCES agents(id),
+        -- NULL once the agent is purged from the Bin: the chat stays the owner's, readable, and cannot send (D363).
+        agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
         title TEXT NOT NULL CHECK (length(title) <= 120),
         pinned INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0,1)),
         active_leaf_id TEXT,
@@ -177,7 +179,8 @@ export const agentChatMigration: Migration = {
         finished_at TEXT
       ) STRICT;
       CREATE INDEX IF NOT EXISTS chat_messages_chat ON chat_messages(chat_id, created_at);
-      CREATE VIRTUAL TABLE IF NOT EXISTS chat_fts USING fts5(chat_id UNINDEXED, title, body, tokenize='unicode61 remove_diacritics 2', prefix='2 3');
+      -- owner_id lets the search filter by owner inside the FTS query, so other people's matches never crowd the owner's out.
+      CREATE VIRTUAL TABLE IF NOT EXISTS chat_fts USING fts5(chat_id UNINDEXED, owner_id UNINDEXED, title, body, tokenize='unicode61 remove_diacritics 2', prefix='2 3');
       CREATE TABLE IF NOT EXISTS chat_public_shares (
         chat_id TEXT PRIMARY KEY REFERENCES chats(id) ON DELETE CASCADE,
         token_hash TEXT NOT NULL UNIQUE,
@@ -328,10 +331,15 @@ const quoted = (words: readonly string[]) => words.map((word) => `'${word}'`).jo
 export function rebuildApiKeyGrants(db: Parameters<Migration["up"]>[0]) {
   const current = (db.query("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'api_key_grants'").get() as { sql: string } | null)?.sql ?? "";
   if (!current || /'agents'/.test(current)) return;
-  // 031, 037, and 038 may reach an install after this one (each id is applied on its own): without
-  // 038's column the copy writes its default, and 038 later finds the column and triggers in place.
+  // The runner applies ids in order, so 038 has always run before this (its column and triggers are
+  // in place and copied verbatim). Defensive only, for a table that somehow lacks 038's shape: the
+  // copy writes the column's default, and 038's triggers are created only when the key column they
+  // read (`mcp_api_keys.vault_protected_access`) exists, since a trigger naming a missing column makes
+  // every INSERT fail at prepare time; 038 then adds the column and its triggers (IF NOT EXISTS).
   const columns = (db.query("PRAGMA table_info(api_key_grants)").all() as Array<{ name: string }>).map((column) => column.name);
   const protectedSource = columns.includes("protected_at_grant") ? "protected_at_grant" : "0";
+  const keyColumns = (db.query("PRAGMA table_info(mcp_api_keys)").all() as Array<{ name: string }>).map((column) => column.name);
+  const with038 = keyColumns.includes("vault_protected_access");
   // The Messages migration (040) may have rebuilt it first with its own words: keep them too.
   db.exec(`
     CREATE TABLE api_key_grants_new (
@@ -369,7 +377,9 @@ export function rebuildApiKeyGrants(db: Parameters<Migration["up"]>[0]) {
     CREATE TRIGGER IF NOT EXISTS api_key_grants_kind_wall_update BEFORE UPDATE OF key_id, module ON api_key_grants
     WHEN (NEW.module = 'vault') IS NOT (SELECT kind = 'vault' FROM mcp_api_keys WHERE id = NEW.key_id)
     BEGIN SELECT RAISE(ABORT, 'KEY_KIND_WALL'); END;
-
+  `);
+  if (!with038) return;
+  db.exec(`
     -- 038: the vault grant shape and the protected flag.
     CREATE TRIGGER IF NOT EXISTS api_key_grants_vault_shape BEFORE INSERT ON api_key_grants
     WHEN NEW.module = 'vault' AND (SELECT kind FROM mcp_api_keys WHERE id = NEW.key_id) = 'vault' AND (

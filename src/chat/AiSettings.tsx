@@ -164,7 +164,8 @@ function ProviderDialog({ provider, onCancel, onSaved }: { provider: ProviderSum
   const [baseUrl, setBaseUrl] = useState(provider?.baseUrl ?? DEFAULT_BASE_URL);
   const [apiKey, setApiKey] = useState("");
   const [removeSecret, setRemoveSecret] = useState(false);
-  const [defaultModel, setDefaultModel] = useState(provider?.defaultModel ?? DEFAULT_MODEL);
+  // Empty for a new provider: the placeholder shows the default and an empty field saves it (QA Q8: a pre-filled value under the same placeholder read as a hint and got typed over).
+  const [defaultModel, setDefaultModel] = useState(provider?.defaultModel ?? "");
   const [tokenParam, setTokenParam] = useState<"max_completion_tokens" | "max_tokens">(provider?.compat.tokenParam ?? "max_completion_tokens");
   const [streamUsage, setStreamUsage] = useState(provider?.compat.streamUsage ?? true);
   const [contextTokens, setContextTokens] = useState(provider?.compat.contextTokens ?? 128_000);
@@ -201,7 +202,7 @@ function ProviderDialog({ provider, onCancel, onSaved }: { provider: ProviderSum
       {provider?.hasSecret && <label className="ai-check"><input type="checkbox" checked={removeSecret} onChange={(event) => setRemoveSecret(event.target.checked)} />Remove the saved key</label>}
       <p className="file-dialog-hint">{SECRET_HONESTY} The key is sent only to this provider's endpoint and is never shown again.</p>
       <label htmlFor={ids.model}>Default chat model</label>
-      <input id={ids.model} value={defaultModel} maxLength={AGENT_BOUNDS.model} autoComplete="off" spellCheck={false} placeholder={DEFAULT_MODEL} onChange={(event) => setDefaultModel(event.target.value)} />
+      <input id={ids.model} value={defaultModel} maxLength={AGENT_BOUNDS.model} autoComplete="off" spellCheck={false} placeholder={`${DEFAULT_MODEL} (default)`} onChange={(event) => setDefaultModel(event.target.value.replace(/\s+/g, ""))} />
       <span className="ai-label" id={ids.param}>Output-token parameter</span>
       <Select<"max_completion_tokens" | "max_tokens"> labelledBy={ids.param} label="Output-token parameter" value={tokenParam} onChange={setTokenParam} options={[{ value: "max_completion_tokens", label: "max_completion_tokens", description: "OpenAI" }, { value: "max_tokens", label: "max_tokens", description: "Most compatible servers" }]} />
       <label htmlFor={ids.context}>Context window (tokens)</label>

@@ -122,6 +122,8 @@ describe("agent secrets (D354, T309)", () => {
       setAgentsKeyForTests(key);
     }
     expect(agentsStatus().enabled).toBe(true);
-    expect((await api(member, "GET", "/auth/me")).body.features.agents).toBe(true);
+    // Members see the module once it is on and a provider exists (QA Q5); admins always.
+    expect((await api(member, "GET", "/auth/me")).body.features.agents).toBe(db.query("SELECT 1 FROM agent_providers LIMIT 1").get() !== null);
+    expect((await api(admin, "GET", "/auth/me")).body.features.agents).toBe(true);
   });
 });
