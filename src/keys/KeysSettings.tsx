@@ -15,6 +15,8 @@ import { keyDetailEvents, useKeysApi, type ApiKey, type KeyEvent, type KeyList, 
 import { firstVaultRow, useVaultChoices, VaultGrantBuilder } from "./VaultGrantBuilder";
 import { namesProtected, vaultFlagChips, vaultGrantChips, vaultGrantCountChips, vaultGrantsToRows, vaultKeyEventLine, vaultRowsNarrow, vaultRowsToGrants, type VaultGrantRow, type VaultGrantView } from "./vaultKeyGrants";
 import { appName } from "../appName";
+import { holdsAgentGrants, KEYS_TAB_INTROS, KEYS_TAB_LABELS, keysTabCounts, keysTabPreset, keyTabOf, listedOnLine, shownKeysTab, visibleKeysTabs, type KeysTab } from "./keyTabs";
+import { keysPanelId, keysTabId, KeysTabs } from "./KeysTabs";
 import "./keys.css";
 
 /**
@@ -29,7 +31,7 @@ type Dialog = { kind: "create" } | { kind: "edit"; key: ApiKey } | { kind: "rota
 
 const messageOf = (reason: unknown, fallback: string) => reason instanceof Error ? reason.message : fallback;
 
-export function KeysSettings({ onPendingChange, onNestedDialogChange, totpEnabled, role, notice = null, integration, reopenOnForward = true, vaultAvailable = true }: {
+export function KeysSettings({ onPendingChange, onNestedDialogChange, totpEnabled, role, notice = null, integration, reopenOnForward = true, vaultAvailable = true, agentsAvailable = true, tab = "general", onTab }: {
   onPendingChange: (pending: boolean) => void; onNestedDialogChange?: (open: boolean) => void; totpEnabled: boolean; role: string | undefined; /** Q2: the result of a Google confirmation started here. */ notice?: React.ReactNode;
   /** Team → Integrations (Wave 36): an admin manages this integration's keys (wrap in KeysApiContext); `role` is the integration's. */
   integration?: { name: string };
@@ -37,15 +39,35 @@ export function KeysSettings({ onPendingChange, onNestedDialogChange, totpEnable
   reopenOnForward?: boolean;
   /** Wave 41 QA L8: with the Vault off (`features.vault`), no vault key kind and no call to /api/vault/vaults. */
   vaultAvailable?: boolean;
+  /** Chat (`features.agents`): with it off, no Agents tab; agents-only keys are listed on General. */
+  agentsAvailable?: boolean;
+  /**
+   * The tab on the URL (/settings/keys/:tab), and the move to another (the hub asks the leave guard
+   * first). Team → Integrations has no tabs: integrations hold no vault keys or agents grants.
+   */
+  tab?: KeysTab;
+  onTab?: (tab: KeysTab) => void;
 }) {
   const keysApi = useKeysApi();
+  const tabbed = !integration;
+  const features = { vault: vaultAvailable, agents: agentsAvailable };
+  const shownTab: KeysTab = tabbed ? shownKeysTab(tab, features) : "general";
   const [data, setData] = useState<KeyList | null>(null);
   const [error, setError] = useState("");
   const [dialog, setDialog] = useState<Dialog | null>(null);
   // Which kind the New key dialog is making, for the header's expiry line (QA L3).
   const [creatingKind, setCreatingKind] = useState<"general" | "vault">("general");
   useEffect(() => { if (dialog?.kind !== "create") setCreatingKind("general"); }, [dialog]);
-  const [newToken, setNewToken] = useState<{ token: string; name: string; rotated: boolean } | null>(null);
+  // `tab`: the tab that lists the new key (it may differ from the one on screen when the kind was changed).
+  const [newToken, setNewToken] = useState<{ token: string; name: string; rotated: boolean; tab: KeysTab } | null>(null);
+  // A tab switch asked first (the leave guard) when a key was on screen: the one-time panel goes with it.
+  const tabSeenRef = useRef(shownTab);
+  useEffect(() => {
+    if (tabSeenRef.current === shownTab) return;
+    tabSeenRef.current = shownTab;
+    setNewToken(null);
+    setStatus("");
+  }, [shownTab]);
   const [copied, setCopied] = useState("");
   const [status, setStatus] = useState("");
   const endpoint = `${window.location.origin}/mcp`;
@@ -127,8 +149,17 @@ export function KeysSettings({ onPendingChange, onNestedDialogChange, totpEnable
     }
   }
 
-  const live = data?.keys.filter((key) => key.state !== "revoked") ?? [];
-  const revoked = data?.keys.filter((key) => key.state === "revoked") ?? [];
+  // Each key is on exactly one tab (keyTabs.ts); without tabs (an integration) every key is listed.
+  const onShownTab = (key: ApiKey) => !tabbed || keyTabOf(key, features) === shownTab;
+  const tabOf = (key: ApiKey): KeysTab => tabbed ? keyTabOf(key, features) : "general";
+  const live = data?.keys.filter((key) => key.state !== "revoked" && onShownTab(key)) ?? [];
+  const revoked = data?.keys.filter((key) => key.state === "revoked" && onShownTab(key)) ?? [];
+  const tabs = tabbed ? visibleKeysTabs(features) : [];
+  const counts = data ? keysTabCounts(data.keys, features) : null;
+  // The Vault is off: vault keys made before are listed on General, with a note.
+  const vaultOffKeys = tabbed && !vaultAvailable && shownTab === "general" && (data?.keys.some((key) => key.kind === "vault" && key.state !== "revoked") ?? false);
+  const preset = keysTabPreset(shownTab);
+  const heading = integration ? `Keys of ${integration.name}` : shownTab === "vault" ? "Your vault keys" : shownTab === "agents" ? "Your agent keys" : "Your keys";
   const atLimit = data ? data.liveCount >= data.policy.keysPerUser : false;
   const revokedFocusKey = (revokedId: string) => keyAfterRevoke(live.map((key) => key.id), revokedId);
 
@@ -137,16 +168,19 @@ export function KeysSettings({ onPendingChange, onNestedDialogChange, totpEnable
     <div className="settings-section-heading"><span className="settings-icon"><KeyRound /></span><div><h3 id="keys-heading">API keys</h3><p>{integration
       ? `Keys let an AI client or script act as ${integration.name}, over MCP or the REST API. A key reaches only what owners share with ${integration.name} by name, only what its permissions allow, and only until it expires. Creating or rotating one asks for your password; copy the new key into the client that uses it.`
       : `Keys let trusted AI clients and scripts use ${appName()} as you, over MCP or the REST API. Each key does only what its permissions allow, only with items you can open, and only until it expires. No key can share, manage access, manage keys, or delete forever.`}</p></div></div>
+    {tabbed && <KeysTabs tabs={tabs} selected={shownTab} counts={counts} onSelect={(next) => onTab?.(next)} />}
+    <div className="keys-tabpanel" {...(tabbed ? { role: "tabpanel", id: keysPanelId(shownTab), "aria-labelledby": keysTabId(shownTab), tabIndex: 0 } : {})}>
+    {tabbed && <p className="keys-tab-intro">{KEYS_TAB_INTROS[shownTab]}</p>}
     {error && <p className="form-error" role="alert">{error}</p>}
     {status && <p className="keys-status" role="status">{status}</p>}
     <div className="mcp-endpoint"><div><span>Transport</span><strong>Streamable HTTP</strong></div><div><span>Endpoint</span><code>{endpoint}</code><button type="button" className="icon-button" onClick={() => copy(endpoint, "endpoint")} aria-label="Copy MCP endpoint"><Copy /></button></div></div>
 
-    {newToken && <div className="new-api-key" role="status"><strong>{newToken.rotated ? `Copy the new key for ${newToken.name} now` : "Copy this key now"}</strong><p>It cannot be shown again after you leave this screen. You can select the text manually if automatic copy is unavailable.</p><textarea ref={tokenFieldRef} readOnly value={newToken.token} aria-label="New API key" onFocus={(event) => event.currentTarget.select()} /><div><button type="button" className="secondary-button" onClick={() => copy(newToken.token, "token")}><Copy />{copied === "token" ? "Copied key" : "Copy key"}</button><button type="button" className="text-button" onClick={() => setNewToken(null)}>I saved this key</button></div></div>}
+    {newToken && <div className="new-api-key" role="status"><strong>{newToken.rotated ? `Copy the new key for ${newToken.name} now` : "Copy this key now"}</strong><p>It cannot be shown again after you leave this screen. You can select the text manually if automatic copy is unavailable.</p><textarea ref={tokenFieldRef} readOnly value={newToken.token} aria-label="New API key" onFocus={(event) => event.currentTarget.select()} /><div><button type="button" className="secondary-button" onClick={() => copy(newToken.token, "token")}><Copy />{copied === "token" ? "Copied key" : "Copy key"}</button><button type="button" className="text-button" onClick={() => setNewToken(null)}>I saved this key</button></div>{tabbed && newToken.tab !== shownTab && <p className="keys-field-note">{listedOnLine(newToken.tab)}</p>}</div>}
 
     <div className="mcp-card keys-card">
       <div className="keys-card-head">
-        <div><h4 ref={headingRef} tabIndex={-1}>{integration ? `Keys of ${integration.name}` : "Your keys"}</h4><p>{data ? keyPolicyLine(data.policy, data.liveCount, dialog?.kind === "create" ? creatingKind : "general") : "Loading…"}</p></div>
-        {!guest && <button ref={newKeyRef} type="button" className="primary-button keys-new" onClick={() => { setStatus(""); openDialog({ kind: "create" }); }} disabled={!data || atLimit || Boolean(newToken) || needsGoogle}><Plus aria-hidden="true" />New key</button>}
+        <div><h4 ref={headingRef} tabIndex={-1}>{heading}</h4><p>{data ? keyPolicyLine(data.policy, data.liveCount, dialog?.kind === "create" ? creatingKind : "general") : "Loading…"}</p></div>
+        {!guest && <button ref={newKeyRef} type="button" className="primary-button keys-new" onClick={() => { setStatus(""); setCreatingKind(vaultAvailable && !integration ? preset.kind : "general"); openDialog({ kind: "create" }); }} disabled={!data || atLimit || Boolean(newToken) || needsGoogle}><Plus aria-hidden="true" />New key</button>}
       </div>
       {/* Q2: the confirmation state too ("Confirmed with Google until …"), not only the button. */}
       {!guest && account && !asksForPassword(account) && <GoogleReauthNotice account={account} returnTo={keysApi.returnTo} />}
@@ -154,10 +188,11 @@ export function KeysSettings({ onPendingChange, onNestedDialogChange, totpEnable
       {role === "viewer" && <p className="mcp-role-note" role="note">{integration ? "This integration is a viewer: its keys can only read." : "Team role: Viewer. Keys you create can only read."}</p>}
       {data && !data.policy.mcpAllowed && <p className="mcp-role-note" role="note">Team policy does not allow your team role to use MCP keys.</p>}
       {atLimit && <p className="mcp-role-note" role="note">You have {data!.liveCount} live keys, the most team policy allows. Revoke one to create another.</p>}
-      <ul ref={liveListRef} className="keys-list" aria-label="API keys">
-        {live.map((key) => <KeyRow key={key.id} apiKey={key} onRotate={needsGoogle ? undefined : () => openDialog({ kind: "rotate", key })} onEdit={() => openDialog({ kind: "edit", key })} onRevoke={() => openDialog({ kind: "revoke", key })} onReview={() => openDialog({ kind: "review", key })} />)}
+      {vaultOffKeys && <p className="mcp-role-note" role="note">The Vault is turned off, so vault keys are listed here under General. You can still edit, rotate, or revoke them.</p>}
+      <ul ref={liveListRef} className="keys-list" aria-label={tabbed ? `${KEYS_TAB_LABELS[shownTab]} API keys` : "API keys"}>
+        {live.map((key) => <KeyRow key={key.id} apiKey={key} agentsChip={tabbed && shownTab === "general" && key.kind === "general" && holdsAgentGrants(key)} onRotate={needsGoogle ? undefined : () => openDialog({ kind: "rotate", key })} onEdit={() => openDialog({ kind: "edit", key })} onRevoke={() => openDialog({ kind: "revoke", key })} onReview={() => openDialog({ kind: "review", key })} />)}
       </ul>
-      {data && !live.length && <p className="keys-empty">No active API keys.</p>}
+      {data && !live.length && <p className="keys-empty">{tabbed && shownTab !== "general" ? `No active ${shownTab === "vault" ? "vault" : "agent"} keys.` : "No active API keys."}</p>}
       {revoked.length > 0 && <details className="keys-revoked"><summary>Revoked in the last 7 days ({revoked.length})</summary><ul className="keys-list">{revoked.map((key) => <KeyRow key={key.id} apiKey={key} />)}</ul></details>}
     </div>
 
@@ -165,13 +200,14 @@ export function KeysSettings({ onPendingChange, onNestedDialogChange, totpEnable
 
     <div className="mcp-card mcp-config keys-rest-help"><div><h4 id="keys-rest-heading">Using the REST API</h4><p>A key whose “Where it is used” includes REST runs the same tools over plain HTTPS, for scripts and CI. Send it only in the Authorization header, never in a URL. Bodies are JSON. <code>GET /api/v1/tools</code> lists what the key can call, and <code>GET /api/v1/me</code> shows its permissions and limits. Replace the placeholder with your key.</p></div><pre aria-labelledby="keys-rest-heading"><code>{restExample}</code></pre><button type="button" className="secondary-button" onClick={() => copy(restExample, "rest")}><Copy />{copied === "rest" ? "Copied example" : "Copy example"}</button></div>
 
-    {!integration && <div className="mcp-card mcp-config keys-rest-help"><div><h4 id="keys-vault-heading">Using a vault key</h4><p>A vault key (<code>nkv_…</code>) reaches only the vaults and environments you give it, never more than you can reach yourself, and nothing outside the Vault. Over REST it reads and writes values at <code>/api/v1/vault</code>; over MCP it gets the vault tools only, and returns values only when you allowed that when you created it. Replace the placeholder with your key.</p></div><pre aria-labelledby="keys-vault-heading"><code>{vaultExample}</code></pre><button type="button" className="secondary-button" onClick={() => copy(vaultExample, "vault")}><Copy />{copied === "vault" ? "Copied example" : "Copy example"}</button></div>}
+    {tabbed && shownTab === "vault" && <div className="mcp-card mcp-config keys-rest-help"><div><h4 id="keys-vault-heading">Using a vault key</h4><p>A vault key (<code>nkv_…</code>) reaches only the vaults and environments you give it, never more than you can reach yourself, and nothing outside the Vault. Over REST it reads and writes values at <code>/api/v1/vault</code>; over MCP it gets the vault tools only, and returns values only when you allowed that when you created it. Replace the placeholder with your key.</p></div><pre aria-labelledby="keys-vault-heading"><code>{vaultExample}</code></pre><button type="button" className="secondary-button" onClick={() => copy(vaultExample, "vault")}><Copy />{copied === "vault" ? "Copied example" : "Copy example"}</button></div>}
+    </div>
 
     {/* Back off the phone sentinel closes a key dialog; Forward shows the same one again (Friction 12). */}
     <HistoryDialogReopen.Provider value={dialog && reopenOnForward ? () => setDialog(dialog) : null}>
-    {dialog?.kind === "create" && data && <CreateKeyDialog policy={data.policy} role={role} totpEnabled={totpEnabled} allowVault={!integration && vaultAvailable} onKind={setCreatingKind} onClose={closeDialog} onCreated={(key) => { closeDialog(); setNewToken({ token: key.token, name: key.name, rotated: false }); load(); }} />}
+    {dialog?.kind === "create" && data && <CreateKeyDialog policy={data.policy} role={role} totpEnabled={totpEnabled} allowVault={!integration && vaultAvailable} preset={tabbed ? shownTab : "general"} onKind={setCreatingKind} onClose={closeDialog} onCreated={(key) => { closeDialog(); setNewToken({ token: key.token, name: key.name, rotated: false, tab: tabOf(key) }); load(); }} />}
     {dialog?.kind === "edit" && data && <EditKeyDialog apiKey={dialog.key} policy={data.policy} role={role} onClose={closeDialog} onSaved={(message) => { closeDialog(); setStatus(message); load(); }} />}
-    {dialog?.kind === "rotate" && data && <RotateKeyDialog apiKey={dialog.key} policy={data.policy} role={role} totpEnabled={totpEnabled} onClose={closeDialog} onRotated={(key) => { closeDialog(); setNewToken({ token: key.token, name: key.name, rotated: true }); load(); }} />}
+    {dialog?.kind === "rotate" && data && <RotateKeyDialog apiKey={dialog.key} policy={data.policy} role={role} totpEnabled={totpEnabled} onClose={closeDialog} onRotated={(key) => { closeDialog(); setNewToken({ token: key.token, name: key.name, rotated: true, tab: tabOf(dialog.key) }); load(); }} />}
     {dialog?.kind === "revoke" && <RevokeKeyDialog apiKey={dialog.key} onClose={closeDialog} onRevoked={() => { closeDialogAfterReload(revokedFocusKey(dialog.key.id)); setStatus(`${dialog.key.name} was revoked.`); }} />}
     {dialog?.kind === "review" && <McpBinnedReview keyId={dialog.key.id} keyName={dialog.key.name} onClose={() => closeDialogAfterReload(dialog.key.id)} onRevoke={() => setDialog({ kind: "revoke", key: dialog.key })} />}
     </HistoryDialogReopen.Provider>
@@ -285,13 +321,13 @@ export function UsageBars({ usage }: { usage: readonly number[] }) {
 export const EXPIRY_BLOCKED_TEXT = "Blocked by team policy: keys need an expiry. Rotate it to give it one.";
 export const blockedLine = (key: Pick<ApiKey, "blockedBy" | "blockedMessage">) => key.blockedBy === "expiry_required" ? EXPIRY_BLOCKED_TEXT : key.blockedMessage ?? "";
 
-export function KeyRow({ apiKey, owner, onRotate, onEdit, onRevoke, onReview }: { apiKey: ApiKey; owner?: React.ReactNode; onRotate?: () => void; onEdit?: () => void; onRevoke?: () => void; onReview?: () => void }) {
+export function KeyRow({ apiKey, owner, agentsChip = false, onRotate, onEdit, onRevoke, onReview }: { apiKey: ApiKey; owner?: React.ReactNode; /** API keys' General tab: this key also runs agents. */ agentsChip?: boolean; onRotate?: () => void; onEdit?: () => void; onRevoke?: () => void; onReview?: () => void }) {
   const state = keyStateLabel(apiKey);
   const binned = binnedTodayLine(apiKey.binnedToday);
   return <li className={`keys-row state-${apiKey.state}`} data-key-id={apiKey.id}>
     <span className="key-icon" aria-hidden="true"><KeyRound /></span>
     <div className="keys-row-main">
-      <div className="keys-row-title"><strong>{apiKey.name}</strong><span className="keys-chip">{SURFACE_LABELS[apiKey.surfaces]}</span>{apiKey.ipRestricted && <span className="keys-chip" title={apiKey.ipAllowlist?.join(", ")}>{apiKey.ipAllowlist ? `IP limited (${apiKey.ipAllowlist.length})` : "IP limited"}</span>}{apiKey.kind === "vault" && <span className="keys-chip">Vault</span>}<span className={`keys-chip tone-${state.tone}`}>{state.label}</span></div>
+      <div className="keys-row-title"><strong>{apiKey.name}</strong><span className="keys-chip">{SURFACE_LABELS[apiKey.surfaces]}</span>{apiKey.ipRestricted && <span className="keys-chip" title={apiKey.ipAllowlist?.join(", ")}>{apiKey.ipAllowlist ? `IP limited (${apiKey.ipAllowlist.length})` : "IP limited"}</span>}{apiKey.kind === "vault" && <span className="keys-chip">Vault</span>}{agentsChip && <span className="keys-chip">Agents</span>}<span className={`keys-chip tone-${state.tone}`}>{state.label}</span></div>
       {owner && <small className="keys-row-owner">{owner}</small>}
       <small><code>{apiKey.prefix}…</code> · Created {relativeTime(apiKey.createdAt)} · {lastUsedLine(apiKey, relativeTime)}</small>
       {apiKey.ipAllowlist && <small className="keys-row-description">Only from {apiKey.ipAllowlist.join(", ")}</small>}
@@ -370,10 +406,11 @@ function ReauthFields({ totpEnabled, password, code, onPassword, onCode, disable
   </div>;
 }
 
-function CreateKeyDialog({ policy, role, totpEnabled, allowVault, onKind, onClose, onCreated }: { policy: PolicySummary; role: string | undefined; totpEnabled: boolean; allowVault: boolean; onKind?: (kind: "general" | "vault") => void; onClose: () => void; onCreated: (key: ApiKey & { token: string }) => void }) {
+function CreateKeyDialog({ policy, role, totpEnabled, allowVault, preset: presetTab = "general", onKind, onClose, onCreated }: { policy: PolicySummary; role: string | undefined; totpEnabled: boolean; allowVault: boolean; /** The API keys tab it was opened on: Vault starts as a vault key, Agents with Chat → Run agents. */ preset?: KeysTab; onKind?: (kind: "general" | "vault") => void; onClose: () => void; onCreated: (key: ApiKey & { token: string }) => void }) {
   const keysApi = useKeysApi();
+  const preset = createPreset(presetTab, allowVault, policy);
   // Wave 27 (D264): a general key or a vault key (nkv_), never both in one.
-  const [kind, setKind] = useState<"general" | "vault">("general");
+  const [kind, setKind] = useState<"general" | "vault">(preset.kind);
   const [vaultRows, setVaultRows] = useState<VaultGrantRow[]>([]);
   const [mcpValues, setMcpValues] = useState(false);
   const [protectedAccess, setProtectedAccess] = useState(false);
@@ -389,9 +426,9 @@ function CreateKeyDialog({ policy, role, totpEnabled, allowVault, onKind, onClos
   }, [kind, vaults]);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [surfaces, setSurfaces] = useState<KeySurfaces>("mcp");
-  const [expires, setExpires] = useState(String(policy.keyDefaultDays));
-  const [rows, setRows] = useState<GrantRow[]>(() => [{ key: newRowKey(), module: "notes", permission: "read", applies: "all", resourceIds: [] }]);
+  const [surfaces, setSurfaces] = useState<KeySurfaces>(preset.surfaces);
+  const [expires, setExpires] = useState(preset.expires);
+  const [rows, setRows] = useState<GrantRow[]>(() => [{ key: newRowKey(), ...preset.firstRow, applies: "all", resourceIds: [] }]);
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
   const [allowlist, setAllowlist] = useState("");
@@ -466,6 +503,17 @@ function CreateKeyDialog({ policy, role, totpEnabled, allowVault, onKind, onClos
       </div>
     </form>
   </KeysDialog>;
+}
+
+/**
+ * Where the New key builder starts on an API keys tab: Vault as a vault key (REST where policy allows
+ * it, for CI, and an expiry of at most 365 days, as switching the kind does); Agents as a general key
+ * with one row, Chat → Run agents on every agent; General as before (Notes → Read).
+ */
+export function createPreset(tab: KeysTab, allowVault: boolean, policy: Pick<PolicySummary, "keyDefaultDays" | "restAllowed">) {
+  const { kind, firstRow } = keysTabPreset(tab);
+  if (kind === "vault" && allowVault) return { kind: "vault" as const, firstRow, surfaces: (policy.restAllowed ? "rest" : "mcp") as KeySurfaces, expires: String(Math.min(policy.keyDefaultDays, 365)) };
+  return { kind: "general" as const, firstRow: kind === "vault" ? keysTabPreset("general").firstRow : firstRow, surfaces: "mcp" as KeySurfaces, expires: String(policy.keyDefaultDays) };
 }
 
 /** The key's grants as builder rows: one per module and permission, with its chosen items. */

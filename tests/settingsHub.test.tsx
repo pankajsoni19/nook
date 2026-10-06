@@ -25,7 +25,7 @@ describe("route scheme", () => {
     expect(parseRoute("/settings")).toEqual({ app: "settings", section: null });
     expect(parseRoute("/settings/")).toEqual({ app: "settings", section: null });
     expect(formatRoute({ app: "settings", section: null })).toBe("/settings");
-    for (const [path, section] of [["/settings/security", "security"], ["/settings/notifications", "notifications"], ["/settings/access", "access"], ["/settings/keys", "mcp"], ["/settings/modules", "modules"], ["/settings/about", "about"]] as const) {
+    for (const [path, section] of [["/settings/security", "security"], ["/settings/notifications", "notifications"], ["/settings/access", "access"], ["/settings/keys/general", "mcp"], ["/settings/modules", "modules"], ["/settings/about", "about"]] as const) {
       expect(parseRoute(path)).toEqual({ app: "settings", section });
       expect(formatRoute(parseRoute(path))).toBe(path);
     }
@@ -75,7 +75,8 @@ describe("route scheme", () => {
       [`/team/integrations/${integrationId}`, `/settings/team/integrations/${integrationId}`],
       ["/team/templates", "/settings/team/templates"],
       ["/team/activity", "/settings/team/activity"],
-      ["/settings/mcp", "/settings/keys"]
+      ["/settings/mcp", "/settings/keys/general"],
+      ["/settings/keys", "/settings/keys/general"]
     ];
     for (const [old, canonical] of aliases) {
       // Old → new: the app rewrites the entry in place to formatRoute's URL.

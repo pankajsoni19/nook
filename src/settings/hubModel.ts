@@ -2,7 +2,7 @@
 // selects, and where the phone's back arrow goes. Pure, so it is unit tested directly.
 import { readHistoryDepth } from "../appShellNavigation";
 import type { Route, SettingsSection } from "../router";
-import { formatRoute, SETTINGS_SECTION_NAMES } from "../router";
+import { formatRoute, KEYS_TABS, keysTabPath, SETTINGS_SECTION_NAMES } from "../router";
 import { canManageTeam, canSeeTeam, type Role } from "../team/teamRoles";
 
 export type TeamEntryId = "members" | "invites" | "groups" | "integrations" | "keys" | "policies" | "templates" | "activity" | "email";
@@ -138,6 +138,34 @@ export function hubBackAction(state: unknown): "history" | "list" {
   return readHistoryDepth(entry) > 0 && entry?.[HUB_PUSHED_OVER_KEY] === "/settings" ? "history" : "list";
 }
 
+/** The URLs of API keys' tabs (/settings/keys/:tab), which sit side by side in one section. */
+const KEYS_TAB_URLS: ReadonlySet<string> = new Set(KEYS_TABS.map(keysTabPath));
+/** The URLs an entry was pushed over, nearest first (App's PUSHED_OVER_CHAIN_KEY; kept in step by tests/keysTabs.test.tsx). */
+export const HUB_PUSHED_OVER_CHAIN_KEY = "mynotes.pushed-over-chain";
+
+/**
+ * Phones: how many entries the section's back arrow steps back to reach the section list, when this
+ * section was opened from it in this visit and then moved only between API keys' tabs (each tab is
+ * an entry); 0 otherwise (the list replaces the section, as hubBackAction's "list"). The chain is the
+ * URLs each entry was pushed over (App's PUSHED_OVER_CHAIN_KEY), nearest first.
+ */
+export function hubBackSteps(state: unknown): number {
+  if (hubBackAction(state) === "history") return 1;
+  const entry = state && typeof state === "object" ? state as Record<string, unknown> : null;
+  const chain = Array.isArray(entry?.[HUB_PUSHED_OVER_CHAIN_KEY]) ? entry![HUB_PUSHED_OVER_CHAIN_KEY] as unknown[] : [];
+  const depth = readHistoryDepth(entry);
+  for (let index = 0; index < chain.length && index < depth; index += 1) {
+    const url = chain[index];
+    if (url === "/settings") return index + 1;
+    if (typeof url !== "string" || !KEYS_TAB_URLS.has(url)) return 0;
+  }
+  return 0;
+}
+
+/** Whether two routes are API keys' tabs (a move between them is a tab switch, not a section change). */
+export const isKeysTabMove = (target: Route, current: Route) =>
+  target.app === "settings" && target.section === "mcp" && current.app === "settings" && current.section === "mcp";
+
 /**
  * The route the hub shows after Back or Forward (review M2): the hub route on the URL, or null to
  * keep the screen (not a hub route, a Team entry while the role's Team group is hidden, or the Bin
@@ -152,11 +180,12 @@ export function hubPopRoute(route: Route, teamShown: boolean, binShown = true): 
 }
 
 /**
- * The leave guard's wording for a browser move it undid (review L2): "section" when the move went to
- * another hub screen, "leave" when it leaves Settings (another app, or off the landing entry's
+ * The leave guard's wording for a browser move it undid (review L2): "tab" between API keys' tabs,
+ * "section" when the move went to another hub screen, "leave" when it leaves Settings (another app, or off the landing entry's
  * sentinel, where the URL still reads the page's own).
  */
-export function leaveGuardAction(target: Route, current: Route): "section" | "leave" {
+export function leaveGuardAction(target: Route, current: Route): "section" | "tab" | "leave" {
+  if (isKeysTabMove(target, current) && formatRoute(target) !== formatRoute(current)) return "tab";
   return isHubRoute(target) && formatRoute(target) !== formatRoute(current) ? "section" : "leave";
 }
 

@@ -53,7 +53,7 @@ import { lineDiff } from "./diff/lineDiff";
 import { TeamSection } from "./team/TeamApp";
 import { useBlockedCount } from "./team/blockedCount";
 import { SettingsHubShell } from "./settings/SettingsHub";
-import { binEntryShown, hubBackAction, hubEntries, hubEntryLabel, hubEntryOf, hubListGoesUnder, hubPopRoute, isHubRoute, isNestedHubRoute, leaveGuardAction, settingsRoute, teamGroupShown, type HubEntry, type HubEntryId } from "./settings/hubModel";
+import { binEntryShown, hubBackAction, hubBackSteps, hubEntries, hubEntryLabel, hubEntryOf, hubListGoesUnder, hubPopRoute, isHubRoute, isNestedHubRoute, leaveGuardAction, settingsRoute, teamGroupShown, type HubEntry, type HubEntryId } from "./settings/hubModel";
 import { HubBeforeLeaveContext, type BeforeHubLeave } from "./settings/hubLeave";
 import { InviteRegister, InviteWhileSignedIn, type InviteRegisterBody } from "./auth/InviteRegister";
 import { initialInvite } from "./auth/inviteLink";
@@ -96,6 +96,7 @@ import { createAppHistoryState, readHistoryDepth, resolveAppHistorySection, star
 // Settings → API keys (Wave 31) replaced the MCP server section; the section id stays "mcp".
 import { KeysSettings } from "./keys/KeysSettings";
 import { unsavedKeyConfirm } from "./keys/unsavedKeyConfirm";
+import { shownKeysTab } from "./keys/keyTabs";
 import { IntegrationBadge } from "./ui/IntegrationBadge";
 import { MyAccess } from "./settings/MyAccess";
 import { ConfirmDialog } from "./files/Dialog";
@@ -110,7 +111,7 @@ import { usePendingWhiteboardSync } from "./whiteboards/pendingSync";
 import { AccessSheet } from "./access/AccessSheet";
 import { notifyBinChanged } from "./bin/binApi";
 import { canPublish, DRAFT_CHANGED_MESSAGE, finalizeOpenNote, isDraftChangedError, mcpDraftBadge, shouldAutoPublish } from "./noteFinalization";
-import { formatRoute, hubDocumentTitle, locationUrl, parseRoute, routeFromLocation, SETTINGS_SECTION_NAMES, settingsDocumentTitle, settingsPath, type Route, type SettingsSection } from "./router";
+import { formatRoute, hubDocumentTitle, keysTabRoute, locationUrl, parseRoute, routeFromLocation, SETTINGS_SECTION_NAMES, settingsDocumentTitle, settingsPath, type KeysTab, type Route, type SettingsSection } from "./router";
 import { noteInFolder, notesRoute, resolveNotesPanel, resolveNotesRoute, type NotesRoute } from "./notesRoute";
 import type { BinItem, Folder, NoteDetail, NoteSummary, User, Version } from "./types";
 import { SearchResults, searchListId, searchOptionId } from "./search/SearchResults";
@@ -401,7 +402,7 @@ function SettingsPage({ session, modules, googleResult = null, navigate, flash, 
   pendingRef.current = { mcp: mcpKeyPending, integration: integrationKeyPending };
   const onIntegrationKeyPending = useCallback((value: boolean) => { pendingRef.current.integration = value; setIntegrationKeyPending(value); }, []);
   const onMcpKeyPending = useCallback((value: boolean) => { pendingRef.current.mcp = value; setMcpKeyPending(value); }, []);
-  const confirmFor = (action: "section" | "leave") => unsavedKeyConfirm(pendingRef.current.integration ? "integration" : action);
+  const confirmFor = (action: "section" | "tab" | "leave") => unsavedKeyConfirm(pendingRef.current.integration ? "integration" : action);
   // Review L1: the section on screen may hold something else a move would lose (Team → Policies with
   // unsaved changes); its hook asks first, then the key check below runs.
   const beforeLeaveRef = useRef<BeforeHubLeave | null>(null);
@@ -417,7 +418,7 @@ function SettingsPage({ session, modules, googleResult = null, navigate, flash, 
     setIntegrationKeyPending(false);
   };
   /** Runs `leave` now, or once the person chose to leave a key shown only once behind. */
-  const guardLeave = useCallback((leave: () => void, action: "section" | "leave" = "leave") => {
+  const guardLeave = useCallback((leave: () => void, action: "section" | "tab" | "leave" = "leave") => {
     const keyGuarded = () => {
       if (!pendingRef.current.mcp && !pendingRef.current.integration) return leave();
       void ask(confirmFor(action)).then((confirmed) => {
@@ -483,6 +484,8 @@ function SettingsPage({ session, modules, googleResult = null, navigate, flash, 
   /** Phones: the section's back arrow. Back onto the list when this visit came from it, else the list replaces the section. */
   const backToList = useCallback(() => {
     if (hubBackAction(window.history.state) === "history") window.history.back();
+    // API keys' tabs are entries of their own: the arrow steps back over them to the list.
+    else if (hubBackSteps(window.history.state) > 0) window.history.go(-hubBackSteps(window.history.state));
     else go(settingsRoute(null), { replace: true });
   }, [go]);
 
@@ -497,13 +500,19 @@ function SettingsPage({ session, modules, googleResult = null, navigate, flash, 
   const binHidden = route.app === "bin" && !binShown;
   useEffect(() => { if (binHidden) go(settingsRoute("security"), { replace: true }); }, [binHidden, go]);
   const title = route.app === "settings" ? SETTINGS_SECTION_NAMES[section ?? "security"] : hubEntryLabel(selected);
+  // API keys' tabs (General, Vault, Agents): a hidden tab's URL (the Vault or Chat off) opens General in place.
+  const keysFeatures = { vault: session.features?.vault !== false, agents: session.features?.agents !== false };
+  const keysTab: KeysTab | undefined = section === "mcp" && route.app === "settings" ? shownKeysTab(route.keysTab ?? "general", keysFeatures) : undefined;
+  const keysTabHidden = section === "mcp" && route.app === "settings" && route.keysTab !== undefined && keysTab !== route.keysTab;
+  useEffect(() => { if (keysTabHidden) go(keysTabRoute("general"), { replace: true }); }, [go, keysTabHidden]);
+  const openKeysTab = useCallback((tab: KeysTab) => guardLeave(() => go(keysTabRoute(tab)), "tab"), [go, guardLeave]);
 
   // "Settings · Notifications · Nook", "Settings · Bin · Nook"; Team's sections name themselves.
   useEffect(() => {
     if (route.app === "bin") document.title = hubDocumentTitle(hubEntryLabel("bin"));
     if (route.app !== "settings") return;
-    document.title = listScreen && isMobileViewport() ? hubDocumentTitle(null) : settingsDocumentTitle(section ?? "security");
-  }, [listScreen, route.app, section]);
+    document.title = listScreen && isMobileViewport() ? hubDocumentTitle(null) : settingsDocumentTitle(section ?? "security", keysTab);
+  }, [keysTab, listScreen, route.app, section]);
 
   useEffect(() => {
     api<TotpState>("/auth/totp/status").then(setState).catch((reason) => setError(reason instanceof Error ? reason.message : "Could not load security settings"));
@@ -653,7 +662,7 @@ function SettingsPage({ session, modules, googleResult = null, navigate, flash, 
     : route.app === "team"
     ? <TeamSection route={route} role={session.user.role ?? "member"} totpEnabled={state.enabled} navigate={go} flash={flash} onLeave={() => go(settingsRoute(null), { replace: true })} guardLeave={guardLeave} onKeyPendingChange={onIntegrationKeyPending} />
     : section === "modules" ? <ModulesSettings {...modules} highlight={highlightModule} onHighlightDone={onHighlightDone} />
-    : section === "mcp" ? <KeysSettings notice={googleNoticeLine} onPendingChange={onMcpKeyPending} totpEnabled={state.enabled} role={session.user.role} vaultAvailable={session.features?.vault !== false} />
+    : section === "mcp" ? <KeysSettings notice={googleNoticeLine} onPendingChange={onMcpKeyPending} totpEnabled={state.enabled} role={session.user.role} vaultAvailable={keysFeatures.vault} agentsAvailable={keysFeatures.agents} tab={keysTab} onTab={openKeysTab} />
     : section === "access" ? <MyAccess />
     : section === "notifications" ? <NotificationSettings />
     : section === "agents" ? <Suspense fallback={<section className="settings-content" aria-busy="true"><p className="sr-only" role="status">Loading agents…</p></section>}><AgentsSettings agentId={route.app === "settings" ? route.agentId ?? null : null} navigate={go} flash={flash} onOpenChat={(agentId) => navigate({ app: "chat", chatId: null, newChat: true, agentId })} /></Suspense>

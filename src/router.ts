@@ -49,7 +49,9 @@ export type Route =
   // The Settings hub (Wave 37): a page at /settings (the section list on phones), and one account
   // section at /settings/:section. Team sections are `team` routes under /settings/team/… (above).
   // Wave 40: Settings → Agents has an editor below it at /settings/agents/:agentId (or /settings/agents/new).
-  | { app: "settings"; section: SettingsSection | null; agentId?: string };
+  // API keys has three tabs at /settings/keys/:tab (general, vault, agents); `keysTab` is absent on
+  // General, so /settings/keys, /settings/mcp, and an unknown tab all name it.
+  | { app: "settings"; section: SettingsSection | null; agentId?: string; keysTab?: Exclude<KeysTab, "general"> };
 
 /** The Audit log's filters in its URL (Wave 42 QA L4); anything malformed is dropped. */
 export type AuditQuery = { key?: string; agent?: string; status?: string; from?: string; to?: string };
@@ -262,6 +264,11 @@ function parseSettings(rest: string[]): Route {
   // Wave 40: the agent editor, /settings/agents/:agentId or /settings/agents/new.
   if (rest[0] === "agents" && rest.length === 2 && rest[1] !== undefined && (rest[1] === NEW_AGENT || isRouteId(rest[1]))) return { app: "settings", section: "agents", agentId: rest[1].toLowerCase() };
   if (rest.length === 1 && rest[0] === "bin") return { app: "bin" };
+  // API keys' tabs: /settings/keys/:tab (and the old /settings/mcp/:tab); an unknown tab opens General.
+  if (rest.length === 2 && settingsSectionForSlug(rest[0]!) === "mcp") {
+    const tab = keysTabForSlug(rest[1]!);
+    return tab === "general" ? { app: "settings", section: "mcp" } : { app: "settings", section: "mcp", keysTab: tab };
+  }
   const section = rest.length === 1 ? settingsSectionForSlug(rest[0]!) : null;
   return { app: "settings", section };
 }
@@ -323,6 +330,7 @@ export function formatRoute(route: Route): string {
   if (route.app === "team") return formatTeam(route);
   if (route.app === "settings") {
     if (route.section === "agents" && route.agentId && (route.agentId === NEW_AGENT || isRouteId(route.agentId))) return `${settingsPath("agents")}/${route.agentId.toLowerCase()}`;
+    if (route.section === "mcp") return keysTabPath(route.keysTab ?? "general");
     return route.section && SETTINGS_SECTIONS.includes(route.section) ? settingsPath(route.section) : "/settings";
   }
   if (route.app === "chat") {
@@ -406,8 +414,24 @@ export function isLegacySettingsPath(pathname: string) {
 
 export const SETTINGS_SECTION_NAMES: Record<SettingsSection, string> = { security: "Security", modules: "Modules", mcp: "API keys", access: "My access", notifications: "Notifications", agents: "Agents", ai: "AI", about: "About" };
 
-/** The document title on an account section: "Settings · Notifications · Nook". */
-export const settingsDocumentTitle = (section: SettingsSection) => hubDocumentTitle(SETTINGS_SECTION_NAMES[section]);
+/**
+ * The tabs of Settings → API keys: general keys, vault keys (`nkv_`), and keys that only run agents.
+ * Each is a URL, /settings/keys/:tab; /settings/keys (and the old /settings/mcp) opens General.
+ */
+export const KEYS_TABS = ["general", "vault", "agents"] as const;
+export type KeysTab = typeof KEYS_TABS[number];
+export const KEYS_TAB_LABELS: Record<KeysTab, string> = { general: "General", vault: "Vault", agents: "Agents" };
+const keysTabForSlug = (slug: string): KeysTab => (KEYS_TABS as readonly string[]).includes(slug) ? slug as KeysTab : "general";
+export const keysTabPath = (tab: KeysTab) => `${settingsPath("mcp")}/${tab}`;
+/** The route of one API keys tab (General has no `keysTab`). */
+export const keysTabRoute = (tab: KeysTab): Route => tab === "general" ? { app: "settings", section: "mcp" } : { app: "settings", section: "mcp", keysTab: tab };
+
+/**
+ * The document title on an account section: "Settings · Notifications · Nook"; on an API keys tab,
+ * "Settings · API keys · Vault · Nook".
+ */
+export const settingsDocumentTitle = (section: SettingsSection, keysTab?: KeysTab) =>
+  hubDocumentTitle(section === "mcp" && keysTab ? `${SETTINGS_SECTION_NAMES.mcp} · ${KEYS_TAB_LABELS[keysTab]}` : SETTINGS_SECTION_NAMES[section]);
 
 /** The document title on a Settings hub screen (Wave 37): "Settings · Members · Nook", or "Settings · Nook" on the list. */
 export const hubDocumentTitle = (name: string | null) => name ? `Settings · ${name} · ${appName()}` : `Settings · ${appName()}`;
