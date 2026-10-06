@@ -192,7 +192,9 @@ export function registerAgentRoutes(app: Hono<AppEnv>) {
     return c.json({
       enabled: status.enabled, reason: role === "admin" ? status.reason : null, canChat: status.enabled && roleMayChat(role), canCreate: status.enabled && roleMayCreate(role), defaultModel: DEFAULT_MODEL,
       // AC-C: whether the Audit log link shows (admins, and people with `agents:run` keys or runs).
-      auditVisible: status.enabled && auditVisibleTo({ userId: c.get("user").id, role })
+      auditVisible: status.enabled && auditVisibleTo({ userId: c.get("user").id, role }),
+      // Admins only: whether a model provider exists, for the empty Chat list's "add one" line.
+      ...(role === "admin" ? { hasProvider: db.query("SELECT 1 FROM agent_providers LIMIT 1").get() !== null } : {})
     });
   });
 

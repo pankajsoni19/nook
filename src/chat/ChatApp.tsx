@@ -467,7 +467,9 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
       <button className="primary-button chat-new" onClick={() => go(chatRoute(null, { newChat: true }))} disabled={!agents || agents.length === 0}><Plus />New chat</button>
       <label className="chat-search"><Search aria-hidden="true" /><input type="search" value={query} placeholder="Search chats" aria-label="Search chats" onChange={(event) => setQuery(event.target.value)} /></label>
     </div>
-    {agents && agents.length === 0 && <div className="chat-empty-agents"><p>No agents yet.</p>{status?.canCreate ? <button className="secondary-button" onClick={() => onOpenAgents("new")}>Create an agent</button> : <p className="chat-muted">Ask someone who can create agents.</p>}</div>}
+    {agents && agents.length === 0 && <div className="chat-empty-agents"><p>No agents yet. An agent is a system prompt and a model you chat with.</p>
+      {role === "admin" && status?.hasProvider === false && <p className="chat-muted">No model provider yet — add one in <a href="/settings/ai" onClick={(event) => { event.preventDefault(); onOpenPath("/settings/ai"); }}>Settings → AI</a></p>}
+      {status?.canCreate ? <button type="button" className="secondary-button chat-create-agent" onClick={() => onOpenAgents("new")}><Bot />Create an agent</button> : <p className="chat-muted">Ask someone who can create agents.</p>}</div>}
     {chats === null ? <p className="chat-muted">Loading…</p> : chats.length === 0 && agents && agents.length > 0 ? <p className="chat-muted">{query ? "No chats match." : "No chats yet. Start one."}</p> : groups.map(([group, items]) => <div key={group} className="chat-group">
       <h3>{group}</h3>
       <ul>{items.map((chat) => <li key={chat.id}><button type="button" className={`chat-row${route.chatId === chat.id ? " active" : ""}`} aria-current={route.chatId === chat.id ? "page" : undefined} onClick={() => go(chatRoute(chat.id))}>

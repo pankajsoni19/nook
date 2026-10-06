@@ -101,12 +101,23 @@
 .file-dialog-form input[aria-invalid="true"] { border-color: #6a3039; }
 .file-dialog-hint, .file-dialog-error { margin: 0; font-size: .76rem; line-height: 1.45; overflow-wrap: anywhere; }
 .file-dialog-hint { color: #77777e; }
+/* A hint's leading icon sits inline at the start of its first line (the base styles make every svg a block). */
+.file-dialog-hint > svg:first-child { display: inline-block; vertical-align: -2px; }
 .file-dialog-error { color: #fda4af; }
 .file-dialog > .file-dialog-error { padding: 0 20px; }
 .file-share-error { padding: 0 14px; }
 .file-dialog-form .file-dialog-actions { padding: 12px 0 18px; }
-.file-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 20px 18px; }
-.file-dialog-actions button { min-height: 40px; margin: 0; padding: 0 16px; font-size: .84rem; font-weight: 650; }
+/* Checkbox labels in a dialog form read as sentences, not as the all-caps field labels above. */
+.file-dialog-form label:has(> input[type="checkbox"]):not(.vault-check) { color: #d6d6d9; font-size: .86rem; font-weight: 500; letter-spacing: normal; text-transform: none; }
+/* The body of a dialog scrolls under its header, and a footer at the end of the form stays in view
+   at the bottom (AI provider QA): a dialog taller than the window never hides its Save button. */
+.file-dialog > .file-dialog-form { min-height: 0; flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; scroll-padding-bottom: 84px; }
+.file-dialog > .file-dialog-form > .file-dialog-actions:last-child { position: sticky; bottom: 0; z-index: 1; margin: 0 -20px; padding: 12px 20px 18px; background: #141416; }
+.file-dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding: 14px 20px 18px; }
+/* Footer buttons: an icon sits beside its label on one line, and every button is a 44 px target
+   (the generator's "Again" once wrapped its label under its icon, the Wave 25 "Delete vault" bug). */
+.file-dialog-actions button { min-height: 44px; margin: 0; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 16px; font-size: .84rem; font-weight: 650; white-space: nowrap; }
+.file-dialog-actions button svg { width: 16px; height: 16px; flex: none; }
 .file-dialog-actions button:disabled { opacity: .5; cursor: not-allowed; }
 .danger-button { border: 1px solid #6a3039; border-radius: 10px; background: #3a1d22; color: #ffc2ca; cursor: pointer; }
 .danger-button:hover:not(:disabled) { background: #4a2229; }

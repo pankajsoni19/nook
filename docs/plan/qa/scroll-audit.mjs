@@ -1,7 +1,7 @@
 // Scroll audit (carry-overs P0, 2026-09-30): every page and tall dialog must let the person reach
 // its bottom-most control by wheel, touch, and keyboard, at 1280 × 800 and 390 × 844 (and a short
 // landscape phone, 844 × 390, for the sign-in pages; a short computer window, 1280 × 600, for the
-// two-pane pages), with no two nested vertical scrollers fighting.
+// two-pane pages and every dialog or sheet), with no two nested vertical scrollers fighting.
 //
 // Run against a scratch instance (never production data): a fresh data directory, the production
 // build, `ALLOW_REGISTRATION=true SIGNUP_ROLE=member TRUSTED_PROXY_HOPS=1`, and a TOTP key are
@@ -229,6 +229,7 @@ async function seed() {
   // Chat (Wave 40): a provider at AGENT_FAKE_PROVIDER (tests/support/fakeProvider.ts, e.g.
   // http://127.0.0.1:24423/v1, listed in AGENT_ALLOWED_PRIVATE_HOSTS), an agent, and one long chat.
   seeded.chat = null;
+  seeded.agents = Boolean((await api(admin, "GET", "/agents/status")).body?.enabled);
   if (process.env.AGENT_FAKE_PROVIDER && (await api(admin, "GET", "/agents/status")).body?.enabled) {
     const providers = (await api(admin, "GET", "/agents/admin/providers")).body.providers ?? [];
     if (!providers.length) await api(admin, "POST", "/agents/admin/providers", { name: "Scroll fake provider", baseUrl: process.env.AGENT_FAKE_PROVIDER, apiKey: "sk-test-scroll-0000", defaultModel: "gpt-6-luna" });
@@ -251,7 +252,7 @@ async function seed() {
     longNote: { id: seeded.longNote.id }, sharedNote: { id: seeded.sharedNote.id }, longFile: { id: seeded.longFile.id },
     board: { id: seeded.board.id }, card: { id: seeded.card.id }, collection: { id: seeded.collection.id }, row: { id: seeded.row.id },
     group: { id: seeded.group.id }, members: seeded.members.map((member) => ({ userId: member.userId })), inviteToken: seeded.inviteToken,
-    whiteboard: { id: seeded.whiteboard.id }, vault: seeded.vault, integration: { id: seeded.integration.id }, chat: seeded.chat
+    whiteboard: { id: seeded.whiteboard.id }, vault: seeded.vault, integration: { id: seeded.integration.id }, chat: seeded.chat, agents: seeded.agents
   };
 }
 
@@ -298,7 +299,13 @@ async function survey(page, scope) {
       if (!region && !fixed && scrollable(document.scrollingElement)) region = document.scrollingElement;
       const rect = element.getBoundingClientRect();
       if (!region) {
-        if (rect.top >= innerHeight - 1) stranded.push((element.getAttribute("aria-label") || element.textContent || element.tagName).trim().slice(0, 40));
+        // Below the window, or cut off by a box that clips without scrolling (a dialog with
+        // overflow hidden: the AI provider dialog hid its Save button this way, 2026-10-06).
+        // Only boxes inside the control's own dialog count (a canvas page clips plenty on purpose).
+        let clip = innerHeight;
+        const layer = element.closest("[role=dialog]");
+        for (let node = element.parentElement; layer && node && layer.contains(node); node = node.parentElement) if (/(hidden|clip)/.test(getComputedStyle(node).overflowY)) clip = Math.min(clip, node.getBoundingClientRect().bottom);
+        if (rect.top >= clip - 1) stranded.push((element.getAttribute("aria-label") || element.textContent || element.tagName).trim().slice(0, 40));
         continue;
       }
       if (!region.dataset.scrollAudit) region.dataset.scrollAudit = String(++id);
@@ -314,6 +321,8 @@ async function survey(page, scope) {
     for (const entry of regions.values()) {
       const node = document.querySelector(`[data-scroll-audit="${entry.key}"]`);
       if (!node || node === document.scrollingElement) continue;
+      // A fixed layer that scrolls itself (the Team dialogs) does not sit inside the page's scroller.
+      if (getComputedStyle(node).position === "fixed") continue;
       for (let parent = node.parentElement; parent; parent = parent.parentElement) {
         if (getComputedStyle(parent).position === "fixed") break;
         if (parent !== document.body && scrollable(parent) && node.clientHeight > parent.clientHeight * 0.8) nested.push(`${entry.name} in ${parent.className?.toString().split(" ")[0] || parent.tagName.toLowerCase()}`);
@@ -618,7 +627,10 @@ const ROUTES = (s) => [
     ["Vault activity", `/vault/${s.vault.id}/activity`],
     ["Vault import sheet", `/vault/${s.vault.id}`, async (page) => { await tapText(page, "button", "Import"); await page.waitForSelector(".vault-import"); }, { scope: ".vault-import" }],
     ["Vault export sheet", `/vault/${s.vault.id}`, async (page) => { await tapText(page, "button", "Export"); await page.waitForSelector(".vault-export"); }, { scope: ".vault-export" }],
-    ["Vault history dialog (21 versions)", `/vault/${s.vault.id}/secrets/${s.vault.secretId}`, async (page) => { await tapText(page, "button", "History of"); await page.waitForSelector(".vault-history"); }, { scope: ".vault-history" }]
+    ["Vault history dialog (21 versions)", `/vault/${s.vault.id}/secrets/${s.vault.secretId}`, async (page) => { await tapText(page, "button", "History of"); await page.waitForSelector(".vault-history"); }, { scope: ".vault-history" }],
+    // 2026-10-06: the New secret dialog and its generator (the generator's footer once wrapped "Again").
+    ["Vault new secret dialog", `/vault/${s.vault.id}`, async (page) => { await tapText(page, "button", "New secret"); await page.waitForSelector(".vault-dialog"); }, { scope: ".vault-dialog" }],
+    ["Vault generator dialog", `/vault/${s.vault.id}`, async (page) => { await tapText(page, "button", "New secret"); await page.waitForSelector(".vault-dialog"); await tapText(page, ".vault-dialog button", "Generate"); await page.waitForSelector(".vault-generator"); }, { scope: ".vault-generator" }]
   ] : []),
   ["Inbox", "/inbox", null, { split: true, check: splitPanes }],
   ["Inbox routines", "/inbox/routines"],
@@ -632,7 +644,15 @@ const ROUTES = (s) => [
     ["Chat external link sheet", `/chat/${s.chat.id}`, async (page) => { await tapText(page, ".chat-md-link", "docs"); await page.waitForSelector(".chat-link-sheet"); }, { scope: ".chat-link-sheet" }],
     ["Settings · Agents", "/settings/agents", null, HUB],
     ["Settings · Agent editor", `/settings/agents/${s.chat.agentId}`, null, HUB],
-    ["Settings · AI", "/settings/ai", null, HUB]
+    ["Settings · AI", "/settings/ai", null, HUB],
+    ["Settings · AI: Edit provider", "/settings/ai", async (page) => { await tapText(page, ".ai-provider-actions button", "Edit"); await page.waitForSelector(".chat-dialog"); }, { scope: ".chat-dialog" }],
+    ["Settings · Agent editor: Link Nook key", `/settings/agents/${s.chat.agentId}`, async (page) => { await tapText(page, "button", "Link Nook key"); await page.waitForSelector(".chat-link-key-sheet"); }, { scope: ".chat-link-key-sheet" }]
+  ] : []),
+  // 2026-10-06: the AI dialogs need only the module on (AGENT_SECRETS_KEY), not a provider. The Add
+  // provider dialog was taller than the window and cut off its Save button, with nothing to scroll.
+  ...(s.agents ? [
+    ["Settings · AI: Add provider", "/settings/ai", async (page) => { await tapText(page, "button", "Add provider"); await page.waitForSelector(".chat-dialog"); }, { scope: ".chat-dialog" }],
+    ["Settings · AI: Add tool server", "/settings/ai", async (page) => { await tapText(page, "button", "Add tool server"); await page.waitForSelector(".chat-dialog"); }, { scope: ".chat-dialog" }]
   ] : []),
   ["Notifications", "/notifications"],
   // The Settings hub (Wave 37): a page with its nav beside the section on a computer; on a phone the
@@ -659,6 +679,9 @@ const ROUTES = (s) => [
   ["Team integrations", "/settings/team/integrations", null, HUB],
   ["Team integration page (6 keys)", `/settings/team/integrations/${s.integration.id}`, null, HUB],
   ["Team invites", "/settings/team/invites", null, HUB],
+  ["Team new invite dialog", "/settings/team/invites", async (page) => { await tapText(page, "button", "New invite"); await page.waitForSelector(".team-invite-dialog"); }, { scope: ".team-invite-dialog" }],
+  ["Team new group dialog", "/settings/team/groups", async (page) => { await tapText(page, "button", "New group"); await page.waitForSelector(".keys-dialog"); }, { scope: ".keys-dialog" }],
+  ["Team new integration dialog", "/settings/team/integrations", async (page) => { await tapText(page, "button", "New integration"); await page.waitForSelector(".keys-dialog"); }, { scope: ".keys-dialog" }],
   ["Team member page", `/settings/team/members/${s.members[3].userId}`, null, HUB_SPLIT],
   ["Team member access", `/settings/team/members/${s.members[3].userId}/access`, null, HUB],
   ["Team email log", "/settings/team/email", null, HUB],
@@ -697,7 +720,8 @@ try {
     const page = await session(`${PREFIX}-admin@nook.test`, "Scroll Admin", width, height);
     for (const [name, path, setup, options] of ROUTES(seeded)) {
       if (only && !only.test(name)) continue;
-      if (height === 600 && !options?.split) continue;
+      // 1280 × 600 also covers every dialog and sheet (a scope): a short window is where they overflow.
+      if (height === 600 && !options?.split && !options?.scope) continue;
       try {
         await page.goto(`${ORIGIN}${path}`, { waitUntil: "networkidle2" });
         await sleep(600);

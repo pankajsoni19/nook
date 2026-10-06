@@ -124,12 +124,23 @@
 .vault-cell-actions { flex-wrap: wrap; }
 .vault-cell-actions button { display: inline-flex; align-items: center; gap: 6px; }
 .vault-settings-actions { justify-content: space-between; align-items: center; }
-.vault-settings-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
-.vault-settings-actions svg { width: 16px; height: 16px; flex: none; }
-.vault-hint-icon { width: 13px; height: 13px; margin-right: 5px; vertical-align: -2px; }
+/* Inline at the start of its help line (the base styles make every svg a block). */
+.vault-hint-icon { display: inline-block; width: 13px; height: 13px; margin-right: 5px; vertical-align: -2px; }
 
 @media (min-width: 761px) {
   .vault-dialog.file-dialog { max-height: min(760px, calc(100dvh - 48px)); }
+  /* Vault settings: wide enough for an environment row on one line (name, short name, protected, moves, delete). */
+  .vault-dialog.vault-settings { width: min(720px, calc(100vw - 32px)); }
+  .vault-env-settings .vault-slug { flex: 0 0 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Name and Description side by side with their Save, and Rotate beside its note: the sheet fits 1280 × 800 unscrolled. */
+  .vault-settings .vault-form > form.vault-settings-block { grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto; column-gap: 10px; align-items: end; }
+  .vault-settings .vault-form > form.vault-settings-block > :nth-child(1) { grid-area: 1 / 1; }
+  .vault-settings .vault-form > form.vault-settings-block > :nth-child(2) { grid-area: 2 / 1; }
+  .vault-settings .vault-form > form.vault-settings-block > :nth-child(3) { grid-area: 1 / 2; }
+  .vault-settings .vault-form > form.vault-settings-block > :nth-child(4) { grid-area: 2 / 2; }
+  .vault-settings .vault-form > form.vault-settings-block > :nth-child(5) { grid-area: 2 / 3; min-height: 42px; }
+  .vault-settings .vault-form > div.vault-settings-block { grid-template-columns: minmax(0, 1fr) auto; column-gap: 16px; align-items: center; }
+  .vault-settings .vault-form > div.vault-settings-block > .vault-field-label { grid-column: 1 / -1; }
 }
 @media (max-width: 760px) {
   .vault-body { padding: 14px 16px calc(28px + env(safe-area-inset-bottom)); }
@@ -165,8 +176,6 @@
 .vault-history-value { display: grid; gap: 6px; }
 .vault-form .vault-file-pick { position: relative; justify-self: start; max-width: 100%; min-height: 42px; display: inline-flex; align-items: center; gap: 6px; overflow: hidden; color: #ededee; font-size: .84rem; font-weight: 650; letter-spacing: normal; text-transform: none; cursor: pointer; }
 .vault-file-pick svg { width: 16px; height: 16px; flex: none; }
-.vault-import .file-dialog-actions button, .vault-export .file-dialog-actions button, .vault-history .file-dialog-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
-.vault-import .file-dialog-actions svg, .vault-export .file-dialog-actions svg { width: 16px; height: 16px; flex: none; }
 .vault-file-pick input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
 .vault-file-pick:focus-within { outline: 2px solid var(--yellow); outline-offset: 2px; }
 .vault-import-problems li { color: #ffc2ca; font-size: .8rem; }
