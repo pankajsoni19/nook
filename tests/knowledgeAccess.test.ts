@@ -259,6 +259,11 @@ describe("search_knowledge in chats (§5.2, T320)", () => {
     const steps = db.query("SELECT tool_name, result_text FROM agent_audit_steps WHERE run_id = ? AND kind = 'tool'").all(body.runId) as Array<{ tool_name: string; result_text: string }>;
     expect(steps[0]!.tool_name).toBe("search_knowledge");
     expect(steps[0]!.result_text).toContain("How do refunds work?");
+    // Read back later (the Audit log and GET …/runs/:runId) the call is still named as a knowledge search.
+    const later = await (await fetch(`${origin}/api/v1/agents/${agentId}/runs/${body.runId}`, { headers: { Authorization: `Bearer ${runKey.token}` } })).json() as Record<string, any>;
+    expect(later.toolCalls).toEqual([expect.objectContaining({ name: "search_knowledge", server: "knowledge", ok: true })]);
+    const audited = await send(owner, "GET", `/agents/audit/${body.runId}`);
+    expect(audited.body.run.timeline.find((step: { kind: string }) => step.kind === "tool")).toMatchObject({ server: "knowledge", tool: "search_knowledge" });
     const listed = await (await fetch(`${origin}/api/v1/agents`, { headers: { Authorization: `Bearer ${runKey.token}` } })).json() as { agents: Array<{ tools: string[] }> };
     expect(listed.agents[0]!.tools).toEqual(["knowledge/search_knowledge"]);
   });

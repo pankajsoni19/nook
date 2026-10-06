@@ -433,7 +433,7 @@ export function externalRunResult(runId: string, agentId: string, keyId: string)
   const steps = db.query("SELECT s.tool_name, s.ok, s.duration_ms, s.server_id, t.slug FROM agent_audit_steps s LEFT JOIN agent_tool_servers t ON t.id = s.server_id WHERE s.run_id = ? AND s.kind = 'tool' ORDER BY s.seq").all(runId) as Array<{ tool_name: string | null; ok: number | null; duration_ms: number; server_id: string | null; slug: string | null }>;
   return {
     runId, agentId, status: row.status, output: entry?.output_text ?? "", steps: row.steps,
-    toolCalls: steps.map((step) => ({ name: step.tool_name ?? "?", server: step.slug ?? (step.server_id ? "?" : "nook"), ok: step.ok === null ? null : step.ok === 1, durationMs: step.duration_ms })),
+    toolCalls: steps.map((step) => ({ name: step.tool_name ?? "?", server: step.slug ?? (step.server_id ? "?" : step.tool_name === "search_knowledge" ? "knowledge" : "nook"), ok: step.ok === null ? null : step.ok === 1, durationMs: step.duration_ms })),
     usage: { promptTokens: row.prompt_tokens, completionTokens: row.completion_tokens, estimated: row.tokens_estimated === 1 },
     timings: { queuedMs: row.started_at ? at(row.started_at)! - queued : null, firstTokenMs: row.first_token_at ? at(row.first_token_at)! - queued : null, totalMs: row.finished_at ? at(row.finished_at)! - queued : null },
     error: row.error_code ? { code: row.error_code, message: ERROR_TEXT[row.error_code] ?? "The run did not finish" } : row.status === "interrupted" ? { code: "INTERRUPTED", message: "The server restarted during the run" } : null,

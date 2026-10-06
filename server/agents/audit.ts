@@ -167,7 +167,7 @@ function detailOf(row: RunRow, viewer: AuditViewer): AuditRunDetail {
     FROM agent_audit_steps s LEFT JOIN agent_tool_servers t ON t.id = s.server_id WHERE s.run_id = ? ORDER BY s.seq`).all(row.id) as StepRow[];
   const entry = full ? db.query("SELECT input_text, output_text FROM agent_audit_entries WHERE run_id = ?").get(row.id) as { input_text: string; output_text: string | null } | null : null;
   const timeline: AuditStepView[] = steps.map((step) => ({
-    seq: step.seq, kind: step.kind, server: step.kind === "tool" ? step.server_slug ?? (step.server_id ? "(removed server)" : "nook") : null, tool: step.tool_name,
+    seq: step.seq, kind: step.kind, server: step.kind === "tool" ? step.server_slug ?? (step.server_id ? "(removed server)" : step.tool_name === "search_knowledge" ? "knowledge" : "nook") : null, tool: step.tool_name,
     ok: step.ok === null ? null : step.ok === 1, truncated: step.truncated === 1, durationMs: step.duration_ms, promptTokens: step.prompt_tokens, completionTokens: step.completion_tokens,
     // Content for the key's owner only (D73, D366).
     text: full ? step.text : null, args: full ? step.args_json : null, result: full ? step.result_text : null
