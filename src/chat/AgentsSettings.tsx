@@ -55,7 +55,7 @@ export function AgentsSettings({ agentId, navigate, flash, onOpenChat }: { agent
       <button type="button" className="secondary-button" onClick={() => onOpenChat(agent.id)}>Chat</button>
     </li>)}</ul>}
     {agents && agents.length === 0 && status?.enabled && status.canChat && <p className="chat-muted">No agents yet.</p>}
-    {status?.enabled && status.canCreate && <button type="button" className="secondary-button agents-add" onClick={() => navigate({ ...toList, agentId: NEW_AGENT })}><Plus />New agent</button>}
+    {status?.enabled && status.canCreate && <button type="button" className="action-button secondary agents-add" onClick={() => navigate({ ...toList, agentId: NEW_AGENT })}><Plus />New agent</button>}
   </section>;
 }
 

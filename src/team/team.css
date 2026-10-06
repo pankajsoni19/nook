@@ -124,7 +124,7 @@
 .team-invites-icon svg { width: 18px; height: 18px; }
 .team-invites-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
 .team-invites-header h2 { margin: 0 0 6px; color: #fafafa; font-size: 1.35rem; letter-spacing: -.02em; }
-.team-invites-header .team-action { flex: none; }
+.team-invites-header :is(.team-action, .action-button) { flex: none; }
 .team-invites-limit { color: #f0c674; }
 .team-invite-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
 .team-invite { display: grid; gap: 8px; border: 1px solid #242428; border-radius: 14px; padding: 12px 14px; background: #131315; }
@@ -154,7 +154,7 @@
 
 @media (max-width: 760px) {
   .team-invites-header { flex-direction: column; }
-  .team-invites-header .team-action { width: 100%; }
+  .team-invites-header :is(.team-action, .action-button) { width: 100%; }
   .team-invite-actions .team-action { flex: 1 1 auto; }
 }
 
@@ -185,8 +185,6 @@
 /* Team → Groups (Wave 32, access plan §C.6). */
 .team-back.team-back-visible { min-height: 44px; display: inline-flex; align-items: center; gap: 4px; justify-self: start; border: 0; border-radius: 9px; padding: 0 10px 0 4px; background: transparent; color: #b2b2b8; font-size: .9rem; cursor: pointer; }
 .team-back.team-back-visible svg { width: 18px; }
-.team-groups-new { min-height: 44px; flex: none; display: inline-flex; align-items: center; gap: 7px; padding: 0 16px; }
-.team-groups-new svg { width: 16px; }
 .team-group-row { grid-template-columns: 40px minmax(0, 1fr) 20px; }
 .team-group-row .team-avatar svg, .team-group-page .team-avatar svg { width: 20px; height: 20px; }
 .team-group-row > svg { width: 18px; color: #7c7c83; }
@@ -201,9 +199,6 @@
 .group-history li { display: flex; justify-content: space-between; gap: 12px; color: #c9c9ce; font-size: .82rem; }
 .group-history time { flex: none; color: #7c7c83; }
 .group-history-self { color: #f0c674; }
-@media (max-width: 760px) {
-  .team-groups-new { width: 100%; justify-content: center; }
-}
 
 /* A group's "Add people…" field: a 40 px input inside the 44 px field (it was 30 px, QA v0.13.0). */
 @media (max-width: 760px) { .team-group-page .ui-combobox-field .ui-combobox-input { min-height: 40px; } }

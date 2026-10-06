@@ -19,7 +19,6 @@
 .ma-row-actions .select-trigger { min-height: 40px; }
 .ma-more { justify-self: start; }
 .ma-header-actions { display: flex; flex-wrap: wrap; gap: 8px; flex: none; }
-.ma-header-button { flex: none; display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
 .member-access .team-invites-header > div:first-child { min-width: 0; }
 .ma-summary-line { margin: 0; color: #b7b7bd; font-size: .82rem; }
 .ma-group-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
@@ -46,5 +45,4 @@
 @media (max-width: 760px) {
   .ma-filters { grid-template-columns: minmax(0, 1fr); }
   .ma-header-actions .team-action { flex: 1 1 auto; }
-  .ma-header-button { width: 100%; justify-content: center; }
 }

@@ -132,7 +132,7 @@ export function AiSettings({ flash, tabs, tab, onSelectTab }: { flash: (message:
     </ul>
     {providers && providers.length === 0 && <p className="chat-muted">No provider yet. Chats need one.</p>}
     <p className="policy-copy">{SECRET_HONESTY}</p>
-    <button type="button" className="secondary-button ai-add" onClick={() => setEditing("new")} disabled={(providers?.length ?? 0) >= AGENT_BOUNDS.providers}><Plus />Add provider</button>
+    <button type="button" className="action-button secondary ai-add" onClick={() => setEditing("new")} disabled={(providers?.length ?? 0) >= AGENT_BOUNDS.providers}><Plus />Add provider</button>
     </div>}
     {tabs.includes("tools") && <div {...panel("tools")}><ToolServersSection flash={flash} onCountChange={setServerCount} /></div>}
     {tabs.includes("policy") && <div {...panel("policy")}>

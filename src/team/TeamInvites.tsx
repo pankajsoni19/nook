@@ -66,7 +66,7 @@ export function TeamInvites({ data, error, onBack, onReload, onOpenMember, flash
         <h2 id="team-invites-title">Invites</h2>
         <p className="team-muted">Single-use links that let someone create an account with a team role you choose, even while registration is closed. The email allowlist still applies.</p>
       </div>
-      <button type="button" className="team-action primary" onClick={() => open({ kind: "create" })} disabled={!data || Boolean(limitHint)}><Plus />New invite</button>
+      <button type="button" className="action-button" onClick={() => open({ kind: "create" })} disabled={!data || Boolean(limitHint)}><Plus />New invite</button>
     </header>
     {limitHint && <p className="team-muted team-invites-limit" role="note">{limitHint}</p>}
 

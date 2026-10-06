@@ -106,7 +106,7 @@
 .file-share-error { padding: 0 14px; }
 .file-dialog-form .file-dialog-actions { padding: 12px 0 18px; }
 .file-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 20px 18px; }
-.file-dialog-actions button { min-height: 40px; margin: 0; padding: 0 16px; font-size: .84rem; font-weight: 650; }
+.file-dialog-actions button { min-height: 44px; margin: 0; padding: 0 16px; font-size: .84rem; font-weight: 650; }
 .file-dialog-actions button:disabled { opacity: .5; cursor: not-allowed; }
 .danger-button { border: 1px solid #6a3039; border-radius: 10px; background: #3a1d22; color: #ffc2ca; cursor: pointer; }
 .danger-button:hover:not(:disabled) { background: #4a2229; }

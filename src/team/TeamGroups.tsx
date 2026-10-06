@@ -37,7 +37,7 @@ export function TeamGroups({ onBack, onOpenGroup, flash }: { onBack: () => void;
         <h2 id="team-groups-title">Groups</h2>
         <p className="team-muted">People who work together. Owners share a board, note, or calendar with a group; you decide who is in it. A group never opens anything by itself.</p>
       </div>
-      <button type="button" className="primary-button team-groups-new" onClick={() => setCreating(true)} aria-haspopup="dialog"><Plus />New group</button>
+      <button type="button" className="action-button" onClick={() => setCreating(true)} aria-haspopup="dialog"><Plus />New group</button>
     </header>
     {error && <div className="team-state team-error" role="alert">
       <span className="team-state-icon"><TriangleAlert /></span>

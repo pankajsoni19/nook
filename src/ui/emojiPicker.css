@@ -3,8 +3,10 @@
  * the phone sheet (7 flexible columns, so nothing scrolls sideways at 390 px).
  */
 .emoji-picker { display: inline-flex; flex: none; }
-.emoji-picker-trigger { width: 44px; height: 44px; display: grid; place-items: center; border: 1px solid #333338; border-radius: 10px; padding: 0; background: #0b0b0d; color: #b4b4ba; font-size: 24px; line-height: 1; cursor: pointer; touch-action: manipulation; }
-.emoji-picker-trigger:hover, .emoji-picker-trigger:focus-visible, .emoji-picker-trigger[aria-expanded="true"] { border-color: #6b582f; outline: none; }
+.emoji-picker-trigger { width: 44px; height: 44px; display: grid; place-items: center; border: 1px solid var(--field-border); border-radius: var(--field-radius); padding: 0; background: var(--field-bg); color: #b4b4ba; font-size: 24px; line-height: 1; cursor: pointer; touch-action: manipulation; }
+.emoji-picker-trigger:hover { border-color: #45454b; }
+/* The shared field focus (styles.css): accent border plus one ring. */
+.emoji-picker-trigger:focus-visible, .emoji-picker-trigger[aria-expanded="true"] { border-color: var(--field-focus); outline: none; box-shadow: var(--field-ring); }
 .emoji-picker-trigger svg { width: 20px; height: 20px; }
 .emoji-picker-placeholder { opacity: .45; filter: grayscale(.6); }
 
