@@ -91,6 +91,13 @@ export const ROLE_READ_ONLY_ALLOWED_WRITES: readonly AllowedWrite[] = [
  */
 export const SELF_GATED_WRITE_PREFIXES: readonly string[] = ["/api/team/"];
 
+/**
+ * Knowledge bases (Wave 44 fixes, QA LOW-1): guests never reach them (AC-O2), and the module answers
+ * a guest 404 on every route, writes included, so the gate lets a guest's write through to that 404
+ * instead of answering ROLE_READ_ONLY. Viewers are still gated (only Try it is allowlisted above).
+ */
+const GUEST_SELF_GATED = (path: string) => path === "/api/knowledge" || path.startsWith("/api/knowledge/");
+
 const compiled = ROLE_READ_ONLY_ALLOWED_WRITES.map((entry) => ({
   ...entry,
   regex: new RegExp(`^${entry.path.split("/").map((segment) => segment.startsWith(":") ? "[^/]+" : segment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("/")}$`)
@@ -99,6 +106,7 @@ const compiled = ROLE_READ_ONLY_ALLOWED_WRITES.map((entry) => ({
 /** Whether `role` may send this write although it cannot write content. */
 export function isAllowedReadOnlyWrite(role: Role, method: string, path: string) {
   if (SELF_GATED_WRITE_PREFIXES.some((prefix) => path.startsWith(prefix))) return true;
+  if (role === "guest" && GUEST_SELF_GATED(path)) return true;
   return compiled.some((entry) => entry.method === method && entry.regex.test(path) && (!entry.roles || entry.roles.includes(role)));
 }
 
@@ -123,8 +131,6 @@ const GUEST_QUERY_BODY = { error: "Guests can only list cards assigned to them (
 export async function roleWriteGate(c: Context<AppEnv>, next: Next) {
   const role = c.get("user")?.role;
   if (!role || can(role, "content.write") || ["GET", "HEAD", "OPTIONS"].includes(c.req.method)) return next();
-  // Knowledge bases (Wave 44 fixes, QA LOW-1): guests never reach them (AC-O2), so a guest's write there is the module's 404, not ROLE_READ_ONLY.
-  if (role === "guest" && (c.req.path === "/api/knowledge" || c.req.path.startsWith("/api/knowledge/"))) return c.json({ error: "Not found" }, 404);
   // Hono matches routes case-sensitively on the raw path, so the gate compares the same path.
   if (!isAllowedReadOnlyWrite(role, c.req.method, c.req.path)) return c.json(ROLE_READ_ONLY_BODY, 403);
   if (role === "guest" && c.req.method === "POST" && c.req.path === "/api/tasks/query") {

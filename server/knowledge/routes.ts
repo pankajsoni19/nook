@@ -17,7 +17,7 @@ import "./bin";
  * The knowledge base session API (plan §12 "Knowledge", docs/plan/API_CONTRACTS.md § Knowledge
  * bases): `/api/knowledge/*`. Every route needs a session and a role that may chat; mutations need
  * CSRF and pass the role write gate. Guests get 404 everywhere (AC-O2), mutations included (QA LOW-1:
- * the role write gate answers a guest's write there with the same 404); with the module off every
+ * the role write gate lets a guest's write there through to this 404); with the module off every
  * route answers 503 `AGENTS_DISABLED`. Missing and forbidden are the same 404 (D73); a viewer of a
  * base who tries to change it gets 403 `READ_ONLY`.
  */
