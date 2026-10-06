@@ -7,6 +7,7 @@ import { useConfirm } from "../ui/useConfirm";
 import { useHistoryDialogGuard } from "../ui/useHistoryDialogGuard";
 import { AGENT_BOUNDS, AGENT_ROLE_OPTIONS, DEFAULT_BASE_URL, DEFAULT_MODEL, type AgentRole, type AgentSettings, type ProviderSummary } from "../../shared/agents";
 import { agentsStatus, createProvider, deleteProvider, listProviders, messageOf, readSettings, testProvider, updateProvider, writeSettings, errorCode, type AgentsStatus, type ProviderTest } from "./chatApi";
+import { ToolServersSection } from "./ToolServers";
 import "./chat.css";
 
 /**
@@ -116,6 +117,7 @@ export function AiSettings({ flash }: { flash: (message: string) => void }) {
     <p className="policy-copy">{SECRET_HONESTY}</p>
     <button type="button" className="secondary-button ai-add" onClick={() => setEditing("new")} disabled={(providers?.length ?? 0) >= AGENT_BOUNDS.providers}><Plus />Add provider</button>
 
+    <ToolServersSection flash={flash} />
     {settings && <PolicyForm settings={settings} providers={providers ?? []} flash={flash} onSaved={(next) => setSettings(next)} />}
     {editing && <ProviderDialog provider={editing === "new" ? null : editing} onCancel={() => setEditing(null)} onSaved={() => { setEditing(null); void load(); }} />}
     {confirm.confirmElement}
@@ -152,7 +154,7 @@ function PolicyForm({ settings, providers, flash, onSaved }: { settings: AgentSe
       <label>Agents per person<input type="number" min={1} max={500} value={draft.agentsPerUser} onChange={(event) => setDraft({ ...draft, agentsPerUser: Math.min(500, Math.max(1, Math.floor(Number(event.target.value) || 1))) })} /></label>
       <div><span className="ai-label" id="ai-default-provider">Default provider</span><Select<string> labelledBy="ai-default-provider" label="Default provider" value={draft.defaultProviderId ?? providers.find((provider) => provider.isDefault)?.id ?? null} onChange={(value) => setDraft({ ...draft, defaultProviderId: value })} options={providers.map((provider) => ({ value: provider.id, label: provider.name, description: provider.defaultModel }))} placeholder="The provider marked default" disabled={providers.length === 0} /></div>
     </div>
-    <p className="chat-muted">Public chat links stay off in this release (AC-O1). Sharing, tool servers, and the Audit log come in later releases.</p>
+    <p className="chat-muted">Public chat links stay off in this release (AC-O1). Sharing and the Audit log come in later releases.</p>
     <footer className="file-dialog-actions"><button type="submit" className="primary-button" disabled={busy}>{busy ? "Saving…" : "Save policy"}</button></footer>
   </form>;
 }

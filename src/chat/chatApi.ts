@@ -1,5 +1,5 @@
 import { api, ApiError, getCsrfToken, noteRequestOutcome } from "../api";
-import type { AgentDetail, AgentSettings, AgentSummary, ChatDetail, ChatMessage, ChatSummary, DailyUsage, ProviderCompat, ProviderSummary, RunEvent } from "../../shared/agents";
+import type { AgentDetail, AgentSettings, AgentSummary, AgentToolRef, ChatDetail, ChatMessage, ChatSummary, DailyUsage, DeclaredStdioServer, LinkableKey, NookLink, ProviderCompat, ProviderSummary, RunEvent, ServerAuthKind, ServerAvailability, ToolCatalog, ToolPolicy, ToolServerSummary } from "../../shared/agents";
 
 /** The agent chat API (docs/plan/API_CONTRACTS.md § Agent chat), plus the SSE reader for runs. */
 
@@ -8,7 +8,7 @@ export const agentsStatus = () => api<AgentsStatus>("/agents/status");
 
 export const listAgents = () => api<{ agents: AgentSummary[] }>("/agents");
 export const getAgent = (id: string) => api<{ agent: AgentDetail }>(`/agents/${id}`);
-export type AgentInput = { name: string; description?: string; icon?: string | null; color?: string | null; systemPrompt?: string; providerId?: string | null; model?: string | null; maxSteps?: number; temperature?: number | null; maxOutputTokens?: number | null; starters?: string[] };
+export type AgentInput = { name: string; description?: string; icon?: string | null; color?: string | null; systemPrompt?: string; providerId?: string | null; model?: string | null; maxSteps?: number; temperature?: number | null; maxOutputTokens?: number | null; starters?: string[]; tools?: AgentToolRef[]; nookDirectWrites?: boolean };
 export const createAgent = (input: AgentInput) => api<{ agent: AgentDetail }>("/agents", { method: "POST", body: JSON.stringify(input) });
 export const updateAgent = (id: string, input: Partial<AgentInput> & { expectedRevision: number }) => api<{ agent: AgentDetail }>(`/agents/${id}`, { method: "PATCH", body: JSON.stringify(input) });
 export const deleteAgent = (id: string) => api<{ ok: true }>(`/agents/${id}`, { method: "DELETE" });
@@ -24,6 +24,11 @@ export type StartedRun = { runId: string; userMessage: ChatMessage | null; assis
 export const sendMessage = (chatId: string, content: string, parentId?: string | null) => api<StartedRun>(`/chats/${chatId}/messages`, { method: "POST", body: JSON.stringify({ content, ...(parentId !== undefined ? { parentId } : {}) }) });
 export const regenerate = (chatId: string, messageId: string) => api<StartedRun>(`/chats/${chatId}/messages/${messageId}/regenerate`, { method: "POST", body: "{}" });
 export const cancelRun = (runId: string) => api<{ status: string }>(`/runs/${runId}/cancel`, { method: "POST", body: "{}" });
+// AC-B: confirmations, the tool catalog, and the Link Nook key sheet.
+export const confirmRun = (runId: string, callId: string, decision: "once" | "deny") => api<{ ok: true; decision: "allowed" | "denied" }>(`/runs/${runId}/confirm`, { method: "POST", body: JSON.stringify({ callId, decision }) });
+export const toolCatalog = (agentId?: string | null) => api<{ catalog: ToolCatalog }>(`/agents/catalog${agentId ? `?agentId=${encodeURIComponent(agentId)}` : ""}`);
+export const agentLink = (agentId: string) => api<{ link: NookLink; keys: LinkableKey[] }>(`/agents/${agentId}/link`);
+export const setAgentLink = (agentId: string, nookKeyId: string | null) => api<{ link: NookLink }>(`/agents/${agentId}/link`, { method: "PUT", body: JSON.stringify({ nookKeyId }) });
 
 // Admin (Settings → AI).
 export type ProviderInput = { name: string; baseUrl?: string; apiKey?: string | null; defaultModel?: string; compat?: Partial<ProviderCompat>; isDefault?: boolean };
@@ -34,6 +39,14 @@ export const deleteProvider = (id: string) => api<{ ok: true }>(`/agents/admin/p
 export type ProviderTest = { ok: boolean; models: { ok: boolean; count: number | null; latencyMs: number | null; error: string | null }; completion: { ok: boolean; model: string | null; latencyMs: number | null; error: string | null } };
 export const testProvider = (id: string) => api<{ test: ProviderTest }>(`/agents/admin/providers/${id}/test`, { method: "POST", body: "{}" });
 export const providerModels = (id: string) => api<{ models: string[]; cachedAt: string }>(`/agents/admin/providers/${id}/models`);
+export type ToolServerInput = { name: string; slug?: string; url?: string | null; stdioId?: string | null; authKind?: ServerAuthKind; authHeader?: string | null; secret?: string | null; timeoutMs?: number; resultCapBytes?: number; availability?: ServerAvailability; enabled?: boolean };
+export type ToolServerList = { servers: ToolServerSummary[]; stdio: { enabled: boolean; declared: DeclaredStdioServer[] } };
+export const listServers = () => api<ToolServerList>("/agents/admin/servers");
+export const createServer = (input: ToolServerInput) => api<{ server: ToolServerSummary }>("/agents/admin/servers", { method: "POST", body: JSON.stringify(input) });
+export const updateServer = (id: string, input: Partial<ToolServerInput> & { expectedRevision: number; removeSecret?: boolean }) => api<{ server: ToolServerSummary }>(`/agents/admin/servers/${id}`, { method: "PATCH", body: JSON.stringify(input) });
+export const deleteServer = (id: string) => api<{ ok: true }>(`/agents/admin/servers/${id}`, { method: "DELETE", body: "{}" });
+export const syncServer = (id: string) => api<{ server: ToolServerSummary }>(`/agents/admin/servers/${id}/sync`, { method: "POST", body: "{}" });
+export const setServerPolicies = (id: string, policies: Record<string, ToolPolicy>) => api<{ server: ToolServerSummary }>(`/agents/admin/servers/${id}/policies`, { method: "PUT", body: JSON.stringify({ policies }) });
 export const readSettings = () => api<{ settings: AgentSettings & { revision: number } }>("/agents/admin/settings");
 export const writeSettings = (patch: Partial<AgentSettings> & { expectedRevision: number }) => api<{ settings: AgentSettings & { revision: number } }>("/agents/admin/settings", { method: "PUT", body: JSON.stringify(patch) });
 

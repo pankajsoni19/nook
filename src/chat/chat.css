@@ -181,3 +181,77 @@
 .agents-icon-input { width: 90px; }
 .agents-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 8px; }
 .agents-actions .secondary-button { min-height: 44px; padding: 0 14px; }
+
+/* AC-B: tool servers (Settings → AI) */
+.ai-servers { display: grid; gap: 14px; margin-top: 10px; }
+.ai-server-disabled { opacity: .72; }
+.ai-status-dot { display: inline-block; width: 9px; height: 9px; margin-right: 8px; border-radius: 50%; background: #5b5b62; vertical-align: 1px; }
+.ai-status-ok { background: #9ad5a0; }
+.ai-status-auth_failed, .ai-status-unreachable, .ai-status-error { background: #fda4af; }
+.ai-badge-ok { background: #15241a; color: #9ad5a0; }
+.ai-badge-warn { background: #2a1f14; color: #f3b56e; }
+.ai-tools { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.ai-tools li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; border-top: 1px solid #26262a; padding-top: 8px; }
+.ai-tool-text { display: grid; gap: 2px; min-width: 0; flex: 1 1 260px; }
+.ai-tool-text strong { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-weight: 600; }
+.ai-tool-text code { font-size: .86rem; }
+.ai-tool-text small { color: #8d8d94; font-size: .8rem; overflow-wrap: anywhere; }
+.ai-tools .secondary-button { min-height: 36px; padding: 0 12px; font-size: .84rem; }
+.ai-stdio { display: grid; gap: 8px; }
+.ai-stdio p { margin: 0; }
+.ai-provider-actions .secondary-button svg { width: 14px; margin-right: 5px; vertical-align: -2px; }
+
+/* AC-B: the tool picker (Settings → Agents) */
+.agents-tools { display: grid; gap: 12px; }
+.agents-tools-group { display: grid; gap: 8px; border: 1px solid #303035; border-radius: 12px; padding: 10px 12px; background: #0f0f11; }
+.agents-tools-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; }
+.agents-tools-head strong { display: flex; align-items: center; gap: 8px; }
+.agents-tools-head small { color: #8d8d94; font-size: .8rem; }
+.agents-tool { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-height: 40px; }
+.agents-tool > label { display: flex; align-items: flex-start; gap: 8px; flex: 1 1 240px; min-width: 0; color: #e1e1e3; font-size: .88rem; cursor: pointer; }
+.agents-tool > label input { margin-top: 4px; flex: none; }
+.agents-tool-text { display: grid; gap: 1px; min-width: 0; }
+.agents-tool-text small { color: #8d8d94; font-size: .78rem; overflow-wrap: anywhere; }
+.agents-tool-text code { font-size: .86rem; }
+.agents-tool-badges { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: 6px; }
+.agents-tool-badges .ai-badge { margin-left: 0; }
+.agents-nook-module { margin: 6px 0 2px; color: #7c7c83; font-size: .7rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+.agents-link-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.agents-link-row .secondary-button { min-height: 38px; padding: 0 12px; font-size: .84rem; }
+
+/* AC-B: the Link Nook key sheet */
+.chat-link-key { display: grid; gap: 12px; padding: 0 20px 16px; }
+.chat-link-key .file-dialog-hint { display: flex; gap: 8px; padding: 0; }
+.chat-link-key .file-dialog-hint svg { width: 18px; flex: none; margin-top: 2px; color: #c9a85c; }
+.chat-link-keys { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.chat-link-keys li, .chat-link-current { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; }
+.chat-link-key-active { border-color: #6b582f; }
+.chat-link-key-text { display: grid; gap: 2px; min-width: 0; flex: 1 1 220px; }
+.chat-link-key-text small, .chat-link-current small { color: #8d8d94; font-size: .8rem; overflow-wrap: anywhere; }
+.chat-link-grants { color: #c9c9ce !important; }
+.chat-link-keys .primary-button, .chat-link-current .secondary-button { min-height: 38px; margin: 0; padding: 0 14px; font-size: .84rem; }
+.chat-link-key .file-dialog-actions { padding: 4px 0 0; }
+
+/* AC-B: tool disclosure, the confirmation card, and the trifecta badge in a chat */
+.chat-tools { margin: 0 0 8px; }
+.chat-tools-toggle { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 30px; border: 1px solid #36363b; border-radius: 999px; padding: 0 12px 0 8px; background: #19191c; color: #c9c9ce; font-size: .8rem; cursor: pointer; }
+.chat-tools-toggle svg { width: 14px; }
+.chat-tools-names { color: #8d8d94; overflow-wrap: anywhere; }
+.chat-tool-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; }
+.chat-tool-row { border: 1px solid #26262a; border-radius: 10px; background: #0f0f11; }
+.chat-tool-failed { border-color: #5b2a33; }
+.chat-tool-head { width: 100%; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; min-height: 40px; border: 0; padding: 6px 12px; background: transparent; color: #e1e1e3; font-size: .82rem; text-align: left; cursor: pointer; }
+.chat-tool-name { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+.chat-tool-outcome { color: #8d8d94; }
+.chat-tool-failed .chat-tool-outcome { color: #fda4af; }
+.chat-tool-detail { display: grid; gap: 4px; padding: 0 12px 10px; }
+.chat-tool-detail pre, .chat-confirm-args { margin: 0; max-height: 240px; overflow: auto; border: 1px solid #2c2c31; border-radius: 8px; padding: 8px 10px; background: #0b0b0d; color: #ededee; font-size: .8rem; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.chat-confirm { display: grid; gap: 10px; max-width: min(100%, 760px); border: 1px solid #6b582f; border-radius: 14px; padding: 14px 16px; background: #1f1d16; outline: 0; }
+.chat-confirm:focus-visible { box-shadow: 0 0 0 2px #c9a85c; }
+.chat-confirm > strong { display: flex; align-items: flex-start; gap: 8px; color: #f3ce79; font-size: .92rem; }
+.chat-confirm > strong svg { width: 18px; flex: none; margin-top: 1px; }
+.chat-confirm-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.chat-confirm-actions .primary-button, .chat-confirm-actions .secondary-button { min-height: 42px; margin: 0; padding: 0 16px; }
+.chat-trifecta { display: inline-flex; align-items: flex-start; gap: 6px; border: 1px solid #5a3d1f; border-radius: 10px; padding: 6px 10px; background: #2a1f14; color: #f3b56e; font-size: .82rem; line-height: 1.4; }
+.chat-trifecta svg { width: 16px; flex: none; margin-top: 1px; }
+.chat-trifecta-compact { min-height: 32px; align-items: center; border-radius: 999px; padding: 0 10px; font-size: .76rem; }
