@@ -605,7 +605,10 @@ async function dialogContract(page, selector) {
     const buttons = footer ? [...footer.querySelectorAll("button")].map((button) => { const rect = button.getBoundingClientRect(); return { label: button.textContent.trim(), top: Math.round(rect.top), bottom: Math.round(rect.bottom), height: Math.round(rect.height) }; }) : [];
     // A text field scrolling its own text is not a second body scroller.
     const scrollers = [...dialog.querySelectorAll("*:not(textarea)")].filter((node) => /(auto|scroll)/.test(getComputedStyle(node).overflowY) && node.scrollHeight > node.clientHeight + 2 && node.clientHeight > 80).map((node) => node.className.toString().split(" ")[0] || node.tagName.toLowerCase());
-    return { buttons, bottom: Math.round(bottom), headerBottom: Math.round(header?.bottom ?? box.top), scrollers };
+    // A body that scrolls: its pinned footer reaches the body's bottom edge, so no row shows under it.
+    const body = footer?.parentElement;
+    const gap = body && body.scrollHeight > body.clientHeight + 2 ? Math.round(Math.min(innerHeight, body.getBoundingClientRect().bottom) - footer.getBoundingClientRect().bottom) : 0;
+    return { buttons, bottom: Math.round(bottom), headerBottom: Math.round(header?.bottom ?? box.top), scrollers, gap };
   }, selector);
   if (!found) return [`no ${selector}`];
   const problems = [];
@@ -615,6 +618,7 @@ async function dialogContract(page, selector) {
     if (button.height < 44) problems.push(`footer “${button.label}” is ${button.height} px tall`);
   }
   if (found.scrollers.length > 1) problems.push(`${found.scrollers.length} scrollers: ${found.scrollers.join(", ")}`);
+  if (found.gap > 1) problems.push(`rows show for ${found.gap} px under the pinned footer`);
   return problems;
 }
 

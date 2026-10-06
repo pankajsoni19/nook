@@ -30,6 +30,8 @@ describe("v0.30 layout fixes", () => {
     const files = await read("files/files.css");
     expect(rule(files, ".file-dialog > .file-dialog-form")).toContain("overflow-y: auto");
     expect(rule(files, ".file-dialog > .file-dialog-form > .file-dialog-actions:last-child")).toContain("position: sticky");
+    // Nothing shows under the pinned footer (the chat dialogs' 16 px bottom padding once let rows through).
+    expect(rule(files, ".file-dialog > .file-dialog-form:has(> .file-dialog-actions:last-child)")).toContain("padding-bottom: 0");
     // No second scroller (the candidate list once scrolled at 50vh inside the clipped sheet), and no
     // padding of its own on top of the form's (L4: the form sat 20 px further in than the modes).
     const css = await read("chat/knowledge.css");

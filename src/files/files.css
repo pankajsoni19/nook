@@ -114,6 +114,8 @@
 /* The body of a dialog scrolls under its header, and a footer at the end of the form stays in view
    at the bottom (AI provider QA): a dialog taller than the window never hides its Save button. */
 .file-dialog > .file-dialog-form { min-height: 0; flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; scroll-padding-bottom: 84px; }
+/* v0.30: the pinned footer pads itself; padding under it (the chat dialogs' 16 px) let rows show below it. */
+.file-dialog > .file-dialog-form:has(> .file-dialog-actions:last-child) { padding-bottom: 0; }
 .file-dialog > .file-dialog-form > .file-dialog-actions:last-child { position: sticky; bottom: 0; z-index: 1; margin: 0 -20px; padding: 12px 20px 18px; background: #141416; }
 .file-dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding: 14px 20px 18px; }
 /* Footer buttons: an icon sits beside its label on one line, and every button is a 44 px target
