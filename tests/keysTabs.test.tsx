@@ -3,9 +3,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { formatRoute, keysTabRoute, parseRoute, settingsDocumentTitle, type Route } from "../src/router";
-import { HUB_PUSHED_OVER_CHAIN_KEY, HUB_PUSHED_OVER_KEY, hubBackSteps, hubEntryOf, hubPopRoute, isNestedHubRoute, leaveGuardAction, settingsRoute } from "../src/settings/hubModel";
-import { keysTabCounts, keysTabPreset, keyTabOf, shownKeysTab, visibleKeysTabs } from "../src/keys/keyTabs";
-import { KeysTabs } from "../src/keys/KeysTabs";
+import { HUB_PUSHED_OVER_CHAIN_KEY, HUB_PUSHED_OVER_KEY, hubBackSteps, hubEntryOf, hubPopRoute, isNestedHubRoute, keysTabRedirect, keysTabsFor, leaveGuardAction, settingsRoute } from "../src/settings/hubModel";
+import { keysTabCounts, keysTabPreset, keyTabOf, shownKeysTab } from "../src/keys/keyTabs";
 import { createPreset, KeyRow, KeysSettings } from "../src/keys/KeysSettings";
 import { unsavedKeyConfirm } from "../src/keys/unsavedKeyConfirm";
 import { readHistoryDepth, withHistoryDepth } from "../src/appShellNavigation";
@@ -39,7 +38,7 @@ const vaultKey = apiKey({ kind: "vault", prefix: "nkv_Ab3", grants: [{ module: "
 
 describe("the URLs", () => {
   test("each tab is a URL; General is /settings/keys/general", () => {
-    expect(parseRoute("/settings/keys/general")).toEqual({ app: "settings", section: "mcp" });
+    expect(parseRoute("/settings/keys/general")).toEqual({ app: "settings", section: "mcp", keysTab: "general" });
     expect(parseRoute("/settings/keys/vault")).toEqual({ app: "settings", section: "mcp", keysTab: "vault" });
     expect(parseRoute("/settings/keys/agents")).toEqual({ app: "settings", section: "mcp", keysTab: "agents" });
     for (const tab of ["general", "vault", "agents"] as const) {
@@ -48,18 +47,25 @@ describe("the URLs", () => {
     }
   });
 
-  test("/settings/keys, the /settings/mcp alias, and unknown tabs open General; old /settings/mcp/:tab still works", () => {
-    for (const path of ["/settings/keys", "/settings/mcp", "/settings/keys/", "/settings/keys/nope", "/settings/keys/constructor", "/settings/mcp/general"]) {
-      expect(parseRoute(path)).toEqual({ app: "settings", section: "mcp" });
-      expect(formatRoute(parseRoute(path))).toBe("/settings/keys/general");
+  test("/settings/keys, the /settings/mcp alias, and unknown tabs open General in place (as Settings → AI)", () => {
+    for (const path of ["/settings/keys", "/settings/mcp", "/settings/keys/", "/settings/keys/nope", "/settings/keys/constructor", "/settings/keys/vault/extra"]) {
+      const route = parseRoute(path);
+      expect(route).toEqual({ app: "settings", section: "mcp" });
+      expect(formatRoute(route)).toBe("/settings/keys");
+      // App replaces bare API keys with its first tab.
+      expect(formatRoute(keysTabRedirect(route, on)!)).toBe("/settings/keys/general");
     }
     expect(formatRoute(parseRoute("/settings/mcp/vault"))).toBe("/settings/keys/vault");
-    // The hub's nav entry (no tab) opens General; a tab is the same section, not a page below it.
-    expect(formatRoute(settingsRoute("mcp"))).toBe("/settings/keys/general");
+    expect(formatRoute(parseRoute("/settings/mcp/general"))).toBe("/settings/keys/general");
+    // A tab on show stays; a hidden one (the Vault or Chat off) opens General; other routes are left alone.
+    expect(keysTabRedirect(keysTabRoute("vault"), on)).toBeNull();
+    expect(keysTabRedirect(keysTabRoute("vault"), { vault: false, agents: true })).toEqual(keysTabRoute("general"));
+    expect(keysTabRedirect(keysTabRoute("agents"), { vault: true, agents: false })).toEqual(keysTabRoute("general"));
+    expect(keysTabRedirect(settingsRoute("security"), on)).toBeNull();
+    expect(read("App.tsx")).toContain("useEffect(() => { if (keysRedirectUrl) go(parseRoute(keysRedirectUrl), { replace: true }); }, [go, keysRedirectUrl]);");
+    // The hub's nav entry is the section; a tab is the same section, not a page below it.
     expect(hubEntryOf(keysTabRoute("vault"))).toBe("mcp");
     expect(isNestedHubRoute(keysTabRoute("agents"))).toBe(false);
-    // Deeper paths are not tabs: the list, as any unknown Settings path.
-    expect(parseRoute("/settings/keys/vault/extra")).toEqual({ app: "settings", section: null });
     // Back and Forward follow the tab on the URL.
     expect(hubPopRoute(parseRoute("/settings/keys/vault"), true)).toEqual(keysTabRoute("vault"));
   });
@@ -86,9 +92,9 @@ describe("which tab lists a key", () => {
   test("with the Vault off, vault keys are on General; with Chat off, agents-only keys are", () => {
     expect(keyTabOf(vaultKey, { vault: false, agents: true })).toBe("general");
     expect(keyTabOf(agentsOnly, { vault: true, agents: false })).toBe("general");
-    expect(visibleKeysTabs(on)).toEqual(["general", "vault", "agents"]);
-    expect(visibleKeysTabs({ vault: false, agents: true })).toEqual(["general", "agents"]);
-    expect(visibleKeysTabs({ vault: true, agents: false })).toEqual(["general", "vault"]);
+    expect(keysTabsFor(on)).toEqual(["general", "vault", "agents"]);
+    expect(keysTabsFor({ vault: false, agents: true })).toEqual(["general", "agents"]);
+    expect(keysTabsFor({ vault: true, agents: false })).toEqual(["general", "vault"]);
     expect(shownKeysTab("vault", { vault: false, agents: true })).toBe("general");
     expect(shownKeysTab("agents", { vault: true, agents: false })).toBe("general");
     expect(shownKeysTab("agents", on)).toBe("agents");
@@ -107,8 +113,10 @@ describe("which tab lists a key", () => {
     const keys = [generalOnly, generalAndAgents, agentsOnly, agentsAndKnowledge, vaultKey, apiKey({ kind: "vault", state: "revoked" }), apiKey({ state: "revoked" })];
     expect(keysTabCounts(keys, on)).toEqual({ general: 2, vault: 1, agents: 2 });
     expect(keysTabCounts(keys, { vault: false, agents: false })).toEqual({ general: 5, vault: 0, agents: 0 });
-    const tabs = renderToStaticMarkup(<KeysTabs tabs={["general", "vault", "agents"]} selected="vault" counts={{ general: 2, vault: 1, agents: 2 }} onSelect={() => undefined} />);
-    expect(tabs).toContain('<span>Vault</span> <span class="keys-tab-count">1</span>');
+    // The labels use the shared SettingsTabs: "Vault 1", read as "Vault, 1 live key".
+    const source = read("keys/KeysSettings.tsx");
+    expect(source).toContain('({ id, label: KEYS_TAB_LABELS[id], ...(counts ? { count: counts[id], countNoun: "live key" } : {}) })');
+    expect(source).not.toContain("KeysTabs");
   });
 });
 
@@ -144,7 +152,7 @@ describe("the leave guard on a tab switch", () => {
   });
 
   test("a hidden tab's URL opens General in place", () => {
-    expect(read("App.tsx")).toContain('useEffect(() => { if (keysTabHidden) go(keysTabRoute("general"), { replace: true }); }, [go, keysTabHidden]);');
+    expect(read("App.tsx")).toContain("const keysRedirect = keysTabRedirect(route, keysFeatures);");
   });
 });
 
@@ -175,7 +183,7 @@ describe("history at 390 px", () => {
   test("list → API keys → Vault → Agents: Back moves between tabs, then to the list; Forward returns; the arrow goes to the list", () => {
     const history = browser("/");
     history.push(settingsRoute(null));
-    history.push(settingsRoute("mcp"));
+    history.push(keysTabRoute("general"));
     history.push(keysTabRoute("vault"));
     history.push(keysTabRoute("agents"));
     // The arrow: three steps back, over both tabs, to the list.
@@ -214,15 +222,15 @@ describe("the page", () => {
   afterEach(() => { host.window = saved; });
   const render = (props: Partial<Parameters<typeof KeysSettings>[0]>) => renderToStaticMarkup(<KeysSettings onPendingChange={() => undefined} totpEnabled={false} role="member" {...props} />);
 
-  test("a tablist, tabs, and the tabpanel they control", () => {
+  test("a tablist, tabs, and the tabpanel they control (the shared SettingsTabs)", () => {
     const markup = render({ tab: "vault" });
-    expect(markup).toContain('role="tablist" aria-label="Key kinds"');
-    expect(markup).toContain('role="tab" id="keys-tab-vault" data-tab="vault" aria-selected="true" aria-controls="keys-panel-vault" tabindex="0"');
-    expect(markup).toContain('role="tab" id="keys-tab-general" data-tab="general" aria-selected="false" aria-controls="keys-panel-general" tabindex="-1"');
+    expect(markup).toContain('class="settings-tabs" role="tablist" aria-label="Key kinds"');
+    expect(markup).toContain('role="tab" id="keys-tab-vault" aria-selected="true" aria-controls="keys-panel-vault" tabindex="0"');
+    expect(markup).toContain('role="tab" id="keys-tab-general" aria-selected="false" aria-controls="keys-panel-general" tabindex="-1"');
     expect(markup).toContain('role="tabpanel" id="keys-panel-vault" aria-labelledby="keys-tab-vault" tabindex="0"');
     expect(markup).toContain("Your vault keys");
-    // Arrow keys, Home, and End move between tabs.
-    const tabs = read("keys/KeysTabs.tsx");
+    // Arrow keys, Home, and End move between tabs (SettingsTabs).
+    const tabs = read("settings/SettingsTabs.tsx");
     for (const key of ["ArrowRight", "ArrowLeft", "Home", "End"]) expect(tabs).toContain(`event.key === "${key}"`);
   });
 

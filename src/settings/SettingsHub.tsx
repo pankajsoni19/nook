@@ -20,7 +20,7 @@ const ICONS: Record<HubEntryId, LucideIcon> = {
  */
 const hintsFor = (name: string): Record<HubEntryId, string> => ({
   security: "Password, two-factor, and Google sign-in", notifications: "Push and email", access: "What others share with you",
-  mcp: "Keys for AI clients and scripts", agents: "Your agents: prompt, model, and steps", ai: "Model providers and chat policy", modules: `Turn parts of ${name} on or off`, about: "Version and source",
+  mcp: "Keys for AI clients and scripts", agents: "Your agents: prompt, model, and steps", ai: "Providers, tool servers, and chat policy", modules: `Turn parts of ${name} on or off`, about: "Version and source",
   bin: "Deleted items, kept for 30 days",
   "team-members": "Everyone on this Nook and their team role", "team-invites": "Links to add people", "team-groups": "Share with a team at once",
   "team-integrations": "Accounts for AI clients and scripts", "team-keys": "Every API key on this Nook", "team-policies": "Key lifetime and where keys work",

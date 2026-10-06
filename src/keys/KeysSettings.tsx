@@ -15,8 +15,8 @@ import { keyDetailEvents, useKeysApi, type ApiKey, type KeyEvent, type KeyList, 
 import { firstVaultRow, useVaultChoices, VaultGrantBuilder } from "./VaultGrantBuilder";
 import { namesProtected, vaultFlagChips, vaultGrantChips, vaultGrantCountChips, vaultGrantsToRows, vaultKeyEventLine, vaultRowsNarrow, vaultRowsToGrants, type VaultGrantRow, type VaultGrantView } from "./vaultKeyGrants";
 import { appName } from "../appName";
-import { holdsAgentGrants, KEYS_TAB_INTROS, KEYS_TAB_LABELS, keysTabCounts, keysTabPreset, keyTabOf, listedOnLine, shownKeysTab, visibleKeysTabs, type KeysTab } from "./keyTabs";
-import { keysPanelId, keysTabId, KeysTabs } from "./KeysTabs";
+import { holdsAgentGrants, KEYS_TAB_INTROS, KEYS_TAB_LABELS, keysTabCounts, keysTabPreset, keysTabsFor, keyTabOf, listedOnLine, shownKeysTab, type KeysTab } from "./keyTabs";
+import { SettingsTabs, settingsTabIds, type SettingsTab } from "../settings/SettingsTabs";
 import "./keys.css";
 
 /**
@@ -154,8 +154,9 @@ export function KeysSettings({ onPendingChange, onNestedDialogChange, totpEnable
   const tabOf = (key: ApiKey): KeysTab => tabbed ? keyTabOf(key, features) : "general";
   const live = data?.keys.filter((key) => key.state !== "revoked" && onShownTab(key)) ?? [];
   const revoked = data?.keys.filter((key) => key.state === "revoked" && onShownTab(key)) ?? [];
-  const tabs = tabbed ? visibleKeysTabs(features) : [];
   const counts = data ? keysTabCounts(data.keys, features) : null;
+  const tabs: Array<SettingsTab<KeysTab>> = (tabbed ? keysTabsFor(features) : []).map((id) => ({ id, label: KEYS_TAB_LABELS[id], ...(counts ? { count: counts[id], countNoun: "live key" } : {}) }));
+  const panelIds = settingsTabIds("keys", shownTab);
   // The Vault is off: vault keys made before are listed on General, with a note.
   const vaultOffKeys = tabbed && !vaultAvailable && shownTab === "general" && (data?.keys.some((key) => key.kind === "vault" && key.state !== "revoked") ?? false);
   const preset = keysTabPreset(shownTab);
@@ -168,8 +169,9 @@ export function KeysSettings({ onPendingChange, onNestedDialogChange, totpEnable
     <div className="settings-section-heading"><span className="settings-icon"><KeyRound /></span><div><h3 id="keys-heading">API keys</h3><p>{integration
       ? `Keys let an AI client or script act as ${integration.name}, over MCP or the REST API. A key reaches only what owners share with ${integration.name} by name, only what its permissions allow, and only until it expires. Creating or rotating one asks for your password; copy the new key into the client that uses it.`
       : `Keys let trusted AI clients and scripts use ${appName()} as you, over MCP or the REST API. Each key does only what its permissions allow, only with items you can open, and only until it expires. No key can share, manage access, manage keys, or delete forever.`}</p></div></div>
-    {tabbed && <KeysTabs tabs={tabs} selected={shownTab} counts={counts} onSelect={(next) => onTab?.(next)} />}
-    <div className="keys-tabpanel" {...(tabbed ? { role: "tabpanel", id: keysPanelId(shownTab), "aria-labelledby": keysTabId(shownTab), tabIndex: 0 } : {})}>
+    {/* The bar holds the scrolling row, so this section's grid sizes it by its tabs. */}
+    {tabbed && <div className="keys-tabs-bar"><SettingsTabs label="Key kinds" idPrefix="keys" tabs={tabs} selected={shownTab} onSelect={(next) => onTab?.(next)} /></div>}
+    <div className="keys-tabpanel settings-tab-panel" {...(tabbed ? { role: "tabpanel", id: panelIds.panel, "aria-labelledby": panelIds.tab, tabIndex: 0 } : {})}>
     {tabbed && <p className="keys-tab-intro">{KEYS_TAB_INTROS[shownTab]}</p>}
     {error && <p className="form-error" role="alert">{error}</p>}
     {status && <p className="keys-status" role="status">{status}</p>}

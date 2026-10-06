@@ -44,8 +44,7 @@ describe("routes", () => {
     for (const section of ["security", "modules", "mcp", "notifications", "about"] as const) {
       expect(parseSettingsPath(settingsPath(section))).toBe(section);
       expect(parseRoute(settingsPath(section))).toEqual({ app: "settings", section });
-      // API keys opens its General tab (/settings/keys/general).
-      expect(formatRoute(parseRoute(settingsPath(section)))).toBe(section === "mcp" ? "/settings/keys/general" : settingsPath(section));
+      expect(formatRoute(parseRoute(settingsPath(section)))).toBe(settingsPath(section));
     }
     expect(parseSettingsPath("/settings/nope")).toBeNull();
     expect(parseSettingsPath("/settings")).toBeNull();
@@ -71,9 +70,9 @@ describe("routes", () => {
       expect(settingsPath(section!)).toBe(`/settings/${slug}`);
     }
     // The app rewrites an old entry in place, without a new history entry: /settings/mcp is the API
-    // keys route, whose canonical URL is its General tab, /settings/keys/general (every non-Notes popstate and the startup do this).
+    // keys route, whose canonical URL is /settings/keys (every non-Notes popstate and the startup do this).
     expect(parseRoute("/settings/mcp")).toEqual({ app: "settings", section: "mcp" });
-    expect(formatRoute(parseRoute("/settings/mcp"))).toBe("/settings/keys/general");
+    expect(formatRoute(parseRoute("/settings/mcp"))).toBe("/settings/keys");
     // The Google re-auth round trip from API keys comes back to /settings/keys (Wave 35 merge).
     const keys = await Bun.file(new URL("../src/keys/KeysSettings.tsx", import.meta.url)).text();
     // Wave 36: the return address comes from the keys API (Settings or an integration's page).

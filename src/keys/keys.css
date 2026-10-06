@@ -157,20 +157,9 @@
 .keys-switch input { width: 20px; height: 20px; flex: none; accent-color: #d7b86a; }
 .scope-chips li.keys-flag { border-style: dashed; }
 
-/* API keys' tabs: General, Vault, Agents (a segmented row; it scrolls sideways on a phone). */
+
+/* API keys' tabs (SettingsTabs): General, Vault, Agents. The bar is the grid item, so the scrolling row keeps its height. */
 .keys-tabs-bar { min-width: 0; }
-.keys-tabs { display: flex; gap: 4px; width: max-content; max-width: 100%; box-sizing: border-box; padding: 4px; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scrollbar-width: none; border: 1px solid #303035; border-radius: 12px; background: #0f0f11; }
-.keys-tabs::-webkit-scrollbar { display: none; }
-.keys-tab { flex: none; display: inline-flex; align-items: center; gap: 7px; min-height: 40px; padding: 0 14px; border: 0; border-radius: 9px; background: transparent; color: #b5b5bb; font-size: .86rem; font-weight: 650; cursor: pointer; white-space: nowrap; }
-.keys-tab:hover { color: #f0f0f2; background: #1a1a1d; }
-.keys-tab.active { background: #26262b; color: #fafafa; box-shadow: inset 0 0 0 1px #3a3a3f; }
-.keys-tab:focus-visible { outline: 2px solid var(--yellow); outline-offset: -2px; }
-.keys-tab-count { min-width: 20px; padding: 1px 6px; border-radius: 999px; background: #1b1b1e; color: #c9c9cd; font-size: .72rem; text-align: center; }
-.keys-tab.active .keys-tab-count { background: var(--yellow); color: #281f0b; }
-.keys-tabpanel { display: grid; align-content: start; gap: 16px; min-width: 0; }
+.keys-tabpanel:not([hidden]) { gap: 16px; }
 .keys-tabpanel:focus-visible { outline: 2px solid var(--yellow); outline-offset: 4px; border-radius: 6px; }
 .keys-tab-intro { margin: 0; color: #a9a9ae; font-size: .84rem; }
-@media (max-width: 760px) {
-  .keys-tabs { width: auto; }
-  .keys-tab { min-height: 44px; }
-}

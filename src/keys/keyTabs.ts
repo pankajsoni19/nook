@@ -1,4 +1,5 @@
 import { KEYS_TAB_LABELS, KEYS_TABS, type KeysTab } from "../router";
+import { keysTabsFor, type KeysTabFeatures } from "../settings/hubModel";
 import type { ApiKey } from "./keysApi";
 
 /**
@@ -6,10 +7,7 @@ import type { ApiKey } from "./keysApi";
  * show, and their counts are unit tested (tests/keysTabs.test.tsx). Each key is listed on exactly one tab.
  */
 
-export { KEYS_TAB_LABELS, KEYS_TABS, type KeysTab };
-
-/** What turns tabs on: the Vault (`features.vault`) and Chat (`features.agents`). */
-export type KeysTabFeatures = { vault: boolean; agents: boolean };
+export { KEYS_TAB_LABELS, KEYS_TABS, keysTabsFor, type KeysTab, type KeysTabFeatures };
 
 /** Grants the Agents tab's keys hold: running and reading agents, and Chat's knowledge bases when present. */
 const AGENT_MODULES: ReadonlySet<string> = new Set(["agents", "knowledge_base"]);
@@ -29,12 +27,8 @@ export function keyTabOf(key: Pick<ApiKey, "kind" | "grants">, features: KeysTab
   return agentsOnly && features.agents ? "agents" : "general";
 }
 
-/** The tabs on show, in order. General always; Vault with the Vault on; Agents while Chat is available. */
-export const visibleKeysTabs = (features: KeysTabFeatures): KeysTab[] =>
-  KEYS_TABS.filter((tab) => tab === "general" || (tab === "vault" ? features.vault : features.agents));
-
-/** The tab a URL's tab opens: itself when on show, else General. */
-export const shownKeysTab = (tab: KeysTab, features: KeysTabFeatures): KeysTab => visibleKeysTabs(features).includes(tab) ? tab : "general";
+/** The tab a URL's tab shows: itself when on show, else General (App also replaces the URL: keysTabRedirect). */
+export const shownKeysTab = (tab: KeysTab, features: KeysTabFeatures): KeysTab => keysTabsFor(features).includes(tab) ? tab : "general";
 
 /** Live keys (not revoked) per tab, for the tab labels ("Vault 2"). */
 export function keysTabCounts(keys: readonly Pick<ApiKey, "kind" | "grants" | "state">[], features: KeysTabFeatures): Record<KeysTab, number> {

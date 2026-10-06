@@ -21,7 +21,8 @@ export const SECRET_HONESTY = "Encrypted at rest; anyone with the server and its
 const STATUS_TEXT: Record<ToolServerSummary["status"], string> = { unknown: "Not synced yet", ok: "Reachable", auth_failed: "Credential refused", unreachable: "Unreachable", error: "Error" };
 const AVAILABILITY_LABELS: Record<ServerAvailability, string> = { admins: "Admins only", all: "Everyone who can chat" };
 
-export function ToolServersSection({ flash }: { flash: (message: string) => void }) {
+/** `onCountChange` (Settings → AI's tab count): the number of servers, once loaded and after every change. */
+export function ToolServersSection({ flash, onCountChange }: { flash: (message: string) => void; onCountChange?: (count: number) => void }) {
   const [list, setList] = useState<ToolServerList | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<ToolServerSummary | "new" | { adopt: DeclaredStdioServer } | null>(null);
@@ -38,6 +39,8 @@ export function ToolServersSection({ flash }: { flash: (message: string) => void
     }
   }, []);
   useEffect(() => { void load(); }, [load]);
+  const count = list?.servers.length;
+  useEffect(() => { if (count !== undefined) onCountChange?.(count); }, [count, onCountChange]);
 
   async function sync(server: ToolServerSummary) {
     setSyncing(server.id);

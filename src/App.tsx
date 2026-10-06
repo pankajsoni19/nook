@@ -53,7 +53,7 @@ import { lineDiff } from "./diff/lineDiff";
 import { TeamSection } from "./team/TeamApp";
 import { useBlockedCount } from "./team/blockedCount";
 import { SettingsHubShell } from "./settings/SettingsHub";
-import { binEntryShown, hubBackAction, hubBackSteps, hubEntries, hubEntryLabel, hubEntryOf, hubListGoesUnder, hubPopRoute, isHubRoute, isNestedHubRoute, leaveGuardAction, settingsRoute, teamGroupShown, type HubEntry, type HubEntryId } from "./settings/hubModel";
+import { aiTabRedirect, aiTabsFor, binEntryShown, hubBackAction, hubBackSteps, hubEntries, hubEntryLabel, hubEntryOf, hubListGoesUnder, hubPopRoute, isHubRoute, isNestedHubRoute, keysTabRedirect, keysTabsFor, leaveGuardAction, settingsRoute, teamGroupShown, type HubEntry, type HubEntryId } from "./settings/hubModel";
 import { HubBeforeLeaveContext, type BeforeHubLeave } from "./settings/hubLeave";
 import { InviteRegister, InviteWhileSignedIn, type InviteRegisterBody } from "./auth/InviteRegister";
 import { initialInvite } from "./auth/inviteLink";
@@ -96,7 +96,6 @@ import { createAppHistoryState, readHistoryDepth, resolveAppHistorySection, star
 // Settings → API keys (Wave 31) replaced the MCP server section; the section id stays "mcp".
 import { KeysSettings } from "./keys/KeysSettings";
 import { unsavedKeyConfirm } from "./keys/unsavedKeyConfirm";
-import { shownKeysTab } from "./keys/keyTabs";
 import { IntegrationBadge } from "./ui/IntegrationBadge";
 import { MyAccess } from "./settings/MyAccess";
 import { ConfirmDialog } from "./files/Dialog";
@@ -499,12 +498,20 @@ function SettingsPage({ session, modules, googleResult = null, navigate, flash, 
   // Wave 38: with the Bin module off (D92), or for a guest, the Bin has no entry, and /settings/bin opens Security in place.
   const binHidden = route.app === "bin" && !binShown;
   useEffect(() => { if (binHidden) go(settingsRoute("security"), { replace: true }); }, [binHidden, go]);
+  // Settings → AI is tabbed: bare /settings/ai, an unknown tab, or a hidden one opens the first tab in place (Back does not bounce).
+  const aiTabs = useMemo(() => aiTabsFor(session.user.role), [session.user.role]);
+  const aiRedirect = aiTabRedirect(route, session.user.role);
+  const aiRedirectUrl = aiRedirect ? formatRoute(aiRedirect) : null;
+  useEffect(() => { if (aiRedirectUrl) go(parseRoute(aiRedirectUrl), { replace: true }); }, [aiRedirectUrl, go]);
+  const aiTab = route.app === "settings" && route.aiTab && aiTabs.includes(route.aiTab) ? route.aiTab : aiTabs[0] ?? "providers";
   const title = route.app === "settings" ? SETTINGS_SECTION_NAMES[section ?? "security"] : hubEntryLabel(selected);
-  // API keys' tabs (General, Vault, Agents): a hidden tab's URL (the Vault or Chat off) opens General in place.
-  const keysFeatures = { vault: session.features?.vault !== false, agents: session.features?.agents !== false };
-  const keysTab: KeysTab | undefined = section === "mcp" && route.app === "settings" ? shownKeysTab(route.keysTab ?? "general", keysFeatures) : undefined;
-  const keysTabHidden = section === "mcp" && route.app === "settings" && route.keysTab !== undefined && keysTab !== route.keysTab;
-  useEffect(() => { if (keysTabHidden) go(keysTabRoute("general"), { replace: true }); }, [go, keysTabHidden]);
+  // API keys' tabs (General, Vault, Agents), the same way: bare /settings/keys, an unknown tab, or a
+  // hidden one (the Vault or Chat off) opens General in place.
+  const keysFeatures = useMemo(() => ({ vault: session.features?.vault !== false, agents: session.features?.agents !== false }), [session.features?.agents, session.features?.vault]);
+  const keysRedirect = keysTabRedirect(route, keysFeatures);
+  const keysRedirectUrl = keysRedirect ? formatRoute(keysRedirect) : null;
+  useEffect(() => { if (keysRedirectUrl) go(parseRoute(keysRedirectUrl), { replace: true }); }, [go, keysRedirectUrl]);
+  const keysTab: KeysTab | undefined = section !== "mcp" ? undefined : route.app === "settings" && route.keysTab && keysTabsFor(keysFeatures).includes(route.keysTab) ? route.keysTab : "general";
   const openKeysTab = useCallback((tab: KeysTab) => guardLeave(() => go(keysTabRoute(tab)), "tab"), [go, guardLeave]);
 
   // "Settings · Notifications · Nook", "Settings · Bin · Nook"; Team's sections name themselves.
@@ -666,7 +673,7 @@ function SettingsPage({ session, modules, googleResult = null, navigate, flash, 
     : section === "access" ? <MyAccess />
     : section === "notifications" ? <NotificationSettings />
     : section === "agents" ? <Suspense fallback={<section className="settings-content" aria-busy="true"><p className="sr-only" role="status">Loading agents…</p></section>}><AgentsSettings agentId={route.app === "settings" ? route.agentId ?? null : null} navigate={go} flash={flash} onOpenChat={(agentId) => navigate({ app: "chat", chatId: null, newChat: true, agentId })} /></Suspense>
-    : section === "ai" ? (session.user.role === "admin" ? <Suspense fallback={<section className="settings-content" aria-busy="true"><p className="sr-only" role="status">Loading AI settings…</p></section>}><AiSettings flash={flash} /></Suspense> : <section className="settings-content"><p className="settings-warning">That section is for admins.</p></section>)
+    : section === "ai" ? (session.user.role === "admin" ? <Suspense fallback={<section className="settings-content" aria-busy="true"><p className="sr-only" role="status">Loading AI settings…</p></section>}><AiSettings flash={flash} tabs={aiTabs} tab={aiTab} onSelectTab={(tab) => go({ app: "settings", section: "ai", aiTab: tab })} /></Suspense> : <section className="settings-content"><p className="settings-warning">That section is for admins.</p></section>)
     : section === "about" ? <section className="settings-content about-settings" aria-labelledby="about-heading"><div className="settings-section-heading"><span className="settings-icon"><Info /></span><div><h3 id="about-heading">About {appName()}</h3><p>A private, self-hosted workspace for notes, files, and ideas.</p></div></div><div className="about-card"><div className="brand-mark"><Sparkles /></div><div><h4>{appName()}</h4><p>{appName() === "Nook" ? "Built by Pankaj" : "Built on Nook by Pankaj"}</p></div><dl><div><dt>Version</dt><dd>{appInfo.version}</dd></div><div><dt>Git SHA</dt><dd><code>{appInfo.gitSha}</code></dd></div></dl><a href="https://github.com/pankajsoni19" target="_blank" rel="noopener noreferrer">github.com/pankajsoni19</a></div></section>
     : securitySection;
 
