@@ -2,13 +2,11 @@
 
 Only open work lives here. Shipped work is in [CHANGELOG.md](CHANGELOG.md), the docs site ("What's new") and `git log`. Plans of record: `DEVELOPMENT_PLAN.md` and `docs/plan/research/`. Contracts: [API](docs/plan/API_CONTRACTS.md) · [Threat model](docs/plan/THREAT_MODEL.md) · [Test plan](docs/plan/TEST_PLAN.md).
 
-**Current state (2026-10-06):** production runs **v0.29.0** (`86e3519`, Agentic chat AC-D sharing plus Settings tabs and UI fixes; backup `mynotes-20261006T170155Z.tar.gz`). Released migrations are immutable: **001–041**. Unreleased: **042** `knowledge` (branch `wave44-fixes`). Messages takes **043**.
+**Current state (2026-10-07):** production runs **v0.30.0** (`a30e684`, Agentic chat AC-E knowledge bases; backup `mynotes-20261006T190706Z.tar.gz`). The agentic chat plan (AC-A…AC-E) is complete. Released migrations are immutable: **001–042**. Messages takes **043**.
 
 ## In flight
 
-- [ ] **v0.30.0 — Agentic chat AC-E (knowledge bases)**, branch `wave44-fixes` (718c4a5):
-  - Review and QA are done (no HIGH); the fix pass is done, including the operator decision "attaching a base needs manage".
-  - Verification passed (no regressions); follow-ups done (`.text` dropped, unavailable sources in the list line, THREAT_MODEL T321 note). Next: merge main (v0.29.0), gates, Docker verify, release.
+Nothing. Waiting for the operator's next pick.
 
 ## Next features (operator to pick)
 
@@ -46,6 +44,7 @@ Only open work lives here. Shipped work is in [CHANGELOG.md](CHANGELOG.md), the 
   - all three share the browser title "Settings · AI" (the API keys tabs have one title per tab)
   - the phone header back arrow on a second tab goes to the list; match the API keys page (`hubBackSteps`)
 - [ ] **Chat policy panel (1280):** the "Who can create agents" checkboxes sit well below their label (they align with the taller input in the next column).
+- [ ] **Scroll audit:** no dedicated routes yet for the Knowledge Share… and Move to Bin dialogs (both use shared components).
 - [ ] **README:** the link to `#rate-limits-and-reverse-proxies` lands at the page top (it is a bold paragraph, not a heading).
 
 ## Known LOW leftovers
