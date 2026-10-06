@@ -42,8 +42,9 @@
 .ui-option-group-label { padding: 6px 8px 2px; color: #8d8d94; font-size: .68rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .ui-listbox-empty { padding: 10px; color: #8d8d94; font-size: .82rem; }
 
-.ui-search input, .ui-combobox-input { width: 100%; min-height: 34px; min-width: 0; border: 1px solid #333338; border-radius: 8px; padding: 0 10px; background: #0b0b0d; color: #ededee; font: inherit; font-size: .84rem; outline: 0; }
-.ui-search input:focus { border-color: #6b582f; }
+.ui-search input, .ui-combobox-input { width: 100%; min-height: 34px; min-width: 0; border: 1px solid var(--field-border); border-radius: 8px; padding: 0 10px; background: #0b0b0d; color: #ededee; font: inherit; font-size: .84rem; outline: 0; }
+/* The shared field focus (styles.css): accent border plus one ring. */
+.ui-search input:focus { border-color: var(--field-focus); box-shadow: var(--field-ring); }
 .ui-search input::-webkit-search-cancel-button { filter: grayscale(1); }
 
 /* Combobox field with chips. */

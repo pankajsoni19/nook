@@ -20,7 +20,7 @@
 .vault-state h1, .vault-state h2 { margin: 0; color: #ededee; font-size: 1.05rem; }
 .vault-state p { margin: 0; max-width: 52ch; line-height: 1.55; }
 .vault-state code { color: #ffe19a; }
-.vault-state button { min-height: 42px; display: inline-flex; align-items: center; gap: 6px; padding: 0 16px; }
+.vault-state button:not(.action-button) { min-height: 42px; display: inline-flex; align-items: center; gap: 6px; padding: 0 16px; }
 .vault-state-icon { width: 52px; height: 52px; display: grid; place-items: center; border-radius: 16px; background: #1d1a12; color: #d9b55f; }
 
 .vault-search { position: relative; display: flex; align-items: center; min-width: 0; }

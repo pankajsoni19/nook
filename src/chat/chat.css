@@ -179,6 +179,7 @@
 .agents-form label small { font-weight: 500; letter-spacing: normal; text-transform: none; }
 /* Beats `.agents-form textarea { font: inherit }` above, which used to win and drop the monospace. */
 .agents-form .agents-prompt { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.agents-icon-row { display: flex; align-items: center; gap: 8px; }
 .agents-icon-input { width: 90px; }
 .agents-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 8px; }
 .agents-actions .secondary-button { min-height: 44px; padding: 0 14px; }

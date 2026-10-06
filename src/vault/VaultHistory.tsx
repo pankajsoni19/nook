@@ -13,7 +13,8 @@ import { listVersions, readVersion, restoreVersion, type VaultEnvironment, type 
  * A value's history (D224; Wave 26 UI for the Wave 25 API): the last 20 versions of one secret in one
  * environment, newest first, with who wrote each and when. Show opens one version (a read, audited
  * `version.read`, and hidden again after 30 seconds); Restore writes it as a new version through the
- * same compare-and-swap. A protected environment asks to confirm it's you first. A history layer:
+ * same compare-and-swap. In a protected environment Show asks to confirm it's you first; Restore is a
+ * write and does not (2026-10-06 operator: no re-auth for writes). A history layer:
  * Back closes it before anything else.
  */
 export function VersionHistoryDialog({ vaultId, secret, env, ask, flash, onClose, onRestored }: {
@@ -63,13 +64,13 @@ export function VersionHistoryDialog({ vaultId, secret, env, ask, flash, onClose
     if (!await ask({ title: `Restore version ${version}?`, message: `${secret.name} in ${env.name} gets version ${version}'s value as a new version. The current value stays in history.`, confirmLabel: "Restore" })) return;
     setBusy(true);
     try {
-      await run(() => restoreVersion(vaultId, secret.id, env.id, version, data.current.version));
+      await restoreVersion(vaultId, secret.id, env.id, version, data.current.version);
       flash(`Restored version ${version} in ${env.name}`);
       setShown(null);
       onRestored();
       await load();
     } catch (reason) {
-      if (!(reason instanceof ReauthCancelled)) flash(errorCode(reason) === "VALUE_CHANGED" ? "The value changed meanwhile. The history now shows the latest; restore again if you still want to." : messageOf(reason, "Could not restore that version"));
+      flash(errorCode(reason) === "VALUE_CHANGED" ? "The value changed meanwhile. The history now shows the latest; restore again if you still want to." : messageOf(reason, "Could not restore that version"));
       await load();
     } finally {
       setBusy(false);
