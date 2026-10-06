@@ -111,7 +111,7 @@ describe("the key builder's Agents section (D364)", () => {
     expect(rowsToGrants([row({ permission: "read", applies: "chosen", resourceIds: [`knowledge_base:${agentId}`] })]).grants).toEqual([{ module: "agents", permission: "read", resources: [{ kind: "knowledge_base", id: agentId }] }]);
     expect(grantSummary([row({ applies: "chosen", resourceIds: [`agent:${agentId}`, `agent:${runId}`] })])).toBe("Chat: run agents on 2 agents. Never shares, never manages access or keys, and never deletes forever.");
     expect(grantSummary([row({ permission: "read" })])).toBe("Chat: read agents, chats, and knowledge. Never shares, never manages access or keys, and never deletes forever.");
-    expect(grantSummary([row({ permission: "read", applies: "chosen", resourceIds: [`knowledge_base:${agentId}`] })])).toBe("Chat: read agents, chats, and knowledge on 1 knowledge base. Never shares, never manages access or keys, and never deletes forever.");
+    expect(grantSummary([row({ permission: "read", applies: "chosen", resourceIds: [`knowledge_base:${agentId}`] })])).toBe("Chat: search knowledge on 1 knowledge base. Never shares, never manages access or keys, and never deletes forever.");
   });
 
   test("members may run agents; viewers may not (member-only)", () => {

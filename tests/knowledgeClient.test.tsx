@@ -183,6 +183,6 @@ describe("keys: Chat → Read on chosen knowledge bases", () => {
     const rows = [{ key: "a", module: "agents" as const, permission: "read" as const, applies: "chosen" as const, resourceIds: [`knowledge_base:${id(1)}`] }];
     expect(rowsToGrants(rows)).toEqual({ grants: [{ module: "agents", permission: "read", resources: [{ kind: "knowledge_base", id: id(1) }] }], error: null });
     expect(rowsToGrants([{ ...rows[0]!, resourceIds: [] }]).error).toContain("knowledge base");
-    expect(grantChips([{ module: "agents", permission: "read", resource: { kind: "knowledge_base", id: id(1), name: "Support FAQ" }, active: true, inactiveReason: null }])[0]!.label).toBe("Chat: read agents, chats, and knowledge · Support FAQ");
+    expect(grantChips([{ module: "agents", permission: "read", resource: { kind: "knowledge_base", id: id(1), name: "Support FAQ" }, active: true, inactiveReason: null }])[0]!.label).toBe("Chat: search knowledge · Support FAQ");
   });
 });

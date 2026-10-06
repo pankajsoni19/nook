@@ -297,12 +297,18 @@ export function AddSourceSheet({ kb, onClose, onAdded }: { kb: KnowledgeDetail; 
     }
   }
   const bytes = new TextEncoder().encode(text).byteLength;
+  // v0.30 L1: the owner reads as themselves; a manager sees only what both they and the owner can read.
+  const readers = kb.yourLevel === "owner" ? "Only what you can read is listed." : `Only what both you and ${kb.ownerName} can read is listed; it is read as ${kb.ownerName} when indexed.`;
+  // v0.30 H: the sheet follows the shared dialog contract (files.css): its one child is the
+  // .file-dialog-form, the single scroller under the fixed header, whose footer stays in view at its
+  // end (sticky). It is one form in every mode (the mode buttons keep focus); only Paste text submits.
+  const submitText = (event: FormEvent) => { event.preventDefault(); if (mode !== "text") return; if (!title.trim() || !text.trim()) { setError("Enter a title and some text."); return; } void add({ kind: "text", title: title.trim(), text }, "text"); };
   return <ModalDialog title="Add source" eyebrow={kb.name} onClose={onClose} busy={busy} variant="sheet" className="chat-dialog knowledge-sheet knowledge-add">
-    <div className="knowledge-add-body">
+    <form className="file-dialog-form knowledge-add-body" onSubmit={submitText}>
       <div className="knowledge-modes" role="group" aria-label="Source type">
         {MODES.map((option) => <button key={option.value} type="button" className={`knowledge-mode${mode === option.value ? " active" : ""}`} aria-pressed={mode === option.value} onClick={() => { setMode(option.value); setError(null); }}>{option.label}</button>)}
       </div>
-      <p className="file-dialog-hint">{KNOWLEDGE_WARNING} {mode === "text" ? "" : `Only what both you and ${kb.yourLevel === "owner" ? "you" : kb.ownerName} can read is listed; it is read as ${kb.yourLevel === "owner" ? "you" : kb.ownerName} when indexed.`}</p>
+      <p className="file-dialog-hint">{KNOWLEDGE_WARNING}{mode === "text" ? "" : ` ${readers}`}</p>
       {error && <p className="form-error" role="alert">{error}</p>}
       {mode !== "text" ? <>
         <label className="sr-only" htmlFor={ids.query}>Search {mode === "note" ? "notes" : "files"}</label>
@@ -318,18 +324,20 @@ export function AddSourceSheet({ kb, onClose, onAdded }: { kb: KnowledgeDetail; 
               </li>;
             })}
           </ul>}
-      </> : <form className="file-dialog-form" onSubmit={(event) => { event.preventDefault(); if (!title.trim() || !text.trim()) { setError("Enter a title and some text."); return; } void add({ kind: "text", title: title.trim(), text }, "text"); }}>
+      </> : <>
         <label htmlFor={ids.title}>Title</label>
         <input id={ids.title} value={title} maxLength={KNOWLEDGE_BOUNDS.textTitle} autoComplete="off" placeholder="Billing FAQ" onChange={(event) => setTitle(event.target.value)} />
         <label htmlFor={ids.text}>Text <small>{Math.ceil(bytes / 1024).toLocaleString()} / {KNOWLEDGE_BOUNDS.textBytes / 1024} KiB</small></label>
         <textarea id={ids.text} className="knowledge-paste" value={text} rows={10} spellCheck={false} placeholder={"# Billing\n\n## How do refunds work?\nRefunds are pro rata.\n\nQ: Can I pause?\nA: Yes, for up to three months."} onChange={(event) => setText(event.target.value)} />
         <p className="file-dialog-hint">Markdown headings become the passages' heading paths; a heading that asks a question, or a Q: / A: pair, stays one passage.</p>
-        <footer className="file-dialog-actions">
+      </>}
+      <footer className="file-dialog-actions">
+        {mode === "text" ? <>
+          <button type="button" className="action-button secondary" onClick={onClose} disabled={busy}>Cancel</button>
           <button type="submit" className="action-button" disabled={busy || bytes > KNOWLEDGE_BOUNDS.textBytes}>{busy ? "Adding…" : "Add text"}</button>
-        </footer>
-      </form>}
-      {mode !== "text" && <footer className="file-dialog-actions"><button type="button" className="action-button secondary" onClick={onClose} disabled={busy}>Done</button></footer>}
-    </div>
+        </> : <button type="button" className="action-button secondary" onClick={onClose} disabled={busy}>Done</button>}
+      </footer>
+    </form>
   </ModalDialog>;
 }
 

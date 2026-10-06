@@ -1,7 +1,8 @@
 // Scroll audit (carry-overs P0, 2026-09-30): every page and tall dialog must let the person reach
 // its bottom-most control by wheel, touch, and keyboard, at 1280 × 800 and 390 × 844 (and a short
 // landscape phone, 844 × 390, for the sign-in pages; a short computer window, 1280 × 600, for the
-// two-pane pages and every dialog or sheet), with no two nested vertical scrollers fighting.
+// two-pane pages and every dialog or sheet), with no two nested vertical scrollers fighting. The
+// Knowledge sheets (v0.30) also run at 1280 × 500 and 390 × 667, with their footers in view.
 //
 // Run against a scratch instance (never production data): a fresh data directory, the production
 // build, `ALLOW_REGISTRATION=true SIGNUP_ROLE=member TRUSTED_PROXY_HOPS=1`, and a TOTP key are
@@ -24,7 +25,13 @@ const PREFIX = process.env.ACCOUNT_PREFIX ?? "co-scroll";
 const RUN = Date.now().toString(36).slice(-5);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const launchBrowser = () => puppeteer.launch({ executablePath: process.env.CHROME ?? "/usr/bin/google-chrome", headless: true, args: ["--no-sandbox"] });
+// v0.30: every browser the run launches (a lost one is replaced) is closed at the end, so the run exits.
+const browsers = [];
+const launchBrowser = async () => {
+  const launched = await puppeteer.launch({ executablePath: process.env.CHROME ?? "/usr/bin/google-chrome", headless: true, args: ["--no-sandbox"] });
+  browsers.push(launched);
+  return launched;
+};
 // v0.29: a page that crashes or closes its target no longer takes the rest of the run with it: each
 // route runs in a fresh tab of the signed-in context, and a lost tab, context or browser is replaced.
 let browser = await launchBrowser();
@@ -248,6 +255,9 @@ async function seed() {
       }
     }
     seeded.chat = { id: chat.id, agentId: agent.id };
+    // v0.30: a knowledge base (it uses the provider's embedding model) for the Knowledge sheets.
+    const knowledge = await api(admin, "POST", "/knowledge", { name: `Scroll knowledge ${RUN}`, description: "Seeded by the scroll audit" });
+    seeded.knowledge = knowledge.status === 201 ? { id: knowledge.body.knowledgeBase.id } : null;
   }
   admin.browserContext().close();
   // Ids only: a later run against the same instance reuses them (SEED_FILE), under the registration limits.
@@ -255,7 +265,8 @@ async function seed() {
     longNote: { id: seeded.longNote.id }, sharedNote: { id: seeded.sharedNote.id }, longFile: { id: seeded.longFile.id },
     board: { id: seeded.board.id }, card: { id: seeded.card.id }, collection: { id: seeded.collection.id }, row: { id: seeded.row.id },
     group: { id: seeded.group.id }, members: seeded.members.map((member) => ({ userId: member.userId })), inviteToken: seeded.inviteToken,
-    whiteboard: { id: seeded.whiteboard.id }, vault: seeded.vault, integration: { id: seeded.integration.id }, chat: seeded.chat, agents: seeded.agents
+    whiteboard: { id: seeded.whiteboard.id }, vault: seeded.vault, integration: { id: seeded.integration.id }, chat: seeded.chat, agents: seeded.agents,
+    knowledge: seeded.knowledge ?? null
   };
 }
 
@@ -576,6 +587,37 @@ async function tabsClickable(page, target) {
 }
 const HUB_SPLIT = { split: true, check: async (page) => [...await hubPanes(page), ...await splitPanes(page)] };
 
+// ------------------------------------------------------------------ dialog contract (v0.30)
+
+/**
+ * The shared dialog contract (files.css): the header stays put, one body scrolls, and the footer's
+ * buttons are in view without scrolling, inside the dialog and the window. Add source once had a
+ * body that did not scroll in a dialog that clipped, so Done and Add text sat below its edge.
+ */
+async function dialogContract(page, selector) {
+  const found = await page.evaluate((selector) => {
+    const dialog = document.querySelector(selector);
+    if (!dialog) return null;
+    const box = dialog.getBoundingClientRect();
+    const header = dialog.querySelector(".file-dialog-header")?.getBoundingClientRect();
+    const footer = [...dialog.querySelectorAll(".file-dialog-actions")].filter((node) => node.getClientRects().length).at(-1);
+    const bottom = Math.min(innerHeight, box.bottom);
+    const buttons = footer ? [...footer.querySelectorAll("button")].map((button) => { const rect = button.getBoundingClientRect(); return { label: button.textContent.trim(), top: Math.round(rect.top), bottom: Math.round(rect.bottom), height: Math.round(rect.height) }; }) : [];
+    // A text field scrolling its own text is not a second body scroller.
+    const scrollers = [...dialog.querySelectorAll("*:not(textarea)")].filter((node) => /(auto|scroll)/.test(getComputedStyle(node).overflowY) && node.scrollHeight > node.clientHeight + 2 && node.clientHeight > 80).map((node) => node.className.toString().split(" ")[0] || node.tagName.toLowerCase());
+    return { buttons, bottom: Math.round(bottom), headerBottom: Math.round(header?.bottom ?? box.top), scrollers };
+  }, selector);
+  if (!found) return [`no ${selector}`];
+  const problems = [];
+  if (!found.buttons.length) problems.push("no footer buttons");
+  for (const button of found.buttons) {
+    if (button.bottom > found.bottom + 1 || button.top < found.headerBottom - 1) problems.push(`footer “${button.label}” out of view (${button.top}–${button.bottom}, dialog ends ${found.bottom})`);
+    if (button.height < 44) problems.push(`footer “${button.label}” is ${button.height} px tall`);
+  }
+  if (found.scrollers.length > 1) problems.push(`${found.scrollers.length} scrollers: ${found.scrollers.join(", ")}`);
+  return problems;
+}
+
 // ------------------------------------------------------------------ page keys (F6)
 
 /**
@@ -710,6 +752,15 @@ const ROUTES = (s) => [
     ["Settings · AI: Add provider", "/settings/ai", async (page) => { await tapText(page, "button", "Add provider"); await page.waitForSelector(".chat-dialog"); }, { scope: ".chat-dialog" }],
     ["Settings · AI: Add tool server", "/settings/ai/tools", async (page) => { await tapText(page, "button", "Add tool server"); await page.waitForSelector(".chat-dialog"); }, { scope: ".chat-dialog" }]
   ] : []),
+  // v0.30: Settings → Knowledge's sheets (the Add source footer was cut off by a long list or an
+  // error), also on a shorter computer window and a small phone (`short`).
+  ...(s.knowledge ? [
+    ["Knowledge: New knowledge base", "/settings/knowledge", async (page) => { await tapText(page, "button", "New knowledge base"); await page.waitForSelector(".knowledge-sheet"); }, { scope: ".knowledge-sheet", short: true, check: (page) => dialogContract(page, ".knowledge-sheet") }],
+    ["Knowledge: Rename", `/settings/knowledge/${s.knowledge.id}`, async (page) => { await tapText(page, ".knowledge-actions button", "Rename"); await page.waitForSelector(".knowledge-sheet"); }, { scope: ".knowledge-sheet", short: true, check: (page) => dialogContract(page, ".knowledge-sheet") }],
+    ["Knowledge: Add source, Note (many notes)", `/settings/knowledge/${s.knowledge.id}`, async (page) => { await tapText(page, ".knowledge-actions button", "Add source"); await page.waitForSelector(".knowledge-add .knowledge-candidates li"); }, { scope: ".knowledge-add", short: true, check: (page) => dialogContract(page, ".knowledge-add") }],
+    ["Knowledge: Add source, File (many files)", `/settings/knowledge/${s.knowledge.id}`, async (page) => { await tapText(page, ".knowledge-actions button", "Add source"); await tapText(page, ".knowledge-mode", "File"); await page.waitForFunction(() => document.querySelector(".knowledge-add .knowledge-candidates li")?.textContent.includes(".txt")); }, { scope: ".knowledge-add", short: true, check: (page) => dialogContract(page, ".knowledge-add") }],
+    ["Knowledge: Add source, Paste text with an error", `/settings/knowledge/${s.knowledge.id}`, async (page) => { await tapText(page, ".knowledge-actions button", "Add source"); await tapText(page, ".knowledge-mode", "Paste text"); await tapText(page, ".knowledge-add button[type=submit]", "Add text"); await page.waitForSelector(".knowledge-add .form-error"); }, { scope: ".knowledge-add", short: true, check: (page) => dialogContract(page, ".knowledge-add") }]
+  ] : []),
   ["Notifications", "/notifications"],
   // The Settings hub (Wave 37): a page with its nav beside the section on a computer; on a phone the
   // nav is the first screen (/settings) and each section a screen of its own.
@@ -775,13 +826,15 @@ try {
   if (seedFile) writeFileSync(seedFile, JSON.stringify(seeded));
   const only = process.env.ONLY ? new RegExp(process.env.ONLY, "i") : null;
   // 1280 × 600 is a short computer window: only the two-pane pages, whose panes are bounded by it.
-  for (const [width, height] of [[1280, 800], [390, 844], [1280, 600]]) {
+  // v0.30: 1280 × 500 and 390 × 667 only for the routes marked `short` (the Knowledge sheets).
+  for (const [width, height] of [[1280, 800], [390, 844], [1280, 600], [1280, 500], [390, 667]]) {
     let base = await session(`${PREFIX}-admin@nook.test`, "Scroll Admin", width, height);
     const nativeDialogs = base.nativeDialogs;
     for (const [name, path, setup, options] of ROUTES(seeded)) {
       if (only && !only.test(name)) continue;
       // 1280 × 600 also covers every dialog and sheet (a scope): a short window is where they overflow.
       if (height === 600 && !options?.split && !options?.scope) continue;
+      if ((height === 500 || height === 667) && !options?.short) continue;
       let page = null;
       try {
         if (!browser.connected || base.isClosed()) base = await freshSession(base, width, height);
@@ -814,8 +867,15 @@ try {
     await page.browserContext().close();
   }
 } finally {
-  await browser.close().catch(() => undefined);
+  // v0.30: a run once printed its summary and then never exited (until a 1800 s timeout). Close every
+  // browser it launched, give each 10 s, then kill its process group (this run's own Chrome only).
+  for (const launched of browsers) {
+    await Promise.race([launched.close().catch(() => undefined), sleep(10_000)]);
+    const pid = launched.process()?.pid;
+    if (pid) { try { process.kill(-pid, "SIGKILL"); } catch { /* already gone */ } }
+  }
 }
 const failed = results.filter((result) => !result.ok);
 console.log(`\n${results.length - failed.length}/${results.length} passed${failed.length ? `; failed: ${failed.map((result) => `${result.width} ${result.name}`).join(", ")}` : ""}`);
-process.exit(failed.length ? 1 : 0);
+// Exit explicitly once stdout has drained, whatever handle (a socket, a timer) is still open.
+process.stdout.write("", () => process.exit(failed.length ? 1 : 0));

@@ -15,17 +15,18 @@
 .agents-row .knowledge-status { margin-left: auto; }
 /* A base's line wraps rather than hiding its errors behind an ellipsis on a phone. */
 .knowledge-settings .agents-row-text small { white-space: normal; overflow-wrap: anywhere; }
-.knowledge-add-body { display: grid; gap: 10px; padding: 0 18px 18px; }
+/* v0.30: Add source is a .file-dialog-form (files.css): that rule pads it, scrolls it, and pins its footer. */
 .knowledge-modes { display: flex; flex-wrap: wrap; gap: 6px; }
-.knowledge-mode { min-height: 40px; border: 1px solid #303035; border-radius: 999px; padding: 0 14px; background: #0f0f11; color: #c8c8cd; font-weight: 600; cursor: pointer; }
+.knowledge-mode { min-height: 44px; border: 1px solid #303035; border-radius: 999px; padding: 0 14px; background: #0f0f11; color: #c8c8cd; font-weight: 600; cursor: pointer; }
 .knowledge-mode.active { border-color: #f3ce79; background: #1f1d16; color: #f3ce79; }
 .knowledge-search-field { display: flex; align-items: center; gap: 8px; border: 1px solid var(--field-border); border-radius: var(--field-radius); padding: 0 12px; background: var(--field-bg); }
 .knowledge-search-field:focus-within { border-color: var(--field-focus); box-shadow: var(--field-ring); }
 .knowledge-search-field svg { width: 16px; height: 16px; color: #8d8d94; }
-.knowledge-search-field input { flex: 1; min-width: 0; min-height: 44px; border: 0; background: transparent; color: inherit; font-size: var(--field-font-size); outline: none; box-shadow: none; }
-.knowledge-candidates { max-height: 50vh; overflow-y: auto; }
+.knowledge-search-field input[type="search"] { flex: 1; min-width: 0; min-height: 44px; border: 0; border-radius: 0; padding: 0; background: transparent; color: inherit; font-size: var(--field-font-size); outline: none; box-shadow: none; }
 .knowledge-candidates .action-button { flex: none; }
-.knowledge-paste { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .86rem; }
+/* A grid row in a height-bound form shrinks a scrolling textarea to nothing (19 px at 1280 × 500 with an
+   error): it keeps about ten lines, and the form scrolls instead. */
+.knowledge-paste { min-height: 160px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .86rem; }
 .knowledge-try { margin-top: 20px; }
 .knowledge-try-form { display: flex; gap: 8px; }
 .knowledge-try-form input { flex: 1; min-width: 0; min-height: 44px; border: 1px solid var(--field-border); border-radius: var(--field-radius); padding: 0 12px; background: var(--field-bg); color: #ededee; font-size: var(--field-font-size); outline: none; }
@@ -40,5 +41,4 @@
 @media (max-width: 760px) {
   .knowledge-actions .action-button { flex: 1 1 auto; }
   .knowledge-try-form { flex-direction: column; }
-  .knowledge-add-body { padding: 0 14px 14px; }
 }

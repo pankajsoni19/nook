@@ -99,6 +99,15 @@ export function permissionLabel(module: GrantModule, permission: KeyPermission) 
   return MCP_PERMISSIONS.find((item) => item.scope === scope)?.label ?? permission;
 }
 
+/**
+ * A grant's label in a key's summary and its row (v0.30 L2): Chat → Read limited to chosen knowledge
+ * bases reads no agents or chats, so it says what it does; on everything it keeps the full label.
+ */
+export function grantPermissionLabel(module: GrantModule, permission: KeyPermission, chosen: boolean) {
+  if (module === "agents" && permission === "read" && chosen) return "Search knowledge";
+  return permissionLabel(module, permission);
+}
+
 export function permissionHelp(module: GrantModule, permission: KeyPermission) {
   const scope = scopeFor(module, permission);
   const item = MCP_PERMISSIONS.find((entry) => entry.scope === scope);
@@ -235,7 +244,7 @@ export function grantChips(grants: readonly KeyGrantView[]) {
   return [...groups.entries()].map(([id, items]) => {
     const first = items[0]!;
     const selector = selectorFor(first.module, first.permission);
-    const base = `${MODULE_LABELS[first.module]}: ${permissionLabel(first.module, first.permission).toLowerCase()}`;
+    const base = `${MODULE_LABELS[first.module]}: ${grantPermissionLabel(first.module, first.permission, Boolean(first.resource)).toLowerCase()}`;
     let scope = "";
     if (first.resource) {
       const names = items.map((item) => item.resource?.name).filter((name): name is string => Boolean(name));
@@ -269,7 +278,7 @@ export function grantSummary(rows: readonly GrantRow[]) {
     const only = kinds.size === 1 ? [...kinds][0] : undefined;
     const noun = only ? KIND_NOUNS[only] : ["item", "items"] as const;
     const where = createOnly ? "" : row.applies === "chosen" && selector ? ` on ${row.resourceIds.length} ${row.resourceIds.length === 1 ? noun[0] : noun[1]}` : selector ? ` on all ${selector.many}` : "";
-    return `${MODULE_LABELS[row.module]}: ${permissionLabel(row.module, row.permission).toLowerCase()}${where}`;
+    return `${MODULE_LABELS[row.module]}: ${grantPermissionLabel(row.module, row.permission, row.applies === "chosen").toLowerCase()}${where}`;
   });
   return `${parts.join("; ")}. Never shares, never manages access or keys, and never deletes forever.`;
 }
