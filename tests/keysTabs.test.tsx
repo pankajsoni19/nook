@@ -249,3 +249,16 @@ describe("the page", () => {
     expect(read("../src/team/IntegrationPage.tsx")).not.toContain("onTab=");
   });
 });
+
+describe("the shared tab row on a narrow screen", () => {
+  test("an overflowing row fades toward the hidden tabs, and the selected tab is revealed clear of the fade", () => {
+    const tabs = read("settings/SettingsTabs.tsx");
+    expect(tabs).toContain('const more = start && end ? "both" : start ? "start" : end ? "end" : "";');
+    expect(tabs).toContain("const left = rowBox.left + (row.scrollLeft > 0 ? TAB_FADE : 0);");
+    expect(tabs).toContain('row.addEventListener("scroll", edges, { passive: true });');
+    const css = read("settings/settingsHub.css");
+    for (const edge of ["end", "start", "both"]) expect(css).toContain(`.settings-tabs[data-more="${edge}"] {`);
+    // Tabs are 44 px touch targets on a phone.
+    expect(css).toContain("/* A section's tabs are 44 px touch targets on a phone. */\n  .settings-tab { min-height: 44px; }");
+  });
+});

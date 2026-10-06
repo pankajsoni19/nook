@@ -43,6 +43,10 @@
    screen, labels never wrap, and only the row scrolls, never the page. */
 .settings-tabs { min-width: 0; max-width: 100%; display: flex; gap: 4px; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scrollbar-width: none; border-bottom: 1px solid var(--border); }
 .settings-tabs::-webkit-scrollbar { display: none; }
+/* More tabs past an edge (SettingsTabs sets data-more): that edge fades, so the row reads as scrollable. */
+.settings-tabs[data-more="end"] { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); }
+.settings-tabs[data-more="start"] { -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent); }
+.settings-tabs[data-more="both"] { -webkit-mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent); }
 .settings-tab { flex: none; min-height: 40px; display: inline-flex; align-items: center; gap: 8px; margin-bottom: -1px; border: 0; border-bottom: 2px solid transparent; padding: 0 12px; background: transparent; color: #a7a7ad; font-size: .88rem; font-weight: 600; white-space: nowrap; cursor: pointer; }
 .settings-tab:hover { color: #f2f2f3; }
 .settings-tab.active { border-bottom-color: var(--yellow); color: #f6ce73; }

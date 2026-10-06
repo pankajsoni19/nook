@@ -17,28 +17,45 @@ export type SettingsTab<Id extends string> = {
 /** The ids a tab and its panel share, so the caller's panel can point back at its tab. */
 export const settingsTabIds = (prefix: string, id: string) => ({ tab: `${prefix}-tab-${id}`, panel: `${prefix}-panel-${id}` });
 
+/** The width of the row's edge fade (settingsHub.css, `.settings-tabs[data-more]`). */
+const TAB_FADE = 28;
+
 export function SettingsTabs<Id extends string>({ label, idPrefix, tabs, selected, onSelect }: { label: string; idPrefix: string; tabs: ReadonlyArray<SettingsTab<Id>>; selected: Id; onSelect: (id: Id) => void }) {
   const refs = useRef(new Map<Id, HTMLButtonElement>());
   const rowRef = useRef<HTMLDivElement>(null);
   // A narrow screen: the selected tab (a deep link, Back or Forward) is scrolled into the row's view,
   // sideways only, again whenever the row's width changes (a count arriving, the page's styles loading).
+  // A row that overflows fades at the edge(s) with more tabs past it (`data-more`), so it reads as
+  // scrollable; the selected tab is revealed clear of that fade, never half under it.
   useEffect(() => {
     const row = rowRef.current;
     if (!row) return undefined;
+    const edges = () => {
+      const max = row.scrollWidth - row.clientWidth;
+      const start = row.scrollLeft > 1;
+      const end = max - row.scrollLeft > 1;
+      const more = start && end ? "both" : start ? "start" : end ? "end" : "";
+      if (more) row.dataset.more = more;
+      else delete row.dataset.more;
+    };
     const reveal = () => {
       const tab = refs.current.get(selected);
-      if (!tab) return;
-      const rowBox = row.getBoundingClientRect();
-      const tabBox = tab.getBoundingClientRect();
-      if (tabBox.left < rowBox.left) row.scrollLeft -= rowBox.left - tabBox.left;
-      else if (tabBox.right > rowBox.right) row.scrollLeft += tabBox.right - rowBox.right;
+      if (tab) {
+        const rowBox = row.getBoundingClientRect();
+        const tabBox = tab.getBoundingClientRect();
+        const left = rowBox.left + (row.scrollLeft > 0 ? TAB_FADE : 0);
+        const right = rowBox.right - (row.scrollWidth - row.clientWidth - row.scrollLeft > 0 ? TAB_FADE : 0);
+        if (tabBox.left < left) row.scrollLeft -= left - tabBox.left;
+        else if (tabBox.right > right) row.scrollLeft += tabBox.right - right;
+      }
+      edges();
     };
     reveal();
-    if (typeof ResizeObserver === "undefined") return undefined;
-    const observer = new ResizeObserver(reveal);
-    observer.observe(row);
-    for (const tab of refs.current.values()) observer.observe(tab);
-    return () => observer.disconnect();
+    row.addEventListener("scroll", edges, { passive: true });
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(reveal);
+    observer?.observe(row);
+    for (const tab of refs.current.values()) observer?.observe(tab);
+    return () => { observer?.disconnect(); row.removeEventListener("scroll", edges); };
   }, [selected, tabs.length]);
   function onKeyDown(event: KeyboardEvent<HTMLButtonElement>, index: number) {
     const last = tabs.length - 1;
