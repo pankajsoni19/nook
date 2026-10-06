@@ -32,7 +32,11 @@ describe("Wave 27 QA fixes (client)", () => {
     expect(MCP_VALUES_SURFACE_HINT).toContain("MCP only");
     const source = await Bun.file(join(root, "keys", "KeysSettings.tsx")).text();
     expect(source).toContain("kind === \"vault\" && mcpValues && surfaces !== \"mcp\"");
-    // The default surface stays MCP.
-    expect(source).toContain("const [surfaces, setSurfaces] = useState<KeySurfaces>(\"mcp\");");
+    // The default surface stays MCP; the Vault tab's preset starts a vault key on REST where policy allows it.
+    const { createPreset } = await import("../src/keys/KeysSettings");
+    expect(createPreset("general", true, { keyDefaultDays: 90, restAllowed: true }).surfaces).toBe("mcp");
+    expect(createPreset("vault", true, { keyDefaultDays: 90, restAllowed: true }).surfaces).toBe("rest");
+    expect(createPreset("vault", true, { keyDefaultDays: 90, restAllowed: false }).surfaces).toBe("mcp");
+    expect(source).toContain("const [surfaces, setSurfaces] = useState<KeySurfaces>(preset.surfaces);");
   });
 });

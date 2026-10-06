@@ -155,3 +155,10 @@
 .keys-switch small.keys-switch-warning { color: #e3cf9c; }
 .keys-switch input { width: 20px; height: 20px; flex: none; accent-color: #d7b86a; }
 .scope-chips li.keys-flag { border-style: dashed; }
+
+
+/* API keys' tabs (SettingsTabs): General, Vault, Agents. The bar is the grid item, so the scrolling row keeps its height. */
+.keys-tabs-bar { min-width: 0; }
+.keys-tabpanel:not([hidden]) { gap: 16px; }
+.keys-tabpanel:focus-visible { outline: 2px solid var(--yellow); outline-offset: 4px; border-radius: 6px; }
+.keys-tab-intro { margin: 0; color: #a9a9ae; font-size: .84rem; }
