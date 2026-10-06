@@ -1,9 +1,10 @@
 import { audit, db, now } from "../db";
 import { listApiKeys, ownApiKey } from "../apiKeys";
 import { loadLiveKey, type McpKeyContext } from "../mcpTools";
-import type { AgentToolPolicy, AgentToolRef, LinkableKey, NookLink, ToolCatalog, ToolPolicy } from "../../shared/agents";
+import type { AgentToolPolicy, AgentToolRef, LinkableKey, LinkState, NookLink, ToolCatalog, ToolPolicy } from "../../shared/agents";
 import type { AgentRow } from "./agentsService";
 import { nookCatalogFor, nookToolSpec, nookToolsFor, type NookResolved } from "./nookBridge";
+import { roleMayChat } from "./settings";
 import { AgentError } from "./status";
 import { defaultPolicy, parseTools, serverAvailableTo, serverPolicies, serverRowOrNull, serversAvailableTo, type ToolServerRow } from "./toolServers";
 
@@ -121,6 +122,28 @@ export function liveLinkedKey(agentId: string, userId: string): McpKeyContext | 
   return key;
 }
 
+/**
+ * The caller's link as the editor and the chat show it (Wave 41 QA Q4): none, live, or a key that is
+ * no longer live (revoked, expired, or otherwise inactive), named so the person can link another.
+ */
+export function linkStateOf(agentId: string, userId: string): { state: LinkState; keyName: string | null } {
+  const row = linkRow(agentId, userId);
+  if (!row?.nook_key_id) return { state: "none", keyName: null };
+  if (liveLinkedKey(agentId, userId)) return { state: "live", keyName: ownApiKey(userId, row.nook_key_id)?.name ?? null };
+  const key = ownApiKey(userId, row.nook_key_id);
+  if (!key) return { state: "inactive", keyName: null };
+  return { state: key.state === "revoked" ? "revoked" : key.state === "expired" ? "expired" : "inactive", keyName: key.name };
+}
+
+/** The tool-result text for a Nook call through a link whose key is gone (QA Q4): names the key, says what to do. */
+export function inactiveLinkMessage(agentId: string, userId: string): string | null {
+  const link = linkStateOf(agentId, userId);
+  if (link.state === "none" || link.state === "live") return null;
+  const name = link.keyName ? `"${link.keyName}"` : "";
+  const why = link.state === "revoked" ? "was revoked" : link.state === "expired" ? "has expired" : "is no longer active";
+  return `The linked Nook key ${name}${name ? " " : ""}${why}, so Nook's tools are off for this agent. The person can link another key in the agent's settings.`;
+}
+
 // --- The catalog (plan §12 `GET /api/agents/catalog`) -----------------------------------------------
 
 export function catalogFor(role: string, agentId: string | null, userId: string): ToolCatalog {
@@ -132,7 +155,8 @@ export function catalogFor(role: string, agentId: string | null, userId: string)
     };
   });
   const key = agentId ? liveLinkedKey(agentId, userId) : null;
-  return { servers, nook: { linked: key !== null, tools: nookCatalogFor(key) } };
+  // Without a live key the picker lists none of Nook's tools (QA Q4): what runs is bounded by the key.
+  return { servers, nook: { linked: key !== null, linkState: agentId ? linkStateOf(agentId, userId).state : "none", tools: key ? nookCatalogFor(key) : [] } };
 }
 
 // --- Per-step resolution (plan §2.1 `toolCatalog`, D358) ---------------------------------------------
@@ -158,9 +182,46 @@ function uniqueName(base: string, taken: Set<string>) {
  */
 export type ExternalToolOptions = { nookKey: McpKeyContext | null; surface: "mcp" | "rest" };
 
+/** What a resolved tool was at offer time, to compare against live rows before a call runs (review M3). */
+export type ToolIdentity =
+  | { kind: "server"; serverId: string; toolName: string; revision: number }
+  | { kind: "nook"; toolName: string; mode: NookResolved["mode"]; keyId: string };
+
+export const identityOf = (tool: ResolvedTool): ToolIdentity => tool.kind === "server"
+  ? { kind: "server", serverId: tool.serverId!, toolName: tool.toolName, revision: tool.serverRow!.revision }
+  : { kind: "nook", toolName: tool.toolName, mode: tool.nook!.mode, keyId: tool.nook!.keyId };
+
+/** The agent row and the runner's role as they stand now (the agent not in the Bin, the account active, the role allowed to chat). */
+export function liveRunner(agentId: string, userId: string): { agent: AgentRow; role: string } | null {
+  const agent = db.query("SELECT * FROM agents WHERE id = ? AND deleted_at IS NULL").get(agentId) as AgentRow | null;
+  if (!agent) return null;
+  const user = db.query("SELECT role FROM users WHERE id = ? AND disabled_at IS NULL").get(userId) as { role: string } | null;
+  if (!user || !roleMayChat(user.role)) return null;
+  return { agent, role: user.role };
+}
+
+/**
+ * The one tool a call is about to run, re-resolved against live rows just before it runs (review
+ * M3): the live agent row (its picks and `nook_direct_writes`), the runner's live role and account,
+ * the live server row (enabled, available to the runner, the same revision), the live policy, and
+ * the live key with the same mode (the linked key in a chat; the calling key, re-read, in an API or
+ * MCP run, with the run's auto-only set). Null when anything changed: the call is refused.
+ */
+export function liveToolFor(agentId: string, userId: string, identity: ToolIdentity, external: ExternalToolOptions | null = null): ResolvedTool | null {
+  const live = liveRunner(agentId, userId);
+  if (!live) return null;
+  const match = resolveTools(live.agent, { userId, role: live.role }, external, identity).find((tool) => identity.kind === "server"
+    ? tool.kind === "server" && tool.serverId === identity.serverId && tool.toolName === identity.toolName && tool.serverRow!.revision === identity.revision
+    : tool.kind === "nook" && tool.toolName === identity.toolName && tool.nook!.mode === identity.mode && tool.nook!.keyId === identity.keyId);
+  return match ?? null;
+}
+
 /** The agent's remote and Nook tools the runner may call at this step; disabled, `off`, and unreachable rights drop silently. */
-export function resolveTools(agent: AgentRow, runner: { userId: string; role: string }, external: ExternalToolOptions | null = null): ResolvedTool[] {
-  const refs = agentToolRefs(agent.id);
+export function resolveTools(agent: AgentRow, runner: { userId: string; role: string }, external: ExternalToolOptions | null = null, only?: ToolIdentity): ResolvedTool[] {
+  const all = agentToolRefs(agent.id);
+  const refs = all.filter((ref) => !only || (only.kind === "server" ? ref.source === "server" && ref.serverId === only.serverId && ref.toolName === only.toolName : ref.source === "nook" && ref.toolName === only.toolName));
+  // The trifecta (plan §5.2 [14], review L10): with Nook tools picked, an open-world remote tool asks first.
+  const hasNook = all.some((ref) => ref.source === "nook");
   const taken = new Set<string>();
   const resolved: ResolvedTool[] = [];
   const servers = new Map<string, { row: ToolServerRow; tools: Map<string, ReturnType<typeof parseTools>[number]>; policies: Map<string, ToolPolicy> } | null>();
@@ -175,8 +236,10 @@ export function resolveTools(agent: AgentRow, runner: { userId: string; role: st
     if (!server || !tool) continue;
     const admin = server.policies.get(tool.name) ?? defaultPolicy(tool);
     // The agent can only be stricter (D358): off wins, then confirm, then the admin's policy.
-    const policy: ToolPolicy = admin === "off" || ref.policy === "off" ? "off" : ref.policy === "confirm" ? "confirm" : admin;
+    let policy: ToolPolicy = admin === "off" || ref.policy === "off" ? "off" : ref.policy === "confirm" ? "confirm" : admin;
     if (policy === "off") continue;
+    if (policy === "auto" && hasNook && tool.openWorld) policy = "confirm";
+    // An API or MCP run never waits on a person (D352): only what runs on its own is offered.
     if (external && policy !== "auto") continue;
     resolved.push({
       modelName: uniqueName(`${server.row.slug}__${tool.name}`, taken), kind: "server", serverId: server.row.id, server: server.row.slug, serverName: server.row.name, toolName: tool.name,

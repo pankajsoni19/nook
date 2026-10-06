@@ -64,6 +64,9 @@ export function openSecret(owner: SecretOwner, rowId: string, envelope: string, 
  * only for secrets of at least 16 characters (review L8: seven of a short key's characters would
  * be most of it); shorter ones show `…`.
  */
+/** The hint a read returns (Wave 41 QA L5): null without a secret or when it was too short to hint at (the UI says "Saved"). */
+export const shownHint = (ciphertext: string | null, hint: string | null) => ciphertext && hint && hint !== "…" ? hint : null;
+
 export function secretHint(plaintext: string) {
   const text = plaintext.trim();
   if (text.length < 16) return "…";

@@ -29,12 +29,14 @@ type Dialog = { kind: "create" } | { kind: "edit"; key: ApiKey } | { kind: "rota
 
 const messageOf = (reason: unknown, fallback: string) => reason instanceof Error ? reason.message : fallback;
 
-export function KeysSettings({ onPendingChange, onNestedDialogChange, totpEnabled, role, notice = null, integration, reopenOnForward = true }: {
+export function KeysSettings({ onPendingChange, onNestedDialogChange, totpEnabled, role, notice = null, integration, reopenOnForward = true, vaultAvailable = true }: {
   onPendingChange: (pending: boolean) => void; onNestedDialogChange?: (open: boolean) => void; totpEnabled: boolean; role: string | undefined; /** Q2: the result of a Google confirmation started here. */ notice?: React.ReactNode;
   /** Team → Integrations (Wave 36): an admin manages this integration's keys (wrap in KeysApiContext); `role` is the integration's. */
   integration?: { name: string };
   /** Friction 12 (Settings): Forward after Back reopens the key dialog Back closed. Team → Integrations turns it off, like its other sheets (Q-L1). */
   reopenOnForward?: boolean;
+  /** Wave 41 QA L8: with the Vault off (`features.vault`), no vault key kind and no call to /api/vault/vaults. */
+  vaultAvailable?: boolean;
 }) {
   const keysApi = useKeysApi();
   const [data, setData] = useState<KeyList | null>(null);
@@ -167,7 +169,7 @@ export function KeysSettings({ onPendingChange, onNestedDialogChange, totpEnable
 
     {/* Back off the phone sentinel closes a key dialog; Forward shows the same one again (Friction 12). */}
     <HistoryDialogReopen.Provider value={dialog && reopenOnForward ? () => setDialog(dialog) : null}>
-    {dialog?.kind === "create" && data && <CreateKeyDialog policy={data.policy} role={role} totpEnabled={totpEnabled} allowVault={!integration} onKind={setCreatingKind} onClose={closeDialog} onCreated={(key) => { closeDialog(); setNewToken({ token: key.token, name: key.name, rotated: false }); load(); }} />}
+    {dialog?.kind === "create" && data && <CreateKeyDialog policy={data.policy} role={role} totpEnabled={totpEnabled} allowVault={!integration && vaultAvailable} onKind={setCreatingKind} onClose={closeDialog} onCreated={(key) => { closeDialog(); setNewToken({ token: key.token, name: key.name, rotated: false }); load(); }} />}
     {dialog?.kind === "edit" && data && <EditKeyDialog apiKey={dialog.key} policy={data.policy} role={role} onClose={closeDialog} onSaved={(message) => { closeDialog(); setStatus(message); load(); }} />}
     {dialog?.kind === "rotate" && data && <RotateKeyDialog apiKey={dialog.key} policy={data.policy} role={role} totpEnabled={totpEnabled} onClose={closeDialog} onRotated={(key) => { closeDialog(); setNewToken({ token: key.token, name: key.name, rotated: true }); load(); }} />}
     {dialog?.kind === "revoke" && <RevokeKeyDialog apiKey={dialog.key} onClose={closeDialog} onRevoked={() => { closeDialogAfterReload(revokedFocusKey(dialog.key.id)); setStatus(`${dialog.key.name} was revoked.`); }} />}

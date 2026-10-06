@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,11 +13,15 @@ import { McpClientError, type McpTransport } from "./mcpClient";
  * server as a tool server (transport `stdio`), and the Settings row says "Declared by the host ·
  * runs as Nook's user".
  *
- * The child gets only the declared variables (nothing of Nook's environment: no `*_KEY`, `DATABASE`,
- * `RESEND_*`), an empty temporary cwd, 5 s to start, the server's tool timeout per call, 1 MiB of
- * stdout per message, one process per server, and at most 3 restarts in 10 minutes. OPERATIONS
- * recommends an HTTP bridge in a separate container instead; the residual (same UID as Nook) is
- * documented.
+ * The child gets only the declared variables, an empty temporary cwd (removed when it exits), 5 s
+ * to answer `initialize`, the server's tool timeout per call, 1 MiB of stdout per message, one
+ * process per server, and at most 3 restarts in 10 minutes per server id.
+ *
+ * None of that is a security boundary (review M4, T308): the child runs as Nook's own user, so it
+ * can read `/proc/<nook pid>/environ` (where compose puts the keys), the `*_FILE` secrets, the
+ * database, and the vault. Enabling stdio gives the child full trust, equal to the key material.
+ * The environment scrub only keeps Nook's variables out of the child's own environment by
+ * accident-proofing; OPERATIONS recommends an HTTP bridge in a separate container as the only setup.
  */
 
 export type StdioDeclaration = { id: string; name: string; command: string; args: string[]; env: Record<string, string> };
@@ -90,44 +94,73 @@ export function setStdioDeclarationsForTests(list: StdioDeclaration[]) {
 type Pending = { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> };
 
 /**
+ * Starts per declared server id (review L3), shared by every transport of that id: a new session
+ * (after an edit, an idle sweep, or a sync) never resets the cap. A start that follows Nook's own
+ * close of the previous child is not counted; a start after the child exited on its own is.
+ */
+const startLog = new Map<string, { starts: number[]; closedByNook: boolean }>();
+
+/** Test hook. */
+export function resetStdioStartsForTests() {
+  startLog.clear();
+}
+
+/**
  * One child process speaking newline-delimited JSON-RPC over stdio. Started on first use, with
- * the scrubbed environment; restarted at most 3 times in 10 minutes.
+ * the declared environment only; at most 3 counted starts in 10 minutes per server id; ready only
+ * once it answers `initialize` within 5 s; its temporary cwd is removed when it exits.
  */
 export class McpStdioTransport implements McpTransport {
   private child: ReturnType<typeof Bun.spawn> | null = null;
+  private childExited = true;
+  private childReady = false;
+  private spawns = 0;
   private readonly pending = new Map<number, Pending>();
   private nextId = 1;
-  private starts: number[] = [];
   private buffer = "";
 
   constructor(private readonly declaration: StdioDeclaration, private readonly timeoutMs: number) {}
 
-  private async ensureChild() {
-    if (this.child && this.child.exitCode === null) return this.child;
+  /** One number per child; an exited child already counts as the next (the session then greets the new one). */
+  generation() {
+    return this.childExited ? this.spawns + 1 : this.spawns;
+  }
+
+  private ensureChild() {
+    if (this.child && !this.childExited) return this.child;
     const now = Date.now();
-    this.starts = this.starts.filter((at) => now - at < RESTART_WINDOW_MS);
-    if (this.starts.length >= RESTART_CAP) throw new McpClientError("NETWORK", "The stdio server restarted too often; it is paused for a while");
-    this.starts.push(now);
+    const log = startLog.get(this.declaration.id) ?? { starts: [], closedByNook: false };
+    startLog.set(this.declaration.id, log);
+    log.starts = log.starts.filter((at) => now - at < RESTART_WINDOW_MS);
+    if (!log.closedByNook) {
+      if (log.starts.length >= RESTART_CAP) throw new McpClientError("NETWORK", "The stdio server restarted too often; it is paused for a while");
+      log.starts.push(now);
+    }
+    log.closedByNook = false;
     const cwd = mkdtempSync(join(tmpdir(), "nook-mcp-"));
     let child: ReturnType<typeof Bun.spawn>;
     try {
       child = Bun.spawn([this.declaration.command, ...this.declaration.args], { cwd, env: { ...this.declaration.env, PATH: "/usr/local/bin:/usr/bin:/bin" }, stdin: "pipe", stdout: "pipe", stderr: "ignore" });
     } catch {
+      rmSync(cwd, { recursive: true, force: true });
       throw new McpClientError("NETWORK", "The stdio server could not be started");
     }
     this.child = child;
+    this.childExited = false;
+    this.childReady = false;
+    this.spawns += 1;
     this.buffer = "";
     void this.readLoop(child);
     void child.exited.then(() => {
+      if (this.child === child) { this.childExited = true; this.childReady = false; }
+      // The child's temporary cwd goes with it (review L3).
+      try { rmSync(cwd, { recursive: true, force: true }); } catch { /* best effort */ }
       for (const [id, entry] of this.pending) {
         clearTimeout(entry.timer);
-        entry.reject(new McpClientError("NETWORK", "The stdio server exited"));
+        entry.reject(new McpClientError("NETWORK", this.child === child && !this.childReady ? "The stdio server exited before it was ready" : "The stdio server exited"));
         this.pending.delete(id);
       }
     });
-    // 5 s to start: the first write succeeds once the pipe is open; a child that dies at once fails the first request.
-    await Promise.race([new Promise((resolve) => setTimeout(resolve, 20)), child.exited]);
-    if (child.exitCode !== null) throw new McpClientError("NETWORK", "The stdio server exited while starting");
     return child;
   }
 
@@ -173,19 +206,28 @@ export class McpStdioTransport implements McpTransport {
 
   private write(message: unknown) {
     const child = this.child;
-    if (!child || child.exitCode !== null) return;
-    const stdin = child.stdin as { write: (text: string) => unknown; flush?: () => unknown };
-    stdin.write(`${JSON.stringify(message)}\n`);
-    stdin.flush?.();
+    if (!child || this.childExited) return;
+    try {
+      const stdin = child.stdin as { write: (text: string) => unknown; flush?: () => unknown };
+      stdin.write(`${JSON.stringify(message)}\n`);
+      stdin.flush?.();
+    } catch {
+      // The pipe closed under us; `exited` rejects what is pending.
+    }
   }
 
   async request(method: string, params: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
-    await this.ensureChild();
+    const child = this.ensureChild();
+    // A new child is ready only once it answers `initialize` (review L3): anything else first is refused,
+    // so a restarted child is never spoken to before the session greets it again.
+    if (!this.childReady && method !== "initialize") throw new McpClientError("MCP_PROTOCOL", "The stdio server restarted and was not initialized again");
     const id = this.nextId++;
-    return new Promise<unknown>((resolve, reject) => {
+    const result = await new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new McpClientError("MCP_TIMEOUT", "The stdio server did not answer in time"));
+        // 5 s to start (review L3): a child that does not answer `initialize` in time is stopped.
+        if (method === "initialize" && !this.childReady && this.child === child) child.kill();
+        reject(new McpClientError("MCP_TIMEOUT", method === "initialize" ? "The stdio server did not become ready within 5 s" : "The stdio server did not answer in time"));
       }, method === "initialize" ? START_TIMEOUT_MS : this.timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
       signal?.addEventListener("abort", () => {
@@ -196,16 +238,27 @@ export class McpStdioTransport implements McpTransport {
       }, { once: true });
       this.write({ jsonrpc: "2.0", id, method, params });
     });
+    if (method === "initialize" && this.child === child && !this.childExited) this.childReady = true;
+    return result;
   }
 
   async notify(method: string, params: Record<string, unknown>) {
-    await this.ensureChild();
+    // Never starts a child just to notify it (a cancel for a child that is gone has no one to tell).
+    if (!this.child || this.childExited) return;
     this.write({ jsonrpc: "2.0", method, params });
   }
 
   async close() {
     const child = this.child;
+    if (!child) return;
     this.child = null;
-    if (child && child.exitCode === null) child.kill();
+    if (!this.childExited) {
+      // Nook's own close: the next start of this server id is not a restart.
+      const log = startLog.get(this.declaration.id);
+      if (log) log.closedByNook = true;
+      this.childExited = true;
+      this.childReady = false;
+      child.kill();
+    }
   }
 }

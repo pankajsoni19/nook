@@ -90,6 +90,22 @@ async function resolveBounded(host: string): Promise<string[]> {
 }
 
 /**
+ * The save-time rules for an endpoint an admin stores (a provider's base URL, a tool server's URL;
+ * QA Q7, Wave 41 QA Q1): the shape check, plain http only for hosts in
+ * AGENT_ALLOWED_PRIVATE_HOSTS, and a private literal address only when listed. No DNS here (the
+ * request-time check resolves and re-checks every call).
+ */
+export function checkSavedEndpoint(value: string): URL {
+  const url = checkEgressUrl(value);
+  const host = url.hostname.toLowerCase().replace(/\.$/, "").replace(/^\[|\]$/g, "");
+  const literal = isIP(host) ? [host] : [];
+  const listed = privateHostAllowed(host, literal);
+  if (url.protocol === "http:" && !listed) throw new EgressError("URL_REFUSED", "Plain http is allowed only for hosts in AGENT_ALLOWED_PRIVATE_HOSTS");
+  if (!listed && literal.some((address) => isPrivateAddress(address))) throw new EgressError("PRIVATE_ADDRESS", "The endpoint is a private or local address; list it in AGENT_ALLOWED_PRIVATE_HOSTS to allow it");
+  return url;
+}
+
+/**
  * Shape plus DNS plus the private-range rule: the URL when it may be called now, else an
  * `EgressError`. Called before every request.
  */

@@ -3,7 +3,7 @@ import { purgeAfterFrom } from "../bin";
 import { AGENT_BOUNDS, type AgentDetail, type AgentSummary, type AgentToolRef } from "../../shared/agents";
 import { readAgentSettings, roleMayCreate } from "./settings";
 import { AgentError } from "./status";
-import { agentToolRefs, linkRow, setAgentTools, trifectaOf } from "./tools";
+import { agentToolRefs, linkStateOf, setAgentTools, trifectaOf } from "./tools";
 
 /**
  * Agents (plan §5.1, D355): owner-private in AC-A (sharing through `agent_access` is AC-D). Create
@@ -29,11 +29,12 @@ const starters = (json: string): string[] => {
 
 export const agentSummary = (row: AgentRow, userId: string): AgentSummary => {
   const tools = agentToolRefs(row.id);
+  const link = linkStateOf(row.id, userId).state;
   return {
     id: row.id, ownerId: row.owner_id, name: row.name, description: row.description, icon: row.icon, color: row.color,
     providerId: row.provider_id, model: row.model, maxSteps: row.max_steps, temperature: row.temperature, maxOutputTokens: row.max_output_tokens,
     starters: starters(row.starters_json), revision: row.revision, createdAt: row.created_at, updatedAt: row.updated_at, isOwner: row.owner_id === userId,
-    tools, nookDirectWrites: row.nook_direct_writes === 1, linked: (linkRow(row.id, userId)?.nook_key_id ?? null) !== null, trifecta: trifectaOf(tools)
+    tools, nookDirectWrites: row.nook_direct_writes === 1, linked: link === "live", linkState: link, trifecta: trifectaOf(tools)
   };
 };
 export const agentDetail = (row: AgentRow, userId: string): AgentDetail => ({ ...agentSummary(row, userId), systemPrompt: row.system_prompt });

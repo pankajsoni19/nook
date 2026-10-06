@@ -1,10 +1,10 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { addressPrefix, isKeyDenial, resolveKeyActor, type KeyActor } from "../apiKeys";
 import { config } from "../config";
 import { audit, db } from "../db";
 import { keyReach, reachCovers } from "../keyResources";
 import { hasScope } from "../mcpScopes";
-import { AGENT_BOUNDS, EXTERNAL_BOUNDS, PREAMBLE_VERSION, preambleFor, toolResultMarker, type AuditVia, type ExternalRunResult, type RunStatus, type TokenUsage } from "../../shared/agents";
+import { AGENT_BOUNDS, EXTERNAL_BOUNDS, PREAMBLE_VERSION, preambleFor, toolResultEnd, toolResultMarker, type AuditVia, type ExternalRunResult, type RunStatus, type TokenUsage } from "../../shared/agents";
 import type { AgentRow } from "./agentsService";
 import { finishAuditRun, insertAuditRun, insertAuditStep, markAuditFirstToken, markAuditStarted } from "./audit";
 import { withinAgentRun } from "./depth";
@@ -16,7 +16,7 @@ import { connectionFor } from "./providers";
 import { activeRun, assertBudget, assertKeySlots, capResultText, chargeUsage, dayOf, registerActiveRun, releaseActiveRun, secondsToMidnight, withTimeout, type ActiveRun } from "./runs";
 import { readAgentSettings, roleMayChat } from "./settings";
 import { AgentError, agentsStatus } from "./status";
-import { resolveTools, type ResolvedTool } from "./tools";
+import { identityOf, liveToolFor, resolveTools, type ExternalToolOptions, type ResolvedTool } from "./tools";
 import { sessionFor } from "./toolServers";
 
 /**
@@ -183,6 +183,9 @@ const keyInactive = () => new AgentError(401, "KEY_INACTIVE", ERROR_TEXT.KEY_INA
 
 type CancelReason = "stop" | "timeout";
 
+/** Why an API or MCP run had no tool to run (only tools that run on their own are offered there). */
+const NO_TOOLS_REASON = "Over the API and MCP an agent gets only the tools that run on their own; tools that ask a person first are not offered.";
+
 async function execute(state: LiveExternal, active: ActiveRun, caller: ExternalCaller, agent: AgentRow, ownerRole: string, turns: ChatTurn[], connection: ReturnType<typeof connectionFor>): Promise<ExternalRunResult> {
   const runId = state.runId;
   const timeoutS = Math.min(config.agents.runTimeoutS || EXTERNAL_BOUNDS.runTimeoutS, EXTERNAL_BOUNDS.runTimeoutS);
@@ -198,6 +201,7 @@ async function execute(state: LiveExternal, active: ActiveRun, caller: ExternalC
     pendingDelta = "";
   };
   /** The right again (T319); without it the run ends here. Returns the key for the Nook tools. */
+  const externalOptions = (right: ExternalRight): ExternalToolOptions => ({ nookKey: right.key, surface: caller.surface });
   const recheck = () => {
     const right = effectiveRight(caller.keyId, caller.surface, agent.id);
     if (!right) throw keyInactive();
@@ -205,7 +209,7 @@ async function execute(state: LiveExternal, active: ActiveRun, caller: ExternalC
   };
   const runOne = async (call: ModelToolCall): Promise<ToolExecution> => {
     const started = Date.now();
-    recheck();
+    const right = recheck();
     const tool = resolved.find((item) => item.modelName === call.name) ?? null;
     const view = { name: tool?.toolName ?? call.name, server: tool?.server ?? "?", ok: null as boolean | null, durationMs: null as number | null };
     state.toolCalls.push(view);
@@ -233,17 +237,22 @@ async function execute(state: LiveExternal, active: ActiveRun, caller: ExternalC
     } catch {
       return fail("INVALID_ARGUMENTS", "arguments were not valid JSON");
     }
+    // Rights are live per call (AC-B review M3): the tool is re-resolved against the live agent row, the
+    // owner's role, the server row (same revision), the policy, and the calling key (re-read just above).
+    const live = liveToolFor(agent.id, active.userId, identityOf(tool), externalOptions(right));
+    if (!live) return fail("TOOL_UNAVAILABLE", "This tool is no longer available to this agent (it was disabled, removed, changed, or the rights changed); the call was not run");
     // Belt and braces (D352): nothing that asks first is ever offered over the API, so nothing can run here unasked.
-    if (tool.policy !== "auto") return fail("DENIED", "This tool needs a person's confirmation and cannot run over the API");
+    if (live.policy !== "auto") return fail("DENIED", "This tool needs a person's confirmation and cannot run over the API");
     let text: string;
     let ok: boolean;
     try {
-      if (tool.nook) {
-        const outcome = await runNookTool(tool.nook, args, { runId, agentId: agent.id, agentName: agent.name, via: caller.via });
+      if (live.nook) {
+        // The same per-call timeout as a server's (AC-B review L9); the result of a late call is discarded.
+        const outcome = await withTimeout(runNookTool(live.nook, args, { runId, agentId: agent.id, agentName: agent.name, via: caller.via }), live.timeoutMs, active.controller.signal);
         text = outcome.text;
         ok = outcome.ok;
       } else {
-        const outcome = await withTimeout(sessionFor(tool.serverRow!).callTool(tool.toolName, args, active.controller.signal), tool.timeoutMs, active.controller.signal);
+        const outcome = await withTimeout(sessionFor(live.serverRow!).callTool(live.toolName, args, active.controller.signal), live.timeoutMs, active.controller.signal);
         text = outcome.text;
         ok = !outcome.isError;
       }
@@ -254,12 +263,15 @@ async function execute(state: LiveExternal, active: ActiveRun, caller: ExternalC
       console.error("Agent tool call failed", error instanceof Error ? error.name : "Unknown error");
       return fail("INTERNAL", "The tool could not be run");
     }
-    const capped = capResultText(text, tool.resultCapBytes);
+    const capped = capResultText(text, live.resultCapBytes);
     record(ok, capped.text, capped.truncated);
-    return { content: `${toolResultMarker(tool.server, tool.toolName)}\n${capped.text}${capped.truncated ? `\n[truncated: the result was ${capped.bytes} bytes; the first ${tool.resultCapBytes} are shown]` : ""}` };
+    // The fence's nonce is made after the result exists, so the result cannot close the fence (AC-B review L7).
+    const nonce = randomBytes(6).toString("hex");
+    return { content: `${toolResultMarker(live.server, live.toolName, nonce)}\n${capped.text}${capped.truncated ? `\n[truncated: the result was ${capped.bytes} bytes; the first ${live.resultCapBytes} are shown]` : ""}\n${toolResultEnd(nonce)}` };
   };
 
   let status: RunStatus = "running";
+  let droppedToolCalls = 0;
   let errorCode: string | null = null;
   let errorMessage: string | null = null;
   try {
@@ -305,13 +317,18 @@ async function execute(state: LiveExternal, active: ActiveRun, caller: ExternalC
         }
       },
       tools: () => {
-        if (state.toolCalls.length >= AGENT_BOUNDS.toolCallsPerRun) { resolved = []; return []; }
+        resolved = [];
+        if (state.toolCalls.length >= AGENT_BOUNDS.toolCallsPerRun) return [];
+        // The right, the agent row, and the owner's role as they stand now (AC-B review M3), never the run's start.
         const right = recheck();
-        resolved = resolveTools(agent, { userId: active.userId, role: ownerRole }, { nookKey: right.key, surface: caller.surface });
+        resolved = resolveTools(right.agent, { userId: active.userId, role: right.owner.role }, externalOptions(right));
         return resolved.map((tool) => ({ name: tool.modelName, description: tool.description, parameters: tool.parameters }));
       },
-      execute: runOne
+      execute: runOne,
+      // A tool call nothing could run ends the answer with the reason (AC-B QA L9); the output, and so the Audit log, keeps it.
+      noToolsReason: () => NO_TOOLS_REASON
     });
+    droppedToolCalls = result.droppedToolCalls;
     status = result.status === "step_limit" ? "step_limit" : "ok";
   } catch (error) {
     const reason = active.controller.signal.aborted ? (active.controller.signal.reason as CancelReason | undefined) ?? "stop" : null;
@@ -341,7 +358,7 @@ async function execute(state: LiveExternal, active: ActiveRun, caller: ExternalC
   } catch (error) {
     console.error("Agent API run could not be recorded", error instanceof Error ? error.name : "Unknown error");
   }
-  audit(active.userId, null, "agents.run.finish", { runId, via: caller.via, keyId: caller.keyId, agentId: agent.id, status, errorCode, steps: state.steps, toolCalls: state.toolCalls.length, promptTokens: state.usage.promptTokens, completionTokens: state.usage.completionTokens });
+  audit(active.userId, null, "agents.run.finish", { runId, via: caller.via, keyId: caller.keyId, agentId: agent.id, status, errorCode, steps: state.steps, toolCalls: state.toolCalls.length, droppedToolCalls, promptTokens: state.usage.promptTokens, completionTokens: state.usage.completionTokens });
   const result: ExternalRunResult = {
     runId, agentId: agent.id, status, output: state.output, steps: state.steps, toolCalls: state.toolCalls.map((call) => ({ ...call })),
     usage: { ...state.usage },

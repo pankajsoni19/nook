@@ -250,8 +250,29 @@ export type LoopInput = {
   execute?: (call: ModelToolCall, step: number) => Promise<ToolExecution>;
   /** AC-C (plan §7.1, T319): before every model call, the last one included; throws to end the run (a revoked key). */
   beforeStep?: (step: number) => void;
+  /** Why no tools were offered, when the run knows (a linked key that died, QA Q4); the answer then ends with it. */
+  noToolsReason?: () => string | null;
+  /** Calls run per step and per run (defaults: AGENT_BOUNDS); calls past either are dropped, not executed. */
+  limits?: { perStep: number; perRun: number };
 };
-export type LoopResult = { status: "stop" | "step_limit"; content: string; steps: number; usage: TokenUsage; model: string | null; toolCalls: number };
+export type LoopResult = { status: "stop" | "step_limit"; content: string; steps: number; usage: TokenUsage; model: string | null; toolCalls: number; droppedToolCalls: number };
+
+/** The one line an old tool result becomes once it falls out of the run's window (review L4). */
+export const OMITTED_TOOL_RESULT = "[An earlier tool result was omitted to keep the conversation short; call the tool again if you need it.]";
+
+/**
+ * Keeps the last `keep` tool results of the run whole and replaces older ones with a one-line
+ * placeholder (the `tool` turns stay, so every call still has its answer on the wire).
+ */
+export function windowToolResults(messages: ChatTurn[], keep: number) {
+  let seen = 0;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const turn = messages[index]!;
+    if (turn.role !== "tool") continue;
+    seen += 1;
+    if (seen > keep && turn.content !== OMITTED_TOOL_RESULT) turn.content = OMITTED_TOOL_RESULT;
+  }
+}
 
 /**
  * The loop (plan §2.1, D342, D343). Each step is one model call. Tool calls run one at a time in
@@ -264,12 +285,16 @@ export async function runLoop(input: LoopInput): Promise<LoopResult> {
   let content = "";
   let model: string | null = null;
   let toolCalls = 0;
+  let droppedToolCalls = 0;
   let offeredAny = false;
+  const perStep = input.limits?.perStep ?? AGENT_BOUNDS.toolCallsPerStep;
+  const perRun = input.limits?.perRun ?? AGENT_BOUNDS.toolCallsPerRun;
   for (let step = 1; step <= input.maxSteps; step += 1) {
     const last = step === input.maxSteps;
     input.beforeStep?.(step);
-    const tools = last || !input.tools || !input.connection.compat.supportsTools ? [] : await input.tools(step);
+    const tools = last || !input.tools || !input.connection.compat.supportsTools || toolCalls >= perRun ? [] : await input.tools(step);
     offeredAny ||= tools.length > 0;
+    windowToolResults(input.messages, AGENT_BOUNDS.toolResultsWindow);
     const stepStarted = Date.now();
     const reply = await completeStreaming(input.connection, { messages: input.messages, temperature: input.temperature, maxOutputTokens: input.maxOutputTokens ?? undefined, tools }, input.signal, input.sink.delta);
     input.sink.step?.({ step, content: reply.content, toolCalls: reply.toolCalls, usage: reply.usage, model: reply.model, durationMs: Date.now() - stepStarted });
@@ -280,22 +305,39 @@ export async function runLoop(input: LoopInput): Promise<LoopResult> {
     if (reply.content) content += (content && reply.toolCalls.length === 0 && !content.endsWith("\n") ? "\n\n" : "") + reply.content;
     input.sink.usage(reply.usage, reply.model);
     const execute = input.execute;
-    const calls = tools.length > 0 && execute ? reply.toolCalls.filter((call) => call.name) : [];
+    const wantedCalls = tools.length > 0 && execute ? reply.toolCalls.filter((call) => call.name) : [];
+    // Per step and per run (review L4): calls past either cap are dropped here, never executed, with
+    // no event or audit row each; the run's finish row counts them, and the model is told once.
+    const room = Math.max(0, Math.min(perStep, perRun - toolCalls));
+    // Call ids are Nook's, never the model's (review M1): `call_<step>_<index>`, unique in the run.
+    const calls = wantedCalls.slice(0, room).map((call, index) => ({ ...call, id: `call_${step}_${index}` }));
+    const dropped = wantedCalls.length - calls.length;
+    droppedToolCalls += dropped;
     // Charged after every step; with more steps ahead a used-up budget ends the run here (plan §2.2).
     input.charge(reply.usage, calls.length > 0);
     if (calls.length === 0 || !execute) {
       input.messages.push({ role: "assistant", content: reply.content });
       // On the last step the model got no tools (D342); still wanting one after earlier steps had them is the step limit.
       const wanted = last && offeredAny && reply.toolCalls.length > 0;
-      return { status: wanted ? "step_limit" : "stop", content, steps: step, usage: total, model, toolCalls };
+      // A tool call nothing could run (none offered at this step) ends the answer with a reason, never an empty reply (Wave 41 QA L9).
+      if (reply.toolCalls.some((call) => call.name)) {
+        const reason = wanted ? null : input.noToolsReason?.() ?? null;
+        const note = wanted
+          ? "[The answer reached its step limit while the model still wanted to use a tool.]"
+          : `[The model tried to use a tool, but no tools were available to it here, so the answer stops.${reason ? ` ${reason}` : ""}]`;
+        const lead = content ? "\n\n" : "";
+        content += lead + note;
+        input.sink.delta(lead + note);
+      }
+      return { status: wanted ? "step_limit" : "stop", content, steps: step, usage: total, model, toolCalls, droppedToolCalls };
     }
-    input.messages.push({ role: "assistant", content: reply.content, tool_calls: calls.map((call, index) => ({ id: call.id || `call_${step}_${index}`, type: "function", function: { name: call.name, arguments: call.arguments } })) });
+    input.messages.push({ role: "assistant", content: reply.content, tool_calls: calls.map((call) => ({ id: call.id, type: "function", function: { name: call.name, arguments: call.arguments } })) });
     for (const [index, call] of calls.entries()) {
-      const id = call.id || `call_${step}_${index}`;
       toolCalls += 1;
-      const outcome = await execute({ ...call, id }, step);
-      input.messages.push({ role: "tool", tool_call_id: id, content: outcome.content });
+      const outcome = await execute(call, step);
+      const note = dropped > 0 && index === calls.length - 1 ? `\n[${dropped} more tool ${dropped === 1 ? "call" : "calls"} in this step ${dropped === 1 ? "was" : "were"} dropped: at most ${perStep} calls run per step and ${perRun} per answer.]` : "";
+      input.messages.push({ role: "tool", tool_call_id: call.id, content: outcome.content + note });
     }
   }
-  return { status: "step_limit", content, steps: input.maxSteps, usage: total, model, toolCalls };
+  return { status: "step_limit", content, steps: input.maxSteps, usage: total, model, toolCalls, droppedToolCalls };
 }

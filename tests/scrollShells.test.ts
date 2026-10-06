@@ -132,6 +132,19 @@ test("Chat (Wave 40): a split page on a computer (the list | the chat, each its 
   expect(rule(css, ".chat-md-pre pre")).toContain("overflow-x: auto");
 });
 
+test("Chat (Wave 41 QA Q5): one long unbroken token wraps inside its bubble and never widens the chat pane", async () => {
+  const css = await read("chat/chat.css");
+  // Grid tracks and flex children may shrink below their content (else a 2,000-character token sets the track width).
+  for (const selector of [".chat-messages", ".chat-message", ".chat-tool-list", ".chat-tool-detail", ".chat-confirm"]) expect(rule(css, selector)).toContain("grid-template-columns: minmax(0, 1fr)");
+  for (const selector of [".chat-app .chat-pane", ".chat-thread", ".chat-messages", ".chat-message", ".chat-bubble"]) expect(rule(css, selector)).toContain("min-width: 0");
+  // Text wraps anywhere in bubbles and in the disclosure and card excerpts; code blocks keep their own sideways scroller.
+  expect(rule(css, ".chat-bubble")).toContain("overflow-wrap: anywhere");
+  expect(rule(css, ".chat-bubble")).toContain("word-break: break-word");
+  expect(rule(css, ".chat-tool-detail pre, .chat-confirm-args")).toContain("overflow-wrap: anywhere");
+  expect(rule(css, ".chat-md-pre pre")).toContain("overflow-wrap: normal");
+  // The real-browser check (headless Chrome, 390 × 844, a 2,000-character token): the chat pane's scrollWidth equals its clientWidth.
+});
+
 test("Vault (Wave 25): every screen scrolls as a page with a fixed header; a wide grid scrolls sideways only inside itself", async () => {
   const shell = await read("appShell.css");
   expect(bounded(rule(shell, ".app-page:not(.tasks-app):not(.collections-app)"))).toBe(true);

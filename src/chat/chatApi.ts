@@ -39,7 +39,8 @@ export const sendMessage = (chatId: string, content: string, parentId?: string |
 export const regenerate = (chatId: string, messageId: string) => api<StartedRun>(`/chats/${chatId}/messages/${messageId}/regenerate`, { method: "POST", body: "{}" });
 export const cancelRun = (runId: string) => api<{ status: string }>(`/runs/${runId}/cancel`, { method: "POST", body: "{}" });
 // AC-B: confirmations, the tool catalog, and the Link Nook key sheet.
-export const confirmRun = (runId: string, callId: string, decision: "once" | "deny") => api<{ ok: true; decision: "allowed" | "denied" }>(`/runs/${runId}/confirm`, { method: "POST", body: JSON.stringify({ callId, decision }) });
+/** Answers the card it was shown (review M1): the server's nonce and the arguments' hash, never the model's call id. */
+export const confirmRun = (runId: string, card: { confirmationId: string; argsHash: string }, decision: "once" | "deny") => api<{ ok: true; decision: "allowed" | "denied" }>(`/runs/${runId}/confirm`, { method: "POST", body: JSON.stringify({ confirmationId: card.confirmationId, argsHash: card.argsHash, decision }) });
 export const toolCatalog = (agentId?: string | null) => api<{ catalog: ToolCatalog }>(`/agents/catalog${agentId ? `?agentId=${encodeURIComponent(agentId)}` : ""}`);
 export const agentLink = (agentId: string) => api<{ link: NookLink; keys: LinkableKey[] }>(`/agents/${agentId}/link`);
 export const setAgentLink = (agentId: string, nookKeyId: string | null) => api<{ link: NookLink }>(`/agents/${agentId}/link`, { method: "PUT", body: JSON.stringify({ nookKeyId }) });
@@ -96,10 +97,15 @@ export async function followRun(runId: string, after: number, onEvent: (event: S
   const decoder = new TextDecoder();
   let buffer = "";
   let ended = false;
+  // Wave 41 QA L8: after `done` the server closes the stream itself; reading on to that close (with a
+  // short fallback) ends the response cleanly instead of cancelling it mid-body, which browsers log.
+  let fallback: ReturnType<typeof setTimeout> | null = null;
+  let closed = false;
   try {
     for (;;) {
       const { done, value } = await reader.read();
-      if (done) break;
+      if (done) { closed = true; break; }
+      if (ended) continue;
       buffer += decoder.decode(value, { stream: true });
       let at = buffer.indexOf("\n\n");
       while (at >= 0) {
@@ -111,13 +117,15 @@ export async function followRun(runId: string, after: number, onEvent: (event: S
         onEvent(event);
         if (event.type === "done" || event.type === "snapshot") ended = true;
       }
-      if (ended) break;
+      if (ended && !fallback) fallback = setTimeout(() => { reader.cancel().catch(() => undefined); }, 2000);
     }
   } catch (error) {
     if (signal.aborted) return "aborted";
-    throw error;
+    if (!ended) throw error;
   } finally {
-    try { reader.cancel().catch(() => undefined); } catch { /* closed */ }
+    if (fallback) clearTimeout(fallback);
+    // A body the server finished is left alone (cancelling it then is logged as an aborted request).
+    if (!closed) { try { reader.cancel().catch(() => undefined); } catch { /* closed */ } }
   }
   if (ended) return "ended";
   if (signal.aborted) return "aborted";
