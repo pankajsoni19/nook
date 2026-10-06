@@ -61,10 +61,10 @@ test("heading anchors follow GitHub's rules", () => {
     .toEqual(["rate-limits-and-reverse-proxies", "upgrades", "upgrades-1", "app_origin-and-tls"]);
 });
 
-test.skipIf(!docsPresent)("every in-repo Markdown link to an anchor lands on a heading (README, docs)", async () => {
+test.skipIf(!docsPresent)("every in-repo Markdown link to an anchor lands on a heading (README, CHANGELOG, docs)", async () => {
   const { Glob } = await import("bun");
   const { dirname, relative } = await import("node:path");
-  const files = ["README.md", ...await Array.fromAsync(new Glob("docs/**/*.md").scan({ cwd: root }))];
+  const files = ["README.md", "CHANGELOG.md", ...await Array.fromAsync(new Glob("docs/**/*.md").scan({ cwd: root }))];
   const broken: string[] = [];
   const cache = new Map<string, Set<string> | null>();
   const anchorsOf = async (path: string) => {

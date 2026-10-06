@@ -749,8 +749,9 @@ describe("review 6: exhaustion", () => {
 // ================================================================================================
 describe("review 8: upgrade from a v0.26.0 (main 45a6b93) database", () => {
   const root = join(import.meta.dir, "..");
-  const git = Bun.spawnSync(["git", "-C", root, "cat-file", "-e", "45a6b93^{commit}"], { stdout: "ignore", stderr: "ignore" });
-  const hasHistory = git.exitCode === 0;
+  // The Docker verify stage has no git binary (spawning it throws), and a shallow clone lacks the commit; skip either way.
+  const hasHistory = Bun.which("git") !== null
+    && Bun.spawnSync(["git", "-C", root, "cat-file", "-e", "45a6b93^{commit}"], { stdout: "ignore", stderr: "ignore" }).exitCode === 0;
   const totp = Buffer.alloc(32, 7).toString("base64");
   const secrets = Buffer.alloc(32, 11).toString("base64");
 
