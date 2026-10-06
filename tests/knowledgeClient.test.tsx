@@ -78,6 +78,8 @@ describe("the base's page (§13.4)", () => {
   test("Wave 44 fixes: errors in the status line (LOW-4), the budget pause and slow polling (LOW-3)", () => {
     expect(knowledgeLine(detail({ counts: { pending: 0, indexing: 0, ready: 1, error: 1, unavailable: 0 } }))).toBe("2 sources · 12 chunks · 1 source has an error");
     expect(knowledgeLine(detail({ status: "error", counts: { pending: 0, indexing: 0, ready: 0, error: 2, unavailable: 0 } }))).toBe("2 sources · 12 chunks · 2 sources have errors");
+    expect(knowledgeLine(detail({ sourceCount: 9, counts: { pending: 0, indexing: 0, ready: 2, error: 0, unavailable: 7 } }))).toBe("9 sources · 12 chunks · 7 sources unavailable");
+    expect(knowledgeLine(detail({ sourceCount: 3, counts: { pending: 0, indexing: 0, ready: 1, error: 1, unavailable: 1 } }))).toBe("3 sources · 12 chunks · 1 source has an error · 1 source unavailable");
     expect(knowledgeLine(detail({ status: "indexing", counts: { pending: 1, indexing: 0, ready: 0, error: 1, unavailable: 0 } }))).toBe("2 sources · 12 chunks · Indexing 1 · 1 source has an error");
     const paused = { status: "pending" as const, error: "Paused: the daily token budget is used up; indexing resumes after midnight UTC" };
     expect(sourceStatusLabel(paused)).toBe("Paused");

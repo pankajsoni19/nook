@@ -99,9 +99,13 @@ export function kbProvider(kb: Pick<KbRow, "provider_id">): { id: string; base_u
 /** The media type without parameters, lower case. */
 export const bareType = (mime: string) => mime.split(";")[0]!.trim().toLowerCase();
 export const isKnowledgeType = (mime: string) => (KNOWLEDGE_DOCUMENT_TYPES as readonly string[]).includes(bareType(mime));
-/** The file names a document source may have (QA LOW-5): text, Markdown, or CSV by extension, so `.json` and the like are refused. */
-export const KNOWLEDGE_FILE_NAME = /\.(txt|text|md|markdown|csv)$/i;
-const KNOWLEDGE_EXTENSIONS_SQL = ["txt", "text", "md", "markdown", "csv"].map((extension) => `lower(d.name) LIKE '%.${extension}'`).join(" OR ");
+/**
+ * The file names a document source may have (QA LOW-5): text, Markdown, or CSV by extension, so `.json`
+ * and the like are refused. Only extensions Files stores as text (server/mimeSniff.ts `TEXT_EXTENSIONS`):
+ * a `.text` upload is stored as application/octet-stream, so it is not listed.
+ */
+export const KNOWLEDGE_FILE_NAME = /\.(txt|md|markdown|csv)$/i;
+const KNOWLEDGE_EXTENSIONS_SQL = ["txt", "md", "markdown", "csv"].map((extension) => `lower(d.name) LIKE '%.${extension}'`).join(" OR ");
 export const isKnowledgeFile = (mime: string, name: string) => isKnowledgeType(mime) && KNOWLEDGE_FILE_NAME.test(name);
 
 /**

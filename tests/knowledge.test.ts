@@ -234,6 +234,9 @@ describe("the index lifecycle (plan §9)", () => {
     expect(refused.status).toBe(400);
     expect(refused.body.code).toBe("UNSUPPORTED_TYPE");
     expect((await send(owner, "GET", `/knowledge/${kbId}/candidates?kind=document&q=photo`)).body.candidates).toEqual([]);
+    // .text is not one of them: Files stores it as application/octet-stream (its sniffing is unchanged).
+    const textName = await upload(owner, "notes.text", "plain words");
+    expect((await send(owner, "POST", `/knowledge/${kbId}/sources`, { kind: "document", documentId: textName })).body.code).toBe("UNSUPPORTED_TYPE");
     const huge = await send(owner, "POST", `/knowledge/${kbId}/sources`, { kind: "text", title: "Huge", text: "x".repeat(256 * 1024 + 1) });
     expect(huge.status).toBe(400);
     const notes = await send(owner, "GET", `/knowledge/${kbId}/candidates?kind=note&q=`);

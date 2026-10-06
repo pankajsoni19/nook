@@ -43,16 +43,21 @@ export function sourceLabel(source: Pick<KnowledgeSource, "kind" | "title" | "ti
 }
 
 /**
- * The list line of a base: "3 sources · 42 chunks · Ready". Any source in error is named instead of
- * Ready (QA LOW-4): "1 source has an error".
+ * The list line of a base: "3 sources · 42 chunks · Ready". Sources in error or unavailable are named
+ * instead of Ready (QA LOW-4): "1 source has an error · 2 sources unavailable".
  */
 export function knowledgeLine(kb: Pick<KnowledgeSummary, "sourceCount" | "chunkCount" | "status" | "counts">) {
   const errors = kb.counts.error;
-  const errorLine = `${errors} ${errors === 1 ? "source has an error" : "sources have errors"}`;
+  const unavailable = kb.counts.unavailable;
+  const problems = [
+    errors > 0 ? `${errors} ${errors === 1 ? "source has an error" : "sources have errors"}` : null,
+    unavailable > 0 ? `${unavailable} ${unavailable === 1 ? "source" : "sources"} unavailable` : null
+  ].filter(Boolean);
+  const errorLine = problems.join(" · ");
   const waiting = kb.counts.pending + kb.counts.indexing;
   // Everything waiting is paused on the daily budget (QA LOW-3): say so rather than "Indexing".
   const paused = waiting > 0 && kb.counts.indexing === 0 && (kb.counts.paused ?? 0) === kb.counts.pending;
-  const status = kb.status === "indexing" ? `${paused ? "Paused" : "Indexing"} ${waiting}${errors ? ` · ${errorLine}` : ""}` : errors > 0 ? errorLine : kb.status === "ready" ? "Ready" : "Empty";
+  const status = kb.status === "indexing" ? `${paused ? "Paused" : "Indexing"} ${waiting}${errorLine ? ` · ${errorLine}` : ""}` : errorLine ? errorLine : kb.status === "ready" ? "Ready" : "Empty";
   return `${kb.sourceCount} ${kb.sourceCount === 1 ? "source" : "sources"} · ${kb.chunkCount.toLocaleString()} ${kb.chunkCount === 1 ? "chunk" : "chunks"} · ${status}`;
 }
 
