@@ -55,7 +55,8 @@ const BASES: Record<AccessKind, string> = {
   collection: "/collections",
   calendar: "/calendars",
   agent: "/agents",
-  chat: "/chats"
+  chat: "/chats",
+  knowledge_base: "/knowledge"
 };
 
 export const accessPath = (kind: AccessKind, id: string) => `${BASES[kind]}/${encodeURIComponent(id)}/access`;

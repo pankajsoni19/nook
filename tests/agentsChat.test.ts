@@ -470,7 +470,7 @@ describe("MCP tools (agents:read, D281)", () => {
     const chat = await newChat(owner, agent.id);
     await sendAndWait(owner, chat.id, "echo:Over MCP.");
     const key = makeKey(owner, ["agents:read"]);
-    expect(await toolNames(key)).toEqual(["get_chat", "list_agents", "list_chats"]);
+    expect(await toolNames(key)).toEqual(["get_chat", "list_agents", "list_chats", "search_knowledge"]);
     const agents = await ok(key, "list_agents");
     expect(agents.agents.map((item: { id: string }) => item.id)).toContain(agent.id);
     expect(JSON.stringify(agents)).not.toContain("SECRET PROMPT");
@@ -490,10 +490,11 @@ describe("MCP tools (agents:read, D281)", () => {
     for (const spec of mcpToolSpecs.filter((item) => ["list_agents", "list_chats", "get_chat"].includes(item.name))) {
       expect(spec.write).toBe(false);
       // Wave 42: list_agents also answers run-only keys, narrowed to the agents their grant names (a list tool).
-      expect(spec.access.mode).toBe(spec.name === "list_agents" ? "list" : "own");
+      // Wave 44 (AC-E): list_chats and get_chat are `global`, hidden from a key whose agents:read names only chosen knowledge bases.
+      expect(spec.access.mode).toBe(spec.name === "list_agents" ? "list" : "global");
     }
     const grantKey = createApiKey(owner.userId, { name: "Grant", surfaces: "mcp", grants: [{ module: "agents", permission: "read", resourceKind: null, resourceId: null }], expiresInDays: 30 });
     const live = loadLiveKey(grantKey.id)!;
-    expect(mcpToolSpecs.filter((spec) => toolVisible(spec, live)).map((spec) => spec.name).sort()).toEqual(["get_chat", "list_agents", "list_chats"]);
+    expect(mcpToolSpecs.filter((spec) => toolVisible(spec, live)).map((spec) => spec.name).sort()).toEqual(["get_chat", "list_agents", "list_chats", "search_knowledge"]);
   });
 });

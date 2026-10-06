@@ -111,9 +111,16 @@ export async function loadResources(module: GrantModule): Promise<ResourceOption
     return whiteboards.map((item) => ({ value: resourceToken("whiteboard", item.id), label: item.name.replace(/\.excalidraw$/i, ""), description: ownerNote(item), writable: item.is_owner === 1 }));
   }
   if (module === "agents") {
-    // Wave 42 (AC-C): your own agents (until AC-D shares them); a run grant may name some of them.
-    const { agents } = await api<{ agents: Array<{ id: string; name: string; description: string; model: string | null; isOwner: boolean }> }>("/agents");
-    return agents.filter((agent) => agent.isOwner).map((agent) => ({ value: resourceToken("agent", agent.id), label: agent.name, description: agent.description || undefined, writable: true }));
+    // Wave 42 (AC-C): your own agents (a run grant may name some of them). Wave 44 (AC-E): the knowledge
+    // bases you can open (a read grant may name some of them); each row shows only its permission's kind.
+    const [{ agents }, bases] = await Promise.all([
+      api<{ agents: Array<{ id: string; name: string; description: string; model: string | null; isOwner: boolean }> }>("/agents"),
+      api<{ knowledgeBases: Array<{ id: string; name: string; description: string; yourLevel: string; ownerName: string }> }>("/knowledge").catch(() => ({ knowledgeBases: [] }))
+    ]);
+    return [
+      ...agents.filter((agent) => agent.isOwner).map((agent) => ({ value: resourceToken("agent", agent.id), label: agent.name, description: agent.description || undefined, writable: true })),
+      ...bases.knowledgeBases.map((kb) => ({ value: resourceToken("knowledge_base", kb.id), label: kb.name, description: kb.yourLevel === "owner" ? kb.description || undefined : `Owned by ${kb.ownerName}`, writable: false }))
+    ];
   }
   if (module === "calendar") {
     const { calendars } = await api<{ calendars: Array<{ id: string; name: string; role: string } & Owned> }>("/calendars");

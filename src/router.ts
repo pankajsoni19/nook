@@ -49,7 +49,8 @@ export type Route =
   // The Settings hub (Wave 37): a page at /settings (the section list on phones), and one account
   // section at /settings/:section. Team sections are `team` routes under /settings/team/… (above).
   // Wave 40: Settings → Agents has an editor below it at /settings/agents/:agentId (or /settings/agents/new).
-  | { app: "settings"; section: SettingsSection | null; agentId?: string };
+  // Wave 44 (AC-E): Settings → Knowledge has a page per base below it at /settings/knowledge/:kbId.
+  | { app: "settings"; section: SettingsSection | null; agentId?: string; kbId?: string };
 
 /** The Audit log's filters in its URL (Wave 42 QA L4); anything malformed is dropped. */
 export type AuditQuery = { key?: string; agent?: string; status?: string; from?: string; to?: string };
@@ -261,6 +262,8 @@ function parseSettings(rest: string[]): Route {
   if (rest[0] === "team") return parseTeam(rest.slice(1), true);
   // Wave 40: the agent editor, /settings/agents/:agentId or /settings/agents/new.
   if (rest[0] === "agents" && rest.length === 2 && rest[1] !== undefined && (rest[1] === NEW_AGENT || isRouteId(rest[1]))) return { app: "settings", section: "agents", agentId: rest[1].toLowerCase() };
+  // Wave 44 (AC-E): one knowledge base's page, /settings/knowledge/:kbId.
+  if (rest[0] === "knowledge" && rest.length === 2 && rest[1] !== undefined && isRouteId(rest[1])) return { app: "settings", section: "knowledge", kbId: rest[1].toLowerCase() };
   if (rest.length === 1 && rest[0] === "bin") return { app: "bin" };
   const section = rest.length === 1 ? settingsSectionForSlug(rest[0]!) : null;
   return { app: "settings", section };
@@ -323,6 +326,7 @@ export function formatRoute(route: Route): string {
   if (route.app === "team") return formatTeam(route);
   if (route.app === "settings") {
     if (route.section === "agents" && route.agentId && (route.agentId === NEW_AGENT || isRouteId(route.agentId))) return `${settingsPath("agents")}/${route.agentId.toLowerCase()}`;
+    if (route.section === "knowledge" && route.kbId && isRouteId(route.kbId)) return `${settingsPath("knowledge")}/${route.kbId.toLowerCase()}`;
     return route.section && SETTINGS_SECTIONS.includes(route.section) ? settingsPath(route.section) : "/settings";
   }
   if (route.app === "chat") {
@@ -376,14 +380,15 @@ function formatTasksHome(home: TasksHome) {
  */
 // `access` (Wave 33): Settings → My access, read-only, every role but guest.
 // `agents` and `ai` (Wave 40): Settings → Agents (every role that chats) and Settings → AI (admins: providers and policy).
-export const SETTINGS_SECTIONS = ["security", "modules", "mcp", "access", "notifications", "agents", "ai", "about"] as const;
+// `knowledge` (Wave 44, AC-E): Settings → Knowledge (every role that chats).
+export const SETTINGS_SECTIONS = ["security", "modules", "mcp", "access", "notifications", "agents", "knowledge", "ai", "about"] as const;
 export type SettingsSection = typeof SETTINGS_SECTIONS[number];
 
 /**
  * The URL slug of each section. API keys (section id "mcp" since Wave 8) lives at `/settings/keys`
  * (C3); the old `/settings/mcp` still opens it and is rewritten in place (no extra history entry).
  */
-const SETTINGS_SLUGS: Record<SettingsSection, string> = { security: "security", modules: "modules", mcp: "keys", access: "access", notifications: "notifications", agents: "agents", ai: "ai", about: "about" };
+const SETTINGS_SLUGS: Record<SettingsSection, string> = { security: "security", modules: "modules", mcp: "keys", access: "access", notifications: "notifications", agents: "agents", knowledge: "knowledge", ai: "ai", about: "about" };
 const LEGACY_SETTINGS_SLUGS: Record<string, SettingsSection> = { mcp: "mcp" };
 
 function settingsSectionForSlug(slug: string): SettingsSection | null {
@@ -404,7 +409,7 @@ export function isLegacySettingsPath(pathname: string) {
   return section !== null && pathname !== settingsPath(section);
 }
 
-export const SETTINGS_SECTION_NAMES: Record<SettingsSection, string> = { security: "Security", modules: "Modules", mcp: "API keys", access: "My access", notifications: "Notifications", agents: "Agents", ai: "AI", about: "About" };
+export const SETTINGS_SECTION_NAMES: Record<SettingsSection, string> = { security: "Security", modules: "Modules", mcp: "API keys", access: "My access", notifications: "Notifications", agents: "Agents", knowledge: "Knowledge", ai: "AI", about: "About" };
 
 /** The document title on an account section: "Settings · Notifications · Nook". */
 export const settingsDocumentTitle = (section: SettingsSection) => hubDocumentTitle(SETTINGS_SECTION_NAMES[section]);

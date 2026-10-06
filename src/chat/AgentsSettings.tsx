@@ -5,11 +5,11 @@ import { AccessSheet } from "../access/AccessSheet";
 import { hubDocumentTitle, NEW_AGENT, type Route } from "../router";
 import { Select } from "../ui/Select";
 import { useConfirm } from "../ui/useConfirm";
-import { AGENT_BOUNDS, type AgentApiUsage, type AgentDetail, type AgentSummary, type AgentToolRef, type LinkState, type NookLink, type ToolCatalog } from "../../shared/agents";
+import { AGENT_BOUNDS, type AgentApiUsage, type AgentDetail, type AgentSummary, type AgentToolRef, type KnowledgeCatalogBase, type LinkState, type NookLink, type ToolCatalog } from "../../shared/agents";
 import { agentApiUsage, agentsStatus, createAgent, deleteAgent, errorCode, getAgent, listAgents, messageOf, toolCatalog, updateAgent, type AgentsStatus } from "./chatApi";
 import { LinkNookKeySheet } from "./LinkNookKeySheet";
 import { TrifectaBadge } from "./ToolDisclosure";
-import { hasRef, nookGroups, nookWriteMode, orphanRefs, pickCounts, POLICY_BADGES, policyOptions, refKey, setRefPolicy, toggleRef } from "./toolPicker";
+import { hasRef, nookGroups, nookWriteMode, orphanRefs, pickCounts, POLICY_BADGES, policyOptions, refKey, refName, setRefPolicy, toggleRef } from "./toolPicker";
 import "./chat.css";
 
 type Navigate = (route: Route, options?: { replace?: boolean }) => void;
@@ -212,7 +212,7 @@ function AgentEditor({ agentId, navigate, flash, canCreate, onOpenChat }: { agen
       <input id={ids.temperature} value={temperature} inputMode="decimal" autoComplete="off" placeholder="Provider default" onChange={(event) => setTemperature(event.target.value)} />
       <h4>Tools{catalog && <small> · {pickCounts(tools, catalog).total} picked</small>}</h4>
       {agent?.trifecta && <TrifectaBadge />}
-      {agent && agent.hiddenTools > 0 && <p className="file-dialog-hint" role="note">{agent.hiddenTools === 1 ? "1 tool" : `${agent.hiddenTools} tools`} from servers you can't use {agent.hiddenTools === 1 ? "is" : "are"} also picked. {agent.ownerName} manages {agent.hiddenTools === 1 ? "it" : "them"}; saving keeps {agent.hiddenTools === 1 ? "it" : "them"}.</p>}
+      {agent && agent.hiddenTools > 0 && <p className="file-dialog-hint" role="note">{agent.hiddenTools === 1 ? "1 tool" : `${agent.hiddenTools} tools`} from servers or knowledge bases you can't use {agent.hiddenTools === 1 ? "is" : "are"} also picked. {agent.ownerName} manages {agent.hiddenTools === 1 ? "it" : "them"}; saving keeps {agent.hiddenTools === 1 ? "it" : "them"}.</p>}
       <ToolPicker catalog={catalog} tools={tools} directWrites={directWrites} linked={agent?.linked ?? false} linkState={agent?.linkState ?? "none"} creating={creating} onChange={setTools} onLink={() => setLinking(true)} />
       <label className="ai-check" htmlFor={ids.direct}><input id={ids.direct} type="checkbox" checked={directWrites} onChange={(event) => setDirectWrites(event.target.checked)} />Allow direct Nook writes (otherwise every Nook change becomes an Inbox proposal)</label>
       <p className="file-dialog-hint">Direct writes also need the linked key's write grant, and they still ask first in chats.</p>
@@ -330,6 +330,7 @@ function ToolPicker({ catalog, tools, directWrites, linked, linkState, creating,
         }))}
       </section>;
     })}
+    {catalog.knowledge && <KnowledgeToolGroup bases={catalog.knowledge} tools={tools} onChange={onChange} />}
     <section className="agents-tools-group" aria-label="Nook">
       <div className="agents-tools-head">
         <strong>Nook{linked && <span className="ai-badge ai-badge-ok">Key linked</span>}{dead && <span className="ai-badge ai-badge-warn">{LINK_DEAD[linkState]} — link another</span>}</strong>
@@ -356,7 +357,33 @@ function ToolPicker({ catalog, tools, directWrites, linked, linkState, creating,
     </section>
     {orphans.length > 0 && <div className="agents-tools-group">
       <div className="agents-tools-head"><strong>No longer available</strong><small>{orphans.length}</small></div>
-      {orphans.map((ref) => <div key={refKey(ref)} className="agents-tool"><label><input type="checkbox" checked onChange={() => onChange(toggleRef(tools, ref))} /><span className="agents-tool-text"><code>{ref.toolName}</code><small>{ref.source === "server" ? "Its server or tool is gone; untick to clear it." : "Not offered any more; untick to clear it."}</small></span></label></div>)}
+      {orphans.map((ref) => <div key={refKey(ref)} className="agents-tool"><label><input type="checkbox" checked onChange={() => onChange(toggleRef(tools, ref))} /><span className="agents-tool-text"><code>{refName(ref)}</code><small>{ref.source === "server" ? "Its server or tool is gone; untick to clear it." : ref.source === "knowledge" ? "It is in the Bin, or no longer shared with you; untick to clear it." : "Not offered any more; untick to clear it."}</small></span></label></div>)}
     </div>}
   </div>;
+}
+
+/**
+ * The picker's Knowledge group (plan §5.2; Wave 44 AC-E): the bases the editor can open, one
+ * checkbox each. Attached bases become one read-only `search_knowledge` tool that runs on its own.
+ */
+export function KnowledgeToolGroup({ bases, tools, onChange }: { bases: KnowledgeCatalogBase[]; tools: AgentToolRef[]; onChange: (tools: AgentToolRef[]) => void }) {
+  const attached = tools.filter((ref) => ref.source === "knowledge").length;
+  return <section className="agents-tools-group" aria-label="Knowledge">
+    <div className="agents-tools-head">
+      <strong>Knowledge</strong>
+      <small>{attached} attached</small>
+    </div>
+    {bases.length === 0 ? <p className="chat-muted">No knowledge bases yet. Make one in Settings → Knowledge, then attach it here.</p>
+      : <>
+        <p className="chat-muted">Attached bases become one read-only tool, search_knowledge, that runs on its own. Anyone who can use this agent can read their text.</p>
+        {bases.map((kb) => {
+          const ref: AgentToolRef = { source: "knowledge", kbId: kb.id };
+          return <div key={kb.id} className="agents-tool">
+            <label><input type="checkbox" checked={hasRef(tools, ref)} onChange={() => onChange(toggleRef(tools, ref))} />
+              <span className="agents-tool-text"><span><strong>{kb.name}</strong><span className="agents-tool-badges">{kb.status === "ready" ? <span className="ai-badge ai-badge-ok">Ready</span> : kb.status === "indexing" ? <span className="ai-badge">Indexing</span> : kb.status === "error" ? <span className="ai-badge ai-badge-warn">Errors</span> : <span className="ai-badge">Empty</span>}</span></span><small>{kb.yours ? "Yours" : `${kb.ownerName}'s`} · {kb.chunkCount.toLocaleString()} chunks{kb.description ? ` · ${kb.description}` : ""}</small></span>
+            </label>
+          </div>;
+        })}
+      </>}
+  </section>;
 }

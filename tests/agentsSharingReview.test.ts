@@ -391,7 +391,7 @@ describe("review 5: migration 041 on a 040 database", () => {
   }
 
   test("every non-agent row of access_grants_v is identical before and after; idempotent; the unique index holds", () => {
-    expect(registeredMigrationIds.at(-1)).toBe(41);
+    expect(registeredMigrationIds).toContain(41);
     const database = new Database(":memory:", { strict: true });
     database.exec("PRAGMA foreign_keys = ON");
     database.exec("CREATE TABLE IF NOT EXISTS schema_migrations (id INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL)");

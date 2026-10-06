@@ -30,7 +30,7 @@ export const MCP_PERMISSIONS: readonly McpPermission[] = [
   { scope: "inbox:write", label: "Suggest changes", help: "Suggest changes for you to approve in the Inbox. Never applies anything; each suggestion also needs that module's read permission.", implies: "inbox:read" },
   { scope: "whiteboards:read", label: "Read whiteboards", help: "Whiteboards you can open: their names and text, and on request a summary of their shapes." },
   { scope: "whiteboards:write", label: "Create whiteboards", help: "Create empty, private whiteboards in your folders; never draws, shares, or deletes.", implies: "whiteboards:read" },
-  { scope: "agents:read", label: "Read agents and chats", help: "Your agents (name, description, model; never the prompt) and the chats you own, read-only." },
+  { scope: "agents:read", label: "Read agents, chats, and knowledge", help: "Your agents (name, description, model; never the prompt), the chats you can open, read-only, and searching the knowledge bases you can open. Limited to chosen knowledge bases, it searches only those and reads no agents or chats." },
   { scope: "agents:run", label: "Run agents", help: "Run your agents over the REST API (POST /api/v1/agents/:id/runs) and MCP (run_agent). Only tools that need no confirmation run; Nook changes become Inbox proposals. Every run is in your Audit log; none creates a chat.",
     warning: "Each run spends this Nook's model budget and may call the agent's tools; set it to chosen agents where you can." }
 ];

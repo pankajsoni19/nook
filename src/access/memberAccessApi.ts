@@ -73,7 +73,7 @@ export type AccessSource = {
  */
 export type AccessRow = {
   /** Wave 43: also an agent or a chat (the Chat section). */
-  kind: AccessKind | "agent" | "chat";
+  kind: AccessKind | "agent" | "chat" | "knowledge_base";
   title: string;
   titleHidden: boolean;
   owner: { id: string; displayName: string };

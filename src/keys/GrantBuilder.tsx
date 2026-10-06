@@ -3,8 +3,8 @@ import { Plus, Trash2, X } from "lucide-react";
 import { Combobox } from "../ui/Combobox";
 import { Select, type Option } from "../ui/Select";
 import {
-  CREATE_ONLY, MODULE_LABELS, permissionHelp, permissionLabel, rowModuleChoices, rowPermissionChoices, selectorFor, SELECTOR_KINDS, grantSummary,
-  type GrantModule, type GrantRow, type KeyPermission, type PolicySummary
+  CREATE_ONLY, MODULE_LABELS, parseResourceToken, permissionHelp, permissionLabel, rowModuleChoices, rowPermissionChoices, selectorFor, SELECTOR_KINDS, grantSummary,
+  type GrantModule, type GrantRow, type KeyPermission, type PolicySummary, type ResourceKind
 } from "./keyGrants";
 import { useKeysApi, type ResourceOption } from "./keysApi";
 
@@ -92,7 +92,8 @@ function GrantRowEditor({ row, index, role, policy, disabled, rows, ceiling, nar
     { value: "chosen", label: `Chosen ${selector.many}`, description: `Only the ${selector.many} you pick` }
   ] : [];
   const writable = row.permission !== "read";
-  let resourceOptions: Option[] = resources === "error" || !resources ? [] : resources.map((option) => ({
+  // A module may offer several kinds; a row lists only those its permission names (Wave 44: Chat → Read lists knowledge bases).
+  let resourceOptions: Option[] = resources === "error" || !resources ? [] : resources.filter((option) => !selector || selector.kinds.includes(parseResourceToken(option.value)?.kind as ResourceKind)).map((option) => ({
     value: option.value, label: option.label,
     description: writable && option.readOnly ? "Views can only be read through a key" : writable && !option.writable ? "You can only view this one" : option.description,
     disabled: writable && !option.writable

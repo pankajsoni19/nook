@@ -45,8 +45,8 @@ export function callOutcome(call: ToolCallView): string {
   return "Failed";
 }
 
-/** Wave 41 QA L7: a tool the model made up reads "Unknown tool <name>", never "?/<name>". */
-export const callLabel = (call: ToolCallView) => call.server ? `Called ${call.server}/${call.tool}` : `Unknown tool ${call.tool}`;
+/** Wave 41 QA L7: a tool the model made up reads "Unknown tool <name>", never "?/<name>". AC-E: a knowledge search says so. */
+export const callLabel = (call: ToolCallView) => call.server === "knowledge" && call.tool === "search_knowledge" ? "Searched knowledge" : call.server ? `Called ${call.server}/${call.tool}` : `Unknown tool ${call.tool}`;
 
 export function ToolCallsDisclosure({ calls = [], running }: { calls?: ToolCallView[]; running: boolean }) {
   const [open, setOpen] = useState(false);

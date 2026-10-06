@@ -117,7 +117,7 @@ describe("the nav per role", () => {
 
   test("admins: every account section, the Bin, then every Team section", () => {
     expect(ids(hubEntries("admin", { teamModuleEnabled: true }))).toEqual([
-      "security", "notifications", "access", "mcp", "agents", "ai", "modules", "about", "bin",
+      "security", "notifications", "access", "mcp", "agents", "knowledge", "ai", "modules", "about", "bin",
       "team-members", "team-invites", "team-groups", "team-integrations", "team-keys", "team-policies", "team-templates", "team-activity", "team-email"
     ]);
     // Team turned off in Modules: admins keep Team here (Team plan §6.2).
@@ -126,7 +126,7 @@ describe("the nav per role", () => {
 
   test("members and viewers see Team → Members only, while Team is on; guests never", () => {
     for (const role of ["member", "viewer"] as const) {
-      expect(ids(hubEntries(role, { teamModuleEnabled: true }))).toEqual(["security", "notifications", "access", "mcp", "agents", "modules", "about", "bin", "team-members"]);
+      expect(ids(hubEntries(role, { teamModuleEnabled: true }))).toEqual(["security", "notifications", "access", "mcp", "agents", "knowledge", "modules", "about", "bin", "team-members"]);
       expect(ids(hubEntries(role, { teamModuleEnabled: false }))).not.toContain("team-members");
     }
     // Wave 38 fixes: no Bin for guests either (they can delete nothing).

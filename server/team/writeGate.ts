@@ -80,7 +80,9 @@ export const ROLE_READ_ONLY_ALLOWED_WRITES: readonly AllowedWrite[] = [
   { method: "POST", path: "/api/chats/:chatId/messages/:messageId/regenerate", roles: ["viewer"], why: "regenerate in an own chat" },
   { method: "POST", path: "/api/runs/:runId/cancel", roles: ["viewer"], why: "stop an own run" },
   // Wave 43 (AC-D, D361): a viewer reading a shared chat continues it in their own copy (they must be able to use its agent).
-  { method: "POST", path: "/api/chats/:chatId/fork", roles: ["viewer"], why: "an own copy of a chat shared with them" }
+  { method: "POST", path: "/api/chats/:chatId/fork", roles: ["viewer"], why: "an own copy of a chat shared with them" },
+  // Wave 44 (AC-E): Try it on a knowledge base shared with them (view); a read sent as POST.
+  { method: "POST", path: "/api/knowledge/:kbId/search", roles: ["viewer"], why: "a read sent as POST (Try it on a readable knowledge base)" }
 ];
 
 /**
