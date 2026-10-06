@@ -25,7 +25,8 @@ export const sendMessage = (chatId: string, content: string, parentId?: string |
 export const regenerate = (chatId: string, messageId: string) => api<StartedRun>(`/chats/${chatId}/messages/${messageId}/regenerate`, { method: "POST", body: "{}" });
 export const cancelRun = (runId: string) => api<{ status: string }>(`/runs/${runId}/cancel`, { method: "POST", body: "{}" });
 // AC-B: confirmations, the tool catalog, and the Link Nook key sheet.
-export const confirmRun = (runId: string, callId: string, decision: "once" | "deny") => api<{ ok: true; decision: "allowed" | "denied" }>(`/runs/${runId}/confirm`, { method: "POST", body: JSON.stringify({ callId, decision }) });
+/** Answers the card it was shown (review M1): the server's nonce and the arguments' hash, never the model's call id. */
+export const confirmRun = (runId: string, card: { confirmationId: string; argsHash: string }, decision: "once" | "deny") => api<{ ok: true; decision: "allowed" | "denied" }>(`/runs/${runId}/confirm`, { method: "POST", body: JSON.stringify({ confirmationId: card.confirmationId, argsHash: card.argsHash, decision }) });
 export const toolCatalog = (agentId?: string | null) => api<{ catalog: ToolCatalog }>(`/agents/catalog${agentId ? `?agentId=${encodeURIComponent(agentId)}` : ""}`);
 export const agentLink = (agentId: string) => api<{ link: NookLink; keys: LinkableKey[] }>(`/agents/${agentId}/link`);
 export const setAgentLink = (agentId: string, nookKeyId: string | null) => api<{ link: NookLink }>(`/agents/${agentId}/link`, { method: "PUT", body: JSON.stringify({ nookKeyId }) });

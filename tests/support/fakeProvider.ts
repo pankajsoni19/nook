@@ -53,7 +53,7 @@ export function startFakeProvider(port: number, options: { models?: string[] } =
         // AC-B: after a tool result came back (`tool:` mode), the model answers with an excerpt of it;
         // `loop:` keeps calling the tool every step (the step cap). The call names a tool offered to it
         // (`tool:<name>:<json args>`; a name not offered is sent as given, to test "unknown tool").
-        if (match?.[1] === "tool" && lastTurn?.role === "tool") match = ["", "echo", `Done: ${(lastTurn.content ?? "").slice(0, 120)}`] as unknown as RegExpExecArray;
+        if (match?.[1] === "tool" && lastTurn?.role === "tool") match = ["", "echo", `Done: ${(lastTurn.content ?? "").slice(0, 200)}`] as unknown as RegExpExecArray;
         const mode = match?.[1] ?? "echo";
         const rest = match ? match[2]! : `You said: ${last}`;
         if (mode === "status") return Response.json({ error: { message: `Simulated failure sk-secret-should-not-echo-123456789012345 (${rest})`, type: "server_error" } }, { status: Number(rest) || 500 });

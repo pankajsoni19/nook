@@ -15,6 +15,7 @@ import { sweepGoogleFlows } from "./google/flows";
 import { sweepVaultEvents } from "./vault/service";
 import { resumeRotations } from "./vault/rotation";
 import { vaultStatus } from "./vault/status";
+import { sweepSessions } from "./agents/toolServers";
 
 const SWEEP_INTERVAL_MS = 3_600_000;
 export type SweepResult = SweepCounts & { bin: BinSweepCounts };
@@ -121,6 +122,12 @@ export function runSweep(options: { boot?: boolean; nowMs?: number } = {}) {
         for (const orphan of orphanGrantReport()) console.error(`Grant self-check: ${orphan.count} ${orphan.source} rows point at missing ${orphan.kind} items (${orphan.sample.join(", ")})`);
       } catch (error) {
         console.error("Grant self-check failed", error instanceof Error ? error.name : "Unknown error");
+      }
+      try {
+        // Agent tool servers (Wave 41 review L5): MCP sessions idle for 10 minutes are closed (HTTP DELETE, stdio child stopped).
+        await sweepSessions(options.nowMs);
+      } catch (error) {
+        console.error("Tool server session sweep failed", error instanceof Error ? error.name : "Unknown error");
       }
       try {
         // Mail history (outbound email §B.3): delivered rows after 30 days, failures after 90.

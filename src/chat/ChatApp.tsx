@@ -175,7 +175,7 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
         const { messageId: _message, ...pending } = event.data;
         next.pending = pending;
       } else if (event.type === "confirmation_resolved") {
-        if (next.pending?.callId === event.data.callId) next.pending = null;
+        if (next.pending?.confirmationId === event.data.confirmationId) next.pending = null;
         next.toolCalls = next.toolCalls.map((call) => call.id === event.data.callId ? { ...call, decision: event.data.decision } : call);
       } else if (event.type === "snapshot") {
         next.text = event.data.content;
@@ -297,12 +297,13 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
     return detail.messages.map((message) => message.id === live.messageId ? { ...message, content: live.text || message.content, usage: live.usage ?? message.usage, status: live.status ? (live.status === "ok" ? "complete" : live.status === "cancelled" || live.status === "timeout" ? "cancelled" : live.status === "step_limit" ? "step_limit" : "error") : "streaming", errorCode: live.error?.code ?? message.errorCode, toolCalls: live.toolCalls.length ? live.toolCalls : message.toolCalls ?? [] } : message);
   }, [detail, live]);
 
-  async function decide(decision: "once" | "deny") {
+  async function decide(decision: "once" | "deny", card: PendingConfirmation) {
     const current = liveRef.current;
     if (!current?.pending || deciding) return;
     setDeciding(true);
     try {
-      await confirmRun(current.runId, current.pending.callId, decision);
+      // The card the person answered, not whatever card is newest now (review M1).
+      await confirmRun(current.runId, card, decision);
     } catch (reason) {
       if (errorCode(reason) === "NO_PENDING_CONFIRMATION") setLive((value) => value ? { ...value, pending: null } : value);
       else flash(messageOf(reason, "Could not answer the confirmation"));
@@ -538,7 +539,7 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
           </div>
         </header>
         <ol className="chat-messages" aria-live="polite" aria-relevant="additions text">
-          {branch.map((shown) => <MessageView key={shown.message.id} shown={shown} context={renderContext} streaming={live?.messageId === shown.message.id && running} live={live?.messageId === shown.message.id ? live : null} busy={busy || running} deciding={deciding} onDecide={(decision) => { void decide(decision); }}
+          {branch.map((shown) => <MessageView key={shown.message.id} shown={shown} context={renderContext} streaming={live?.messageId === shown.message.id && running} live={live?.messageId === shown.message.id ? live : null} busy={busy || running} deciding={deciding} onDecide={(decision, card) => { void decide(decision, card); }}
             editing={editing?.id === shown.message.id ? editing.text : null}
             onEdit={(text) => setEditing({ id: shown.message.id, text })}
             onCancelEdit={() => setEditing(null)}
@@ -582,7 +583,7 @@ function autoGrow(element: HTMLTextAreaElement) {
 
 type MessageViewProps = {
   shown: Shown; context: RenderContext; streaming: boolean; live: LiveRun | null; busy: boolean; editing: string | null; deciding: boolean;
-  onEdit: (text: string) => void; onCancelEdit: () => void; onSubmitEdit: (text: string) => void; onRegenerate: () => void; onSwitch: (direction: 1 | -1) => void; onCopied: () => void; onDecide: (decision: "once" | "deny") => void;
+  onEdit: (text: string) => void; onCancelEdit: () => void; onSubmitEdit: (text: string) => void; onRegenerate: () => void; onSwitch: (direction: 1 | -1) => void; onCopied: () => void; onDecide: (decision: "once" | "deny", card: PendingConfirmation) => void;
 };
 
 function MessageView({ shown, context, streaming, live, busy, editing, deciding, onEdit, onCancelEdit, onSubmitEdit, onRegenerate, onSwitch, onCopied, onDecide }: MessageViewProps) {
@@ -612,7 +613,7 @@ function MessageView({ shown, context, streaming, live, busy, editing, deciding,
   const footer = message.status === "cancelled" ? "Stopped" : message.status === "interrupted" ? "Stopped: server restarted" : message.status === "step_limit" ? "Stopped at the step limit" : message.status === "error" ? (live?.error?.message ?? ERROR_TEXT[message.errorCode ?? ""] ?? "The run did not finish") : null;
   return <li className={`chat-message chat-assistant${failed ? " chat-failed" : ""}`}>
     <ToolCallsDisclosure calls={message.toolCalls} running={streaming} />
-    {live?.pending && streaming && <ConfirmationCard confirmation={live.pending} busy={deciding} onDecide={onDecide} />}
+    {live?.pending && streaming && <ConfirmationCard key={live.pending.confirmationId} confirmation={live.pending} busy={deciding} onDecide={onDecide} />}
     <div className="chat-bubble">
       {message.content ? <Markdown text={message.content} context={context} streaming={streaming} /> : streaming ? <span className="chat-thinking" aria-label={live?.pending ? "Waiting for your answer" : "Answering"}>…</span> : null}
       {footer && <p className={`chat-footer${failed ? " chat-footer-error" : ""}`} role={failed ? "alert" : undefined}>{footer}</p>}

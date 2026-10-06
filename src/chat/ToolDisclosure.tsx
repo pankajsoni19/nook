@@ -70,21 +70,21 @@ export function ToolCallsDisclosure({ calls = [], running }: { calls?: ToolCallV
   </div>;
 }
 
-export function ConfirmationCard({ confirmation, busy, onDecide }: { confirmation: PendingConfirmation; busy: boolean; onDecide: (decision: "once" | "deny") => void }) {
+export function ConfirmationCard({ confirmation, busy, onDecide }: { confirmation: PendingConfirmation; busy: boolean; onDecide: (decision: "once" | "deny", card: PendingConfirmation) => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const [showAll, setShowAll] = useState(false);
-  useEffect(() => { ref.current?.focus(); }, [confirmation.callId]);
+  useEffect(() => { ref.current?.focus(); }, [confirmation.confirmationId]);
   const json = JSON.stringify(confirmation.args ?? {}, null, 2);
   const lines = json.split("\n");
   const long = lines.length > 20;
-  return <div ref={ref} className="chat-confirm" role="group" aria-labelledby={`confirm-${confirmation.callId}`} tabIndex={-1}>
-    <strong id={`confirm-${confirmation.callId}`}><ShieldAlert />{confirmation.proposal ? `The agent wants to propose ${confirmation.tool} in your Inbox` : `The agent wants to run ${confirmation.tool} on ${confirmation.server}`}</strong>
+  return <div ref={ref} className="chat-confirm" role="group" aria-labelledby={`confirm-${confirmation.confirmationId}`} tabIndex={-1}>
+    <strong id={`confirm-${confirmation.confirmationId}`}><ShieldAlert />{confirmation.proposal ? `The agent wants to propose ${confirmation.tool} in your Inbox` : `The agent wants to run ${confirmation.tool} on ${confirmation.server}`}</strong>
     <pre className="chat-confirm-args">{long && !showAll ? `${lines.slice(0, 20).join("\n")}\n…` : json}</pre>
     {long && <button type="button" className="chat-link" onClick={() => setShowAll(!showAll)}>{showAll ? "Show less" : `Show all ${lines.length} lines`}</button>}
-    <p className="chat-muted">{confirmation.proposal ? "Allowing files a proposal; nothing changes until you approve it in the Inbox." : "The arguments were written by the model. Allow runs this call once; Deny tells the model it was refused."} Expires {new Date(confirmation.expiresAt).toLocaleTimeString()}.</p>
+    <p className="chat-muted">{confirmation.proposal ? "Allowing files a proposal in your Inbox (a note change is saved as a draft); nothing is applied or published until you approve it." : "The arguments were written by the model. Allow runs this call once; Deny tells the model it was refused."} Expires {new Date(confirmation.expiresAt).toLocaleTimeString()}.</p>
     <div className="chat-confirm-actions">
-      <button type="button" className="secondary-button" onClick={() => onDecide("deny")} disabled={busy}>Deny</button>
-      <button type="button" className="primary-button" onClick={() => onDecide("once")} disabled={busy}>Allow once</button>
+      <button type="button" className="secondary-button" onClick={() => onDecide("deny", confirmation)} disabled={busy}>Deny</button>
+      <button type="button" className="primary-button" onClick={() => onDecide("once", confirmation)} disabled={busy}>Allow once</button>
     </div>
   </div>;
 }

@@ -137,7 +137,11 @@ for (const user of usersMissingDefault) ensureDefaultFolder(user.id);
 const auditContext = new AsyncLocalStorage<Record<string, unknown>>();
 
 export function withAuditContext<T>(extra: Record<string, unknown>, operation: () => T): T {
-  return auditContext.run(extra, operation);
+  // Nested contexts merge (Wave 41 review L8): an outer context's keys win, so an agent run's
+  // `{via: "agent", runId, agentId}` survives a module wrapper's `{via: "mcp", keyId}` inside it,
+  // and the row carries the key id as well.
+  const outer = auditContext.getStore();
+  return auditContext.run(outer ? { ...extra, ...outer } : extra, operation);
 }
 
 /**

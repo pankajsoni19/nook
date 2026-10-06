@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useState, type FormEvent } from "react";
-import { Plug, Plus, RefreshCw } from "lucide-react";
+import { Plug, Plus, RefreshCw, ShieldAlert } from "lucide-react";
 import { ModalDialog } from "../files/Dialog";
 import { Select } from "../ui/Select";
 import { useConfirm } from "../ui/useConfirm";
@@ -80,6 +80,7 @@ export function ToolServersSection({ flash }: { flash: (message: string) => void
 
   return <section className="ai-servers" aria-labelledby="ai-servers-heading">
     <div className="settings-section-heading"><span className="settings-icon"><Plug /></span><div><h3 id="ai-servers-heading">Tool servers</h3><p>MCP servers over Streamable HTTP that agents may call. The server calls them with the credential below and sends tool arguments the model wrote; results come back as untrusted text, capped per server. At most {AGENT_BOUNDS.toolServers}.</p></div></div>
+    {list?.stdio.enabled && <p className="settings-warning ai-stdio-warning" role="note"><ShieldAlert aria-hidden="true" /><span><strong>AGENT_MCP_STDIO is on.</strong> A stdio server runs as Nook's own user with full trust: it can read Nook's keys, database, and vault, and nothing Nook does contains it. Use an HTTP bridge in its own container instead (docs/OPERATIONS.md).</span></p>}
     {error && <p className="form-error" role="alert">{error}</p>}
     {list && list.servers.length === 0 && <p className="chat-muted">No tool servers yet. Agents can still use Nook's own tools through a linked key.</p>}
     <ul className="ai-providers">
@@ -119,7 +120,7 @@ export function ToolServersSection({ flash }: { flash: (message: string) => void
     <button type="button" className="secondary-button ai-add" onClick={() => setEditing("new")} disabled={!list || list.servers.length >= AGENT_BOUNDS.toolServers}><Plus />Add tool server</button>
     {list?.stdio.enabled && <div className="security-card ai-stdio">
       <strong>Declared by the host (AGENT_MCP_STDIO)</strong>
-      <p className="chat-muted">stdio servers come only from the host's declaration file; they run as Nook's user and can read its data. An HTTP bridge in its own container is the recommended setup (docs/OPERATIONS.md).</p>
+      <p className="chat-muted">stdio servers come only from the host's declaration file. Adopt one only if you trust it as much as Nook itself.</p>
       {list.stdio.declared.length === 0 ? <p className="chat-muted">The file declares no servers.</p> : <ul className="ai-tools">{list.stdio.declared.map((entry) => <li key={entry.id}>
         <div className="ai-tool-text"><strong><code>{entry.id}</code> {entry.name}</strong><small>{entry.command} {entry.args.join(" ")}{entry.envNames.length ? ` · env: ${entry.envNames.join(", ")}` : ""}</small></div>
         {entry.adopted ? <span className="ai-badge">Adopted</span> : <button type="button" className="secondary-button" onClick={() => setEditing({ adopt: entry })}>Adopt</button>}
@@ -167,12 +168,12 @@ function ServerDialog({ server, adopt, onCancel, onSaved }: { server: ToolServer
     <form className="file-dialog-form ai-provider-form" onSubmit={submit}>
       <label htmlFor={ids.name}>Name</label>
       <input id={ids.name} value={name} maxLength={AGENT_BOUNDS.serverName} autoFocus autoComplete="off" placeholder="GitHub tools" onChange={(event) => setName(event.target.value)} />
-      {stdio ? <p className="file-dialog-hint">A stdio server declared by the host: <code>{server?.stdioId ?? adopt?.id}</code>. It runs as Nook's user; Nook cannot sandbox it.</p> : <>
+      {stdio ? <p className="file-dialog-hint">A stdio server declared by the host: <code>{server?.stdioId ?? adopt?.id}</code>. It runs as Nook's user with full trust (Nook's keys, database, and vault); Nook cannot sandbox it.</p> : <>
         <label htmlFor={ids.url}>URL</label>
         <input id={ids.url} value={url} maxLength={AGENT_BOUNDS.serverUrl} autoComplete="off" spellCheck={false} placeholder="https://tools.example.com/mcp" onChange={(event) => setUrl(event.target.value)} />
         <p className="file-dialog-hint">https only, Streamable HTTP. A private host must be listed in AGENT_ALLOWED_PRIVATE_HOSTS on the server; this Nook's own address is refused.</p>
         <span className="ai-label" id={ids.auth}>Authentication</span>
-        <Select<ServerAuthKind> labelledBy={ids.auth} label="Authentication" value={authKind} onChange={setAuthKind} options={[{ value: "none", label: "None" }, { value: "bearer", label: "Bearer token", description: "Authorization: Bearer …" }, { value: "header", label: "Custom header", description: "A header name and its value" }]} />
+        <Select<ServerAuthKind> labelledBy={ids.auth} label="Authentication" value={authKind} onChange={setAuthKind} options={[{ value: "none", label: "None" }, { value: "bearer", label: "Bearer token", description: "Authorization: Bearer …" }, { value: "header", label: "Custom header", description: "Authorization or an X- header, and its value" }]} />
         {authKind === "header" && <>
           <label htmlFor={ids.header}>Header name</label>
           <input id={ids.header} value={authHeader} maxLength={64} autoComplete="off" spellCheck={false} placeholder="X-API-Key" onChange={(event) => setAuthHeader(event.target.value)} />

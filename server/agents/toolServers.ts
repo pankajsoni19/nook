@@ -24,11 +24,14 @@ export type ToolServerRow = {
 
 export type StoredTool = Omit<CatalogTool, "policy">;
 
+/** A tool name Nook keeps from a server (review L7). */
+export const TOOL_NAME = /^[A-Za-z0-9_.-]{1,128}$/;
+
 export function parseTools(json: string): StoredTool[] {
   try {
     const value: unknown = JSON.parse(json);
     if (!Array.isArray(value)) return [];
-    return value.filter((item): item is StoredTool => !!item && typeof item === "object" && typeof (item as StoredTool).name === "string").map((item) => ({
+    return value.filter((item): item is StoredTool => !!item && typeof item === "object" && typeof (item as StoredTool).name === "string" && TOOL_NAME.test((item as StoredTool).name)).map((item) => ({
       name: item.name, title: typeof item.title === "string" ? item.title : null, description: typeof item.description === "string" ? item.description : "",
       inputSchema: item.inputSchema && typeof item.inputSchema === "object" ? item.inputSchema : { type: "object" },
       readOnly: item.readOnly === true, openWorld: item.openWorld !== false, destructive: item.destructive === true
@@ -89,8 +92,13 @@ export type ToolServerInput = {
 };
 
 const SLUG = /^[a-z0-9][a-z0-9_-]{0,23}$/;
-const HEADER_NAME = /^[A-Za-z0-9-]{1,64}$/;
-const FORBIDDEN_HEADERS = new Set(["host", "cookie", "content-type", "content-length", "accept", "user-agent", "mcp-session-id", "mcp-protocol-version", "transfer-encoding", "connection"]);
+/**
+ * Custom credential header names are an allowlist (review L6): `X-…` names or `Authorization`.
+ * Hop-by-hop, proxy, and identity headers are refused even when they would match.
+ */
+const HEADER_NAME = /^X-[A-Za-z0-9-]{1,60}$/i;
+const REFUSED_HEADER = /^(x-forwarded-.*|x-real-ip|proxy-authorization|origin|host|cookie)$/i;
+export const headerNameAllowed = (name: string) => (name.toLowerCase() === "authorization" || HEADER_NAME.test(name)) && !REFUSED_HEADER.test(name);
 
 function slugFrom(name: string, explicit?: string) {
   const candidate = (explicit ?? name).trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, AGENT_BOUNDS.serverSlug);
@@ -111,7 +119,7 @@ function normalizeUrl(value: string) {
 
 function checkAuth(kind: ServerAuthKind, header: string | null | undefined, hasSecret: boolean) {
   if (kind === "header") {
-    if (!header || !HEADER_NAME.test(header) || FORBIDDEN_HEADERS.has(header.toLowerCase()) || header.toLowerCase() === "authorization") throw new AgentError(400, "INVALID", "Give the custom header a plain name (not Authorization, Cookie, or a transport header)", { field: "authHeader" });
+    if (!header || !headerNameAllowed(header)) throw new AgentError(400, "INVALID", "The custom header must be Authorization or an X- header (not X-Forwarded-* or X-Real-IP)", { field: "authHeader" });
   }
   if (kind !== "none" && !hasSecret) throw new AgentError(400, "INVALID", "This authentication kind needs a credential", { field: "secret" });
 }
@@ -223,13 +231,20 @@ function transportFor(row: ToolServerRow) {
   return new McpHttpTransport({ url: row.url!, headers: credentialHeaders(row), timeoutMs: row.timeout_ms });
 }
 
-/** The session of a server, opened on demand; a changed revision replaces it. */
+/**
+ * The session of a server at the row's revision, opened on demand (review M3). The row must be the
+ * live one: a row whose revision is no longer current (an edit, a disable, a sync, a delete) never
+ * opens or reuses a session, so a stale URL or credential is never used again. A cached session of
+ * an older revision is closed.
+ */
 export function sessionFor(row: ToolServerRow): McpSession {
+  const live = serverRowOrNull(row.id);
+  if (!live || live.revision !== row.revision) throw new AgentError(409, "TOOL_UNAVAILABLE", "This tool server changed or was removed; the call was not run");
   const cached = sessions.get(row.id);
-  if (cached && cached.revision === row.revision && Date.now() - cached.session.lastUsed < SESSION_IDLE_MS) return cached.session;
+  if (cached && cached.revision === live.revision && Date.now() - cached.session.lastUsed < SESSION_IDLE_MS) return cached.session;
   if (cached) void cached.session.close().catch(() => undefined);
-  const session = new McpSession(transportFor(row), row.name);
-  sessions.set(row.id, { session, revision: row.revision });
+  const session = new McpSession(transportFor(live), live.name);
+  sessions.set(row.id, { session, revision: live.revision });
   return session;
 }
 
@@ -262,7 +277,11 @@ const storedTool = (tool: McpToolInfo): StoredTool => ({
 export async function syncServer(actorId: string | null, id: string): Promise<ToolServerSummary> {
   const row = serverRow(id);
   try {
-    const tools = (await sessionFor(row).listTools()).map(storedTool);
+    const listed = await sessionFor(row).listTools();
+    // Server-chosen names are validated (review L7): anything outside [A-Za-z0-9_.-]{1,128} is dropped and counted.
+    const tools = listed.filter((tool) => TOOL_NAME.test(tool.name)).map(storedTool);
+    const droppedTools = listed.length - tools.length;
+    if (droppedTools > 0) console.warn(`Agents: a tool server listed ${droppedTools} ${droppedTools === 1 ? "tool" : "tools"} with an invalid name; ${droppedTools === 1 ? "it was" : "they were"} dropped`);
     const json = JSON.stringify(tools);
     if (json.length > 1_000_000) throw new AgentError(502, "TOO_LARGE", "The tool server lists more tool schema than Nook stores (1 MB)");
     db.transaction(() => {
@@ -272,7 +291,7 @@ export async function syncServer(actorId: string | null, id: string): Promise<To
       // Policies of tools the server no longer lists are kept: they bind again if the tool returns.
       db.query("UPDATE agent_tool_servers SET tools_json = ?, tools_synced_at = ?, status = 'ok', last_error = NULL, revision = revision + 1, updated_at = ? WHERE id = ?").run(json, now(), now(), id);
     })();
-    audit(actorId, null, "agents.server.sync", { serverId: id, ok: true, toolCount: tools.length });
+    audit(actorId, null, "agents.server.sync", { serverId: id, ok: true, toolCount: tools.length, droppedTools });
   } catch (error) {
     if (error instanceof AgentError && error.code !== "TOO_LARGE") throw error;
     const described = error instanceof AgentError ? { status: "error" as const, message: error.message } : describeMcpError(error);

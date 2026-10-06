@@ -1,7 +1,7 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { config } from "../config";
 import { audit, db, now } from "../db";
-import { AGENT_BOUNDS, CHAT_RUN_TIMEOUT_S, CONFIRMATION_TTL_MS, PREAMBLE_VERSION, preambleFor, RUN_SLOTS, toolResultMarker, type DailyUsage, type PendingConfirmation, type RunErrorCode, type RunStatus, type TokenUsage, type ToolCallView } from "../../shared/agents";
+import { AGENT_BOUNDS, CHAT_RUN_TIMEOUT_S, CONFIRMATION_TTL_MS, PREAMBLE_VERSION, preambleFor, RUN_SLOTS, toolResultEnd, toolResultMarker,type DailyUsage, type PendingConfirmation, type RunErrorCode, type RunStatus, type TokenUsage, type ToolCallView } from "../../shared/agents";
 import type { AgentRow } from "./agentsService";
 import { chatAgent, finishAssistantMessage, flushAssistantText, flushToolCalls, insertAssistantPlaceholder, insertUserMessage, ownedChat, parseToolCalls, pathTo, type ChatRow, type MessageRow } from "./chats";
 import { McpClientError } from "./mcpClient";
@@ -11,7 +11,7 @@ import { connectionFor } from "./providers";
 import { readAgentSettings, roleMayChat } from "./settings";
 import { AgentError } from "./status";
 import { channelOf, openChannel, type RunChannel } from "./stream";
-import { resolveTools, type ResolvedTool } from "./tools";
+import { identityOf, liveRunner, liveToolFor, resolveTools, type ResolvedTool } from "./tools";
 import { sessionFor } from "./toolServers";
 
 /**
@@ -26,8 +26,8 @@ import { sessionFor } from "./toolServers";
  * existing audit log here: counts and ids, never message bodies.
  */
 
-/** A confirmation the run waits on (plan §5.4, D352, T324): bound to the call id and the arguments' hash, single use. */
-type PendingState = { confirmation: PendingConfirmation; argsHash: string; resolve: (decision: "allowed" | "denied") => void };
+/** A confirmation the run waits on (plan §5.4, D352, T324): a server nonce and the arguments' hash, single use (review M1). */
+type PendingState = { confirmation: PendingConfirmation; resolve: (decision: "allowed" | "denied") => void };
 export type ActiveRun = { runId: string; chatId: string; userId: string; messageId: string; controller: AbortController; startedAt: number; pending: PendingState | null; toolCalls: ToolCallView[] };
 const active = new Map<string, ActiveRun>();
 
@@ -170,12 +170,17 @@ const toolError = (code: string, message: string) => JSON.stringify({ error: mes
  * call with the server's timeout, caps the text, prepends the untrusted-data marker, and discloses
  * everything on the stream and the message. Only ids, names, and counts reach the audit log.
  */
-function toolExecutor(run: ActiveRun, channel: RunChannel, agent: AgentRow, actor: { userId: string; role: string }, messageId: string) {
+function toolExecutor(run: ActiveRun, channel: RunChannel, agent: AgentRow, messageId: string) {
   let resolved: ResolvedTool[] = [];
+  const seenCallIds = new Set<string>();
   const persist = () => flushToolCalls(messageId, run.toolCalls);
   const tools = () => {
-    if (run.toolCalls.length >= AGENT_BOUNDS.toolCallsPerRun) { resolved = []; return []; }
-    resolved = resolveTools(agent, actor);
+    resolved = [];
+    if (run.toolCalls.length >= AGENT_BOUNDS.toolCallsPerRun) return [];
+    // The agent row and the runner's role are read live at every step (review M3), not kept from the run's start.
+    const live = liveRunner(agent.id, run.userId);
+    if (!live) return [];
+    resolved = resolveTools(live.agent, { userId: run.userId, role: live.role });
     return resolved.map((tool) => ({ name: tool.modelName, description: tool.description, parameters: tool.parameters }));
   };
   const finish = (view: ToolCallView, outcome: { ok: boolean; text: string; truncated: boolean; durationMs: number; proposalId?: string | null; decision?: ToolCallView["decision"] }) => {
@@ -190,18 +195,21 @@ function toolExecutor(run: ActiveRun, channel: RunChannel, agent: AgentRow, acto
   };
   const execute = async (call: ModelToolCall): Promise<ToolExecution> => {
     const started = Date.now();
-    const tool = resolved.find((item) => item.modelName === call.name) ?? null;
-    const view: ToolCallView = { id: call.id, tool: tool?.toolName ?? call.name, server: tool?.server ?? "?", serverId: tool?.serverId ?? null, argsPreview: argsPreviewOf(call.arguments), resultPreview: null, ok: null, truncated: false, durationMs: null, decision: null, proposalId: null };
-    run.toolCalls.push(view);
-    channel.emit({ type: "tool_call", data: { messageId, callId: call.id, tool: view.tool, server: view.server, serverId: view.serverId, argsPreview: view.argsPreview } });
+    const offered = resolved.find((item) => item.modelName === call.name) ?? null;
+    const view: ToolCallView = { id: call.id, tool: offered?.toolName ?? call.name, server: offered?.server ?? "?", serverId: offered?.serverId ?? null, argsPreview: argsPreviewOf(call.arguments), resultPreview: null, ok: null, truncated: false, durationMs: null, decision: null, proposalId: null };
     const fail = (code: string, message: string, extra: { decision?: ToolCallView["decision"] } = {}) => {
       const text = toolError(code, message);
       finish(view, { ok: false, text, truncated: false, durationMs: Date.now() - started, ...extra });
       audit(run.userId, null, "agents.tool.call", { runId: run.runId, agentId: agent.id, serverId: view.serverId, server: view.server, tool: view.tool, ok: false, code });
       return { content: text };
     };
+    // Call ids are minted by the loop (`call_<step>_<index>`); a repeat is refused before anything is shown (review M1).
+    if (seenCallIds.has(call.id)) return { content: toolError("DUPLICATE_CALL", "This call id was already used in this answer; the call was not run") };
+    seenCallIds.add(call.id);
+    run.toolCalls.push(view);
+    channel.emit({ type: "tool_call", data: { messageId, callId: call.id, tool: view.tool, server: view.server, serverId: view.serverId, argsPreview: view.argsPreview } });
     if (run.toolCalls.length > AGENT_BOUNDS.toolCallsPerRun) return fail("TOOL_LIMIT", `This run has used its ${AGENT_BOUNDS.toolCallsPerRun} tool calls; answer with what you have`);
-    if (!tool) return fail("UNKNOWN_TOOL", "unknown tool");
+    if (!offered) return fail("UNKNOWN_TOOL", "unknown tool");
     let args: Record<string, unknown>;
     try {
       const parsed: unknown = call.arguments.trim() ? JSON.parse(call.arguments) : {};
@@ -210,17 +218,29 @@ function toolExecutor(run: ActiveRun, channel: RunChannel, agent: AgentRow, acto
     } catch {
       return fail("INVALID_ARGUMENTS", "arguments were not valid JSON");
     }
+    // Rights are live per call (review M3): the tool is re-resolved against the live agent row, role,
+    // server row (same revision), policy, and key before the gate, and again after any confirmation.
+    const identity = identityOf(offered);
+    const unavailable = () => fail("TOOL_UNAVAILABLE", "This tool is no longer available to this agent (it was disabled, removed, changed, or the rights changed); the call was not run");
+    let tool = liveToolFor(agent.id, run.userId, identity);
+    if (!tool) return unavailable();
     if (tool.policy === "confirm") {
-      const decision = await awaitConfirmation(run, channel, messageId, { callId: call.id, tool: tool.toolName, server: tool.server, args, expiresAt: new Date(Date.now() + confirmationTimeouts.ttlMs).toISOString(), proposal: tool.nook?.mode === "proposal" });
+      const decision = await awaitConfirmation(run, channel, messageId, {
+        confirmationId: randomBytes(16).toString("hex"), argsHash: argsHashOf(args), callId: call.id, tool: tool.toolName, server: tool.server, args,
+        expiresAt: new Date(Date.now() + confirmationTimeouts.ttlMs).toISOString(), proposal: tool.nook?.mode === "proposal"
+      });
       if (decision !== "allowed") return fail("DENIED", decision === "expired" ? "The person did not answer the confirmation in time; the call was refused" : "The person refused this call", { decision });
       view.decision = "allowed";
+      tool = liveToolFor(agent.id, run.userId, identity);
+      if (!tool) return unavailable();
     }
     let text: string;
     let ok: boolean;
     let proposalId: string | null = null;
     try {
       if (tool.nook) {
-        const outcome = await runNookTool(tool.nook, args, { runId: run.runId, agentId: agent.id, agentName: agent.name });
+        // The same per-call timeout as a server's (review L9); the result of a late call is discarded.
+        const outcome = await withTimeout(runNookTool(tool.nook, args, { runId: run.runId, agentId: agent.id, agentName: agent.name }), tool.timeoutMs, run.controller.signal);
         text = outcome.text;
         ok = outcome.ok;
         proposalId = outcome.proposalId;
@@ -237,7 +257,9 @@ function toolExecutor(run: ActiveRun, channel: RunChannel, agent: AgentRow, acto
       return fail("INTERNAL", "The tool could not be run");
     }
     const capped = capResultText(text, tool.resultCapBytes);
-    const content = `${toolResultMarker(tool.server, tool.toolName)}\n${capped.text}${capped.truncated ? `\n[truncated: the result was ${capped.bytes} bytes; the first ${tool.resultCapBytes} are shown]` : ""}`;
+    // The fence's nonce is made after the result exists, so the result cannot close the fence (review L7).
+    const nonce = randomBytes(6).toString("hex");
+    const content = `${toolResultMarker(tool.server, tool.toolName, nonce)}\n${capped.text}${capped.truncated ? `\n[truncated: the result was ${capped.bytes} bytes; the first ${tool.resultCapBytes} are shown]` : ""}\n${toolResultEnd(nonce)}`;
     finish(view, { ok, text: capped.text, truncated: capped.truncated, durationMs: Date.now() - started, proposalId });
     audit(run.userId, null, "agents.tool.call", { runId: run.runId, agentId: agent.id, serverId: view.serverId, server: view.server, tool: view.tool, ok, truncated: capped.truncated, durationMs: view.durationMs, proposalId });
     return { content };
@@ -269,14 +291,14 @@ function awaitConfirmation(run: ActiveRun, channel: RunChannel, messageId: strin
       run.pending = null;
       db.query("UPDATE agent_runs SET status = 'running' WHERE id = ? AND status = 'awaiting_confirmation'").run(run.runId);
       db.query("UPDATE chat_messages SET status = 'streaming' WHERE id = ? AND status = 'awaiting_confirmation'").run(messageId);
-      channel.emit({ type: "confirmation_resolved", data: { messageId, callId: confirmation.callId, decision } });
+      channel.emit({ type: "confirmation_resolved", data: { messageId, confirmationId: confirmation.confirmationId, callId: confirmation.callId, decision } });
       audit(run.userId, null, "agents.tool.confirm", { runId: run.runId, callId: confirmation.callId, server: confirmation.server, tool: confirmation.tool, decision });
       resolve(decision);
     };
     const onAbort = () => settle("denied");
     const timer = setTimeout(() => settle("expired"), confirmationTimeouts.ttlMs);
     timer.unref?.();
-    run.pending = { confirmation, argsHash: createHash("sha256").update(JSON.stringify(confirmation.args)).digest("hex"), resolve: settle };
+    run.pending = { confirmation, resolve: settle };
     db.query("UPDATE agent_runs SET status = 'awaiting_confirmation' WHERE id = ?").run(run.runId);
     db.query("UPDATE chat_messages SET status = 'awaiting_confirmation' WHERE id = ? AND status = 'streaming'").run(messageId);
     channel.emit({ type: "confirmation_required", data: { messageId, ...confirmation } });
@@ -285,12 +307,22 @@ function awaitConfirmation(run: ActiveRun, channel: RunChannel, messageId: strin
   });
 }
 
-/** Allow once or Deny (POST /api/runs/:id/confirm): the chat's owner, the pending call only, single use (T324). */
-export function confirmRun(runId: string, userId: string, callId: string, decision: "once" | "deny") {
+const argsHashOf = (args: unknown) => createHash("sha256").update(JSON.stringify(args)).digest("hex");
+const sameText = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
+
+/**
+ * Allow once or Deny (POST /api/runs/:id/confirm): the chat's owner, the pending card only, single
+ * use (T324, review M1). The card is named by the server's nonce and the hash of the arguments it
+ * showed; a settled card's nonce never matches again, so a replayed or stale answer is a 409.
+ */
+export function confirmRun(runId: string, userId: string, answer: { confirmationId: string; argsHash: string }, decision: "once" | "deny") {
   runOwnedBy(runId, userId);
   const live = active.get(runId);
-  if (!live?.pending || live.pending.confirmation.callId !== callId) throw new AgentError(409, "NO_PENDING_CONFIRMATION", "This run is not waiting on that confirmation");
-  live.pending.resolve(decision === "once" ? "allowed" : "denied");
+  const pending = live?.pending;
+  if (!pending || !sameText(pending.confirmation.confirmationId, answer.confirmationId) || !sameText(pending.confirmation.argsHash, answer.argsHash)) {
+    throw new AgentError(409, "NO_PENDING_CONFIRMATION", "This run is not waiting on that confirmation");
+  }
+  pending.resolve(decision === "once" ? "allowed" : "denied");
   return { ok: true as const, decision: decision === "once" ? "allowed" as const : "denied" as const };
 }
 
@@ -301,7 +333,7 @@ async function execute(run: ActiveRun, channel: RunChannel, agent: AgentRow, act
   const displayName = actor.displayName;
   const timeoutS = config.agents.runTimeoutS || CHAT_RUN_TIMEOUT_S;
   const wallClock = setTimeout(() => run.controller.abort("timeout" satisfies CancelReason), timeoutS * 1000);
-  const executor = toolExecutor(run, channel, agent, actor, messageId);
+  const executor = toolExecutor(run, channel, agent, messageId);
   let text = "";
   let flushedAt = Date.now();
   let flushedLength = 0;
@@ -326,6 +358,7 @@ async function execute(run: ActiveRun, channel: RunChannel, agent: AgentRow, act
   let errorCode: RunErrorCode | null = null;
   let errorMessage: string | null = null;
   let toolCallCount = 0;
+  let droppedToolCalls = 0;
   try {
     db.query("UPDATE agent_runs SET status = 'running', started_at = ? WHERE id = ?").run(now(), run.runId);
     const turns = windowTurns(agent, displayName, pathTo(chat.id, parentId), connection.compat.contextTokens);
@@ -370,6 +403,7 @@ async function execute(run: ActiveRun, channel: RunChannel, agent: AgentRow, act
     usage = result.usage;
     model = result.model ?? model;
     toolCallCount = result.toolCalls;
+    droppedToolCalls = result.droppedToolCalls;
     status = result.status === "step_limit" ? "step_limit" : "ok";
   } catch (error) {
     const reason = run.controller.signal.aborted ? (run.controller.signal.reason as CancelReason | undefined) ?? "stop" : null;
@@ -420,7 +454,7 @@ async function execute(run: ActiveRun, channel: RunChannel, agent: AgentRow, act
       console.error("Agent run could not be marked failed", again instanceof Error ? again.name : "Unknown error");
     }
   }
-  audit(run.userId, null, "agents.run.finish", { runId: run.runId, chatId: chat.id, status, errorCode, toolCalls: run.toolCalls.length, promptTokens: usage?.promptTokens ?? 0, completionTokens: usage?.completionTokens ?? 0 });
+  audit(run.userId, null, "agents.run.finish", { runId: run.runId, chatId: chat.id, status, errorCode, toolCalls: run.toolCalls.length, droppedToolCalls, promptTokens: usage?.promptTokens ?? 0, completionTokens: usage?.completionTokens ?? 0 });
   if (errorCode && errorMessage) channel.emit({ type: "error", data: { code: errorCode, message: errorMessage } });
   channel.emit({ type: "done", data: { status, messageId } });
   channel.close();

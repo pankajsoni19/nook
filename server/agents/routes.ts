@@ -82,7 +82,8 @@ const toolRefSchema = z.discriminatedUnion("source", [
   z.object({ source: z.literal("nook"), toolName }).strict()
 ]);
 const linkSchema = z.object({ nookKeyId: uuid.nullable() }).strict();
-const confirmSchema = z.object({ callId: z.string().min(1).max(128), decision: z.enum(["once", "deny"]) }).strict();
+// Review M1: the card is named by the server's nonce and the arguments' hash, never the model's call id.
+const confirmSchema = z.object({ confirmationId: z.string().regex(/^[0-9a-f]{32}$/), argsHash: z.string().regex(/^[0-9a-f]{64}$/), decision: z.enum(["once", "deny"]) }).strict();
 const agentCreateSchema = z.object({
   name: line(AGENT_BOUNDS.agentName),
   description: z.string().trim().max(AGENT_BOUNDS.description).optional(),
@@ -322,7 +323,7 @@ export function registerAgentRoutes(app: Hono<AppEnv>) {
   app.post("/api/runs/:runId/confirm", handle(chatter(async (c) => {
     const runId = id(c, "runId");
     const body = await parseJson(c.req.raw, confirmSchema);
-    return confirmRun(runId, c.get("user").id, body.callId, body.decision);
+    return confirmRun(runId, c.get("user").id, { confirmationId: body.confirmationId, argsHash: body.argsHash }, body.decision);
   })));
   app.get("/api/runs/:runId/events", (c) => {
     try {

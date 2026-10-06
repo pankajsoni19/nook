@@ -266,14 +266,14 @@ describe("tools (Wave 41 AC-B: the picker model, disclosure, the confirmation ca
     expect(collapsed).toContain("aria-expanded=\"false\"");
     expect(collapsed).not.toContain("Called gh/search");
     expect(renderToStaticMarkup(<ToolCallsDisclosure calls={[]} running={false} />)).toBe("");
-    const card = renderToStaticMarkup(<ConfirmationCard confirmation={{ callId: "c3", tool: "create_issue", server: "gh", args: { title: "Refund bug", body: "<script>x</script>" }, expiresAt: new Date().toISOString(), proposal: false }} busy={false} onDecide={() => undefined} />);
+    const card = renderToStaticMarkup(<ConfirmationCard confirmation={{ confirmationId: "n3", argsHash: "h3", callId: "c3", tool: "create_issue", server: "gh", args: { title: "Refund bug", body: "<script>x</script>" }, expiresAt: new Date().toISOString(), proposal: false }} busy={false} onDecide={() => undefined} />);
     expect(card).toContain("The agent wants to run create_issue on gh");
     expect(card).toContain("&quot;title&quot;: &quot;Refund bug&quot;");
     expect(card).not.toContain("<script>");
     expect(card).toContain(">Allow once</button>");
     expect(card).toContain(">Deny</button>");
     expect(card).toContain("tabindex=\"-1\"");
-    const proposal = renderToStaticMarkup(<ConfirmationCard confirmation={{ callId: "c2", tool: "create_card", server: "nook", args: {}, expiresAt: new Date().toISOString(), proposal: true }} busy onDecide={() => undefined} />);
+    const proposal = renderToStaticMarkup(<ConfirmationCard confirmation={{ confirmationId: "n2", argsHash: "h2", callId: "c2", tool: "create_card", server: "nook", args: {}, expiresAt: new Date().toISOString(), proposal: true }} busy onDecide={() => undefined} />);
     expect(proposal).toContain("propose create_card in your Inbox");
     expect(proposal).toContain("disabled");
     expect(renderToStaticMarkup(<TrifectaBadge />)).toContain("reach outside services");

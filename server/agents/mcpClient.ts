@@ -23,6 +23,8 @@ export const MCP_PROTOCOL_VERSION = "2025-11-25";
 export const MCP_RESPONSE_MAX_BYTES = 1024 * 1024;
 const MAX_TOOL_PAGES = 10;
 const MAX_TOOLS = 500;
+/** Server-to-client requests answered (-32601) per SSE response; the rest are ignored (review L1). */
+export const SERVER_REQUEST_REPLIES_MAX = 3;
 
 export type McpClientCode = "MCP_PROTOCOL" | "MCP_AUTH" | "MCP_HTTP" | "MCP_TIMEOUT" | "EGRESS_REFUSED" | "TOO_LARGE" | "NETWORK" | "CANCELLED";
 
@@ -50,6 +52,11 @@ export interface McpTransport {
   request(method: string, params: Record<string, unknown>, signal?: AbortSignal): Promise<unknown>;
   notify(method: string, params: Record<string, unknown>): Promise<void>;
   close(): Promise<void>;
+  /**
+   * Which peer the transport talks to (stdio: one number per child process; an exited child counts
+   * as the next one). A session re-initializes when it changes (review L3). HTTP has none.
+   */
+  generation?(): number;
 }
 
 type JsonRpcMessage = { jsonrpc?: string; id?: number | string | null; method?: string; params?: unknown; result?: unknown; error?: { code?: number; message?: string } };
@@ -126,12 +133,14 @@ export class McpHttpTransport implements McpTransport {
     const decoder = new TextDecoder();
     let buffer = "";
     let found: JsonRpcMessage | null = null;
+    // Server-to-client requests answered per response (review L1): at most 3; the rest are ignored and counted.
+    const replies = { sent: 0, ignored: 0 };
     const handle = (frame: string) => {
       const data = frame.split("\n").filter((line) => line.startsWith("data:")).map((line) => line.slice(5).replace(/^ /, "")).join("\n");
       if (!data.trim()) return;
       let parsed: unknown;
       try { parsed = JSON.parse(data); } catch { return; }
-      for (const message of Array.isArray(parsed) ? parsed : [parsed]) this.handleMessage(message as JsonRpcMessage, id, (match) => { found = match; });
+      for (const message of Array.isArray(parsed) ? parsed : [parsed]) this.handleMessage(message as JsonRpcMessage, id, (match) => { found = match; }, replies);
     };
     try {
       for await (const bytes of response.body) {
@@ -146,6 +155,7 @@ export class McpHttpTransport implements McpTransport {
       }
     } finally {
       response.cancel();
+      if (replies.ignored > 0) console.warn(`Agents: a tool server sent ${replies.ignored} more server-to-client ${replies.ignored === 1 ? "request" : "requests"} in one response than Nook answers (${SERVER_REQUEST_REPLIES_MAX}); ignored`);
     }
     if (!found) {
       if (signal?.aborted) throw new McpClientError("CANCELLED", "The call was cancelled");
@@ -154,11 +164,13 @@ export class McpHttpTransport implements McpTransport {
     return found;
   }
 
-  private handleMessage(message: JsonRpcMessage, id: number, onMatch: (message: JsonRpcMessage) => void) {
+  private handleMessage(message: JsonRpcMessage, id: number, onMatch: (message: JsonRpcMessage) => void, replies: { sent: number; ignored: number }) {
     if (!message || typeof message !== "object") return;
     if (message.id === id && ("result" in message || "error" in message)) { onMatch(message); return; }
     // A request from the server (sampling, elicitation, roots): Nook offers none of it (plan §3.1).
     if (typeof message.method === "string" && message.id !== undefined && message.id !== null) {
+      if (replies.sent >= SERVER_REQUEST_REPLIES_MAX) { replies.ignored += 1; return; }
+      replies.sent += 1;
       void this.post({ jsonrpc: "2.0", id: message.id, error: { code: -32601, message: "Method not found" } }).then((reply) => reply.cancel(), () => undefined);
     }
     // Notifications (progress, logging) are ignored (plan: progress ignored).
@@ -222,7 +234,8 @@ const annotation = (value: unknown): boolean | null => typeof value === "boolean
 /** The MCP session over a transport: initialize, list every tool, call a tool (plan §3.1). */
 export class McpSession {
   private ready: Promise<void> | null = null;
-  private reinitialized = false;
+  /** The transport generation the current `ready` initialized (stdio: the child it greeted). */
+  private readyGeneration: number | null = null;
   lastUsed = Date.now();
 
   constructor(readonly transport: McpTransport, readonly label = "tool server") {}
@@ -232,10 +245,13 @@ export class McpSession {
     const parsed = InitializeResultSchema.safeParse(result);
     if (!parsed.success) throw new McpClientError("MCP_PROTOCOL", "The tool server's initialize answer did not match the MCP schema");
     if (this.transport instanceof McpHttpTransport) this.transport.markInitialized(this.transport.session);
+    this.readyGeneration = this.transport.generation?.() ?? null;
     await this.transport.notify("notifications/initialized", {});
   }
 
   private ensure() {
+    // A restarted stdio child is a new peer: greet it again before any other request (review L3).
+    if (this.ready && this.readyGeneration !== null && this.transport.generation && this.transport.generation() !== this.readyGeneration) this.ready = null;
     this.ready ??= this.initialize().catch((error) => { this.ready = null; throw error; });
     return this.ready;
   }
@@ -247,16 +263,17 @@ export class McpSession {
     try {
       return await this.transport.request(method, params, signal);
     } catch (error) {
-      if (error instanceof SessionGone && !this.reinitialized && this.transport instanceof McpHttpTransport) {
-        this.reinitialized = true;
-        this.transport.reset();
-        this.ready = null;
-        await this.ensure();
-        this.reinitialized = false;
-        return this.transport.request(method, params, signal);
+      if (!(error instanceof SessionGone) || !(this.transport instanceof McpHttpTransport)) throw error;
+      this.transport.reset();
+      this.ready = null;
+      await this.ensure();
+      try {
+        return await this.transport.request(method, params, signal);
+      } catch (again) {
+        // A second 404 is the server's failure, never the internal marker (review L2).
+        if (again instanceof SessionGone) throw new McpClientError("MCP_HTTP", "The tool server lost the session again after a fresh initialize", 404);
+        throw again;
       }
-      if (error instanceof SessionGone) throw new McpClientError("MCP_HTTP", "The tool server lost the session", 404);
-      throw error;
     }
   }
 
@@ -273,7 +290,8 @@ export class McpSession {
         const raw = tool as unknown as Record<string, unknown>;
         const hints = (raw.annotations ?? {}) as Record<string, unknown>;
         tools.push({
-          name: tool.name.slice(0, 128),
+          // Not cut: a name past 128 characters is dropped at sync (review L7), never stored shortened.
+          name: tool.name,
           title: typeof raw.title === "string" ? raw.title.slice(0, 128) : null,
           description: typeof raw.description === "string" ? raw.description.slice(0, 4096) : "",
           inputSchema: (tool.inputSchema ?? { type: "object" }) as Record<string, unknown>,

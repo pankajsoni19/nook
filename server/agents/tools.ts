@@ -4,6 +4,7 @@ import { loadLiveKey, type McpKeyContext } from "../mcpTools";
 import type { AgentToolPolicy, AgentToolRef, LinkableKey, NookLink, ToolCatalog, ToolPolicy } from "../../shared/agents";
 import type { AgentRow } from "./agentsService";
 import { nookCatalogFor, nookToolSpec, nookToolsFor, type NookResolved } from "./nookBridge";
+import { roleMayChat } from "./settings";
 import { AgentError } from "./status";
 import { defaultPolicy, parseTools, serverAvailableTo, serverPolicies, serverRowOrNull, serversAvailableTo, type ToolServerRow } from "./toolServers";
 
@@ -150,9 +151,45 @@ function uniqueName(base: string, taken: Set<string>) {
   return name;
 }
 
+/** What a resolved tool was at offer time, to compare against live rows before a call runs (review M3). */
+export type ToolIdentity =
+  | { kind: "server"; serverId: string; toolName: string; revision: number }
+  | { kind: "nook"; toolName: string; mode: NookResolved["mode"]; keyId: string };
+
+export const identityOf = (tool: ResolvedTool): ToolIdentity => tool.kind === "server"
+  ? { kind: "server", serverId: tool.serverId!, toolName: tool.toolName, revision: tool.serverRow!.revision }
+  : { kind: "nook", toolName: tool.toolName, mode: tool.nook!.mode, keyId: tool.nook!.keyId };
+
+/** The agent row and the runner's role as they stand now (the agent not in the Bin, the account active, the role allowed to chat). */
+export function liveRunner(agentId: string, userId: string): { agent: AgentRow; role: string } | null {
+  const agent = db.query("SELECT * FROM agents WHERE id = ? AND deleted_at IS NULL").get(agentId) as AgentRow | null;
+  if (!agent) return null;
+  const user = db.query("SELECT role FROM users WHERE id = ? AND disabled_at IS NULL").get(userId) as { role: string } | null;
+  if (!user || !roleMayChat(user.role)) return null;
+  return { agent, role: user.role };
+}
+
+/**
+ * The one tool a call is about to run, re-resolved against live rows just before it runs (review
+ * M3): the live agent row (its picks and `nook_direct_writes`), the runner's live role and account,
+ * the live server row (enabled, available to the runner, the same revision), the live policy, and
+ * the live linked key with the same mode. Null when anything changed: the call is refused.
+ */
+export function liveToolFor(agentId: string, userId: string, identity: ToolIdentity): ResolvedTool | null {
+  const live = liveRunner(agentId, userId);
+  if (!live) return null;
+  const match = resolveTools(live.agent, { userId, role: live.role }, identity).find((tool) => identity.kind === "server"
+    ? tool.kind === "server" && tool.serverId === identity.serverId && tool.toolName === identity.toolName && tool.serverRow!.revision === identity.revision
+    : tool.kind === "nook" && tool.toolName === identity.toolName && tool.nook!.mode === identity.mode && tool.nook!.keyId === identity.keyId);
+  return match ?? null;
+}
+
 /** The agent's remote and Nook tools the runner may call at this step; disabled, `off`, and unreachable rights drop silently. */
-export function resolveTools(agent: AgentRow, runner: { userId: string; role: string }): ResolvedTool[] {
-  const refs = agentToolRefs(agent.id);
+export function resolveTools(agent: AgentRow, runner: { userId: string; role: string }, only?: ToolIdentity): ResolvedTool[] {
+  const all = agentToolRefs(agent.id);
+  const refs = all.filter((ref) => !only || (only.kind === "server" ? ref.source === "server" && ref.serverId === only.serverId && ref.toolName === only.toolName : ref.source === "nook" && ref.toolName === only.toolName));
+  // The trifecta (plan §5.2 [14], review L10): with Nook tools picked, an open-world remote tool asks first.
+  const hasNook = all.some((ref) => ref.source === "nook");
   const taken = new Set<string>();
   const resolved: ResolvedTool[] = [];
   const servers = new Map<string, { row: ToolServerRow; tools: Map<string, ReturnType<typeof parseTools>[number]>; policies: Map<string, ToolPolicy> } | null>();
@@ -167,8 +204,9 @@ export function resolveTools(agent: AgentRow, runner: { userId: string; role: st
     if (!server || !tool) continue;
     const admin = server.policies.get(tool.name) ?? defaultPolicy(tool);
     // The agent can only be stricter (D358): off wins, then confirm, then the admin's policy.
-    const policy: ToolPolicy = admin === "off" || ref.policy === "off" ? "off" : ref.policy === "confirm" ? "confirm" : admin;
+    let policy: ToolPolicy = admin === "off" || ref.policy === "off" ? "off" : ref.policy === "confirm" ? "confirm" : admin;
     if (policy === "off") continue;
+    if (policy === "auto" && hasNook && tool.openWorld) policy = "confirm";
     resolved.push({
       modelName: uniqueName(`${server.row.slug}__${tool.name}`, taken), kind: "server", serverId: server.row.id, server: server.row.slug, serverName: server.row.name, toolName: tool.name,
       description: tool.description, parameters: tool.inputSchema, policy, openWorld: tool.openWorld, resultCapBytes: server.row.result_cap_bytes, timeoutMs: server.row.timeout_ms, serverRow: server.row, nook: null
