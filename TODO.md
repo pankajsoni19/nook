@@ -6,9 +6,8 @@ Only open work lives here. Shipped work is in [CHANGELOG.md](CHANGELOG.md), the 
 
 ## In flight
 
-- [ ] **v0.30.0 — Agentic chat AC-E (knowledge bases)**, branch `wave44-fixes` (beff496, includes main b679ea0):
+- [ ] **v0.30.0 — Agentic chat AC-E (knowledge bases)**, branch `wave44-fixes` (718c4a5):
   - Review and QA are done (no HIGH); the fix pass is done, including the operator decision "attaching a base needs manage".
-  - Verification is running on `wave44-verify`.
   - Verification passed (no regressions); follow-ups done (`.text` dropped, unavailable sources in the list line, THREAT_MODEL T321 note). Next: merge main (v0.29.0), gates, Docker verify, release.
 
 ## Next features (operator to pick)
