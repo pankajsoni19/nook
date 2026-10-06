@@ -43,7 +43,8 @@ export type Route =
   | { app: "vault"; vaultId: string | null; envId: string | null; secretId: string | null; page: "access" | "activity" | null }
   // Agent chat (Wave 40, plan §13.1): the list at /chat (desktop: the list beside an empty state),
   // a new chat at /chat/new (optionally `?agent=<id>` preselects the agent), and one chat at /chat/:chatId.
-  | { app: "chat"; chatId: string | null; newChat?: true; agentId?: string }
+  // Wave 42 (AC-C, plan §13.3): the Audit log at /chat/audit, and one run at /chat/audit/:runId.
+  | { app: "chat"; chatId: string | null; newChat?: true; agentId?: string; audit?: true; runId?: string }
   // The Settings hub (Wave 37): a page at /settings (the section list on phones), and one account
   // section at /settings/:section. Team sections are `team` routes under /settings/team/… (above).
   // Wave 40: Settings → Agents has an editor below it at /settings/agents/:agentId (or /settings/agents/new).
@@ -168,9 +169,14 @@ export function parseRoute(pathname: string, search = ""): Route {
 
 export const NEW_AGENT = "new";
 
-// /chat, /chat/new (with ?agent=<id>), and /chat/:chatId. Anything malformed opens the list.
+// /chat, /chat/new (with ?agent=<id>), /chat/:chatId, /chat/audit, and /chat/audit/:runId. Anything malformed opens the list.
 function parseChat(segments: string[], search: string): Route {
   const [first] = segments;
+  if (first === "audit") {
+    const runId = segments[1];
+    if (segments.length === 1) return { app: "chat", chatId: null, audit: true };
+    return segments.length === 2 && runId && isRouteId(runId) ? { app: "chat", chatId: null, audit: true, runId: runId.toLowerCase() } : { app: "chat", chatId: null, audit: true };
+  }
   if (first === undefined || segments.length !== 1) return { app: "chat", chatId: null };
   if (first === "new") {
     const agent = new URLSearchParams(search).get("agent");
@@ -285,6 +291,7 @@ export function formatRoute(route: Route): string {
     return route.section && SETTINGS_SECTIONS.includes(route.section) ? settingsPath(route.section) : "/settings";
   }
   if (route.app === "chat") {
+    if (route.audit) return route.runId && isRouteId(route.runId) ? `/chat/audit/${route.runId.toLowerCase()}` : "/chat/audit";
     if (route.chatId && isRouteId(route.chatId)) return `/chat/${route.chatId.toLowerCase()}`;
     if (route.newChat) return route.agentId && isRouteId(route.agentId) ? `/chat/new?agent=${route.agentId.toLowerCase()}` : "/chat/new";
     return "/chat";

@@ -9,14 +9,21 @@ export function chatRoute(chatId: string | null = null, options: { newChat?: boo
   return { app: "chat", chatId: null };
 }
 
+/** The Audit log (Wave 42, plan §13.3): the list, or one run's timeline. */
+export function auditRoute(runId: string | null = null): ChatRoute {
+  return runId ? { app: "chat", chatId: null, audit: true, runId } : { app: "chat", chatId: null, audit: true };
+}
+
 /**
  * In-app Back (the ‹ in a chat's header on phones, and the list's Home): step back through entries
  * this visit pushed (the `mynotes.depth` counter), so it matches the browser's Back; from a deep
- * link replace the chat with the list; from the list go Home. It never leaves Nook.
+ * link replace the chat with the list (a run with the Audit log, the Audit log with the chats); from
+ * the list go Home. It never leaves Nook.
  */
 export function chatBackAction(route: ChatRoute, depth: number): { kind: "history" } | { kind: "replace"; route: ChatRoute } | { kind: "home" } {
-  if (!route.chatId && !route.newChat) return { kind: "home" };
+  if (!route.chatId && !route.newChat && !route.audit) return { kind: "home" };
   if (depth > 0) return { kind: "history" };
+  if (route.audit && route.runId) return { kind: "replace", route: auditRoute() };
   return { kind: "replace", route: chatRoute() };
 }
 
