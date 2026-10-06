@@ -76,12 +76,6 @@ Only open work lives here. Shipped work is in [CHANGELOG.md](CHANGELOG.md), the 
   - search rows indexed from older notes keep an embedded board's name until the note changes
   - the dark-theme colour shift of pictures is accepted (Excalidraw filter)
 
-## Reliability watch
-
-- [ ] `tests/agentsReview.test.ts:351` returned 409 instead of 201 once in a full run (2026-10-06); give it its own agent/chat if it recurs.
-- [ ] `tests/calendarFeeds` "with TOTP required…" hit its 5 s timeout once in Docker verify under load; watch on release builds.
-
-
 ## Standing rules for agent briefs
 
 - Subagents run on Opus 5.5 at medium effort, each in its own worktree with pre-assigned ports and migration ids. Releases are serial.
