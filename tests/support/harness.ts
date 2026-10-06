@@ -32,8 +32,8 @@ export const tailscaleOrigin = "https://notes.example-tailnet.ts.net";
  * process and counter); the rest are spares, handed out from the end by spareEmail(), for tests that
  * need an address no account uses.
  */
-export const SEQUENTIAL_TEST_EMAILS = 2000;
-export const allowedTestEmails = Array.from({ length: 3000 }, (_, index) => `allowed-${index + 1}@example.test`);
+export const SEQUENTIAL_TEST_EMAILS = 3000;
+export const allowedTestEmails = Array.from({ length: 4000 }, (_, index) => `allowed-${index + 1}@example.test`);
 
 process.env.DATA_DIR = dataDir;
 process.env.APP_ORIGIN = origin;

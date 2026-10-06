@@ -182,7 +182,9 @@
 .agents-icon-row { display: flex; align-items: center; gap: 8px; }
 .agents-icon-input { width: 90px; }
 .agents-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 8px; }
-.agents-actions .secondary-button { min-height: 44px; padding: 0 14px; }
+.agents-actions .secondary-button { min-height: 44px; display: inline-flex; align-items: center; gap: 6px; padding: 0 14px; white-space: nowrap; }
+/* Share… carries an icon: beside its label, never stacked above it. */
+.agents-actions .secondary-button svg { flex: none; width: 16px; height: 16px; }
 
 /* AC-B: tool servers (Settings → AI) */
 .ai-servers { display: grid; gap: 14px; margin-top: 10px; }

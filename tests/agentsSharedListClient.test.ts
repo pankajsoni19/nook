@@ -4,6 +4,9 @@ import { join } from "node:path";
 import { ApiError } from "../src/api";
 import { dropSharedChat, forkFailureText, serverMessage, syncSharedChat } from "../src/chat/sharedChatState";
 import type { ChatSummary } from "../shared/agents";
+import { agentKeysRoute } from "../src/chat/AgentsSettings";
+import { keyTabOf } from "../src/keys/keyTabs";
+import { formatRoute } from "../src/router";
 
 /**
  * Wave 43 fixes 2, client: "Shared with me" follows the open shared chat (QA L1: a rename shows,
@@ -75,5 +78,18 @@ describe("QA L2: Continue as a copy says what the server says", () => {
     expect(serverMessage(refused(409, { error: "  " }))).toBeNull();
     expect(source).toContain("flash(forkFailureText(reason));");
     expect(source).not.toContain('code === "AGENT_GONE" ? ERROR_TEXT.AGENT_GONE!');
+  });
+});
+
+describe("Manage API keys from an agent's Link Nook key sheet", () => {
+  test("opens the General tab by its own URL, where every linkable key is listed", () => {
+    expect(formatRoute(agentKeysRoute())).toBe("/settings/keys/general");
+    // A linkable key: a general key with Nook read grants, never agents:run (T318), so on General with Chat on or off.
+    const linkable = { kind: "general" as const, grants: [{ module: "notes", permission: "read" }, { module: "tasks", permission: "read" }] };
+    expect(keyTabOf(linkable as never, { vault: true, agents: true })).toBe("general");
+    expect(keyTabOf(linkable as never, { vault: true, agents: false })).toBe("general");
+    const editor = readFileSync(join(import.meta.dir, "..", "src", "chat", "AgentsSettings.tsx"), "utf8");
+    expect(editor).not.toContain('navigate({ app: "settings", section: "mcp" })');
+    expect(editor.match(/navigate\(keysRoute\)/g)).toHaveLength(2);
   });
 });
