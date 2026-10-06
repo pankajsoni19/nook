@@ -212,6 +212,7 @@ function AgentEditor({ agentId, navigate, flash, canCreate, onOpenChat }: { agen
       <input id={ids.temperature} value={temperature} inputMode="decimal" autoComplete="off" placeholder="Provider default" onChange={(event) => setTemperature(event.target.value)} />
       <h4>Tools{catalog && <small> · {pickCounts(tools, catalog).total} picked</small>}</h4>
       {agent?.trifecta && <TrifectaBadge />}
+      {agent && agent.hiddenTools > 0 && <p className="file-dialog-hint" role="note">{agent.hiddenTools === 1 ? "1 tool" : `${agent.hiddenTools} tools`} from servers you can't use {agent.hiddenTools === 1 ? "is" : "are"} also picked. {agent.ownerName} manages {agent.hiddenTools === 1 ? "it" : "them"}; saving keeps {agent.hiddenTools === 1 ? "it" : "them"}.</p>}
       <ToolPicker catalog={catalog} tools={tools} directWrites={directWrites} linked={agent?.linked ?? false} linkState={agent?.linkState ?? "none"} creating={creating} onChange={setTools} onLink={() => setLinking(true)} />
       <label className="ai-check" htmlFor={ids.direct}><input id={ids.direct} type="checkbox" checked={directWrites} onChange={(event) => setDirectWrites(event.target.checked)} />Allow direct Nook writes (otherwise every Nook change becomes an Inbox proposal)</label>
       <p className="file-dialog-hint">Direct writes also need the linked key's write grant, and they still ask first in chats.</p>

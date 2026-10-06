@@ -4,11 +4,12 @@ import { z, ZodError } from "zod";
 import type { AppEnv } from "../auth";
 import { db } from "../db";
 import { parseJson, uuid } from "../validation";
-import { AGENT_BOUNDS, AGENT_ROLE_OPTIONS, DEFAULT_MODEL, SERVER_AUTH_KINDS, SERVER_AVAILABILITIES, TOOL_POLICIES } from "../../shared/agents";
+import { AGENT_BOUNDS, AGENT_ROLE_OPTIONS, DEFAULT_MODEL, SERVER_AUTH_KINDS, SERVER_AVAILABILITIES, TOOL_POLICIES, type ChatUpdateEvent } from "../../shared/agents";
 import { createAgent, deleteAgent, agentDetail, listUsableAgents, manageableAgent, updateAgent, usableAgent } from "./agentsService";
 import { chatDetail, createChat, deleteChat, forkChat, listChats, listSharedChats, messageOf, readableChat, updateChat } from "./chats";
 import { publicLinkFor, publicLinksOn, publicLinkState, revokePublicLink, roleMayPublish, upsertPublicLink } from "./publicShares";
-import { readShareAccess, writeShareAccess, type ShareKind } from "./sharing";
+import { readShareAccess, shareLevel, writeShareAccess, type ShareKind } from "./sharing";
+import { subscribeChatUpdates } from "./chatUpdates";
 import { createProvider, deleteProvider, listProviders, providerModels, providerRow, providerSummary, testProvider, updateProvider } from "./providers";
 import { activeRunForChat, cancelChatRuns, cancelRun, confirmRun, dailyUsage, pendingConfirmationFor, runReadableBy, runSnapshot, startChatRun } from "./runs";
 import { readAgentSettings, roleMayChat, roleMayCreate, writeAgentSettings } from "./settings";
@@ -178,6 +179,11 @@ const bump = (map: Map<string, number>, key: string, by: 1 | -1) => {
   if (next <= 0) map.delete(key);
   else map.set(key, next);
 };
+/** Chat update streams per person per chat (QA M1); they also count in `streamsPerUser`. */
+const updatesPerChat = new Map<string, number>();
+const chatUpdateFrame = (event: ChatUpdateEvent) => `event: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`;
+/** Stream events only the run's owner receives (review M1): the confirmation card and its outcome. */
+const OWNER_ONLY_EVENTS: ReadonlySet<string> = new Set(["confirmation_required", "confirmation_resolved"]);
 export const openStreamCounts = (runId: string, userId: string) => ({ run: streamsPerRun.get(runId) ?? 0, user: streamsPerUser.get(userId) ?? 0 });
 const chatter = (handler: Handler): Handler => (c) => {
   if (!roleMayChat(c.get("user").role)) throw new AgentError(403, "ROLE_REFUSED", "Your role cannot chat with agents");
@@ -402,6 +408,83 @@ export function registerAgentRoutes(app: Hono<AppEnv>) {
     return { run: live ? { id: live.runId, messageId: live.messageId } : null };
   })));
 
+  /**
+   * Chat updates (Wave 43 fixes, QA M1): an SSE stream for someone reading a chat (the owner's other
+   * tabs too) that says when a message was added, a run started (`run_started {runId}`, which the
+   * client follows on /api/runs/:id/events), the chat changed, or it can no longer be read (`gone`).
+   * `since` is the chat revision the client has: when the chat moved on, a catch-up event goes first.
+   * Access is re-checked on every event and every 15 s. The streams count against the per-person cap
+   * of run streams, and at most `STREAM_CAPS.perRun` per person per chat.
+   */
+  app.get("/api/chats/:chatId/updates", (c) => {
+    try {
+      requireAgentsEnabled();
+      if (!roleMayChat(c.get("user").role)) throw new AgentError(403, "ROLE_REFUSED", "Your role cannot chat with agents");
+      const chatId = id(c, "chatId");
+      const userId = c.get("user").id;
+      const chat = readableChat(chatId, userId);
+      const sinceRaw = c.req.query("since") ?? "0";
+      const since = /^\d{1,9}$/.test(sinceRaw) ? Number(sinceRaw) : 0;
+      const slot = `${chatId}:${userId}`;
+      if ((updatesPerChat.get(slot) ?? 0) >= STREAM_CAPS.perRun || (streamsPerUser.get(userId) ?? 0) >= STREAM_CAPS.perUser) throw new AgentError(429, "TOO_MANY_STREAMS", "Too many open streams; close another tab with this chat", { retryAfterSeconds: 2 });
+      bump(updatesPerChat, slot, 1);
+      bump(streamsPerUser, userId, 1);
+      let released = false;
+      const release = () => {
+        if (released) return;
+        released = true;
+        bump(updatesPerChat, slot, -1);
+        bump(streamsPerUser, userId, -1);
+      };
+      c.header("X-Accel-Buffering", "no");
+      const stillReadable = () => {
+        const row = db.query("SELECT id, owner_id, visibility, deleted_at FROM chats WHERE id = ?").get(chatId) as { id: string; owner_id: string; visibility: string; deleted_at: string | null } | null;
+        return row !== null && shareLevel("chat", row, userId) !== "none";
+      };
+      const response = streamSSE(c, async (stream) => {
+        const queue: ChatUpdateEvent[] = [];
+        let wake: (() => void) | null = null;
+        const unsubscribe = subscribeChatUpdates(chatId, (event) => { queue.push(event); wake?.(); });
+        const keepAlive = setInterval(() => { wake?.(); }, 15_000);
+        stream.onAbort(() => { wake?.(); });
+        let lastCheck = Date.now();
+        try {
+          // Headers go out with the first bytes: a comment, so the client knows it is subscribed.
+          await stream.write(": open\n\n");
+          if (chat.revision > since) {
+            const live = activeRunForChat(chatId);
+            await stream.write(chatUpdateFrame(live ? { type: "run_started", data: { runId: live.runId, messageId: live.messageId, revision: chat.revision } } : { type: "chat_changed", data: { revision: chat.revision } }));
+          }
+          for (;;) {
+            if (stream.aborted) break;
+            if (queue.length === 0) {
+              if (Date.now() - lastCheck >= 15_000) {
+                lastCheck = Date.now();
+                if (!stillReadable()) { await stream.write(chatUpdateFrame({ type: "gone", data: {} })); break; }
+                await stream.write(": ping\n\n");
+              }
+              await new Promise<void>((resolve) => { wake = resolve; });
+              wake = null;
+              continue;
+            }
+            const event = queue.shift()!;
+            // Live per event (T325): someone taken off the chat, or a chat deleted, ends here.
+            if (event.type === "gone" || !stillReadable()) { await stream.write(chatUpdateFrame({ type: "gone", data: {} })); break; }
+            await stream.write(chatUpdateFrame(event));
+          }
+        } finally {
+          clearInterval(keepAlive);
+          unsubscribe();
+          release();
+        }
+      }, async () => { release(); });
+      response.headers.set("Cache-Control", "no-store");
+      return response;
+    } catch (error) {
+      return fail(c, error);
+    }
+  });
+
   // --- Runs (plan §2.3): resume, cancel, and confirm (plan §5.4) ---
   app.post("/api/runs/:runId/cancel", handle(chatter(async (c) => {
     const runId = id(c, "runId");
@@ -437,8 +520,14 @@ export function registerAgentRoutes(app: Hono<AppEnv>) {
       };
       c.header("X-Accel-Buffering", "no");
       // streamSSE sets no-cache; SSE replies carry chat text, so they are no-store like the rest of /api (T325).
+      // Review M1: the confirmation card (its nonce, the arguments' hash, the full arguments) is the
+      // owner's alone; recipients following the run never get it, neither from the ring nor live.
+      const ownerOnly = !run.owner;
       const follow = async (stream: Parameters<Parameters<typeof streamSSE>[1]>[0]) => {
-        const send = (event: SequencedEvent) => stream.write(sseFrame(event));
+        const send = async (event: SequencedEvent) => {
+          if (ownerOnly && OWNER_ONLY_EVENTS.has(event.type)) return;
+          await stream.write(sseFrame(event));
+        };
         const snapshot = async () => {
           const fresh = runReadableBy(runId, userId);
           await stream.write(`id: 0\nevent: snapshot\ndata: ${JSON.stringify(runSnapshot(fresh, { owner: fresh.owner }))}\n\n`);

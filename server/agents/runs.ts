@@ -15,6 +15,7 @@ import { identityOf, inactiveLinkMessage, liveRunner, liveToolFailure, liveToolF
 import { sessionFor } from "./toolServers";
 import { withinAgentRun } from "./depth";
 import { shareLevel } from "./sharing";
+import { publishChatUpdate } from "./chatUpdates";
 
 /**
  * Runs (plan §2.2, §2.3, §2.4, D344, D345): every run is an `agent_runs` row and an in-memory
@@ -169,6 +170,10 @@ export function startChatRun(actor: { userId: string; role: string; displayName:
   const channel = openChannel(runId);
   channel.emit({ type: "run", data: { runId, chatId: chat.id, messageId: assistantMessage.id, userMessageId: userMessage?.id ?? null } });
   audit(actor.userId, null, "agents.run.start", { runId, chatId: chat.id, agentId: agent.id });
+  // QA M1: people reading the chat (shared with them) hear of the new turn and follow the run.
+  const revision = (db.query("SELECT revision FROM chats WHERE id = ?").get(chat.id) as { revision: number } | null)?.revision ?? 0;
+  if (userMessage) publishChatUpdate(chat.id, { type: "message_added", data: { messageId: userMessage.id, revision } });
+  publishChatUpdate(chat.id, { type: "run_started", data: { runId, messageId: assistantMessage.id, revision } });
   // Inside the depth guard's frame (AC-C, T318): nothing this run does can start another run.
   void withinAgentRun({ runId, via: "chat" }, () => execute(run, channel, agent, actor, chat, assistantMessage.id, parentId, connection));
   return { runId, userMessage, assistantMessage };
@@ -394,7 +399,7 @@ const sameText = (a: string, b: string) => a.length === b.length && timingSafeEq
  * showed; a settled card's nonce never matches again, so a replayed or stale answer is a 409.
  */
 export function confirmRun(runId: string, userId: string, answer: { confirmationId: string; argsHash: string }, decision: "once" | "deny") {
-  runOwnedBy(runId, userId);
+  runWritableBy(runId, userId);
   const live = active.get(runId);
   const pending = live?.pending;
   if (!pending || !sameText(pending.confirmation.confirmationId, answer.confirmationId) || !sameText(pending.confirmation.argsHash, answer.argsHash)) {
@@ -570,7 +575,7 @@ async function execute(run: ActiveRun, channel: RunChannel, agent: AgentRow, act
 
 /** Stop (plan §2.2): the chat's owner aborts its live run. */
 export function cancelRun(runId: string, userId: string, reason: CancelReason = "stop") {
-  const run = runOwnedBy(runId, userId);
+  const run = runWritableBy(runId, userId);
   const live = active.get(runId);
   if (!live) return { status: run.status };
   live.controller.abort(reason);
@@ -583,6 +588,18 @@ export type RunRow = { id: string; chat_id: string | null; user_id: string; stat
 export function runOwnedBy(runId: string, userId: string): RunRow {
   const row = db.query("SELECT * FROM agent_runs WHERE id = ? AND via = 'chat' AND user_id = ?").get(runId, userId) as RunRow | null;
   if (!row) throw new AgentError(404, "NOT_FOUND", "Not found");
+  return row;
+}
+
+/**
+ * A run the person may act on (Stop, Allow once, Deny): one they started. Someone the chat is shared
+ * with can read the run, so they get 403 READ_ONLY rather than a 404 (Wave 43 fixes, review M1);
+ * everyone else the 404.
+ */
+export function runWritableBy(runId: string, userId: string): RunRow {
+  const run = runReadableBy(runId, userId);
+  if (!run.owner) throw new AgentError(403, "READ_ONLY", "This chat is shared with you read-only; only its owner can stop the answer or answer its confirmations");
+  const { owner: _owner, ...row } = run;
   return row;
 }
 

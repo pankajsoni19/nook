@@ -14,7 +14,7 @@ import { Select } from "../ui/Select";
 import { useConfirm } from "../ui/useConfirm";
 import { useHistoryDialogGuard } from "../ui/useHistoryDialogGuard";
 import { AGENT_BOUNDS, type AgentSummary, type ChatDetail, type ChatMessage, type ChatSummary, type DailyUsage, type PendingConfirmation, type PublicLinkState, type RunStatus, type TokenUsage, type ToolCallView } from "../../shared/agents";
-import { agentsStatus, cancelRun, confirmRun, createChat, deleteChat, errorCode, followRun, forkChat, getChat, listAgents, listChats, listSharedChats, messageOf, myUsage, regenerate, sendMessage, updateChat, type AgentsStatus, type SequencedRunEvent, type StartedRun } from "./chatApi";
+import { agentsStatus, cancelRun, confirmRun, createChat, deleteChat, errorCode, followChatUpdates, followRun, forkChat, getChat, listAgents, listChats, listSharedChats, messageOf, myUsage, regenerate, sendMessage, updateChat, type AgentsStatus, type SequencedRunEvent, type StartedRun } from "./chatApi";
 import { PublicLinkSheet } from "./PublicLinkSheet";
 import { leafForSibling, shownBranch, type Shown } from "./chatTree";
 import { LinkNookKeySheet } from "./LinkNookKeySheet";
@@ -289,6 +289,58 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
     document.addEventListener("visibilitychange", onVisibility);
     return () => document.removeEventListener("visibilitychange", onVisibility);
   }, [follow, stopFollowing]);
+
+  // Wave 43 fixes (QA M1): reading a chat shared with me, I hear when its owner sends, answers, or
+  // switches branch (GET /api/chats/:id/updates), reload it, and follow a new run. Owners need no
+  // signal: their own tab starts the runs. The stream closes while the tab is hidden and catches up
+  // from the revision it has when the tab comes back.
+  const detailRef = useRef(detail);
+  detailRef.current = detail;
+  const [tabVisible, setTabVisible] = useState(() => typeof document === "undefined" || document.visibilityState !== "hidden");
+  useEffect(() => {
+    const onVisibility = () => setTabVisible(document.visibilityState !== "hidden");
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, []);
+  const updatesChatId = detail && detail.chat.yourLevel === "view" ? detail.chat.id : null;
+  useEffect(() => {
+    if (!updatesChatId || !tabVisible) return;
+    const controller = new AbortController();
+    let timer: number | null = null;
+    let newRun = false;
+    // Events come in pairs (a message, then its run): one reload for both.
+    const schedule = () => {
+      if (timer !== null) return;
+      timer = window.setTimeout(() => {
+        timer = null;
+        if (controller.signal.aborted) return;
+        const current = liveRef.current;
+        const keepLive = !newRun && Boolean(current && !current.status);
+        newRun = false;
+        void refreshDetail(updatesChatId, keepLive);
+      }, 150);
+    };
+    void (async () => {
+      for (let attempt = 0; !controller.signal.aborted; attempt += 1) {
+        try {
+          await followChatUpdates(updatesChatId, detailRef.current?.chat.id === updatesChatId ? detailRef.current.chat.revision : 0, (event) => {
+            attempt = 0;
+            if (event.type === "run_started" && liveRef.current?.runId !== event.data.runId) newRun = true;
+            schedule();
+          }, controller.signal);
+          return;
+        } catch (reason) {
+          if (controller.signal.aborted) return;
+          if (reason instanceof ApiError && (reason.status === 404 || reason.status === 403)) return;
+          await new Promise((resolve) => setTimeout(resolve, Math.min(10_000, 1000 * 2 ** Math.min(attempt, 4))));
+        }
+      }
+    })();
+    return () => {
+      controller.abort();
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [refreshDetail, tabVisible, updatesChatId]);
 
   useEffect(() => {
     // Wave 39: the app's own name follows APP_NAME.
@@ -571,7 +623,7 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
       : <div className="chat-thread">
         <header className="chat-thread-header">
           {phone && <button type="button" className="icon-button chat-back" onClick={back} aria-label="Back to chats"><ChevronLeft /></button>}
-          <button type="button" className="chat-agent-chip" onClick={() => { if (chatAgent?.isOwner) onOpenAgents(chatAgent.id); }} title={chatAgent ? chatAgent.description : detail.chat.agentId ? "This agent is in the Bin" : "This agent was deleted; start a new chat with another agent"}>{chatAgent?.icon ? `${chatAgent.icon} ` : ""}{detail.chat.agentName ?? "(agent deleted)"}</button>
+          <button type="button" className="chat-agent-chip" onClick={() => { if (chatAgent?.isOwner) onOpenAgents(chatAgent.id); }} title={chatAgent ? chatAgent.description : !detail.chat.agentId ? "This agent was deleted; start a new chat with another agent" : detail.agentState === "binned" ? "This agent is in the Bin; restore it to continue" : "This chat's agent is no longer available"}>{chatAgent?.icon ? `${chatAgent.icon} ` : ""}{detail.chat.agentName ?? "(agent deleted)"}</button>
           <span className="chat-model-chip">{chatAgent?.model ?? status?.defaultModel ?? ""}</span>
           {chatAgent?.trifecta && <TrifectaBadge compact />}
           <h2 className="chat-title">{detail.chat.title}</h2>
@@ -629,7 +681,8 @@ function failureText(reason: unknown, fallback: string) {
   if (code === "NO_PROVIDER") return "No model provider is configured; an admin sets one in Settings → AI";
   if (code === "RUN_ACTIVE") return "This chat is still answering; stop it first";
   if (code === "AGENT_BUSY") return messageOf(reason, "Too many chats are answering right now");
-  if (code === "AGENT_GONE") return "This chat's agent is in the Bin or was deleted; restore it, or start a new chat";
+  // QA L3: the server says why: the Bin (to the agent's owner, who can restore it), or no longer available.
+  if (code === "AGENT_GONE") return messageOf(reason, "This chat's agent is no longer available; start a new chat with another agent");
   return messageOf(reason, fallback);
 }
 

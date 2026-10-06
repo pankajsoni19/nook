@@ -3,6 +3,7 @@ import { purgeAfterFrom } from "../bin";
 import { AGENT_BOUNDS, type ChatDetail, type ChatMessage, type ChatSummary, type TokenUsage, type ToolCallView } from "../../shared/agents";
 import { usableAgent, type AgentRow } from "./agentsService";
 import { shareLevel, shareReadableSql } from "./sharing";
+import { publishChatUpdate } from "./chatUpdates";
 import { AgentError } from "./status";
 
 /**
@@ -115,13 +116,17 @@ export function readableChat(id: string, userId: string): ChatRow {
 }
 
 export function chatDetail(id: string, userId: string): ChatDetail {
-  readableChat(id, userId);
+  const row = readableChat(id, userId);
   const chat = summaryRows("c.id = $id AND c.deleted_at IS NULL", { id }, userId)[0];
   if (!chat) throw new AgentError(404, "NOT_FOUND", "Not found");
-  const rows = db.query("SELECT * FROM chat_messages WHERE chat_id = ? ORDER BY created_at, rowid").all(id) as MessageRow[];
+  // Review L5: someone the chat is shared with gets the branch on screen only, as the read-only view shows it;
+  // the owner's other branches (edits, regenerations) stay the owner's.
+  const rows = row.owner_id === userId
+    ? db.query("SELECT * FROM chat_messages WHERE chat_id = ? ORDER BY created_at, rowid").all(id) as MessageRow[]
+    : pathTo(id, row.active_leaf_id);
   const run = db.query("SELECT id FROM agent_runs WHERE chat_id = ? AND status IN ('queued','running','awaiting_confirmation') ORDER BY queued_at DESC LIMIT 1").get(id) as { id: string } | null;
   // `pendingConfirmation` is filled by the route from the live run (runs.ts owns it).
-  return { chat, messages: rows.map(messageOf), activeRunId: run?.id ?? null, pendingConfirmation: null };
+  return { chat, messages: rows.map(messageOf), activeRunId: run?.id ?? null, pendingConfirmation: null, agentState: agentStateFor(row.agent_id, userId) };
 }
 
 export function createChat(userId: string, agentId: string): ChatSummary {
@@ -137,12 +142,31 @@ export function createChat(userId: string, agentId: string): ChatSummary {
   })();
 }
 
-/** The chat's agent, which must still be live to send (binned agents keep their chats readable; purged ones leave them read-only). */
-export function chatAgent(chat: ChatRow): AgentRow {
+/**
+ * The chat's agent, which must still be live to send (binned agents keep their chats readable; purged
+ * ones leave them read-only). Only the agent's owner can restore it from the Bin, so only they are told
+ * to (QA L3); anyone else (a copy of a shared chat, a chat with a shared agent) hears it is gone.
+ */
+export function chatAgent(chat: ChatRow, userId: string = chat.owner_id): AgentRow {
   if (chat.agent_id === null) throw new AgentError(409, "AGENT_GONE", "This chat's agent was deleted; start a new chat with another agent");
   const row = db.query("SELECT * FROM agents WHERE id = ? AND deleted_at IS NULL").get(chat.agent_id) as AgentRow | null;
-  if (!row) throw new AgentError(409, "AGENT_GONE", "This chat's agent is in the Bin; restore it to continue");
+  if (!row) throw new AgentError(409, "AGENT_GONE", agentGoneText(chat.agent_id, userId));
   return row;
+}
+
+/** Why a chat's agent cannot be used (QA L3): the Bin for the agent's owner, "no longer available" for everyone else. */
+export function agentGoneText(agentId: string | null, userId: string, binned = "This chat's agent is in the Bin; restore it to continue") {
+  const owner = agentId ? (db.query("SELECT owner_id FROM agents WHERE id = ?").get(agentId) as { owner_id: string } | null)?.owner_id ?? null : null;
+  return owner === userId ? binned : "This chat's agent is no longer available; start a new chat with another agent";
+}
+
+/** How the chat's agent stands for `userId` (QA L3): usable, in their own Bin, or gone or not shared with them. */
+export function agentStateFor(agentId: string | null, userId: string): "usable" | "binned" | "unavailable" {
+  if (agentId === null) return "unavailable";
+  const row = db.query("SELECT id, owner_id, visibility, deleted_at FROM agents WHERE id = ?").get(agentId) as { id: string; owner_id: string; visibility: string; deleted_at: string | null } | null;
+  if (!row) return "unavailable";
+  if (row.deleted_at !== null) return row.owner_id === userId ? "binned" : "unavailable";
+  return shareLevel("agent", row, userId) === "none" ? "unavailable" : "usable";
 }
 
 export function updateChat(userId: string, id: string, input: { title?: string; pinned?: boolean; activeLeafId?: string | null; expectedRevision: number }): ChatSummary {
@@ -156,7 +180,10 @@ export function updateChat(userId: string, id: string, input: { title?: string; 
     db.query("UPDATE chats SET title = ?, pinned = ?, active_leaf_id = ?, revision = revision + 1, updated_at = ? WHERE id = ?")
       .run(title, input.pinned !== undefined ? (input.pinned ? 1 : 0) : chat.pinned, input.activeLeafId !== undefined ? input.activeLeafId : chat.active_leaf_id, now(), id);
     if (input.title !== undefined) db.query("UPDATE chat_fts SET title = ? WHERE chat_id = ?").run(title, id);
-    return summaryRows("c.id = $id", { id }, userId)[0]!;
+    const summary = summaryRows("c.id = $id", { id }, userId)[0]!;
+    // QA M1: readers reload (a branch switch changes what they see).
+    publishChatUpdate(id, { type: "chat_changed", data: { revision: summary.revision } });
+    return summary;
   })();
 }
 
@@ -165,6 +192,7 @@ export function deleteChat(userId: string, id: string) {
   const timestamp = now();
   db.query("UPDATE chats SET deleted_at = ?, deleted_by = ?, purge_after = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL").run(timestamp, userId, purgeAfterFrom(new Date(timestamp)), timestamp, id);
   audit(userId, null, "agents.chat.delete", { chatId: id });
+  publishChatUpdate(id, { type: "gone", data: {} });
   return { ok: true as const };
 }
 
@@ -276,7 +304,7 @@ export function forkChat(userId: string, chatId: string, messageId: string): Cha
   const source = readableChat(chatId, userId);
   if (source.agent_id === null) throw new AgentError(409, "AGENT_GONE", "This chat's agent was deleted; start a new chat with another agent");
   const agentRow = db.query("SELECT * FROM agents WHERE id = ? AND deleted_at IS NULL").get(source.agent_id) as AgentRow | null;
-  if (!agentRow) throw new AgentError(409, "AGENT_GONE", "This chat's agent is in the Bin; it cannot be continued now");
+  if (!agentRow) throw new AgentError(409, "AGENT_GONE", agentGoneText(source.agent_id, userId, "This chat's agent is in the Bin; restore it to continue"));
   // The agent must be shared with the person too (D361): reading a chat is not using its agent.
   if (shareLevel("agent", agentRow, userId) === "none") throw new AgentError(403, "AGENT_NOT_SHARED", "You can read this chat, but its agent is not shared with you, so you cannot continue it");
   chatMessage(chatId, messageId);

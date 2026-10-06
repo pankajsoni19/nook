@@ -18,7 +18,7 @@ import { AgentError, agentsStatus } from "./status";
  *   (never an email or an id), and each turn's text. Tool calls appear by name; their arguments and
  *   results only when the owner ticked "Include tool results". Later turns never appear until Update.
  * - Policy off: every route answers 404 at once, links included; rows are kept, so turning the policy
- *   back on brings them back. A binned chat (or a blocked owner, or the module off) is a 404 too, and
+ *   back on brings them back. A binned chat (or a blocked owner, an owner demoted below member, or the module off) is a 404 too, and
  *   purging the chat deletes its row (the cascade).
  */
 
@@ -123,11 +123,14 @@ export function revokePublicLink(actor: { userId: string; role: string }, chatId
   return { ok: true as const };
 }
 
-/** The snapshot a token opens now, or null (unknown, revoked, policy off, the chat binned, the owner blocked). */
+/**
+ * The snapshot a token opens now, or null (unknown, revoked, policy off, the chat binned, the owner blocked,
+ * or the owner no longer in a role that may publish: review L3, so a demotion closes the link and a re-promotion reopens it).
+ */
 export function readPublicShare(token: string): PublicChatSnapshot | null {
   if (!PUBLIC_TOKEN.test(token) || !publicLinksOn()) return null;
   const row = db.query(`SELECT s.snapshot_json FROM chat_public_shares s JOIN chats c ON c.id = s.chat_id JOIN users u ON u.id = c.owner_id
-    WHERE s.token_hash = ? AND c.deleted_at IS NULL AND u.disabled_at IS NULL`).get(hashPublicToken(token)) as { snapshot_json: string } | null;
+    WHERE s.token_hash = ? AND c.deleted_at IS NULL AND u.disabled_at IS NULL AND u.role IN ('admin','member')`).get(hashPublicToken(token)) as { snapshot_json: string } | null;
   if (!row) return null;
   try {
     return JSON.parse(row.snapshot_json) as PublicChatSnapshot;

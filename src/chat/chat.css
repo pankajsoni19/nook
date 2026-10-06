@@ -367,3 +367,18 @@
 .public-chat-tools svg { width: 13px; height: 13px; margin-right: 5px; vertical-align: -2px; }
 .public-chat-tools pre { max-height: 220px; overflow: auto; margin: 6px 0 0; padding: 8px; border-radius: 8px; background: #0b0b0d; white-space: pre-wrap; overflow-wrap: anywhere; font-size: .76rem; }
 .public-chat .chat-state h1 { margin: 0; color: #fafafa; font-size: 1.15rem; }
+
+/* Wave 43 fixes (QA L4): on a computer the pane is its own scroll container with top padding, and a
+   sticky `top: 0` stopped below that padding, so scrolled messages showed through the gap above the
+   header; past one screen of scroll the header left altogether, because the thread (its sticky
+   containing block) shrank to the pane's height while the messages overflowed it. The thread now
+   grows with its messages, and the header takes the padding itself and sticks flush with the pane's top. */
+@media (min-width: 761px) {
+  .chat-app .chat-pane { --chat-pane-pad: clamp(28px, 5vh, 56px); }
+  .chat-app .chat-pane > .chat-thread { flex-shrink: 0; }
+  .chat-app .chat-pane .chat-thread-header { top: calc(-1 * var(--chat-pane-pad)); margin-top: calc(-1 * var(--chat-pane-pad)); padding-top: var(--chat-pane-pad); }
+}
+/* QA L5: the public page's wrench sits on the line of the tool's name. */
+.public-chat-tools li > span { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 0 5px; min-width: 0; }
+.public-chat-tools li > span svg { flex: none; margin-right: 0; }
+.public-chat-tools li > span code { overflow-wrap: anywhere; }

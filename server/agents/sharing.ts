@@ -6,6 +6,7 @@ import { notifyAccess } from "../access/notices";
 import { mailAgentShared } from "../mail/triggers";
 import { AUDIENCE_ALL_USERS, type Role } from "../team/roles";
 import { AgentError } from "./status";
+import { publishChatUpdate } from "./chatUpdates";
 
 /**
  * Sharing agents and chats (Wave 43 "AC-D", plan §5, §6.2, D356, D361, T311, T315), through the
@@ -69,12 +70,12 @@ export function shareLevelById(kind: ShareKind, id: string, userId: string): Sha
 }
 
 /**
- * SQL for "the caller (`$userId`) can open this agent or chat" on the row aliased `alias`: the owner,
+ * SQL for "the caller (`$userId`) can open this agent or chat" on the row aliased `alias`: the owner (not blocked, review L1),
  * everyone signed in for `all_users` (never guests or integrations), or a direct or group row under
  * `selected`; never a binned row, never a guest or blocked account. The same rule as `shareLevel`.
  */
 export function shareReadableSql(kind: ShareKind, alias: string) {
-  return `(${alias}.deleted_at IS NULL AND (${alias}.owner_id = $userId OR (
+  return `(${alias}.deleted_at IS NULL AND ((${alias}.owner_id = $userId AND EXISTS (SELECT 1 FROM users ou WHERE ou.id = $userId AND ou.disabled_at IS NULL)) OR (
     EXISTS (SELECT 1 FROM users ru WHERE ru.id = $userId AND ru.disabled_at IS NULL AND ru.role IN ('admin','member','viewer')) AND (
       (${alias}.visibility = 'all_users' AND ${AUDIENCE_ALL_USERS})
       OR (${alias}.visibility = 'selected' AND EXISTS (SELECT 1 FROM agent_access sx LEFT JOIN group_members sgm ON sgm.group_id = sx.group_id
@@ -223,6 +224,8 @@ export function writeShareAccess(kind: ShareKind, id: string, actor: { userId: s
     const asManager = current.yourLevel === "manage" ? { asManager: true } : {};
     audit(actor.userId, null, "item.access_changed", { ...counts, itemId: id, ...asManager });
     recordAccessEvent({ actorId: actor.userId, via: "web", action: "item.access_changed", resource: { kind, id }, meta: { ...counts, ...asManager } }, timestamp);
+    // QA M1: open readers re-check their access at once (someone taken off gets `gone`).
+    if (kind === "chat") publishChatUpdate(id, { type: "chat_changed", data: { revision: (db.query("SELECT revision FROM chats WHERE id = ?").get(id) as { revision: number } | null)?.revision ?? 0 } });
     return readShareAccess(kind, id, actor.userId);
   })();
 }

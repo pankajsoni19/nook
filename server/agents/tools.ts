@@ -51,12 +51,16 @@ export function agentToolRefs(agentId: string): AgentToolRef[] {
 }
 
 /** Replaces the agent's picks (PATCH `tools`): every server tool must exist in a catalog the editor may see; every Nook tool must be offered. */
-export function setAgentTools(agentId: string, role: string, refs: AgentToolRef[]) {
+export function setAgentTools(agentId: string, role: string, submitted: AgentToolRef[], options: { keepHidden?: boolean } = {}) {
   const visible = new Map(serversAvailableTo(role).map((row) => [row.id, new Set(parseTools(row.tools_json).map((tool) => tool.name))]));
   const nook = new Set(nookCatalogFor(null).map((tool) => tool.name));
   // Wave 43 (AC-D): a manager may not see every server the owner picked from; picks already on the
   // agent stay valid as they are (only new picks must come from the editor's own catalog).
-  const kept = new Set(agentToolRefs(agentId).filter((ref) => ref.source === "server").map((ref) => `server:${ref.serverId}:${ref.toolName}`));
+  const current = agentToolRefs(agentId).filter((ref): ref is Extract<AgentToolRef, { source: "server" }> => ref.source === "server");
+  const kept = new Set(current.map((ref) => `server:${ref.serverId}:${ref.toolName}`));
+  // Review L2: a manager's view withholds picks from servers they cannot use, so their save re-merges them.
+  const submittedKeys = new Set(submitted.map((ref) => ref.source === "server" ? `server:${ref.serverId}:${ref.toolName}` : `nook:${ref.toolName}`));
+  const refs = options.keepHidden ? [...submitted, ...current.filter((ref) => !visible.has(ref.serverId) && !submittedKeys.has(`server:${ref.serverId}:${ref.toolName}`))] : submitted;
   const seen = new Set<string>();
   for (const ref of refs) {
     const key = ref.source === "server" ? `server:${ref.serverId}:${ref.toolName}` : `nook:${ref.toolName}`;

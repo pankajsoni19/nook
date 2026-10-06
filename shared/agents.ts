@@ -183,6 +183,17 @@ export type RunEvent =
   | { type: "snapshot"; data: { status: RunStatus; messageId: string; content: string; messageStatus: MessageStatus; usage: TokenUsage | null; errorCode: string | null; toolCalls: ToolCallView[]; pendingConfirmation: PendingConfirmation | null } };
 export type RunEventType = RunEvent["type"];
 
+/**
+ * Chat-level signals (Wave 43 fixes, QA M1) on `GET /api/chats/:id/updates`, for people reading a
+ * shared chat: a new message, a new run to follow, any other change (a branch switch, a rename), and
+ * `gone` when the chat can no longer be read. Ids and the chat's revision only, never text.
+ */
+export type ChatUpdateEvent =
+  | { type: "message_added"; data: { messageId: string; revision: number } }
+  | { type: "run_started"; data: { runId: string; messageId: string; revision: number } }
+  | { type: "chat_changed"; data: { revision: number } }
+  | { type: "gone"; data: Record<string, never> };
+
 /** Wire shapes shared by the session API and the client. */
 export type ProviderSummary = {
   id: string; name: string; baseUrl: string; defaultModel: string; embeddingModel: string | null; embeddingDims: number | null;
@@ -206,6 +217,11 @@ export type AgentSummary = {
    * still says whether Nook's tools are picked, so a viewer knows to link their own key.
    */
   yourLevel: AgentLevel; ownerName: string; usesNook: boolean;
+  /**
+   * Wave 43 fixes (review L2): a manager is not shown the owner's picks from servers the manager
+   * cannot use; this counts them ("N tools from servers you can't use"), and a save keeps them. 0 otherwise.
+   */
+  hiddenTools: number;
 };
 export type AgentLevel = "owner" | "manage" | "view";
 /** The system prompt is null below `manage` (D356: viewers chat, they never read the prompt). */
@@ -248,7 +264,8 @@ export type ChatMessage = {
   /** AC-B: the tool calls an assistant turn made, oldest first (empty for user turns). */
   toolCalls: ToolCallView[];
 };
-export type ChatDetail = { chat: ChatSummary; messages: ChatMessage[]; activeRunId: string | null; pendingConfirmation: PendingConfirmation | null };
+/** `agentState` (Wave 43 fixes, QA L3): whether the caller can use the chat's agent; `binned` only for the agent's owner. */
+export type ChatDetail = { chat: ChatSummary; messages: ChatMessage[]; activeRunId: string | null; pendingConfirmation: PendingConfirmation | null; agentState?: "usable" | "binned" | "unavailable" };
 
 /** A chat's public link as its owner sees it (Wave 43, AC-O1): never the token, which is shown once. */
 export type PublicLinkState = { createdAt: string; updatedAt: string; includeToolResults: boolean };

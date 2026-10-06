@@ -1,5 +1,5 @@
 import { api, ApiError, getCsrfToken, noteRequestOutcome } from "../api";
-import type { AgentApiUsage, AuditFacets, AuditRunDetail, AuditRunSummary, AgentDetail, AgentSettings, AgentSummary, AgentToolRef, ChatDetail, ChatMessage, ChatSummary, DailyUsage, DeclaredStdioServer, LinkableKey, NookLink, ProviderCompat, ProviderSummary, PublicLinkState, RunEvent, ServerAuthKind, ServerAvailability, ToolCatalog, ToolPolicy, ToolServerSummary } from "../../shared/agents";
+import type { AgentApiUsage, AuditFacets, AuditRunDetail, AuditRunSummary, AgentDetail, AgentSettings, AgentSummary, AgentToolRef, ChatDetail, ChatMessage, ChatUpdateEvent, ChatSummary, DailyUsage, DeclaredStdioServer, LinkableKey, NookLink, ProviderCompat, ProviderSummary, PublicLinkState, RunEvent, ServerAuthKind, ServerAvailability, ToolCatalog, ToolPolicy, ToolServerSummary } from "../../shared/agents";
 
 /** The agent chat API (docs/plan/API_CONTRACTS.md § Agent chat), plus the SSE reader for runs. */
 
@@ -139,6 +139,52 @@ export async function followRun(runId: string, after: number, onEvent: (event: S
   if (ended) return "ended";
   if (signal.aborted) return "aborted";
   throw new Error("The connection to the run was lost");
+}
+
+/**
+ * Follows a chat's update signals (Wave 43 fixes, QA M1) while someone reads a chat shared with them:
+ * `message_added`, `run_started`, `chat_changed`, and `gone`. Resolves when the chat is gone or the
+ * signal aborts; rejects when the connection drops (the caller reconnects with the revision it has).
+ */
+export async function followChatUpdates(chatId: string, since: number, onEvent: (event: ChatUpdateEvent) => void, signal: AbortSignal): Promise<"gone" | "aborted"> {
+  let response: Response;
+  try {
+    response = await fetch(`/api/chats/${chatId}/updates?since=${since}`, { headers: { Accept: "text/event-stream", "X-CSRF-Token": getCsrfToken() }, credentials: "same-origin", signal });
+  } catch (error) {
+    if (signal.aborted) return "aborted";
+    throw error;
+  }
+  if (!response.ok || !response.body) {
+    const payload = await response.json().catch(() => ({})) as { error?: string };
+    throw new ApiError(typeof payload.error === "string" ? payload.error : `Request failed (${response.status})`, response.status, payload);
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let at = buffer.indexOf("\n\n");
+      while (at >= 0) {
+        const frame = buffer.slice(0, at);
+        buffer = buffer.slice(at + 2);
+        at = buffer.indexOf("\n\n");
+        const event = parseFrame(frame) as unknown as ChatUpdateEvent | null;
+        if (!event) continue;
+        onEvent(event);
+        if (event.type === "gone") return "gone";
+      }
+    }
+  } catch (error) {
+    if (signal.aborted) return "aborted";
+    throw error;
+  } finally {
+    try { reader.cancel().catch(() => undefined); } catch { /* closed */ }
+  }
+  if (signal.aborted) return "aborted";
+  throw new Error("The connection to the chat was lost");
 }
 
 /** One SSE frame → an event, or null for comments and malformed frames. Exported for tests. */

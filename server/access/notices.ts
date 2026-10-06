@@ -31,7 +31,10 @@ export type AccessNoticeKind = "share_removed" | "share_lowered" | "access_reset
   | "key_vault_volume"
   // Wave 43 (AC-D): an agent or a chat was shared with you, by name or through a group. The line names
   // it only while you can open it (the agent's name or the chat's title), never a prompt or a message.
-  | "agent_shared" | "chat_shared";
+  | "agent_shared" | "chat_shared"
+  // Wave 43 fixes (review L4): a manager changed the agent's system prompt, tools, or direct Nook writes,
+  // or the change turned on the trifecta. To the agent's owner; `count` carries AGENT_CHANGE_PARTS bits.
+  | "agent_changed";
 
 export type AccessNotice = {
   userId: string;
@@ -89,6 +92,12 @@ function line(row: NoticeRow, recipientId: string) {
     const title = sharedTitleFor(row.resource_kind, row.resource_id, recipientId);
     const noun = row.resource_kind === "agent" ? "agent" : "chat";
     if (row.kind === "agent_shared" || row.kind === "chat_shared") return title ? `${row.actor_name ?? "Someone"} shared the ${noun} “${title}” with you` : `A${noun === "agent" ? "n" : ""} ${noun} shared with you is no longer available to you`;
+    if (row.kind === "agent_changed") {
+      const mask = row.count ?? 0;
+      const parts = agentChangeParts(mask);
+      const what = `${row.actor_name ?? "A manager"} changed ${parts.length ? listWords(parts) : "the settings"} on your agent${title ? ` “${title}”` : ""}`;
+      return mask & AGENT_CHANGE_TRIFECTA ? `${what}; it can now read your Nook and reach the open web (the trifecta)` : what;
+    }
   }
   const target = row.target_name ?? "someone";
   const item = isAccessKind(row.resource_kind) && row.resource_id ? presentItem(row.resource_kind, row.resource_id, recipientId) : null;
@@ -141,6 +150,19 @@ export function resetMask(removed: Record<(typeof RESET_PARTS)[number]["key"], n
 
 export const resetParts = (mask: number) => RESET_PARTS.filter((part) => (mask & part.bit) !== 0).map((part) => part.words);
 
+/** What a manager changed on an agent (Wave 43 fixes, review L4), as bits in the notice's `count`. */
+const AGENT_CHANGE_PARTS = [
+  { bit: 1, key: "systemPrompt", words: "the system prompt" },
+  { bit: 2, key: "tools", words: "the tools" },
+  { bit: 4, key: "nookDirectWrites", words: "direct Nook writes" }
+] as const;
+/** The change turned the trifecta warning on: a consequence, said after the fields. */
+export const AGENT_CHANGE_TRIFECTA = 8;
+export function agentChangeMask(changed: Partial<Record<(typeof AGENT_CHANGE_PARTS)[number]["key"] | "trifecta", boolean>>) {
+  return AGENT_CHANGE_PARTS.reduce((mask, part) => changed[part.key] ? mask | part.bit : mask, changed.trifecta ? AGENT_CHANGE_TRIFECTA : 0);
+}
+export const agentChangeParts = (mask: number) => AGENT_CHANGE_PARTS.filter((part) => (mask & part.bit) !== 0).map((part) => part.words);
+
 /** What a Google reset or re-link removed (Wave 35), as bits in the notice's `count`. */
 const GOOGLE_RESET_PARTS = [
   { bit: 1, key: "sessions", words: "signed-in sessions" },
@@ -184,6 +206,8 @@ export function listAccessNotices(userId: string, options: { unread: boolean; li
       // Wave 43: an agent opens a new chat with it; a chat opens read-only, while the recipient can still open it.
       : row.kind === "agent_shared" && row.resource_id && sharedTitleFor("agent", row.resource_id, userId) !== null ? `/chat/new?agent=${row.resource_id}`
       : row.kind === "chat_shared" && row.resource_id && sharedTitleFor("chat", row.resource_id, userId) !== null ? `/chat/${row.resource_id}`
+      // Wave 43 fixes (review L4): the owner opens the agent's editor.
+      : row.kind === "agent_changed" && row.resource_id && sharedTitleFor("agent", row.resource_id, userId) !== null ? `/settings/agents/${row.resource_id}`
       : ACCESS_NOTICE_HREF,
     late: false, read: row.read_at !== null, createdAt: row.created_at, occurrenceStart: null
   }));

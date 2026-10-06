@@ -5,6 +5,8 @@ import { readAgentSettings, roleMayCreate } from "./settings";
 import { shareLevel, shareReadableSql, type ShareLevel } from "./sharing";
 import { AgentError } from "./status";
 import { agentToolRefs, linkStateOf, setAgentTools, trifectaOf } from "./tools";
+import { serversAvailableTo } from "./toolServers";
+import { agentChangeMask, notifyAccess } from "../access/notices";
 
 /**
  * Agents (plan §5.1, D355, D356). Create needs the `create_roles` policy. Wave 43 (AC-D) shares
@@ -32,16 +34,31 @@ const starters = (json: string): string[] => {
 
 const ownerNameQuery = db.query("SELECT display_name FROM users WHERE id = ?");
 
+const roleQuery = db.query("SELECT role FROM users WHERE id = ?");
+
+/**
+ * Review L2: the picks a manager may see. Picks from servers outside `serversAvailableTo(manager's
+ * role)` (an admins-only or disabled server) are withheld, and counted; `setAgentTools` keeps them on save.
+ */
+export function toolsVisibleTo(tools: AgentToolRef[], role: string): { shown: AgentToolRef[]; hidden: AgentToolRef[] } {
+  const usable = new Set(serversAvailableTo(role).map((server) => server.id));
+  const shown: AgentToolRef[] = [];
+  const hidden: AgentToolRef[] = [];
+  for (const tool of tools) (tool.source === "server" && !usable.has(tool.serverId) ? hidden : shown).push(tool);
+  return { shown, hidden };
+}
+
 export const agentSummary = (row: AgentRow, userId: string, level: ShareLevel = shareLevel("agent", row, userId)): AgentSummary => {
   const tools = agentToolRefs(row.id);
   const link = linkStateOf(row.id, userId).state;
   // D356: below manage, no tools configuration leaves the server; the trifecta warning and "uses Nook" do.
   const configVisible = level === "owner" || level === "manage";
+  const managerView = level === "manage" ? toolsVisibleTo(tools, (roleQuery.get(userId) as { role: string } | null)?.role ?? "viewer") : null;
   return {
     id: row.id, ownerId: row.owner_id, name: row.name, description: row.description, icon: row.icon, color: row.color,
     providerId: row.provider_id, model: row.model, maxSteps: row.max_steps, temperature: row.temperature, maxOutputTokens: row.max_output_tokens,
     starters: starters(row.starters_json), revision: row.revision, createdAt: row.created_at, updatedAt: row.updated_at, isOwner: row.owner_id === userId,
-    tools: configVisible ? tools : [], nookDirectWrites: configVisible && row.nook_direct_writes === 1, linked: link === "live", linkState: link, trifecta: trifectaOf(tools),
+    tools: managerView ? managerView.shown : configVisible ? tools : [], hiddenTools: managerView?.hidden.length ?? 0, nookDirectWrites: configVisible && row.nook_direct_writes === 1, linked: link === "live", linkState: link, trifecta: trifectaOf(tools),
     yourLevel: level === "owner" ? "owner" : level === "manage" ? "manage" : "view",
     ownerName: (ownerNameQuery.get(row.owner_id) as { display_name: string } | null)?.display_name ?? "Former member",
     usesNook: tools.some((tool) => tool.source === "nook")
@@ -135,7 +152,21 @@ export function updateAgent(actor: { userId: string; role: string }, id: string,
       input.maxOutputTokens !== undefined ? input.maxOutputTokens : row.max_output_tokens,
       input.nookDirectWrites !== undefined ? (input.nookDirectWrites ? 1 : 0) : row.nook_direct_writes, now(), id
     );
-    if (input.tools) setAgentTools(id, actor.role, input.tools);
+    const manager = row.owner_id !== actor.userId;
+    const toolsBefore = manager ? agentToolRefs(id) : [];
+    if (input.tools) setAgentTools(id, actor.role, input.tools, { keepHidden: manager });
+    // Review L4: the owner hears when a manager changes what the agent is told, what it can call, or what it may write.
+    if (manager) {
+      const toolsAfter = agentToolRefs(id);
+      const keyOf = (refs: AgentToolRef[]) => refs.map((ref) => ref.source === "server" ? `server:${ref.serverId}:${ref.toolName}:${ref.policy ?? ""}` : `nook:${ref.toolName}`).sort().join("\n");
+      const mask = agentChangeMask({
+        systemPrompt: input.systemPrompt !== undefined && input.systemPrompt !== row.system_prompt,
+        tools: input.tools !== undefined && keyOf(toolsBefore) !== keyOf(toolsAfter),
+        nookDirectWrites: input.nookDirectWrites !== undefined && (input.nookDirectWrites ? 1 : 0) !== row.nook_direct_writes,
+        trifecta: !trifectaOf(toolsBefore) && trifectaOf(toolsAfter)
+      });
+      if (mask) notifyAccess({ userId: row.owner_id, kind: "agent_changed", actorId: actor.userId, resource: { kind: "agent", id }, count: mask });
+    }
     audit(actor.userId, null, "agents.agent.update", { agentId: id, ...(input.tools ? { tools: input.tools.length } : {}), ...(row.owner_id !== actor.userId ? { asManager: true } : {}) });
     return agentDetail(usableAgent(id, actor.userId), actor.userId);
   })();

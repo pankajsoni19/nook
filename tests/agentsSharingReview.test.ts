@@ -14,9 +14,8 @@ const { registeredMigrationIds, runMigrations } = await import("../server/migrat
 const { agentSharingMigration } = await import("../server/migrations/041_agent_sharing");
 
 /**
- * Wave 43 (AC-D) independent security review probes. Tests named "FINDING" use `test.failing`: they
- * assert the secure behaviour and fail today, so they pass the suite; once the finding is fixed they
- * start passing and bun reports them, which is the cue to drop `.failing`.
+ * Wave 43 (AC-D) independent security review probes. Tests named "FINDING" assert the secure
+ * behaviour; they were `test.failing` until the Wave 43 fixes and pass now.
  *
  * 1. The TS live level (`shareLevel`) and its SQL twin (`shareReadableSql`) agree on every principal.
  * 2. A recipient following a live run never receives the owner's confirmation card.
@@ -214,7 +213,7 @@ describe("review 1: shareLevel and shareReadableSql agree", () => {
     for (const name of ["owner", "direct-view", "direct-manage"]) expect(shareLevel("agent", rowOf("agent", agentBinned), ids[name]!)).toBe("none");
   });
 
-  test("TS and SQL agree for every principal on every item, except the blocked owner (see the FINDING below)", () => {
+  test("TS and SQL agree for every principal on every item, the blocked owner included", () => {
     const disagreements: string[] = [];
     for (const [kind, id] of [["agent", agentSelected], ["agent", agentAll], ["agent", agentBinned], ["chat", chatSelected], ["agent", blockedOwnerAgent]] as const) {
       for (const [name, userId] of Object.entries(ids)) {
@@ -223,10 +222,10 @@ describe("review 1: shareLevel and shareReadableSql agree", () => {
         if (ts !== sql) disagreements.push(`${kind}:${id === blockedOwnerAgent ? "blocked-owner-agent" : id.slice(0, 8)}:${name}: ts=${ts} sql=${sql}`);
       }
     }
-    expect(disagreements).toEqual([`agent:blocked-owner-agent:blocked-owner: ts=false sql=true`]);
+    expect(disagreements).toEqual([]);
   });
 
-  test.failing("FINDING L1: a blocked owner reads as 'owner' in SQL but 'none' in TS (shareReadableSql skips disabled_at for the owner)", () => {
+  test("FINDING L1 (fixed): a blocked owner reads as 'none' in SQL as in TS (shareReadableSql checks disabled_at for the owner)", () => {
     expect(sqlReadable("agent", blockedOwnerAgent, ids["blocked-owner"]!)).toBe(shareLevel("agent", rowOf("agent", blockedOwnerAgent), ids["blocked-owner"]!) !== "none");
   });
 });
@@ -250,25 +249,28 @@ describe("review 2: a recipient following a run that waits on a confirmation", (
     expect(card).toBeDefined();
     // The chat detail hides the card from the recipient (as built)...
     expect((await send(reader, "GET", `/chats/${chat.id}`)).body.pendingConfirmation).toBeNull();
-    // ...and the stream replays the ring to them.
-    const followed = await readEvents(reader, runId, carded);
-    expect(followed.status).toBe(200);
-    recipientEvents = followed.events;
-    // Even with the card's nonce and hash in hand, the recipient cannot answer it (runOwnedBy).
-    const leaked = recipientEvents.find((event) => event.type === "confirmation_required");
-    // Today the card reaches them with the full arguments (FINDING L2 below).
-    if (leaked) expect(leaked.data).toMatchObject({ args: { what: "W43R-PRIVATE-ARG" }, confirmationId: card!.data.confirmationId, argsHash: card!.data.argsHash });
-    const answer = leaked ?? card!;
-    const refused = await send(reader, "POST", `/runs/${runId}/confirm`, { confirmationId: answer.data.confirmationId, argsHash: answer.data.argsHash, decision: "once" });
-    expect(refused.status).toBe(404);
+    // ...and the stream replays the ring to them, then follows live to the end (after the owner's answer below).
+    const following = readEvents(reader, runId, ended);
+    // The card never reaches them (FINDING L2 below); even with its nonce and hash in hand, the
+    // recipient cannot answer it: they can read the chat, so it is 403 READ_ONLY, not a 404.
+    const refused = await send(reader, "POST", `/runs/${runId}/confirm`, { confirmationId: card!.data.confirmationId, argsHash: card!.data.argsHash, decision: "once" });
+    expect([refused.status, refused.body.code]).toEqual([403, "READ_ONLY"]);
+    const stopped = await send(reader, "POST", `/runs/${runId}/cancel`, {});
+    expect([stopped.status, stopped.body.code]).toEqual([403, "READ_ONLY"]);
     // A stranger cannot follow it at all.
     expect((await readEvents(manager, runId, ended)).status).toBe(404);
     // The owner denies; the run finishes.
     expect((await send(owner, "POST", `/runs/${runId}/confirm`, { confirmationId: card!.data.confirmationId, argsHash: card!.data.argsHash, decision: "deny" })).status).toBe(200);
     await readEvents(owner, runId, ended);
+    const followed = await following;
+    expect(followed.status).toBe(200);
+    recipientEvents = followed.events;
+    // They saw the call and its (denied) result, the transcript as the owner did, minus the card and its outcome.
+    expect(recipientEvents.map((event) => event.type)).toEqual(expect.arrayContaining(["run", "tool_call", "tool_result", "done"]));
+    expect(recipientEvents.some((event) => event.type === "confirmation_resolved")).toBe(false);
   });
 
-  test.failing("FINDING L2: the live stream sends recipients the owner's confirmation card (nonce, args hash, full arguments)", () => {
+  test("FINDING L2 (fixed): the live stream never sends recipients the owner's confirmation card (nonce, args hash, full arguments)", () => {
     expect(recipientEvents.length).toBeGreaterThan(0);
     expect(recipientEvents.some((event) => event.type === "confirmation_required")).toBe(false);
   });
@@ -290,10 +292,13 @@ describe("review 3: a manager and an admin owner's tools from an admins-only ser
     const read = await send(manager, "GET", `/agents/${agentId}`);
     expect(read.status).toBe(200);
     managerView = read.body.agent;
-    expect(managerView.tools).toHaveLength(1);
-    // Saving the list as read keeps the pick (decision 5).
+    // The pick is withheld from the manager and counted (FINDING L3 below).
+    expect(managerView.tools).toHaveLength(0);
+    expect(managerView.hiddenTools).toBe(1);
+    // Saving the list as read keeps the pick (decision 5): the save re-merges what the manager was not shown.
     const kept = await send(manager, "PATCH", `/agents/${agentId}`, { tools: managerView.tools, expectedRevision: managerView.revision });
     expect(kept.status).toBe(200);
+    expect((await send(admin, "GET", `/agents/${agentId}`)).body.agent.tools).toEqual([{ source: "server", serverId, toolName: "echo", policy: null }]);
     // A new pick from the server the manager cannot use is refused.
     const added = await send(manager, "PATCH", `/agents/${agentId}`, { tools: [...managerView.tools, { source: "server", serverId, toolName: "fetch_page", policy: null }], expectedRevision: kept.body.agent.revision });
     expect(added.status).toBe(400);
@@ -302,24 +307,25 @@ describe("review 3: a manager and an admin owner's tools from an admins-only ser
     expect((await send(admin, "PATCH", `/agents/admin/servers/${serverId}`, { availability: "all", expectedRevision: back.body.server.revision })).status).toBe(200);
   });
 
-  test.failing("FINDING L3: the manager is shown the owner's picks from a server they cannot see (server id and tool name)", () => {
+  test("FINDING L3 (fixed): the manager is not shown the owner's picks from a server they cannot see (server id and tool name)", () => {
     expect(managerView.tools.some((tool: { serverId?: string }) => tool.serverId === serverId)).toBe(false);
   });
 
-  test("a manager can switch on direct Nook writes for the owner's agent (design: manage = edit); the owner gets no notice", async () => {
+  test("a manager can switch on direct Nook writes for the owner's agent (design: manage = edit); the owner gets a bell notice (review L4)", async () => {
     const current = await send(manager, "GET", `/agents/${agentId}`);
     const flipped = await send(manager, "PATCH", `/agents/${agentId}`, { nookDirectWrites: true, systemPrompt: "Changed by a manager", expectedRevision: current.body.agent.revision });
     expect(flipped.status).toBe(200);
     expect((await send(admin, "GET", `/agents/${agentId}`)).body.agent.nookDirectWrites).toBe(true);
-    const notices = db.query("SELECT COUNT(*) AS count FROM access_notices WHERE user_id = ? AND resource_id = ?").get(admin.userId, agentId) as { count: number } | null;
-    expect(notices?.count ?? 0).toBe(0);
+    const notices = db.query("SELECT kind, actor_id, count FROM access_notices WHERE user_id = ? AND resource_id = ?").all(admin.userId, agentId) as Array<{ kind: string; actor_id: string; count: number }>;
+    // The system prompt (1) and direct Nook writes (4); the earlier no-op save of the tools said nothing.
+    expect(notices).toEqual([{ kind: "agent_changed", actor_id: manager.userId, count: 5 }]);
   });
 });
 
 // ------------------------------------------------------------------------------------------------ 4
 
 describe("review 4: public links", () => {
-  test("the doors set no cookie; an unknown and a revoked token answer alike; a demoted owner's link keeps working", async () => {
+  test("the doors set no cookie; an unknown and a revoked token answer alike; a demoted owner's link closes until re-promotion", async () => {
     await setPolicy(true);
     const agent = (await send(owner, "POST", "/agents", { name: "W43R public", providerId })).body.agent;
     const chat = (await send(owner, "POST", "/chats", { agentId: agent.id })).body.chat;
@@ -350,17 +356,20 @@ describe("review 4: public links", () => {
     await revokedPage.text();
     expect(revokedPage.status).toBe(404);
     expect(revokedPage.headers.get("x-robots-tag")).toContain("noindex");
-    // Demoted to viewer (a role that may not create links): the existing link still opens.
+    // Demoted to viewer (a role that may not create links): the existing link closes (review L3)...
     db.query("UPDATE users SET role = 'viewer' WHERE id = ?").run(owner.userId);
     try {
       expect((await send(owner, "PUT", `/chats/${chat.id}/public`, { includeToolResults: false })).status).toBe(403);
-      const stillOpen = await fetch(`${origin}/api/public/chat-shares/${fresh}`);
-      await stillOpen.text();
-      // Observation (LOW): AC-O1 limits creation to member and above; nothing re-checks the creator's role when serving.
-      expect(stillOpen.status).toBe(200);
+      const closed = await fetch(`${origin}/api/public/chat-shares/${fresh}`);
+      await closed.text();
+      expect(closed.status).toBe(404);
     } finally {
       db.query("UPDATE users SET role = 'member' WHERE id = ?").run(owner.userId);
     }
+    // ...and opens again on re-promotion (the row was kept).
+    const reopened = await fetch(`${origin}/api/public/chat-shares/${fresh}`);
+    await reopened.text();
+    expect(reopened.status).toBe(200);
     expect((await send(owner, "DELETE", `/chats/${chat.id}/public`, {})).status).toBe(200);
     await setPolicy(false);
   });
