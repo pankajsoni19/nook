@@ -49,9 +49,15 @@ export function sourceLabel(source: Pick<KnowledgeSource, "kind" | "title" | "ti
 export function knowledgeLine(kb: Pick<KnowledgeSummary, "sourceCount" | "chunkCount" | "status" | "counts">) {
   const errors = kb.counts.error;
   const errorLine = `${errors} ${errors === 1 ? "source has an error" : "sources have errors"}`;
-  const status = kb.status === "indexing" ? `Indexing ${kb.counts.pending + kb.counts.indexing}${errors ? ` · ${errorLine}` : ""}` : errors > 0 ? errorLine : kb.status === "ready" ? "Ready" : "Empty";
+  const waiting = kb.counts.pending + kb.counts.indexing;
+  // Everything waiting is paused on the daily budget (QA LOW-3): say so rather than "Indexing".
+  const paused = waiting > 0 && kb.counts.indexing === 0 && (kb.counts.paused ?? 0) === kb.counts.pending;
+  const status = kb.status === "indexing" ? `${paused ? "Paused" : "Indexing"} ${waiting}${errors ? ` · ${errorLine}` : ""}` : errors > 0 ? errorLine : kb.status === "ready" ? "Ready" : "Empty";
   return `${kb.sourceCount} ${kb.sourceCount === 1 ? "source" : "sources"} · ${kb.chunkCount.toLocaleString()} ${kb.chunkCount === 1 ? "chunk" : "chunks"} · ${status}`;
 }
+
+/** Whether every source a base has waiting is paused on the daily budget (the list's badge says Paused). */
+export const knowledgePaused = (kb: Pick<KnowledgeSummary, "counts">) => kb.counts.pending > 0 && kb.counts.indexing === 0 && (kb.counts.paused ?? 0) === kb.counts.pending;
 
 /** The hit's source as Try it shows it: the title only when the reader can open it. */
 export function hitSource(hit: Pick<KnowledgeHit, "source">) {

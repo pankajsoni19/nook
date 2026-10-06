@@ -115,12 +115,13 @@ const documentLabel = (mime: string, name: string) => documentFormat(mime, name)
 // ------------------------------------------------------------------------------ summaries
 
 type Counts = KnowledgeSummary["counts"];
-const emptyCounts = (): Counts => ({ pending: 0, indexing: 0, ready: 0, error: 0, unavailable: 0 });
+const emptyCounts = (): Counts => ({ pending: 0, indexing: 0, ready: 0, error: 0, unavailable: 0, paused: 0 });
 
 function countsOf(kbId: string): Counts {
   const counts = emptyCounts();
-  for (const row of db.query("SELECT status, COUNT(*) AS count FROM kb_sources WHERE kb_id = ? GROUP BY status").all(kbId) as Array<{ status: SourceStatus; count: number }>) {
+  for (const row of db.query("SELECT status, COUNT(*) AS count, SUM(status = 'pending' AND error IS NOT NULL) AS paused FROM kb_sources WHERE kb_id = ? GROUP BY status").all(kbId) as Array<{ status: SourceStatus; count: number; paused: number }>) {
     if (row.status in counts) counts[row.status] = row.count;
+    if (row.status === "pending") counts.paused = row.paused;
   }
   return counts;
 }

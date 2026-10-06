@@ -42,8 +42,8 @@ export type SourceStatus = "pending" | "indexing" | "ready" | "error" | "unavail
 export type KnowledgeSummary = {
   id: string; name: string; description: string; ownerId: string; ownerName: string; yourLevel: KnowledgeLevel;
   embeddingModel: string; dims: number; status: KnowledgeStatus; chunkCount: number; sourceCount: number;
-  /** Sources by state, for the list's line. */
-  counts: { pending: number; indexing: number; ready: number; error: number; unavailable: number };
+  /** Sources by state, for the list's line; `paused` (Wave 44 fixes) counts the `pending` ones waiting on the daily budget. */
+  counts: { pending: number; indexing: number; ready: number; error: number; unavailable: number; paused?: number };
   audience: "private" | "selected" | "all_users" | null; revision: number; createdAt: string; updatedAt: string;
   /**
    * Why the base is not working normally (Wave 44 fixes), shown on its page: its embedding provider

@@ -1,6 +1,6 @@
 /* Settings → Knowledge (Wave 44, AC-E): sources, Add source, and Try it. Phones: one column, nothing scrolls sideways. */
 .knowledge-warning { margin: 4px 0 8px; }
-.knowledge-actions { justify-content: flex-start; margin: 8px 0 4px; }
+.agents-actions.knowledge-actions { justify-content: flex-start; margin: 8px 0 4px; }
 .knowledge-notice { margin: 0 0 8px; }
 .knowledge-subheading { margin: 18px 0 8px; color: #fafafa; font-size: .95rem; }
 .knowledge-sources, .knowledge-candidates, .knowledge-hits { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
@@ -13,6 +13,8 @@
 .knowledge-source-error { color: #f3b56e !important; }
 .knowledge-status { flex: none; margin-left: 0; }
 .agents-row .knowledge-status { margin-left: auto; }
+/* A base's line wraps rather than hiding its errors behind an ellipsis on a phone. */
+.knowledge-settings .agents-row-text small { white-space: normal; overflow-wrap: anywhere; }
 .knowledge-add-body { display: grid; gap: 10px; padding: 0 18px 18px; }
 .knowledge-modes { display: flex; flex-wrap: wrap; gap: 6px; }
 .knowledge-mode { min-height: 40px; border: 1px solid #303035; border-radius: 999px; padding: 0 14px; background: #0f0f11; color: #c8c8cd; font-weight: 600; cursor: pointer; }

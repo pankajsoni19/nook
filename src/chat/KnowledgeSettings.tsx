@@ -8,7 +8,7 @@ import { useConfirm } from "../ui/useConfirm";
 import { useHistoryDialogGuard } from "../ui/useHistoryDialogGuard";
 import { KNOWLEDGE_BOUNDS, KNOWLEDGE_SHARE_NOTE, type KnowledgeCandidate, type KnowledgeDetail, type KnowledgeHit, type KnowledgeSource, type KnowledgeSummary } from "../../shared/knowledge";
 import { agentsStatus, messageOf, type AgentsStatus } from "./chatApi";
-import { addSource, createKnowledge, deleteKnowledge, getKnowledge, hitSource, knowledgeLine, listKnowledge, pollInterval, reindexKnowledge, removeSource, searchKnowledge, sourceCandidates, sourceLabel, sourceStatusLabel, SOURCE_STATUS_LABELS, updateKnowledge } from "./knowledgeApi";
+import { addSource, createKnowledge, deleteKnowledge, getKnowledge, hitSource, knowledgeLine, knowledgePaused, listKnowledge, pollInterval, reindexKnowledge, removeSource, searchKnowledge, sourceCandidates, sourceLabel, sourceStatusLabel, SOURCE_STATUS_LABELS, updateKnowledge } from "./knowledgeApi";
 import "./chat.css";
 import "./knowledge.css";
 
@@ -49,7 +49,7 @@ export function KnowledgeSettings({ kbId, navigate, flash }: { kbId: string | nu
     <button type="button" className="agents-row" onClick={() => navigate({ ...toList, kbId: kb.id })}>
       <span className="agents-row-icon" aria-hidden="true"><BookOpen /></span>
       <span className="agents-row-text"><strong>{kb.name}</strong><small>{kb.yourLevel !== "owner" ? `${kb.ownerName} · ${kb.yourLevel === "manage" ? "Manager" : "Can search"} · ` : ""}{knowledgeLine(kb)}</small></span>
-      <StatusBadge status={kb.status === "indexing" ? "indexing" : kb.counts.error > 0 || kb.status === "error" ? "error" : kb.status === "ready" ? "ready" : null} />
+      <StatusBadge status={kb.status === "indexing" ? (knowledgePaused(kb) ? "pending" : "indexing") : kb.counts.error > 0 || kb.status === "error" ? "error" : kb.status === "ready" ? "ready" : null} label={kb.status === "indexing" && knowledgePaused(kb) ? "Paused" : undefined} />
     </button>
   </li>;
   return <section className="settings-content agents-settings knowledge-settings" aria-labelledby="knowledge-heading">

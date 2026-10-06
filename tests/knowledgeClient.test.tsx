@@ -81,6 +81,8 @@ describe("the base's page (§13.4)", () => {
     expect(knowledgeLine(detail({ status: "indexing", counts: { pending: 1, indexing: 0, ready: 0, error: 1, unavailable: 0 } }))).toBe("2 sources · 12 chunks · Indexing 1 · 1 source has an error");
     const paused = { status: "pending" as const, error: "Paused: the daily token budget is used up; indexing resumes after midnight UTC" };
     expect(sourceStatusLabel(paused)).toBe("Paused");
+    expect(knowledgeLine(detail({ status: "indexing", sourceCount: 3, counts: { pending: 2, indexing: 0, ready: 1, error: 0, unavailable: 0, paused: 2 } }))).toBe("3 sources · 12 chunks · Paused 2");
+    expect(knowledgeLine(detail({ status: "indexing", sourceCount: 3, counts: { pending: 2, indexing: 0, ready: 1, error: 0, unavailable: 0, paused: 1 } }))).toBe("3 sources · 12 chunks · Indexing 2");
     expect(sourceStatusLabel({ status: "pending", error: null })).toBe("Waiting");
     expect(pollInterval([paused, paused, { status: "ready", error: null }])).toBe(60_000);
     expect(pollInterval([paused, { status: "pending", error: null }])).toBe(1_500);
