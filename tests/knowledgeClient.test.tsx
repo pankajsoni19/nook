@@ -6,7 +6,9 @@ import { formatRoute, parseRoute } from "../src/router";
 import { hubEntries, hubEntryOf, isNestedHubRoute } from "../src/settings/hubModel";
 import { accessPath } from "../src/access/accessApi";
 import { levelDescription } from "../src/access/accessLevels";
-import { hitSource, knowledgeLine, sourceLabel, stillIndexing } from "../src/chat/knowledgeApi";
+import { hitSource, knowledgeLine, pollInterval, sourceLabel, sourceStatusLabel, stillIndexing } from "../src/chat/knowledgeApi";
+import { knowledgePickerBases } from "../src/chat/toolPicker";
+import { restoreResultMessage } from "../src/bin/binFormat";
 import { AddSourceSheet, KNOWLEDGE_WARNING } from "../src/chat/KnowledgeSettings";
 import { KnowledgeToolGroup } from "../src/chat/AgentsSettings";
 import { orphanRefs, pickCounts, refKey, refName, toggleRef } from "../src/chat/toolPicker";
@@ -30,7 +32,7 @@ const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")
 const detail = (patch: Partial<KnowledgeDetail> = {}): KnowledgeDetail => ({
   id: id(1), name: "Support FAQ", description: "Billing", ownerId: id(2), ownerName: "Ana", yourLevel: "manage", embeddingModel: "text-embedding-3-small", dims: 512,
   status: "ready", chunkCount: 12, sourceCount: 2, counts: { pending: 0, indexing: 0, ready: 2, error: 0, unavailable: 0 }, audience: null, revision: 3,
-  createdAt: "2026-10-06T00:00:00.000Z", updatedAt: "2026-10-06T00:00:00.000Z", sources: [], ...patch
+  createdAt: "2026-10-06T00:00:00.000Z", updatedAt: "2026-10-06T00:00:00.000Z", notice: null, sources: [], ...patch
 });
 
 describe("routes and the Settings hub", () => {
@@ -68,7 +70,29 @@ describe("the base's page (§13.4)", () => {
     expect(stillIndexing([{ status: "ready" }, { status: "unavailable" }])).toBe(false);
     expect(accessPath("knowledge_base", id(1))).toBe(`/knowledge/${id(1)}/access`);
     expect(levelDescription("knowledge_base", "view")).toContain("Search it");
+    expect(levelDescription("knowledge_base", "view")).toContain("attaching it to agents needs Manage");
+    expect(levelDescription("knowledge_base", "manage")).toContain("attach it to agents");
     expect(levelDescription("knowledge_base", "manage")).toContain("never delete");
+  });
+
+  test("Wave 44 fixes: errors in the status line (LOW-4), the budget pause and slow polling (LOW-3)", () => {
+    expect(knowledgeLine(detail({ counts: { pending: 0, indexing: 0, ready: 1, error: 1, unavailable: 0 } }))).toBe("2 sources · 12 chunks · 1 source has an error");
+    expect(knowledgeLine(detail({ status: "error", counts: { pending: 0, indexing: 0, ready: 0, error: 2, unavailable: 0 } }))).toBe("2 sources · 12 chunks · 2 sources have errors");
+    expect(knowledgeLine(detail({ status: "indexing", counts: { pending: 1, indexing: 0, ready: 0, error: 1, unavailable: 0 } }))).toBe("2 sources · 12 chunks · Indexing 1 · 1 source has an error");
+    const paused = { status: "pending" as const, error: "Paused: the daily token budget is used up; indexing resumes after midnight UTC" };
+    expect(sourceStatusLabel(paused)).toBe("Paused");
+    expect(sourceStatusLabel({ status: "pending", error: null })).toBe("Waiting");
+    expect(pollInterval([paused, paused, { status: "ready", error: null }])).toBe(60_000);
+    expect(pollInterval([paused, { status: "pending", error: null }])).toBe(1_500);
+    expect(pollInterval([paused, { status: "indexing", error: null }])).toBe(1_500);
+    expect(pollInterval([{ status: "ready", error: null }])).toBeNull();
+    // The page shows the base's notice (a removed provider, a blocked owner).
+    expect(read("chat/KnowledgeSettings.tsx")).toContain("kb.notice &&");
+  });
+
+  test("Wave 44 fixes: the Bin's restore toast names the knowledge base (LOW-6)", () => {
+    expect(restoreResultMessage({ type: "knowledge_base" }, { ok: true, knowledgeBaseId: id(1), knowledgeBaseName: "Support FAQ" })).toBe("Restored the knowledge base “Support FAQ”");
+    expect(restoreResultMessage({ type: "knowledge_base" }, { ok: true, alreadyRestored: true, knowledgeBaseId: id(1), knowledgeBaseName: "Support FAQ" })).toBe("The knowledge base “Support FAQ” is already restored");
   });
 
   test("Add source warns who reads the text and offers notes, files, and pasted text", () => {
@@ -119,6 +143,20 @@ describe("the agent tool picker and the chat", () => {
     expect(orphanRefs([...picked, gone], catalog)).toEqual([gone]);
     expect(orphanRefs([gone], { ...catalog, knowledge: undefined })).toEqual([]);
     expect(renderToStaticMarkup(<KnowledgeToolGroup bases={[]} tools={[]} onChange={() => undefined} />)).toContain("Settings → Knowledge");
+  });
+
+  test("Wave 44 fixes (M4): only bases you own or manage can be attached; one you now only view says so", () => {
+    const viewOnly: KnowledgeCatalogBase = { id: id(3), name: "Viewed", description: "", ownerName: "Cy", yours: false, manageable: false, status: "ready", chunkCount: 4 };
+    const managed: KnowledgeCatalogBase = { ...bases[1]!, manageable: true };
+    expect(knowledgePickerBases([managed, viewOnly], []).map((kb) => kb.id)).toEqual([id(2)]);
+    const picked: AgentToolRef[] = [{ source: "knowledge", kbId: id(3) }];
+    expect(knowledgePickerBases([managed, viewOnly], picked).map((kb) => kb.id)).toEqual([id(2), id(3)]);
+    const html = renderToStaticMarkup(<KnowledgeToolGroup bases={[managed, viewOnly]} tools={picked} onChange={() => undefined} />);
+    expect(html).toContain("You no longer manage this knowledge base");
+    expect(html.match(/type="checkbox"/g)).toHaveLength(2);
+    expect(renderToStaticMarkup(<KnowledgeToolGroup bases={[viewOnly]} tools={[]} onChange={() => undefined} />)).toContain("No knowledge bases you own or manage yet");
+    // Not an orphan: it is still in the catalog.
+    expect(orphanRefs(picked, { ...catalog, knowledge: [viewOnly] })).toEqual([]);
   });
 
   test("a search_knowledge call reads “Searched knowledge” in the disclosure", () => {

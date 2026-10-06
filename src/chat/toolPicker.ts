@@ -70,3 +70,13 @@ export function nookWriteMode(tool: NookCatalogTool, directWrites: boolean): "re
   if (directWrites) return "direct";
   return tool.proposable ? "proposal" : "needs-direct";
 }
+
+/**
+ * The Knowledge group's rows (Wave 44 fixes, M4): bases the editor owns or manages, plus any base
+ * already attached that they now only view (shown so it can be cleared). An older server sends no
+ * `manageable`: every base it lists can be attached.
+ */
+export function knowledgePickerBases<T extends { id: string; manageable?: boolean }>(bases: readonly T[], tools: readonly AgentToolRef[]): T[] {
+  const attached = new Set(tools.flatMap((ref) => ref.source === "knowledge" ? [ref.kbId] : []));
+  return bases.filter((kb) => kb.manageable !== false || attached.has(kb.id));
+}

@@ -1,8 +1,7 @@
 /* Settings → Knowledge (Wave 44, AC-E): sources, Add source, and Try it. Phones: one column, nothing scrolls sideways. */
 .knowledge-warning { margin: 4px 0 8px; }
 .knowledge-actions { justify-content: flex-start; margin: 8px 0 4px; }
-.knowledge-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; padding: 0 14px; }
-.knowledge-actions svg { width: 16px; height: 16px; flex: none; }
+.knowledge-notice { margin: 0 0 8px; }
 .knowledge-subheading { margin: 18px 0 8px; color: #fafafa; font-size: .95rem; }
 .knowledge-sources, .knowledge-candidates, .knowledge-hits { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .knowledge-source, .knowledge-candidates li { display: flex; align-items: center; gap: 10px; min-height: 52px; border: 1px solid #303035; border-radius: 12px; padding: 8px 12px; background: #0f0f11; }
@@ -18,17 +17,17 @@
 .knowledge-modes { display: flex; flex-wrap: wrap; gap: 6px; }
 .knowledge-mode { min-height: 40px; border: 1px solid #303035; border-radius: 999px; padding: 0 14px; background: #0f0f11; color: #c8c8cd; font-weight: 600; cursor: pointer; }
 .knowledge-mode.active { border-color: #f3ce79; background: #1f1d16; color: #f3ce79; }
-.knowledge-search-field { display: flex; align-items: center; gap: 8px; border: 1px solid #303035; border-radius: 10px; padding: 0 10px; background: #0f0f11; }
+.knowledge-search-field { display: flex; align-items: center; gap: 8px; border: 1px solid var(--field-border); border-radius: var(--field-radius); padding: 0 12px; background: var(--field-bg); }
+.knowledge-search-field:focus-within { border-color: var(--field-focus); box-shadow: var(--field-ring); }
 .knowledge-search-field svg { width: 16px; height: 16px; color: #8d8d94; }
-.knowledge-search-field input { flex: 1; min-width: 0; min-height: 44px; border: 0; background: transparent; color: inherit; }
+.knowledge-search-field input { flex: 1; min-width: 0; min-height: 44px; border: 0; background: transparent; color: inherit; font-size: var(--field-font-size); outline: none; box-shadow: none; }
 .knowledge-candidates { max-height: 50vh; overflow-y: auto; }
-.knowledge-candidates .secondary-button { min-height: 40px; padding: 0 14px; }
+.knowledge-candidates .action-button { flex: none; }
 .knowledge-paste { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .86rem; }
 .knowledge-try { margin-top: 20px; }
 .knowledge-try-form { display: flex; gap: 8px; }
-.knowledge-try-form input { flex: 1; min-width: 0; min-height: 44px; }
-.knowledge-try-form .secondary-button { min-height: 44px; padding: 0 14px; display: inline-flex; align-items: center; gap: 6px; }
-.knowledge-try-form svg { width: 16px; height: 16px; }
+.knowledge-try-form input { flex: 1; min-width: 0; min-height: 44px; border: 1px solid var(--field-border); border-radius: var(--field-radius); padding: 0 12px; background: var(--field-bg); color: #ededee; font-size: var(--field-font-size); outline: none; }
+.knowledge-try-form input:focus { border-color: var(--field-focus); box-shadow: var(--field-ring); }
 .knowledge-hits { margin-top: 12px; counter-reset: hit; }
 .knowledge-hit { display: grid; gap: 4px; border: 1px solid #303035; border-radius: 12px; padding: 10px 12px; background: #0f0f11; }
 .knowledge-hit-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
@@ -37,7 +36,7 @@
 .knowledge-hit-text { margin: 4px 0 0; color: #d4d4d8; font-size: .86rem; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 12em; overflow-y: auto; }
 .agents-knowledge-base { display: flex; align-items: center; gap: 8px; }
 @media (max-width: 760px) {
-  .knowledge-actions .secondary-button, .knowledge-actions .primary-button { flex: 1 1 auto; }
+  .knowledge-actions .action-button { flex: 1 1 auto; }
   .knowledge-try-form { flex-direction: column; }
   .knowledge-add-body { padding: 0 14px 14px; }
 }

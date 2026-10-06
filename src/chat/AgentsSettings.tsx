@@ -10,7 +10,7 @@ import { AGENT_BOUNDS, type AgentApiUsage, type AgentDetail, type AgentSummary, 
 import { agentApiUsage, agentsStatus, createAgent, deleteAgent, errorCode, getAgent, listAgents, messageOf, toolCatalog, updateAgent, type AgentsStatus } from "./chatApi";
 import { LinkNookKeySheet } from "./LinkNookKeySheet";
 import { TrifectaBadge } from "./ToolDisclosure";
-import { hasRef, nookGroups, nookWriteMode, orphanRefs, pickCounts, POLICY_BADGES, policyOptions, refKey, refName, setRefPolicy, toggleRef } from "./toolPicker";
+import { hasRef, knowledgePickerBases, nookGroups, nookWriteMode, orphanRefs, pickCounts, POLICY_BADGES, policyOptions, refKey, refName, setRefPolicy, toggleRef } from "./toolPicker";
 import "./chat.css";
 
 type Navigate = (route: Route, options?: { replace?: boolean }) => void;
@@ -377,24 +377,30 @@ function ToolPicker({ catalog, tools, directWrites, linked, linkState, creating,
 }
 
 /**
- * The picker's Knowledge group (plan §5.2; Wave 44 AC-E): the bases the editor can open, one
- * checkbox each. Attached bases become one read-only `search_knowledge` tool that runs on its own.
+ * The picker's Knowledge group (plan §5.2; Wave 44 AC-E): the bases the editor owns or manages, one
+ * checkbox each (Wave 44 fixes, M4: attaching needs manage). A base already attached that the editor
+ * now only views stays listed, marked "You no longer manage this knowledge base", so it can be
+ * cleared; it does not answer until they manage it again. Attached bases become one read-only
+ * `search_knowledge` tool that runs on its own.
  */
-export function KnowledgeToolGroup({ bases, tools, onChange }: { bases: KnowledgeCatalogBase[]; tools: AgentToolRef[]; onChange: (tools: AgentToolRef[]) => void }) {
+export function KnowledgeToolGroup({ bases: all, tools, onChange }: { bases: KnowledgeCatalogBase[]; tools: AgentToolRef[]; onChange: (tools: AgentToolRef[]) => void }) {
   const attached = tools.filter((ref) => ref.source === "knowledge").length;
+  // An older server sends no `manageable`: every base it lists can be attached.
+  const bases = knowledgePickerBases(all, tools);
   return <section className="agents-tools-group" aria-label="Knowledge">
     <div className="agents-tools-head">
       <strong>Knowledge</strong>
       <small>{attached} attached</small>
     </div>
-    {bases.length === 0 ? <p className="chat-muted">No knowledge bases yet. Make one in Settings → Knowledge, then attach it here.</p>
+    {bases.length === 0 ? <p className="chat-muted">No knowledge bases you own or manage yet. Make one in Settings → Knowledge, then attach it here. A base shared with you at Can view can be searched there, not attached.</p>
       : <>
         <p className="chat-muted">Attached bases become one read-only tool, search_knowledge, that runs on its own. Anyone who can use this agent can read their text.</p>
         {bases.map((kb) => {
           const ref: AgentToolRef = { source: "knowledge", kbId: kb.id };
-          return <div key={kb.id} className="agents-tool">
+          const lost = kb.manageable === false;
+          return <div key={kb.id} className="agents-tool" data-lost={lost || undefined}>
             <label><input type="checkbox" checked={hasRef(tools, ref)} onChange={() => onChange(toggleRef(tools, ref))} />
-              <span className="agents-tool-text"><span><strong>{kb.name}</strong><span className="agents-tool-badges">{kb.status === "ready" ? <span className="ai-badge ai-badge-ok">Ready</span> : kb.status === "indexing" ? <span className="ai-badge">Indexing</span> : kb.status === "error" ? <span className="ai-badge ai-badge-warn">Errors</span> : <span className="ai-badge">Empty</span>}</span></span><small>{kb.yours ? "Yours" : `${kb.ownerName}'s`} · {kb.chunkCount.toLocaleString()} chunks{kb.description ? ` · ${kb.description}` : ""}</small></span>
+              <span className="agents-tool-text"><span><strong>{kb.name}</strong><span className="agents-tool-badges">{kb.status === "ready" ? <span className="ai-badge ai-badge-ok">Ready</span> : kb.status === "indexing" ? <span className="ai-badge">Indexing</span> : kb.status === "error" ? <span className="ai-badge ai-badge-warn">Errors</span> : <span className="ai-badge">Empty</span>}</span></span><small>{kb.yours ? "Yours" : `${kb.ownerName}'s`} · {kb.chunkCount.toLocaleString()} chunks{kb.description ? ` · ${kb.description}` : ""}</small>{lost && <small className="knowledge-source-error">You no longer manage this knowledge base, so the agent does not search it. Untick to clear it.</small>}</span>
             </label>
           </div>;
         })}

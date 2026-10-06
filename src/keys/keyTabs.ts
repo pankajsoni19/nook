@@ -48,7 +48,7 @@ export function keysTabPreset(tab: KeysTab): { kind: "general" | "vault"; firstR
 export const KEYS_TAB_INTROS: Record<KeysTab, string> = {
   general: "Keys for Notes, Files, Tasks, and the other modules.",
   vault: "Vault keys (nkv_) reach only the vaults and environments you give them, and nothing outside the Vault.",
-  agents: "Keys that only run or read your agents, for scripts and AI clients that start agent runs."
+  agents: "Keys that only run or read your agents, or search chosen knowledge bases, for scripts and AI clients."
 };
 
 /** Where the one-time panel says a new key is listed when it was made on another tab. */

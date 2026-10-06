@@ -8,7 +8,7 @@ import { useConfirm } from "../ui/useConfirm";
 import { useHistoryDialogGuard } from "../ui/useHistoryDialogGuard";
 import { KNOWLEDGE_BOUNDS, KNOWLEDGE_SHARE_NOTE, type KnowledgeCandidate, type KnowledgeDetail, type KnowledgeHit, type KnowledgeSource, type KnowledgeSummary } from "../../shared/knowledge";
 import { agentsStatus, messageOf, type AgentsStatus } from "./chatApi";
-import { addSource, createKnowledge, deleteKnowledge, getKnowledge, hitSource, knowledgeLine, listKnowledge, reindexKnowledge, removeSource, searchKnowledge, sourceCandidates, sourceLabel, SOURCE_STATUS_LABELS, stillIndexing, updateKnowledge } from "./knowledgeApi";
+import { addSource, createKnowledge, deleteKnowledge, getKnowledge, hitSource, knowledgeLine, listKnowledge, pollInterval, reindexKnowledge, removeSource, searchKnowledge, sourceCandidates, sourceLabel, sourceStatusLabel, SOURCE_STATUS_LABELS, updateKnowledge } from "./knowledgeApi";
 import "./chat.css";
 import "./knowledge.css";
 
@@ -49,7 +49,7 @@ export function KnowledgeSettings({ kbId, navigate, flash }: { kbId: string | nu
     <button type="button" className="agents-row" onClick={() => navigate({ ...toList, kbId: kb.id })}>
       <span className="agents-row-icon" aria-hidden="true"><BookOpen /></span>
       <span className="agents-row-text"><strong>{kb.name}</strong><small>{kb.yourLevel !== "owner" ? `${kb.ownerName} · ${kb.yourLevel === "manage" ? "Manager" : "Can search"} · ` : ""}{knowledgeLine(kb)}</small></span>
-      <StatusBadge status={kb.status === "indexing" ? "indexing" : kb.status === "ready" ? "ready" : kb.status === "error" ? "error" : null} />
+      <StatusBadge status={kb.status === "indexing" ? "indexing" : kb.counts.error > 0 || kb.status === "error" ? "error" : kb.status === "ready" ? "ready" : null} />
     </button>
   </li>;
   return <section className="settings-content agents-settings knowledge-settings" aria-labelledby="knowledge-heading">
@@ -60,15 +60,15 @@ export function KnowledgeSettings({ kbId, navigate, flash }: { kbId: string | nu
     {own && own.length > 0 && <ul className="agents-list" aria-label="Your knowledge bases">{own.map(row)}</ul>}
     {bases && bases.length === 0 && status?.enabled && status.canChat && <p className="chat-muted">No knowledge bases yet.</p>}
     {shared.length > 0 && <><h4 className="agents-shared-heading"><UsersRound aria-hidden="true" />Shared with you</h4><ul className="agents-list" aria-label="Knowledge bases shared with you">{shared.map(row)}</ul></>}
-    {status?.enabled && status.canCreate && <button type="button" className="secondary-button agents-add" onClick={() => setCreating(true)}><Plus />New knowledge base</button>}
+    {status?.enabled && status.canCreate && <button type="button" className="action-button secondary agents-add" onClick={() => setCreating(true)}><Plus />New knowledge base</button>}
     {creating && <CreateSheet onClose={() => setCreating(false)} onCreated={(created) => { setCreating(false); flash("Knowledge base created"); navigate({ ...toList, kbId: created.id }); }} />}
   </section>;
 }
 
-function StatusBadge({ status }: { status: KnowledgeSource["status"] | null }) {
+function StatusBadge({ status, label }: { status: KnowledgeSource["status"] | null; label?: string }) {
   if (!status) return null;
   const tone = status === "ready" ? " ai-badge-ok" : status === "error" || status === "unavailable" ? " ai-badge-warn" : "";
-  return <span className={`ai-badge${tone} knowledge-status`} data-status={status}>{SOURCE_STATUS_LABELS[status]}</span>;
+  return <span className={`ai-badge${tone} knowledge-status`} data-status={status}>{label ?? SOURCE_STATUS_LABELS[status]}</span>;
 }
 
 /** New knowledge base: a name and a description. */
@@ -100,8 +100,8 @@ function CreateSheet({ onClose, onCreated }: { onClose: () => void; onCreated: (
       <input id={ids.description} value={description} maxLength={KNOWLEDGE_BOUNDS.description} autoComplete="off" placeholder="What it answers (agents see this)" onChange={(event) => setDescription(event.target.value)} />
       <p className="file-dialog-hint">It uses the default model provider's embedding model, fixed for the life of the base.</p>
       <footer className="file-dialog-actions">
-        <button type="button" className="secondary-button" onClick={onClose} disabled={busy}>Cancel</button>
-        <button type="submit" className="primary-button" disabled={busy}>{busy ? "Creating…" : "Create"}</button>
+        <button type="button" className="action-button secondary" onClick={onClose} disabled={busy}>Cancel</button>
+        <button type="submit" className="action-button" disabled={busy}>{busy ? "Creating…" : "Create"}</button>
       </footer>
     </form>
   </ModalDialog>;
@@ -132,13 +132,14 @@ function KnowledgePage({ kbId, navigate, flash }: { kbId: string; navigate: Navi
   }, [kbId]);
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { document.title = hubDocumentTitle(kb?.name ?? "Knowledge base"); }, [kb?.name]);
-  // While a source waits or is being indexed, the page checks again every 1.5 s.
-  const indexing = kb ? stillIndexing(kb.sources) : false;
+  // While a source waits or is being indexed, the page checks again every 1.5 s; every 60 s while all
+  // that waits is paused on the daily budget (QA LOW-3).
+  const every = kb ? pollInterval(kb.sources) : null;
   useEffect(() => {
-    if (!indexing) return;
-    const timer = window.setInterval(() => { void load(); }, 1500);
+    if (every === null) return;
+    const timer = window.setInterval(() => { void load(); }, every);
     return () => window.clearInterval(timer);
-  }, [indexing, load]);
+  }, [every, load]);
 
   const manager = kb?.yourLevel === "owner" || kb?.yourLevel === "manage";
   async function reindex() {
@@ -184,13 +185,14 @@ function KnowledgePage({ kbId, navigate, flash }: { kbId: string; navigate: Navi
     {error && <p className="form-error" role="alert">{error}</p>}
     {kb && <>
       <p className="settings-warning knowledge-warning" role="note">{KNOWLEDGE_WARNING}</p>
+      {kb.notice && <p className="settings-warning knowledge-notice" role="status">{kb.notice}</p>}
       <p className="chat-muted">{knowledgeLine(kb)} · {kb.embeddingModel}, {kb.dims} dimensions</p>
       {manager && <div className="agents-actions knowledge-actions">
-        <button type="button" className="primary-button" onClick={() => setSheet("add")}><Plus />Add source</button>
-        <button type="button" className="secondary-button" onClick={() => { void reindex(); }} disabled={busy || kb.sourceCount === 0}><RefreshCw />Re-index all</button>
-        <button type="button" className="secondary-button" onClick={() => setSheet("share")}><Share2 />Share…</button>
-        <button type="button" className="secondary-button" onClick={() => setSheet("rename")}>Rename</button>
-        {kb.yourLevel === "owner" && <button type="button" className="secondary-button" onClick={() => { void moveToBin(); }}><Trash2 />Move to Bin</button>}
+        <button type="button" className="action-button" onClick={() => setSheet("add")}><Plus />Add source</button>
+        <button type="button" className="action-button secondary" onClick={() => { void reindex(); }} disabled={busy || kb.sourceCount === 0}><RefreshCw />Re-index all</button>
+        <button type="button" className="action-button secondary" onClick={() => setSheet("share")}><Share2 />Share…</button>
+        <button type="button" className="action-button secondary" onClick={() => setSheet("rename")}>Rename</button>
+        {kb.yourLevel === "owner" && <button type="button" className="action-button secondary" onClick={() => { void moveToBin(); }}><Trash2 />Move to Bin</button>}
       </div>}
       <h4 className="knowledge-subheading">Sources</h4>
       {kb.sources.length === 0 ? <p className="chat-muted">{manager ? "No sources yet. Add a note, a text, Markdown, or CSV file, or paste text." : "No sources yet."}</p>
@@ -206,7 +208,7 @@ function KnowledgePage({ kbId, navigate, flash }: { kbId: string; navigate: Navi
                 {source.error && <small className="knowledge-source-error">{source.error}</small>}
                 {source.status === "unavailable" && <small className="knowledge-source-error">The owner can no longer read it, so its passages were removed.</small>}
               </div>
-              <StatusBadge status={source.status} />
+              <StatusBadge status={source.status} label={sourceStatusLabel(source)} />
               {manager && <button type="button" className="icon-button" onClick={() => { void remove(source); }} aria-label={`Remove ${label.title}`}><Trash2 /></button>}
             </li>;
           })}
@@ -246,8 +248,8 @@ function RenameSheet({ kb, onClose, onSaved }: { kb: KnowledgeDetail; onClose: (
       <label htmlFor={ids.description}>Description</label>
       <input id={ids.description} value={description} maxLength={KNOWLEDGE_BOUNDS.description} autoComplete="off" onChange={(event) => setDescription(event.target.value)} />
       <footer className="file-dialog-actions">
-        <button type="button" className="secondary-button" onClick={onClose} disabled={busy}>Cancel</button>
-        <button type="submit" className="primary-button" disabled={busy}>{busy ? "Saving…" : "Save"}</button>
+        <button type="button" className="action-button secondary" onClick={onClose} disabled={busy}>Cancel</button>
+        <button type="submit" className="action-button" disabled={busy}>{busy ? "Saving…" : "Save"}</button>
       </footer>
     </form>
   </ModalDialog>;
@@ -304,15 +306,15 @@ export function AddSourceSheet({ kb, onClose, onAdded }: { kb: KnowledgeDetail; 
       {error && <p className="form-error" role="alert">{error}</p>}
       {mode !== "text" ? <>
         <label className="sr-only" htmlFor={ids.query}>Search {mode === "note" ? "notes" : "files"}</label>
-        <div className="knowledge-search-field"><Search aria-hidden="true" /><input id={ids.query} type="search" value={query} autoComplete="off" placeholder={mode === "note" ? "Search published notes" : "Search text, Markdown, and CSV files"} onChange={(event) => setQuery(event.target.value)} /></div>
+        <div className="knowledge-search-field"><Search aria-hidden="true" /><input id={ids.query} type="search" value={query} autoComplete="off" placeholder={mode === "note" ? "Search published notes" : "Search .txt, .md, and .csv files"} onChange={(event) => setQuery(event.target.value)} /></div>
         {candidates === null ? <p className="chat-muted" role="status">Loading…</p>
-          : candidates.length === 0 ? <p className="chat-muted">{mode === "note" ? "No published notes match." : "No text, Markdown, or CSV files of 1 MiB or less match."}</p>
+          : candidates.length === 0 ? <p className="chat-muted">{mode === "note" ? "No published notes match." : "No text (.txt), Markdown (.md), or CSV (.csv) files of 1 MiB or less match."}</p>
           : <ul className="knowledge-candidates" aria-label={mode === "note" ? "Notes" : "Files"}>
             {candidates.map((item) => {
               const done = item.added || added.has(item.id);
               return <li key={item.id}>
                 <div className="knowledge-source-text"><strong>{item.title}</strong><small>{item.detail}</small></div>
-                {done ? <span className="ai-badge ai-badge-ok">Added</span> : <button type="button" className="secondary-button" disabled={busy} onClick={() => { void add(mode === "note" ? { kind: "note", noteId: item.id } : { kind: "document", documentId: item.id }, item.id); }}>Add</button>}
+                {done ? <span className="ai-badge ai-badge-ok">Added</span> : <button type="button" className="action-button secondary" disabled={busy} onClick={() => { void add(mode === "note" ? { kind: "note", noteId: item.id } : { kind: "document", documentId: item.id }, item.id); }}>Add</button>}
               </li>;
             })}
           </ul>}
@@ -323,10 +325,10 @@ export function AddSourceSheet({ kb, onClose, onAdded }: { kb: KnowledgeDetail; 
         <textarea id={ids.text} className="knowledge-paste" value={text} rows={10} spellCheck={false} placeholder={"# Billing\n\n## How do refunds work?\nRefunds are pro rata.\n\nQ: Can I pause?\nA: Yes, for up to three months."} onChange={(event) => setText(event.target.value)} />
         <p className="file-dialog-hint">Markdown headings become the passages' heading paths; a heading that asks a question, or a Q: / A: pair, stays one passage.</p>
         <footer className="file-dialog-actions">
-          <button type="submit" className="primary-button" disabled={busy || bytes > KNOWLEDGE_BOUNDS.textBytes}>{busy ? "Adding…" : "Add text"}</button>
+          <button type="submit" className="action-button" disabled={busy || bytes > KNOWLEDGE_BOUNDS.textBytes}>{busy ? "Adding…" : "Add text"}</button>
         </footer>
       </form>}
-      {mode !== "text" && <footer className="file-dialog-actions"><button type="button" className="secondary-button" onClick={onClose} disabled={busy}>Done</button></footer>}
+      {mode !== "text" && <footer className="file-dialog-actions"><button type="button" className="action-button secondary" onClick={onClose} disabled={busy}>Done</button></footer>}
     </div>
   </ModalDialog>;
 }
@@ -336,6 +338,7 @@ function TryIt({ kb }: { kb: KnowledgeDetail }) {
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<KnowledgeHit[] | null>(null);
   const [mode, setMode] = useState<"hybrid" | "keyword">("hybrid");
+  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const id = useId();
@@ -348,6 +351,7 @@ function TryIt({ kb }: { kb: KnowledgeDetail }) {
       const result = await searchKnowledge(kb.id, query.trim());
       setHits(result.hits);
       setMode(result.mode);
+      setNotice(result.notice ?? null);
     } catch (reason) {
       setError(messageOf(reason, "Could not search"));
     } finally {
@@ -359,11 +363,11 @@ function TryIt({ kb }: { kb: KnowledgeDetail }) {
     <form className="knowledge-try-form" onSubmit={run} role="search">
       <label className="sr-only" htmlFor={id}>Ask the knowledge base</label>
       <input id={id} type="search" value={query} maxLength={KNOWLEDGE_BOUNDS.queryChars} autoComplete="off" placeholder="Ask what an agent would ask" onChange={(event) => setQuery(event.target.value)} />
-      <button type="submit" className="secondary-button" disabled={busy || !query.trim()}><Search />{busy ? "Searching…" : "Search"}</button>
+      <button type="submit" className="action-button secondary" disabled={busy || !query.trim()}><Search />{busy ? "Searching…" : "Search"}</button>
     </form>
     {error && <p className="form-error" role="alert">{error}</p>}
     {hits && <div aria-live="polite">
-      {mode === "keyword" && <p className="chat-muted">Matched by keywords only: the embedding model was not available.</p>}
+      {mode === "keyword" && <p className="chat-muted">{notice ? "Matched by keywords only: this knowledge base's embedding provider was removed." : "Matched by keywords only: the embedding model was not available."}</p>}
       {hits.length === 0 ? <p className="chat-muted">No passages match.</p> : <ol className="knowledge-hits" aria-label="Top passages">
         {hits.map((hit, index) => <li key={`${hit.kb.id}-${index}`} className="knowledge-hit">
           <div className="knowledge-hit-head"><strong>{hit.heading ?? "(no heading)"}</strong><span className="ai-badge">{hit.score.toFixed(4)}</span></div>
