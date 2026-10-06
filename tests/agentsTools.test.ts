@@ -11,6 +11,7 @@ const { parseStdioDeclarations, setStdioDeclarationsForTests, stdioEnabled } = a
 const { resetToolServersForTests } = await import("../server/agents/toolServers");
 const { config } = await import("../server/config");
 const { flushKeyUsage } = await import("../server/apiKeys");
+const { deleteProvider } = await import("../server/agents/providers");
 
 /**
  * Tools (agent chat plan §15 items 2, 3, 4, 6, 7; Wave 41 AC-B): the in-house MCP client against
@@ -102,7 +103,8 @@ beforeAll(async () => {
   providerId = created.body.provider.id;
 });
 afterAll(async () => {
-  await api(admin, "DELETE", `/agents/admin/providers/${providerId}`);
+  // Through the service: retireUsersAfterFile has already blocked this file's admin by now.
+  deleteProvider(admin.userId, providerId);
   await resetToolServersForTests();
   fake.stop();
   mcp.stop();
