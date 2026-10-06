@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createElement } from "react";
@@ -604,7 +604,14 @@ process.stdin.on("data", (chunk) => {
   }
 });
 `);
-  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+  // The transport makes a nook-mcp-* directory per child start and never removes it (FINDING L); these probes clean up theirs.
+  const tempBefore = new Set(readdirSync(tmpdir()).filter((name) => name.startsWith("nook-mcp-")));
+  afterAll(() => {
+    rmSync(dir, { recursive: true, force: true });
+    for (const name of readdirSync(tmpdir()).filter((item) => item.startsWith("nook-mcp-") && !tempBefore.has(item))) {
+      try { rmdirSync(join(tmpdir(), name)); } catch { /* not empty or gone */ }
+    }
+  });
   const declaration = (args: string[] = [], env: Record<string, string> = {}) => ({ id: "probe", name: "Probe", command: process.execPath, args: ["--no-env-file", child, ...args], env });
 
   test("the child gets only the declared variables plus PATH, an empty temp cwd, and literal argv (no shell)", async () => {
