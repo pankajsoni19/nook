@@ -41,7 +41,13 @@
 .settings-hub .team-intro p { margin-bottom: 4px; }
 /* A section's tab row (SettingsTabs; Settings → AI first): one line that scrolls sideways on a narrow
    screen, labels never wrap, and only the row scrolls, never the page. */
-.settings-tabs { min-width: 0; max-width: 100%; display: flex; gap: 4px; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scrollbar-width: none; border-bottom: 1px solid var(--border); }
+/* v0.29 H1: the row is a scroll container, and a scroll container's automatic minimum height is 0, so a
+   grid or flex parent short of height shrank it to its 1 px border (Settings → AI at 1280×600 put the
+   tabs under the panel, unclickable). SettingsTabs wraps the row in .settings-tabs-bar, which does not
+   scroll, so the bar is the grid or flex item and keeps the row's height in any container; its
+   min-width: 0 still lets the row inside scroll sideways instead of widening the page. */
+.settings-tabs-bar { flex: none; min-width: 0; max-width: 100%; }
+.settings-tabs { flex: none; min-width: 0; max-width: 100%; display: flex; gap: 4px; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scrollbar-width: none; border-bottom: 1px solid var(--border); }
 .settings-tabs::-webkit-scrollbar { display: none; }
 /* More tabs past an edge (SettingsTabs sets data-more): that edge fades, so the row reads as scrollable. */
 .settings-tabs[data-more="end"] { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); }

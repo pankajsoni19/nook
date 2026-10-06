@@ -59,7 +59,7 @@ export function GrantBuilder({ rows, onChange, role, policy, disabled = false, c
         onChange={(patch) => update(row.key, patch)} onRemove={() => remove(row.key)} canRemove={rows.length > 1 || !narrowing} />)}
     </ul>
     {!rows.length && <p className="grant-empty">No permissions yet.</p>}
-    {!narrowing && <button type="button" className="secondary-button grant-add" onClick={add} disabled={disabled || !rowModuleChoices(role, policy, rows, null).some((module) => !module.disabled)}><Plus aria-hidden="true" />Add permission</button>}
+    {!narrowing && <button type="button" className="action-button secondary grant-add" onClick={add} disabled={disabled || !rowModuleChoices(role, policy, rows, null).some((module) => !module.disabled)}><Plus aria-hidden="true" />Add permission</button>}
     <p className="grant-summary" aria-live="polite">{grantSummary(rows)}</p>
   </div>;
 }

@@ -170,7 +170,7 @@ export function KeysSettings({ onPendingChange, onNestedDialogChange, totpEnable
       ? `Keys let an AI client or script act as ${integration.name}, over MCP or the REST API. A key reaches only what owners share with ${integration.name} by name, only what its permissions allow, and only until it expires. Creating or rotating one asks for your password; copy the new key into the client that uses it.`
       : `Keys let trusted AI clients and scripts use ${appName()} as you, over MCP or the REST API. Each key does only what its permissions allow, only with items you can open, and only until it expires. No key can share, manage access, manage keys, or delete forever.`}</p></div></div>
     {/* The bar holds the scrolling row, so this section's grid sizes it by its tabs. */}
-    {tabbed && <div className="keys-tabs-bar"><SettingsTabs label="Key kinds" idPrefix="keys" tabs={tabs} selected={shownTab} onSelect={(next) => onTab?.(next)} /></div>}
+    {tabbed && <SettingsTabs label="Key kinds" idPrefix="keys" tabs={tabs} selected={shownTab} onSelect={(next) => onTab?.(next)} />}
     <div className="keys-tabpanel settings-tab-panel" {...(tabbed ? { role: "tabpanel", id: panelIds.panel, "aria-labelledby": panelIds.tab, tabIndex: 0 } : {})}>
     {tabbed && <p className="keys-tab-intro">{KEYS_TAB_INTROS[shownTab]}</p>}
     {error && <p className="form-error" role="alert">{error}</p>}

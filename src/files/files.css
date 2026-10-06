@@ -94,7 +94,9 @@
 .file-dialog-header > div { min-width: 0; }
 .file-dialog-header h2 { margin: 4px 0 0; overflow: hidden; color: #f2f2f3; font-size: 1.1rem; letter-spacing: -.02em; text-overflow: ellipsis; white-space: nowrap; }
 .file-dialog-copy { margin: 0; padding: 4px 20px 8px; color: #b7b7bd; font-size: .88rem; line-height: 1.55; overflow-wrap: anywhere; }
-.file-dialog-form { display: grid; gap: 8px; padding: 4px 20px 0; }
+/* v0.29 M1: rows keep their own height (align-content: start); a full-height sheet's spare room goes below
+   the content, never between a label and its field or into the footer's buttons. */
+.file-dialog-form { display: grid; align-content: start; gap: 8px; padding: 4px 20px 0; }
 .file-dialog-form label { color: #8d8d94; font-size: .72rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .file-dialog-form input { min-height: 42px; border: 1px solid #333338; border-radius: 10px; padding: 0 12px; background: #0b0b0d; color: #ededee; font-size: .92rem; outline: 0; }
 .file-dialog-form input:focus { border-color: #6b582f; }

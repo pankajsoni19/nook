@@ -207,7 +207,7 @@
 .ai-tools .secondary-button { min-height: 36px; padding: 0 12px; font-size: .84rem; }
 .ai-stdio { display: grid; gap: 8px; }
 .ai-stdio p { margin: 0; }
-.ai-provider-actions .secondary-button svg { width: 14px; margin-right: 5px; vertical-align: -2px; }
+.ai-provider-actions .secondary-button svg { width: 14px; height: 14px; }
 
 /* AC-B: the tool picker (Settings → Agents) */
 .agents-tools { display: grid; gap: 12px; }
@@ -230,7 +230,7 @@
 .agents-link-row .secondary-button { min-height: 38px; padding: 0 12px; font-size: .84rem; }
 
 /* AC-B: the Link Nook key sheet */
-.chat-link-key { display: grid; gap: 12px; padding: 0 20px 16px; }
+.chat-link-key { display: grid; align-content: start; gap: 12px; padding: 0 20px 16px; }
 .chat-link-key .file-dialog-hint { display: flex; gap: 8px; padding: 0; }
 .chat-link-key .file-dialog-hint svg { width: 18px; flex: none; margin-top: 2px; color: #c9a85c; }
 .chat-link-keys { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
@@ -328,8 +328,8 @@
 /* Wave 43 (AC-D): sharing, read-only chats, Continue as a copy, the Public link sheet, and the public page. */
 .chat-shared-chip { display: inline-flex; align-items: center; gap: 5px; min-height: 28px; border: 1px solid #2f3a4a; border-radius: 999px; padding: 0 10px; background: #141a22; color: #a9c4e6; font-size: .76rem; white-space: nowrap; }
 .chat-shared-chip svg { width: 14px; height: 14px; }
-.chat-continue { min-height: 40px; display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
-.chat-continue svg { width: 16px; }
+/* v0.29 L1: the shared .action-button.secondary gives it its padding, size and icon; only its place here. */
+.chat-continue { margin-left: auto; }
 .chat-copied-note { display: flex; align-items: flex-start; gap: 8px; margin: 0 0 12px; padding: 10px 12px; border: 1px solid #2a2a2f; border-radius: 12px; background: #141416; color: #b9b9bf; font-size: .84rem; line-height: 1.45; }
 .chat-copied-note svg { width: 16px; height: 16px; flex: none; margin-top: 2px; color: #c9a85c; }
 .chat-group-shared h3 { margin-top: 20px; }

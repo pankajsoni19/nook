@@ -67,7 +67,7 @@ export function VaultGrantBuilder({ rows, onChange, vaults, role, protectedAcces
         ceiling={ceiling?.find((item) => item.key === row.key)} narrowing={narrowing} canRemove={rows.length > 1 || !narrowing}
         onChange={(patch) => update(row.key, patch)} onRemove={() => onChange(rows.filter((item) => item.key !== row.key))} />)}
     </ul>
-    {!narrowing && <button type="button" className="secondary-button grant-add" onClick={add} disabled={disabled || !choices.length || rows.length >= MAX_VAULT_GRANTS}><Plus aria-hidden="true" />Add vault access</button>}
+    {!narrowing && <button type="button" className="action-button secondary grant-add" onClick={add} disabled={disabled || !choices.length || rows.length >= MAX_VAULT_GRANTS}><Plus aria-hidden="true" />Add vault access</button>}
     <p className="grant-summary" aria-live="polite">{vaultGrantSummary(rows, known)}</p>
   </div>;
 }

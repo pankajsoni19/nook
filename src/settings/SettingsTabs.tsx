@@ -69,7 +69,9 @@ export function SettingsTabs<Id extends string>({ label, idPrefix, tabs, selecte
     const tab = tabs[target];
     if (tab) refs.current.get(tab.id)?.focus();
   }
-  return <div ref={rowRef} className="settings-tabs" role="tablist" aria-label={label}>
+  // The row scrolls sideways, so it sits in a bar that does not scroll: a scroll container's own
+  // minimum height is 0, and a grid or flex parent short of height shrank it to its border (v0.29 H1).
+  return <div className="settings-tabs-bar"><div ref={rowRef} className="settings-tabs" role="tablist" aria-label={label}>
     {tabs.map((tab, index) => {
       const ids = settingsTabIds(idPrefix, tab.id);
       const current = tab.id === selected;
@@ -92,5 +94,5 @@ export function SettingsTabs<Id extends string>({ label, idPrefix, tabs, selecte
         {count !== undefined && <span className="settings-tab-count" aria-hidden="true">{count > 99 ? "99+" : count}</span>}
       </button>;
     })}
-  </div>;
+  </div></div>;
 }

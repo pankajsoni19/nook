@@ -662,7 +662,7 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
           {readOnly && <span className="chat-shared-chip" title={`Shared with you by ${detail.chat.ownerName}`}><UsersRound aria-hidden="true" />{detail.chat.ownerName} · read-only</span>}
           {!readOnly && detail.chat.audience && detail.chat.audience !== "private" && <span className="chat-shared-chip" title="Others can read this chat"><UsersRound aria-hidden="true" />Shared</span>}
           {!readOnly && publicLink && <span className="chat-shared-chip" title="A public link shows a snapshot of this chat"><Globe aria-hidden="true" />Public link</span>}
-          {readOnly ? <button type="button" className="secondary-button chat-continue" onClick={() => { const last = branch.at(-1); if (last) void continueFrom(last.message.id); }} disabled={busy || branch.length === 0}><CopyPlus />Continue as a copy</button>
+          {readOnly ? <button type="button" className="action-button secondary chat-continue" onClick={() => { const last = branch.at(-1); if (last) void continueFrom(last.message.id); }} disabled={busy || branch.length === 0}><CopyPlus />Continue as a copy</button>
             : <div className="chat-menu-anchor">
               <button type="button" className="icon-button" aria-label="More" aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)}><Ellipsis /></button>
               {menuOpen && <ChatMenu onClose={() => setMenuOpen(false)} pinned={detail.chat.pinned} linked={chatAgent?.linked ?? false} canLink={chatAgent !== null} canShare={role === "admin" || role === "member"} canPublish={status?.publicChatLinks === true}

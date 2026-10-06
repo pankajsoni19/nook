@@ -87,8 +87,8 @@ button:disabled { opacity: .5; cursor: not-allowed; }
  * Field labels in the Settings dialogs use the app's label style (Files, Vault, AI, Calendar):
  * small, uppercase, letter-spaced. Hints, errors and values inside a label keep normal case.
  */
-:is(.keys-dialog, .team-dialog) :is(.keys-input, .team-field, .keys-select-field > span:first-child, .team-field > span:first-child) { color: #8d8d94; font-size: .72rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
-:is(.keys-dialog, .team-dialog) :is(.keys-input, .team-field, .keys-select-field) :is(small, p, input, textarea, button) { font-weight: 400; letter-spacing: normal; text-transform: none; }
+:is(.keys-dialog, .team-dialog) :is(.keys-input, .team-field, .keys-select-field > span:first-child, .team-field > span:first-child, .keys-fieldset > legend, .grant-field > span:first-child) { color: #8d8d94; font-size: .72rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+:is(.keys-dialog, .team-dialog) :is(.keys-input, .team-field, .keys-select-field, .grant-field) :is(small, p, input, textarea, button) { font-weight: 400; letter-spacing: normal; text-transform: none; }
 
 .text-button { width: 100%; border: 0; background: none; color: #c5c5ca; margin-top: 18px; cursor: pointer; }
 /* "Already have an account? Sign in" and the other card links are 44 px targets (A8). */
@@ -402,6 +402,11 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .diff-view span { display: block; padding: 0 12px; color: #aaaab0; }
 .diff-view span.add { background: rgb(49 95 66 / 28%); color: #b6e0c2; }.diff-view span.remove { background: rgb(107 53 65 / 27%); color: #efb2bf; }
 .secondary-button { border: 1px solid #3a3a3f; border-radius: 9px; background: #212125; color: #e1e1e3; cursor: pointer; }
+/* v0.29 L3: a button that starts with an icon lays the icon and its label out on one line. Tailwind's
+   base makes every svg a block, so a plain (inline-block) button stacked the icon above the label
+   ("Sync tools"). :where() keeps this at zero specificity: a button's own display rule still wins. */
+:where(.secondary-button, .primary-button, .danger-button):where(:has(> svg:first-child)) { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+:where(.secondary-button, .primary-button, .danger-button):where(:has(> svg:first-child)) > svg { flex: none; }
 .restore-button { margin: 12px; min-height: 41px; }
 .share-options { padding: 14px; display: grid; gap: 7px; }
 .share-options > label { position: relative; cursor: pointer; }
