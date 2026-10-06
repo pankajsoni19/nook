@@ -80,7 +80,7 @@ describe("Invites panel", () => {
 
   test("New invite is disabled at the live limit, with a hint", () => {
     const full = render({ invites: [invite({})], liveCount: 20, liveLimit: 20 });
-    expect(full).toMatch(/<button type="button" class="team-action primary" disabled="">.*New invite/);
+    expect(full).toMatch(/<button type="button" class="action-button" disabled="">.*New invite/);
     expect(full).toContain("20 invites are live");
     expect(render({ invites: [invite({})], liveCount: 1, liveLimit: 20 })).not.toMatch(/disabled="">.*New invite/);
   });

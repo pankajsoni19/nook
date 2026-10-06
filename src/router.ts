@@ -49,7 +49,9 @@ export type Route =
   // The Settings hub (Wave 37): a page at /settings (the section list on phones), and one account
   // section at /settings/:section. Team sections are `team` routes under /settings/team/… (above).
   // Wave 40: Settings → Agents has an editor below it at /settings/agents/:agentId (or /settings/agents/new).
-  | { app: "settings"; section: SettingsSection | null; agentId?: string };
+  // Settings → AI is tabbed: /settings/ai/providers, /settings/ai/tools, /settings/ai/policy (`aiTab`).
+  // API keys too: /settings/keys/general, /settings/keys/vault, /settings/keys/agents (`keysTab`).
+  | { app: "settings"; section: SettingsSection | null; agentId?: string; aiTab?: AiTab; keysTab?: KeysTab };
 
 /** The Audit log's filters in its URL (Wave 42 QA L4); anything malformed is dropped. */
 export type AuditQuery = { key?: string; agent?: string; status?: string; from?: string; to?: string };
@@ -262,6 +264,10 @@ function parseSettings(rest: string[]): Route {
   // Wave 40: the agent editor, /settings/agents/:agentId or /settings/agents/new.
   if (rest[0] === "agents" && rest.length === 2 && rest[1] !== undefined && (rest[1] === NEW_AGENT || isRouteId(rest[1]))) return { app: "settings", section: "agents", agentId: rest[1].toLowerCase() };
   if (rest.length === 1 && rest[0] === "bin") return { app: "bin" };
+  // Settings → AI's tabs. An unknown or malformed tab opens bare AI, which then opens its first tab.
+  if (rest[0] === "ai" && rest.length >= 2) return rest.length === 2 && isAiTab(rest[1]) ? { app: "settings", section: "ai", aiTab: rest[1] } : { app: "settings", section: "ai" };
+  // API keys' tabs (and the old /settings/mcp/:tab), the same way: bare API keys then opens General.
+  if (rest.length >= 2 && settingsSectionForSlug(rest[0]!) === "mcp") return rest.length === 2 && isKeysTab(rest[1]) ? { app: "settings", section: "mcp", keysTab: rest[1] } : { app: "settings", section: "mcp" };
   const section = rest.length === 1 ? settingsSectionForSlug(rest[0]!) : null;
   return { app: "settings", section };
 }
@@ -323,6 +329,8 @@ export function formatRoute(route: Route): string {
   if (route.app === "team") return formatTeam(route);
   if (route.app === "settings") {
     if (route.section === "agents" && route.agentId && (route.agentId === NEW_AGENT || isRouteId(route.agentId))) return `${settingsPath("agents")}/${route.agentId.toLowerCase()}`;
+    if (route.section === "ai" && isAiTab(route.aiTab)) return `${settingsPath("ai")}/${route.aiTab}`;
+    if (route.section === "mcp" && isKeysTab(route.keysTab)) return keysTabPath(route.keysTab);
     return route.section && SETTINGS_SECTIONS.includes(route.section) ? settingsPath(route.section) : "/settings";
   }
   if (route.app === "chat") {
@@ -379,6 +387,11 @@ function formatTasksHome(home: TasksHome) {
 export const SETTINGS_SECTIONS = ["security", "modules", "mcp", "access", "notifications", "agents", "ai", "about"] as const;
 export type SettingsSection = typeof SETTINGS_SECTIONS[number];
 
+/** Settings → AI's tabs, in tab order; each is its own URL under /settings/ai. */
+export const AI_TABS = ["providers", "tools", "policy"] as const;
+export type AiTab = typeof AI_TABS[number];
+export const isAiTab = (value: unknown): value is AiTab => typeof value === "string" && (AI_TABS as readonly string[]).includes(value);
+
 /**
  * The URL slug of each section. API keys (section id "mcp" since Wave 8) lives at `/settings/keys`
  * (C3); the old `/settings/mcp` still opens it and is rewritten in place (no extra history entry).
@@ -406,8 +419,24 @@ export function isLegacySettingsPath(pathname: string) {
 
 export const SETTINGS_SECTION_NAMES: Record<SettingsSection, string> = { security: "Security", modules: "Modules", mcp: "API keys", access: "My access", notifications: "Notifications", agents: "Agents", ai: "AI", about: "About" };
 
-/** The document title on an account section: "Settings · Notifications · Nook". */
-export const settingsDocumentTitle = (section: SettingsSection) => hubDocumentTitle(SETTINGS_SECTION_NAMES[section]);
+/**
+ * The tabs of Settings → API keys: general keys, vault keys (`nkv_`), and keys that only run agents.
+ * Each is a URL, /settings/keys/:tab; /settings/keys (and the old /settings/mcp) opens General in place.
+ */
+export const KEYS_TABS = ["general", "vault", "agents"] as const;
+export type KeysTab = typeof KEYS_TABS[number];
+export const isKeysTab = (value: unknown): value is KeysTab => typeof value === "string" && (KEYS_TABS as readonly string[]).includes(value);
+export const KEYS_TAB_LABELS: Record<KeysTab, string> = { general: "General", vault: "Vault", agents: "Agents" };
+export const keysTabPath = (tab: KeysTab) => `${settingsPath("mcp")}/${tab}`;
+/** The route of one API keys tab. */
+export const keysTabRoute = (tab: KeysTab): Route => ({ app: "settings", section: "mcp", keysTab: tab });
+
+/**
+ * The document title on an account section: "Settings · Notifications · Nook"; on an API keys tab,
+ * "Settings · API keys · Vault · Nook".
+ */
+export const settingsDocumentTitle = (section: SettingsSection, keysTab?: KeysTab) =>
+  hubDocumentTitle(section === "mcp" && keysTab ? `${SETTINGS_SECTION_NAMES.mcp} · ${KEYS_TAB_LABELS[keysTab]}` : SETTINGS_SECTION_NAMES[section]);
 
 /** The document title on a Settings hub screen (Wave 37): "Settings · Members · Nook", or "Settings · Nook" on the list. */
 export const hubDocumentTitle = (name: string | null) => name ? `Settings · ${name} · ${appName()}` : `Settings · ${appName()}`;

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from 
 import { Bot, ChevronLeft, Plus } from "lucide-react";
 import { ApiError } from "../api";
 import { hubDocumentTitle, NEW_AGENT, type Route } from "../router";
+import { EmojiPicker } from "../ui/EmojiPicker";
 import { Select } from "../ui/Select";
 import { useConfirm } from "../ui/useConfirm";
 import { AGENT_BOUNDS, type AgentApiUsage, type AgentDetail, type AgentSummary, type AgentToolRef, type LinkState, type NookLink, type ToolCatalog } from "../../shared/agents";
@@ -54,7 +55,7 @@ export function AgentsSettings({ agentId, navigate, flash, onOpenChat }: { agent
       <button type="button" className="secondary-button" onClick={() => onOpenChat(agent.id)}>Chat</button>
     </li>)}</ul>}
     {agents && agents.length === 0 && status?.enabled && status.canChat && <p className="chat-muted">No agents yet.</p>}
-    {status?.enabled && status.canCreate && <button type="button" className="secondary-button agents-add" onClick={() => navigate({ ...toList, agentId: NEW_AGENT })}><Plus />New agent</button>}
+    {status?.enabled && status.canCreate && <button type="button" className="action-button secondary agents-add" onClick={() => navigate({ ...toList, agentId: NEW_AGENT })}><Plus />New agent</button>}
   </section>;
 }
 
@@ -187,7 +188,11 @@ function AgentEditor({ agentId, navigate, flash, canCreate, onOpenChat }: { agen
       <label htmlFor={ids.description}>Description</label>
       <input id={ids.description} value={description} maxLength={AGENT_BOUNDS.description} autoComplete="off" placeholder="What it is for" onChange={(event) => setDescription(event.target.value)} />
       <label htmlFor={ids.icon}>Emoji</label>
-      <input id={ids.icon} value={icon} maxLength={16} autoComplete="off" placeholder="🤖" className="agents-icon-input" onChange={(event) => setIcon(event.target.value)} />
+      <div className="agents-icon-row">
+        <EmojiPicker value={icon} onChange={setIcon} label="Agent emoji" placeholder="🤖" />
+        <input id={ids.icon} value={icon} maxLength={16} autoComplete="off" placeholder="🤖" className="agents-icon-input" onChange={(event) => setIcon(event.target.value)} />
+      </div>
+      <p className="file-dialog-hint">Pick one, or type or paste any emoji. Empty shows 🤖.</p>
       <h4>Instructions</h4>
       <label htmlFor={ids.prompt}>System prompt <small>{systemPrompt.length.toLocaleString()} / {AGENT_BOUNDS.systemPrompt.toLocaleString()}</small></label>
       <textarea id={ids.prompt} className="agents-prompt" value={systemPrompt} maxLength={AGENT_BOUNDS.systemPrompt} rows={10} spellCheck={false} onChange={(event) => setSystemPrompt(event.target.value)} />

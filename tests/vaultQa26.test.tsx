@@ -116,7 +116,7 @@ describe("QA L3–L8", () => {
   });
 
   test("L4: the New vault sheet says which environments are protected", () => {
-    expect(protectedHint(DEFAULT_ENVIRONMENTS)).toBe("Production (prod) is protected: opening it asks for your password again. You can change this in the vault's settings.");
+    expect(protectedHint(DEFAULT_ENVIRONMENTS)).toBe("Production (prod) is protected: seeing its values asks for your password again. You can change this in the vault's settings.");
     expect(protectedHint([{ name: "Dev", slug: "dev", protected: false }])).toBeNull();
   });
 

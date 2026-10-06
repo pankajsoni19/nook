@@ -51,6 +51,45 @@ button:focus-visible, input:focus-visible, [contenteditable]:focus-visible { out
 .primary-button { min-height: 46px; margin-top: 4px; }
 .primary-button:hover, .publish-button:hover { background: var(--yellow-strong); }
 button:disabled { opacity: .5; cursor: not-allowed; }
+
+/*
+ * The one action button: the "New …" / "Add …" action in a Settings section header, and the same
+ * metrics in dialog footers. 44 px tall, .84rem/650, a 16 px leading icon, no stray margin.
+ * `.primary-button` above is the full-width auth-form CTA (16 px text, 46 px, a 4 px top margin), so
+ * it is not used for these. `.secondary` is the grey variant with the same size.
+ */
+.action-button { min-height: 44px; display: inline-flex; flex: none; align-items: center; justify-content: center; gap: 8px; margin: 0; border: 1px solid transparent; border-radius: 10px; padding: 0 16px; background: var(--yellow); color: #281f0b; font-size: .84rem; font-weight: 650; line-height: 1.2; white-space: nowrap; cursor: pointer; }
+.action-button:hover:not(:disabled) { background: var(--yellow-strong); }
+.action-button:disabled { opacity: .45; cursor: not-allowed; }
+.action-button svg { flex: none; width: 16px; height: 16px; }
+.action-button.secondary { border-color: #3a3a3f; background: #212125; color: #e1e1e3; }
+.action-button.secondary:hover:not(:disabled) { border-color: #45454b; background: #2a2a2f; }
+
+/*
+ * The one form-field look for the Settings dialogs and forms (keys, team, AI, agents, vault): the
+ * same resting border, background, radius and text size on inputs, textareas and the Select
+ * trigger, and one focus treatment (accent border plus a single soft ring, no outline on top).
+ * Font family is left to each field: monospace only where it is deliberate (secret values, the
+ * address allowlist, the agent prompt, a vault slug).
+ */
+:root { --field-border: #38383d; --field-bg: #0b0b0d; --field-radius: 10px; --field-font-size: .9rem; --field-focus: #c9a14a; --field-ring: 0 0 0 3px rgb(246 196 83 / 18%); }
+:is(.keys-input, .team-field, .file-dialog-form, .vault-form, .agents-form) :is(input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"], [type="color"], .ui-combobox-input), textarea),
+:is(.keys-dialog, .team-dialog, .file-dialog, .agents-form) :is(.ui-select-field, .ui-combobox-field) { border: 1px solid var(--field-border); border-radius: var(--field-radius); background: var(--field-bg); font-size: var(--field-font-size); }
+:is(.keys-input, .team-field, .file-dialog-form, .vault-form, .agents-form) :is(input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"], [type="color"], .ui-combobox-input), textarea), :is(.keys-dialog, .team-dialog, .file-dialog, .agents-form) .ui-select-field { padding-inline: 12px; }
+:is(.keys-input, .team-field, .file-dialog-form, .vault-form, .agents-form) input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"], [type="color"], .ui-combobox-input), :is(.keys-dialog, .team-dialog, .file-dialog, .agents-form) :is(.ui-select-field, .ui-combobox-field) { min-height: 44px; }
+:is(.keys-input, .team-field, .file-dialog-form, .vault-form, .agents-form) :is(input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"], [type="color"], .ui-combobox-input), textarea):focus,
+:is(.keys-dialog, .team-dialog, .file-dialog, .agents-form) .ui-select-field:is(:focus-visible, [aria-expanded="true"]),
+:is(.keys-dialog, .team-dialog, .file-dialog, .agents-form) .ui-combobox-field:focus-within { border-color: var(--field-focus); outline: none; box-shadow: var(--field-ring); }
+:is(.keys-dialog, .team-dialog, .file-dialog, .agents-form) .ui-combobox-input:focus-visible { outline: none; }
+:is(.keys-input, .team-field, .file-dialog-form, .vault-form, .agents-form) :is(input, textarea)::placeholder { font-family: inherit; }
+
+/*
+ * Field labels in the Settings dialogs use the app's label style (Files, Vault, AI, Calendar):
+ * small, uppercase, letter-spaced. Hints, errors and values inside a label keep normal case.
+ */
+:is(.keys-dialog, .team-dialog) :is(.keys-input, .team-field, .keys-select-field > span:first-child, .team-field > span:first-child) { color: #8d8d94; font-size: .72rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+:is(.keys-dialog, .team-dialog) :is(.keys-input, .team-field, .keys-select-field) :is(small, p, input, textarea, button) { font-weight: 400; letter-spacing: normal; text-transform: none; }
+
 .text-button { width: 100%; border: 0; background: none; color: #c5c5ca; margin-top: 18px; cursor: pointer; }
 /* "Already have an account? Sign in" and the other card links are 44 px targets (A8). */
 .auth-card .text-button { min-height: 44px; }

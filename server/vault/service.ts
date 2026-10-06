@@ -277,6 +277,8 @@ export function reorderEnvironments(actor: VaultActor, vaultId: string, ids: str
 export function deleteEnvironment(actor: VaultActor, vaultId: string, envId: string) {
   const access = requireVault(actor, vaultId);
   requireEnvGrant(access, envId, "admin");
+  // Binning a whole protected environment is not a value write: it still needs the window (D226).
+  requireUnlocked(access, [envId]);
   if (access.environments.length <= 1) throw new VaultError(409, "LAST_ENVIRONMENT", "A vault keeps at least one environment");
   chargeActor(actor, "write");
   const deletedAt = new Date();
@@ -504,8 +506,7 @@ export function deleteSecret(actor: VaultActor, vaultId: string, secretId: strin
   const access = requireVault(actor, vaultId);
   liveSecret(access, secretId);
   requireWriteEverywhere(access, secretId);
-  // Deleting takes its values along: a protected environment's value needs the window (D226).
-  requireUnlocked(access, (db.query("SELECT env_id FROM vault_values WHERE secret_id = ?").all(secretId) as Array<{ env_id: string }>).map((row) => row.env_id));
+  // Deleting to the Bin is a write: no window, even with a protected value (2026-10-06 operator).
   chargeActor(actor, "write");
   const deletedAt = new Date();
   db.transaction(() => {
@@ -558,6 +559,18 @@ export function writeValueLocked(access: VaultAccess, grant: ReturnType<typeof r
   return version;
 }
 
+/**
+ * The comment a write keeps when it omits `comment` (review M1, 2026-10-06): the current value's
+ * comment, opened under the write grant only to be sealed again with the new version, and never
+ * returned. An explicit null or empty comment clears it; no current value means no comment.
+ */
+function keptComment(access: VaultAccess, grant: ReturnType<typeof requireEnvGrant>, secretId: string, envId: string, comment: string | null | undefined): string | null {
+  if (comment !== undefined) return comment === "" ? null : comment;
+  const current = storedValue(secretId, envId);
+  if (!current?.comment_ct) return null;
+  return integrity(access.vault.id, access.actor, { secretId, envId }, () => openValue(grant, { secretId, envId, version: current.version, generation: current.generation, valueCt: current.value_ct, commentCt: current.comment_ct })).comment;
+}
+
 export const trimVersions = (secretId: string, envId: string, newest: number) =>
   db.query("DELETE FROM vault_value_versions WHERE secret_id = ? AND env_id = ? AND version <= ?").run(secretId, envId, newest - VAULT_BOUNDS.versionsKept);
 
@@ -568,6 +581,7 @@ function valueResult(secretId: string, envId: string): ValueResult {
   return { secretId, envId, version: row.version, updatedAt: row.updated_at, updatedBy: row.display_name };
 }
 
+/** Sets one value as a new version. An omitted `comment` keeps the current one (review M1); null or "" clears it. */
 export function setValue(actor: VaultActor, vaultId: string, secretId: string, envId: string, input: { value: string; comment?: string | null; expectedVersion: number }): ValueResult {
   const access = requireVault(actor, vaultId);
   const secret = liveSecret(access, secretId);
@@ -575,7 +589,7 @@ export function setValue(actor: VaultActor, vaultId: string, secretId: string, e
   checkValueForType(secret.type, input.value);
   chargeActor(actor, "write");
   db.transaction(() => enforceQuota(vaultId, actor.userId, () => {
-    const version = writeValueLocked(access, grant, secretId, envId, input.value, input.comment ?? null, input.expectedVersion);
+    const version = writeValueLocked(access, grant, secretId, envId, input.value, keptComment(access, grant, secretId, envId, input.comment), input.expectedVersion);
     db.query("UPDATE vaults SET updated_at = ? WHERE id = ?").run(now(), vaultId);
     recordVaultEvent(vaultId, actor, "value.write", { secretId, envId, count: version });
   }))();
@@ -584,7 +598,8 @@ export function setValue(actor: VaultActor, vaultId: string, secretId: string, e
 
 /**
  * "Apply to other environments" (§6.2, Doppler): at most 20 values in one request, every one
- * checked (level, type, CAS) before anything is written, all in one transaction.
+ * checked (level, type, CAS) before anything is written, all in one transaction. Each entry that
+ * omits `comment` keeps that environment's current comment (review M1).
  */
 export function setValues(actor: VaultActor, vaultId: string, secretId: string, entries: Array<{ envId: string; value: string; comment?: string | null; expectedVersion: number }>): ValueResult[] {
   const access = requireVault(actor, vaultId);
@@ -602,7 +617,7 @@ export function setValues(actor: VaultActor, vaultId: string, secretId: string, 
     });
     if (changed.length > 0) throw valuesChanged(changed);
     entries.forEach((entry, index) => {
-      writeValueLocked(access, grants[index]!, secretId, entry.envId, entry.value, entry.comment ?? null, entry.expectedVersion);
+      writeValueLocked(access, grants[index]!, secretId, entry.envId, entry.value, keptComment(access, grants[index]!, secretId, entry.envId, entry.comment), entry.expectedVersion);
       recordVaultEvent(vaultId, actor, "value.write", { secretId, envId: entry.envId });
     });
     db.query("UPDATE vaults SET updated_at = ? WHERE id = ?").run(now(), vaultId);
@@ -715,7 +730,11 @@ export function readVersion(actor: VaultActor, vaultId: string, secretId: string
   return { version, cleared: false, ...opened, createdAt: row.created_at };
 }
 
-/** Restoring writes the old value as a new version (D224), through the same CAS. */
+/**
+ * Restoring writes the old value as a new version (D224), through the same CAS. It is a write: no
+ * window on a protected environment (2026-10-06 operator); the value is opened only to re-seal it
+ * and the response carries ids and versions only.
+ */
 export function restoreVersion(actor: VaultActor, vaultId: string, secretId: string, envId: string, version: number, expectedVersion: number): ValueResult {
   const access = requireVault(actor, vaultId);
   const secret = liveSecret(access, secretId);

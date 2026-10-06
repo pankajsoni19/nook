@@ -8,7 +8,7 @@ import type { ConfirmRequest } from "../ui/useConfirm";
 import { DEFAULT_ENVIRONMENTS, formatLoginValue, isTag, parseLoginValue, SECRET_TYPES, SLUG_PATTERN, utf8Length, VAULT_BOUNDS, type SecretType } from "../../shared/vault";
 import { DEFAULT_GENERATOR, generate, GENERATOR_BOUNDS, strengthLabel, type GeneratorKind, type GeneratorOptions } from "./generator";
 import { MASK, useEditorMask, type Revealed } from "./reveal";
-import { useVaultReauth } from "./VaultReauth";
+import { ReauthCancelled, useVaultReauth } from "./VaultReauth";
 import {
   createEnvironment, createSecret, createVault, deleteEnvironment, deleteVault, getVault, leaveVault, readValue, reorderEnvironments, rotateVault, setValue, setValues, updateEnvironment, updateSecret, updateVault,
   type SecretDetail, type SecretSummary, type VaultEnvironment, type VaultSummary
@@ -67,7 +67,7 @@ export function protectedHint(envs: ReadonlyArray<{ name: string; slug: string; 
   const names = envs.filter((env) => env.protected).map((env) => `${env.name.trim() || env.slug}${env.slug ? ` (${env.slug})` : ""}`);
   if (!names.length) return null;
   const list = names.length === 1 ? names[0]! : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
-  return `${list} ${names.length === 1 ? "is" : "are"} protected: opening ${names.length === 1 ? "it" : "them"} asks for your password again. You can change this in the vault's settings.`;
+  return `${list} ${names.length === 1 ? "is" : "are"} protected: seeing ${names.length === 1 ? "its" : "their"} values asks for your password again. You can change this in the vault's settings.`;
 }
 
 type EnvDraft = { key: string; slug: string; name: string; protected: boolean };
@@ -143,7 +143,6 @@ export function NewSecretDialog({ vault, initialEnvId, onCancel, onCreated }: { 
   const [error, setError] = useState<string | null>(null);
   const ids = { name: useId(), value: useId(), comment: useId(), tags: useId(), type: useId(), env: useId() };
   useHistoryDialogGuard(true, onCancel, { blocked: busy });
-  const run = useVaultReauth();
 
   const payload = type === "login" ? (login.username || login.password || login.url ? formatLoginValue(login) : "") : value;
   async function submit(event: FormEvent) {
@@ -155,10 +154,11 @@ export function NewSecretDialog({ vault, initialEnvId, onCancel, onCreated }: { 
     setBusy(true);
     setError(null);
     try {
-      const { secret } = await run(() => createSecret(vault.id, {
+      // A write: no re-authentication, even in a protected environment (2026-10-06 operator).
+      const { secret } = await createSecret(vault.id, {
         name: name.trim(), type, comment: comment.trim() || null, tags: tags.tags,
         ...(payload && envId ? { values: { [envId]: { value: payload } } } : {})
-      }));
+      });
       onCreated(secret);
     } catch (reason) {
       setError(messageOf(reason, "Could not create the secret"));
@@ -198,18 +198,50 @@ export function NewSecretDialog({ vault, initialEnvId, onCancel, onCreated }: { 
 /** The value inputs: one text area, or a login's three fields; Generate fills the value or the password. */
 type EditorMask = ReturnType<typeof useEditorMask>;
 
-function ValueFields({ type, value, login, onValue, onLogin, valueId, onGenerate, disabled, optional = false, mask }: {
+/** The editor's note in a protected environment outside the window (2026-10-06 operator). */
+export const FRESH_VALUE_NOTE = "This environment is protected; enter the new value. Showing the current value asks for your password.";
+/**
+ * Whether the editor opens empty as the new value: its first read (made without asking) was refused
+ * because the environment is protected and this session's window is closed. Saving needs no window.
+ */
+export const opensFresh = (reason: unknown) => errorCode(reason) === "REAUTH_REQUIRED";
+
+/**
+ * The comment a save sends (review M1). The editor normally shows the current comment, so it sends
+ * what is in the field (empty clears it). In "New value" mode it never saw the current comment, so
+ * an empty field omits `comment`, and the server keeps the current one.
+ */
+export function commentToSend(fresh: boolean, comment: string): { comment?: string | null } {
+  const trimmed = comment.trim();
+  if (fresh && !trimmed) return {};
+  return { comment: trimmed || null };
+}
+export const FRESH_COMMENT_LABEL = "New comment (leave empty to keep the current one)";
+/** Show in "New value" mode replaces what was typed (review L1): asked first, with the app's confirm. */
+export const SHOW_REPLACES_DRAFT: ConfirmRequest = {
+  title: "Replace what you typed?",
+  message: "Showing the current value puts it, and its comment, in place of the new value you typed here.",
+  confirmLabel: "Show current value"
+};
+
+export function ValueFields({ type, value, login, onValue, onLogin, valueId, onGenerate, disabled, optional = false, mask, onShowCurrent }: {
   type: SecretType; value: string; login: { username: string; password: string; url: string };
   onValue: (value: string) => void; onLogin: (login: { username: string; password: string; url: string }) => void;
   valueId: string; onGenerate: () => void; disabled: boolean; optional?: boolean;
   /** The editor's mask (QA Q4): hides the secret part without touching the draft. */
   mask?: EditorMask;
+  /**
+   * A protected environment outside the window (2026-10-06 operator): the fields start empty as the
+   * new value, and Show loads the current one (which asks to confirm it's you).
+   */
+  onShowCurrent?: () => void;
 }) {
   const userId = useId();
   const urlId = useId();
-  const masked = mask?.masked ?? false;
+  const fresh = onShowCurrent !== undefined;
+  const masked = !fresh && (mask?.masked ?? false);
   const generate = <button type="button" className="secondary-button vault-inline-button" onClick={onGenerate} disabled={disabled}><Wand2 />Generate</button>;
-  const toggle = mask && (masked
+  const toggle = fresh ? <button type="button" className="secondary-button vault-inline-button" onClick={onShowCurrent} disabled={disabled} aria-label="Show the current value"><Eye />Show</button> : mask && (masked
     // With the text area gone while masked, its label points at Show instead.
     ? <button type="button" id={type === "login" ? undefined : valueId} className="secondary-button vault-inline-button" onClick={mask.show} disabled={disabled}><Eye />Show</button>
     : <button type="button" className="secondary-button vault-inline-button" onClick={mask.mask} disabled={disabled}><EyeOff />Hide</button>);
@@ -217,7 +249,7 @@ function ValueFields({ type, value, login, onValue, onLogin, valueId, onGenerate
     return <div className="vault-login-fields">
       <label htmlFor={userId}>Username</label>
       <input id={userId} value={login.username} disabled={disabled} {...valueFieldProps} onChange={(event) => onLogin({ ...login, username: event.target.value })} />
-      <label htmlFor={valueId}>Password{optional ? " (optional)" : ""}</label>
+      <label htmlFor={valueId}>{fresh ? "New password" : "Password"}{optional ? " (optional)" : ""}</label>
       <div className="vault-value-row">
         <input id={valueId} className="vault-secret-input" type={masked ? "password" : "text"} value={login.password} disabled={disabled} {...valueFieldProps} onChange={(event) => { mask?.touch(); onLogin({ ...login, password: event.target.value }); }} />
         {toggle}
@@ -228,7 +260,7 @@ function ValueFields({ type, value, login, onValue, onLogin, valueId, onGenerate
     </div>;
   }
   return <>
-    <div className="vault-value-label"><label htmlFor={valueId}>Value{optional ? " (optional)" : ""}</label><span className="vault-value-tools">{toggle}{generate}</span></div>
+    <div className="vault-value-label"><label htmlFor={valueId}>{fresh ? "New value" : "Value"}{optional ? " (optional)" : ""}</label><span className="vault-value-tools">{toggle}{generate}</span></div>
     {masked
       ? <div className="vault-secret-input vault-secret-masked"><Masked /><span className="file-dialog-hint">{value ? "Hidden. Show it to edit; your changes are kept." : "Empty."}</span></div>
       : <textarea id={valueId} className="vault-secret-input" rows={type === "note" ? 6 : 3} value={value} disabled={disabled} {...valueFieldProps} onChange={(event) => { mask?.touch(); onValue(event.target.value); }} />}
@@ -294,8 +326,8 @@ export function GeneratorDialog({ onCancel, onUse }: { onCancel: () => void; onU
 // ---------------------------------------------------------------------------------------------
 // Edit one value, with CAS (VALUE_CHANGED) and "apply to other environments"
 
-export function ValueEditorDialog({ vault, secret, env, onCancel, onSaved }: {
-  vault: VaultSummary; secret: SecretSummary; env: VaultEnvironment; onCancel: () => void; onSaved: (message: string) => void;
+export function ValueEditorDialog({ vault, secret, env, ask, onCancel, onSaved }: {
+  vault: VaultSummary; secret: SecretSummary; env: VaultEnvironment; ask: (request: ConfirmRequest) => Promise<boolean>; onCancel: () => void; onSaved: (message: string) => void;
 }) {
   const cell = secret.values[env.id];
   const [loading, setLoading] = useState(cell?.status === "set");
@@ -315,6 +347,9 @@ export function ValueEditorDialog({ vault, secret, env, onCancel, onSaved }: {
   const [openedVersions, setOpenedVersions] = useState<Record<string, number>>(() =>
     Object.fromEntries(vault.environments.map((item) => [item.id, secret.values[item.id]?.version ?? 0])));
   const editorMask = useEditorMask(cell?.status === "set");
+  // A protected environment while this session's window is closed (2026-10-06 operator): saving
+  // needs no re-authentication, so the editor opens empty as the new value instead of asking.
+  const [fresh, setFresh] = useState(false);
   const valueId = useId();
   const commentId = useId();
   useHistoryDialogGuard(true, onCancel, { blocked: busy });
@@ -322,27 +357,45 @@ export function ValueEditorDialog({ vault, secret, env, onCancel, onSaved }: {
   const others = vault.environments.filter((item) => item.id !== env.id && canWriteEnv(item));
   const envName = (envId: string) => vault.environments.find((item) => item.id === envId)?.name ?? "Another environment";
 
-  async function loadCurrent() {
+  /**
+   * Reads the current value into the fields. `ask`: a protected environment may ask to confirm it's
+   * you (Show, Load the latest); without it (opening the editor) the closed window opens the editor
+   * empty as the new value instead.
+   */
+  async function loadCurrent(ask = true) {
     setLoading(true);
     setError(null);
     try {
-      const { value: current } = await run(() => readValue(vault.id, secret.id, env.id));
+      const { value: current } = await (ask ? run(() => readValue(vault.id, secret.id, env.id)) : readValue(vault.id, secret.id, env.id));
       if (secret.type === "login") setLogin(parseLoginValue(current.value) ?? { username: "", password: current.value, url: "" });
       else setValueText(current.value);
       setComment(current.comment ?? "");
       setExpectedVersion(current.version);
       setConflict(null);
+      return true;
     } catch (reason) {
-      if (errorCode(reason) === "VALUE_NOT_SET") {
+      if (!ask && opensFresh(reason)) setFresh(true);
+      else if (reason instanceof ReauthCancelled) { /* stays as it was */ }
+      else if (errorCode(reason) === "VALUE_NOT_SET") {
         setExpectedVersion(payloadNumber(reason, "currentVersion") ?? expectedVersion);
         setConflict(null);
       } else setError(messageOf(reason, "Could not load the current value"));
+      return false;
     } finally {
       setLoading(false);
     }
   }
-  // Editing starts from the current value, which is a read (audited like a reveal).
-  useEffect(() => { if (cell?.status === "set") void loadCurrent(); }, []);
+  // Editing starts from the current value, which is a read (audited like a reveal), except in a
+  // protected environment outside the window, where it starts empty (the read is refused, unrecorded).
+  useEffect(() => { if (cell?.status === "set") void loadCurrent(false); }, []);
+  async function showCurrent() {
+    const typed = (secret.type === "login" ? Boolean(login.username || login.password || login.url) : Boolean(value)) || Boolean(comment.trim());
+    if (typed && !await ask(SHOW_REPLACES_DRAFT)) return;
+    if (await loadCurrent(true)) {
+      setFresh(false);
+      editorMask.show();
+    }
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -351,13 +404,16 @@ export function ValueEditorDialog({ vault, secret, env, onCancel, onSaved }: {
     setBusy(true);
     setError(null);
     try {
+      // Writes, "Also save in" included, never ask to confirm it's you (2026-10-06 operator).
+      // In "New value" mode an empty comment keeps each environment's current one (review M1).
+      const sent = commentToSend(fresh, comment);
       if (applyTo.length === 0) {
-        await run(() => setValue(vault.id, secret.id, env.id, { value: payload, comment: comment.trim() || null, expectedVersion }));
+        await setValue(vault.id, secret.id, env.id, { value: payload, ...sent, expectedVersion });
       } else {
-        await run(() => setValues(vault.id, secret.id, [
-          { envId: env.id, value: payload, comment: comment.trim() || null, expectedVersion },
-          ...applyTo.map((envId) => ({ envId, value: payload, comment: comment.trim() || null, expectedVersion: openedVersions[envId] ?? 0 }))
-        ]));
+        await setValues(vault.id, secret.id, [
+          { envId: env.id, value: payload, ...sent, expectedVersion },
+          ...applyTo.map((envId) => ({ envId, value: payload, ...sent, expectedVersion: openedVersions[envId] ?? 0 }))
+        ]);
       }
       onSaved(applyTo.length ? `Saved in ${applyTo.length + 1} environments` : `Saved in ${env.name}`);
     } catch (reason) {
@@ -380,9 +436,17 @@ export function ValueEditorDialog({ vault, secret, env, onCancel, onSaved }: {
     const changed = conflict ?? [];
     const elsewhere = changed.filter((item) => item.envId !== env.id);
     if (elsewhere.length) setOpenedVersions((current) => ({ ...current, ...Object.fromEntries(elsewhere.map((item) => [item.envId, item.currentVersion])) }));
-    if (changed.some((item) => item.envId === env.id) || changed.length === 0) await loadCurrent();
+    if (fresh) {
+      // "New value" mode never reads (review L2): the new value replaces whatever is there now, so
+      // take this environment's version without reading it, and never ask to confirm it's you.
+      const mine = changed.find((item) => item.envId === env.id);
+      if (mine) setExpectedVersion(mine.currentVersion);
+      setConflict(null);
+    } else if (changed.some((item) => item.envId === env.id) || changed.length === 0) await loadCurrent();
     else setConflict(null);
-    setRefreshedNote(changed.length
+    setRefreshedNote(changed.length && fresh
+      ? `Saving now replaces the latest version of ${listNames(changed.map((item) => envName(item.envId)))}.`
+      : changed.length
       ? `Loaded the latest version of ${listNames(changed.map((item) => envName(item.envId)))}. Saving now replaces ${changed.length === 1 ? "it" : "them"}.`
       : null);
   }
@@ -390,8 +454,9 @@ export function ValueEditorDialog({ vault, secret, env, onCancel, onSaved }: {
   return <><ModalDialog title={`${secret.name} · ${env.name}`} eyebrow={cell?.status === "set" ? `Edit value · version ${expectedVersion}` : "Set value"} onClose={onCancel} busy={busy || generating} variant="sheet" className="vault-dialog">
     <form className="file-dialog-form vault-form" onSubmit={submit} aria-busy={loading || undefined}>
       {loading ? <p className="file-dialog-hint" role="status">Loading the current value…</p> : <>
-        <ValueFields type={secret.type} value={value} login={login} onValue={setValueText} onLogin={setLogin} valueId={valueId} onGenerate={() => setGenerating(true)} disabled={busy} mask={editorMask} />
-        <label htmlFor={commentId}>Comment for this value (encrypted)</label>
+        {fresh && <p className="file-dialog-hint vault-fresh-note" role="note"><ShieldCheck className="vault-hint-icon" aria-hidden="true" />{FRESH_VALUE_NOTE}</p>}
+        <ValueFields type={secret.type} value={value} login={login} onValue={setValueText} onLogin={setLogin} valueId={valueId} onGenerate={() => setGenerating(true)} disabled={busy} mask={editorMask} onShowCurrent={fresh ? () => { void showCurrent(); } : undefined} />
+        <label htmlFor={commentId}>{fresh ? FRESH_COMMENT_LABEL : "Comment for this value (encrypted)"}</label>
         <input id={commentId} value={comment} maxLength={VAULT_BOUNDS.commentBytes} autoComplete="off" onChange={(event) => setComment(event.target.value)} />
         {others.length > 0 && <fieldset className="vault-sets">
           <legend className="vault-field-label">Also save in</legend>
@@ -607,7 +672,7 @@ export function VaultSettingsDialog({ vault, onCancel, onChanged, onDeleted, onL
         <button type="submit" className="secondary-button vault-inline-button" disabled={busy}><Plus />Add</button>
       </form>}
       {error && <p className="form-error" role="alert">{error}</p>}
-      {owner && <p className="file-dialog-hint"><ShieldCheck className="vault-hint-icon" aria-hidden="true" />A checked shield marks a protected environment: revealing, editing, importing, or exporting its values needs you to confirm it's you (valid 15 minutes).</p>}
+      {owner && <p className="file-dialog-hint"><ShieldCheck className="vault-hint-icon" aria-hidden="true" />A checked shield marks a protected environment: seeing or exporting its values asks you to confirm it's you (valid 15 minutes). Saving and importing values does not.</p>}
       {owner && <div className="vault-settings-block">
         <span className="vault-field-label">Data key</span>
         <p className="file-dialog-hint">Rotating starts a new data key for this vault and re-encrypts its values in the background. It protects old backups; it does not take back what someone already read. Removing someone rotates it for you.</p>

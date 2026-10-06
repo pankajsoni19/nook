@@ -1,5 +1,5 @@
 import { audit, db, now } from "../db";
-import { requireEnvGrant, requireVault, VaultError, type VaultActor } from "./access";
+import { mayReadPlain, requireEnvGrant, requireVault, requireVisibleEnv, VaultError, type VaultActor } from "./access";
 import { openValue } from "./crypto";
 import { chargeVault } from "./limits";
 import {
@@ -16,8 +16,11 @@ import { serializeCsv, serializeDotenv, serializeJson, type ExportEntry, type Tr
  * same, skip, invalid) without writing; the preview compares with the current values, so it is a
  * read (charged as one read and recorded as `import.preview` with a count). The import writes in one
  * transaction under the byte quota, records `import` with counts, and skips or overwrites changed
- * values by `mode`. It needs write on the environment, and the re-authentication window when the
- * environment is protected (the grant says so). Rate limits (QA D4): a preview or an import of up
+ * values by `mode`. It needs write on the environment and no re-authentication window, even when
+ * the environment is protected (2026-10-06 operator: no re-auth for writes). Without the window a
+ * protected environment's preview does not compare with the current values (that would be an
+ * equality oracle on values the session may not read): an existing value is `update` (overwrite)
+ * or `skip`, never `same`. Rate limits (QA D4): a preview or an import of up
  * to 500 entries costs one read (the comparison) and one write, like any single request; the 500
  * bound and the byte quota are what bound it, so an import the preview allows is never refused
  * for its size alone.
@@ -57,6 +60,7 @@ function entryProblem(entry: Entry, secret: SecretLite | undefined): string | nu
 export function importEntries(actor: VaultActor, vaultId: string, envId: string, input: { entries: Entry[]; mode: ImportMode; dryRun: boolean }) {
   const access = requireVault(actor, vaultId);
   const grant = requireEnvGrant(access, envId, "write");
+  const comparable = mayReadPlain(access, requireVisibleEnv(access, envId));
   if (input.entries.length > VAULT_BOUNDS.importEntries) throw new VaultError(400, "INVALID", `An import has at most ${VAULT_BOUNDS.importEntries} entries`);
   const secrets = db.query("SELECT id, name, type FROM vault_secrets WHERE vault_id = ? AND deleted_at IS NULL AND purge_started_at IS NULL").all(vaultId) as SecretLite[];
   const byName = new Map(secrets.map((secret) => [secret.name.toLowerCase(), secret]));
@@ -73,6 +77,7 @@ export function importEntries(actor: VaultActor, vaultId: string, envId: string,
     if (!secret) return { entry, secret, status: "create" as ImportStatus, reason: null };
     const row = storedValue(secret.id, envId);
     if (!row) return { entry, secret, status: "set" as ImportStatus, reason: null };
+    if (!comparable) return { entry, secret, status: input.mode === "overwrite" ? "update" as ImportStatus : "skip" as ImportStatus, reason: input.mode === "overwrite" ? null : "Already set (choose Overwrite to replace it)" };
     compared += 1;
     const current = integrity(vaultId, actor.userId, { secretId: secret.id, envId }, () => openValue(grant, { secretId: secret.id, envId, version: row.version, generation: row.generation, valueCt: row.value_ct, commentCt: row.comment_ct }));
     const same = current.value === entry.value && (entry.comment === undefined || (current.comment ?? "") === (entry.comment ?? ""));

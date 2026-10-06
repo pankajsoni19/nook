@@ -201,7 +201,7 @@ function VaultList({ onOpen, onReady, flash }: { onOpen: (vault: VaultSummary) =
   return <>
     <div className="vault-toolbar">
       <h1 className="vault-title">Vaults{vaults && <span className="vault-count"> · {vaults.length}</span>}</h1>
-      {canWrite && <button type="button" className="primary-button vault-primary" onClick={() => setCreating(true)}><Plus />New vault</button>}
+      {canWrite && <button type="button" className="action-button" onClick={() => setCreating(true)}><Plus />New vault</button>}
     </div>
     <p className="vault-honest"><ShieldAlert aria-hidden="true" />{HONEST_LABEL} Names and tags are not encrypted.</p>
     {error && <div className="vault-state" role="alert"><h2>Could not load your vaults</h2><p>{error}</p><button className="secondary-button" onClick={() => { void load(); }}><RotateCcw />Try again</button></div>}
@@ -210,7 +210,7 @@ function VaultList({ onOpen, onReady, flash }: { onOpen: (vault: VaultSummary) =
       <span className="vault-state-icon"><KeyRound /></span>
       <h2>No vaults yet</h2>
       <p>Keep a team's API keys, database URLs, and passwords per environment: dev, staging, and prod.</p>
-      {canWrite && <button className="primary-button vault-primary" onClick={() => setCreating(true)}><Plus />New vault</button>}
+      {canWrite && <button className="action-button" onClick={() => setCreating(true)}><Plus />New vault</button>}
     </div>}
     {vaults && vaults.length > 0 && ([["Your vaults", vaults.filter((vault) => vault.role === "owner")], ["Shared with me", vaults.filter((vault) => vault.role !== "owner")]] as const).map(([heading, list]) => list.length > 0 && <section key={heading} className="vault-list-section" aria-labelledby={`vault-list-${heading === "Your vaults" ? "own" : "shared"}`}>
       <h2 id={`vault-list-${heading === "Your vaults" ? "own" : "shared"}`} className="vault-list-heading">{heading}<span className="vault-count"> · {list.length}</span></h2>
@@ -237,7 +237,8 @@ type Ask = ReturnType<typeof useConfirm>["ask"];
 
 function useValueActions(vaultId: string, flash: (message: string) => void, reload: () => Promise<void>, ask: Ask) {
   const { revealed, show, hide, hideAll } = useRevealedValues();
-  // Protected environments ask to confirm it's you first, then retry once (D226).
+  // Reading a protected environment asks to confirm it's you first, then retries once (D226);
+  // writing (clear) does not (2026-10-06 operator: no re-auth for writes).
   const run = useVaultReauth();
   const reveal = useCallback(async (secret: SecretSummary, env: VaultEnvironment) => {
     try {
@@ -261,14 +262,14 @@ function useValueActions(vaultId: string, flash: (message: string) => void, relo
     if (!cell || cell.status !== "set") return;
     if (!await ask({ title: `Clear ${secret.name} in ${env.name}?`, message: "The value is removed from this environment. Its earlier versions stay in history.", confirmLabel: "Clear value", danger: true })) return;
     try {
-      await run(() => clearValue(vaultId, secret.id, env.id, cell.version ?? 0));
+      await clearValue(vaultId, secret.id, env.id, cell.version ?? 0);
       hide(cellKey(secret.id, env.id));
       flash(`Cleared in ${env.name}`);
     } catch (reason) {
-      if (!(reason instanceof ReauthCancelled)) flash(errorCode(reason) === "VALUE_CHANGED" ? "This value changed since the page loaded. Nothing was cleared; the page is up to date now." : messageOf(reason, "Could not clear the value"));
+      flash(errorCode(reason) === "VALUE_CHANGED" ? "This value changed since the page loaded. Nothing was cleared; the page is up to date now." : messageOf(reason, "Could not clear the value"));
     }
     await reload();
-  }, [ask, flash, hide, reload, run, vaultId]);
+  }, [ask, flash, hide, reload, vaultId]);
   return { revealed, reveal, hide, hideAll, copy, clear };
 }
 
@@ -360,7 +361,7 @@ function VaultPage({ vaultId, envId, cache, onBack, onReady, flash, ask, onEnvir
         <label className="vault-search"><Search aria-hidden="true" /><span className="sr-only">Search names and tags</span>
           <input type="search" value={query} placeholder="Search names and tags" autoComplete="off" spellCheck={false} onChange={(event) => setQuery(event.target.value)} />
         </label>
-        {canCreate && <button type="button" className="primary-button vault-primary" onClick={() => setDialog({ kind: "newSecret" })}><Plus />New secret</button>}
+        {canCreate && <button type="button" className="action-button" onClick={() => setDialog({ kind: "newSecret" })}><Plus />New secret</button>}
       </div>
     </div>
     {vault.description && <p className="vault-description">{vault.description}</p>}
@@ -384,7 +385,7 @@ function VaultPage({ vaultId, envId, cache, onBack, onReady, flash, ask, onEnvir
       <span className="vault-state-icon"><KeyRound /></span>
       <h2>{query || tag ? "No secrets match" : "No secrets yet"}</h2>
       {!query && !tag && <p>Add a secret, then give it a value in each environment, or import a .env file.</p>}
-      {canCreate && !query && !tag && <button className="primary-button vault-primary" onClick={() => setDialog({ kind: "newSecret" })}><Plus />New secret</button>}
+      {canCreate && !query && !tag && <button className="action-button" onClick={() => setDialog({ kind: "newSecret" })}><Plus />New secret</button>}
     </div>}
 
     {data.secrets.length > 0 && !phone && <div className="vault-grid-scroll" role="region" aria-label={`${vault.name} secrets by environment`} tabIndex={0}>
@@ -444,7 +445,7 @@ function VaultPage({ vaultId, envId, cache, onBack, onReady, flash, ask, onEnvir
       onClear={() => { const { secret, env } = openDialog; setDialog(null); void actions.clear(secret!, env!); }}
       onOpenSecret={() => { setDialog(null); onOpenSecret(dialog.secretId); }}
       onClose={() => { actions.hide(cellKey(dialog.secretId, dialog.envId)); setDialog(null); }} />}
-    {openDialog?.secret && openDialog.env && dialog?.kind === "edit" && <ValueEditorDialog vault={vault} secret={openDialog.secret} env={openDialog.env}
+    {openDialog?.secret && openDialog.env && dialog?.kind === "edit" && <ValueEditorDialog vault={vault} secret={openDialog.secret} env={openDialog.env} ask={ask}
       onCancel={() => setDialog(null)}
       onSaved={(message) => { actions.hideAll(); setDialog(null); flash(message); void load(); }} />}
     {openDialog?.secret && openDialog.env && dialog?.kind === "history" && <VersionHistoryDialog vaultId={vault.id} secret={openDialog.secret} env={openDialog.env} ask={ask} flash={flash}
@@ -505,11 +506,11 @@ function SecretPage({ vaultId, secretId, onBack, onReady, flash, ask, onMissing,
   async function remove() {
     if (!await ask({ title: `Delete ${secret.name}?`, message: `${secret.name} and its values in every environment move to the Bin for 30 days.`, confirmLabel: "Move to Bin", danger: true })) return;
     try {
-      await run(() => deleteSecret(vaultId, secretId));
+      await deleteSecret(vaultId, secretId);
       flash(`Moved ${secret.name} to the Bin`);
       onDeleted();
     } catch (reason) {
-      if (!(reason instanceof ReauthCancelled)) flash(messageOf(reason, "Could not delete the secret"));
+      flash(messageOf(reason, "Could not delete the secret"));
     }
   }
 
@@ -552,7 +553,7 @@ function SecretPage({ vaultId, secretId, onBack, onReady, flash, ask, onMissing,
       })}
     </ul>
     <p className="vault-honest"><ShieldAlert aria-hidden="true" />{HONEST_LABEL}</p>
-    {editEnv && <ValueEditorDialog vault={vault} secret={secret} env={editEnv} onCancel={() => setDialog(null)}
+    {editEnv && <ValueEditorDialog vault={vault} secret={secret} env={editEnv} ask={ask} onCancel={() => setDialog(null)}
       onSaved={(message) => { actions.hideAll(); setDialog(null); flash(message); void load(); }} />}
     {historyEnv && <VersionHistoryDialog vaultId={vaultId} secret={secret} env={historyEnv} ask={ask} flash={flash} onClose={() => setDialog(null)} onRestored={() => { void load(); }} />}
     {dialog?.kind === "meta" && <SecretMetaDialog vault={vault} secret={secret} onCancel={() => setDialog(null)}
