@@ -277,6 +277,8 @@ export function reorderEnvironments(actor: VaultActor, vaultId: string, ids: str
 export function deleteEnvironment(actor: VaultActor, vaultId: string, envId: string) {
   const access = requireVault(actor, vaultId);
   requireEnvGrant(access, envId, "admin");
+  // Binning a whole protected environment is not a value write: it still needs the window (D226).
+  requireUnlocked(access, [envId]);
   if (access.environments.length <= 1) throw new VaultError(409, "LAST_ENVIRONMENT", "A vault keeps at least one environment");
   chargeActor(actor, "write");
   const deletedAt = new Date();
@@ -504,8 +506,7 @@ export function deleteSecret(actor: VaultActor, vaultId: string, secretId: strin
   const access = requireVault(actor, vaultId);
   liveSecret(access, secretId);
   requireWriteEverywhere(access, secretId);
-  // Deleting takes its values along: a protected environment's value needs the window (D226).
-  requireUnlocked(access, (db.query("SELECT env_id FROM vault_values WHERE secret_id = ?").all(secretId) as Array<{ env_id: string }>).map((row) => row.env_id));
+  // Deleting to the Bin is a write: no window, even with a protected value (2026-10-06 operator).
   chargeActor(actor, "write");
   const deletedAt = new Date();
   db.transaction(() => {
@@ -715,7 +716,11 @@ export function readVersion(actor: VaultActor, vaultId: string, secretId: string
   return { version, cleared: false, ...opened, createdAt: row.created_at };
 }
 
-/** Restoring writes the old value as a new version (D224), through the same CAS. */
+/**
+ * Restoring writes the old value as a new version (D224), through the same CAS. It is a write: no
+ * window on a protected environment (2026-10-06 operator); the value is opened only to re-seal it
+ * and the response carries ids and versions only.
+ */
 export function restoreVersion(actor: VaultActor, vaultId: string, secretId: string, envId: string, version: number, expectedVersion: number): ValueResult {
   const access = requireVault(actor, vaultId);
   const secret = liveSecret(access, secretId);

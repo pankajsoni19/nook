@@ -237,7 +237,8 @@ type Ask = ReturnType<typeof useConfirm>["ask"];
 
 function useValueActions(vaultId: string, flash: (message: string) => void, reload: () => Promise<void>, ask: Ask) {
   const { revealed, show, hide, hideAll } = useRevealedValues();
-  // Protected environments ask to confirm it's you first, then retry once (D226).
+  // Reading a protected environment asks to confirm it's you first, then retries once (D226);
+  // writing (clear) does not (2026-10-06 operator: no re-auth for writes).
   const run = useVaultReauth();
   const reveal = useCallback(async (secret: SecretSummary, env: VaultEnvironment) => {
     try {
@@ -261,14 +262,14 @@ function useValueActions(vaultId: string, flash: (message: string) => void, relo
     if (!cell || cell.status !== "set") return;
     if (!await ask({ title: `Clear ${secret.name} in ${env.name}?`, message: "The value is removed from this environment. Its earlier versions stay in history.", confirmLabel: "Clear value", danger: true })) return;
     try {
-      await run(() => clearValue(vaultId, secret.id, env.id, cell.version ?? 0));
+      await clearValue(vaultId, secret.id, env.id, cell.version ?? 0);
       hide(cellKey(secret.id, env.id));
       flash(`Cleared in ${env.name}`);
     } catch (reason) {
-      if (!(reason instanceof ReauthCancelled)) flash(errorCode(reason) === "VALUE_CHANGED" ? "This value changed since the page loaded. Nothing was cleared; the page is up to date now." : messageOf(reason, "Could not clear the value"));
+      flash(errorCode(reason) === "VALUE_CHANGED" ? "This value changed since the page loaded. Nothing was cleared; the page is up to date now." : messageOf(reason, "Could not clear the value"));
     }
     await reload();
-  }, [ask, flash, hide, reload, run, vaultId]);
+  }, [ask, flash, hide, reload, vaultId]);
   return { revealed, reveal, hide, hideAll, copy, clear };
 }
 
@@ -505,11 +506,11 @@ function SecretPage({ vaultId, secretId, onBack, onReady, flash, ask, onMissing,
   async function remove() {
     if (!await ask({ title: `Delete ${secret.name}?`, message: `${secret.name} and its values in every environment move to the Bin for 30 days.`, confirmLabel: "Move to Bin", danger: true })) return;
     try {
-      await run(() => deleteSecret(vaultId, secretId));
+      await deleteSecret(vaultId, secretId);
       flash(`Moved ${secret.name} to the Bin`);
       onDeleted();
     } catch (reason) {
-      if (!(reason instanceof ReauthCancelled)) flash(messageOf(reason, "Could not delete the secret"));
+      flash(messageOf(reason, "Could not delete the secret"));
     }
   }
 
