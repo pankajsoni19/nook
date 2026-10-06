@@ -38,6 +38,7 @@ import { registerWhiteboardRoutes } from "./whiteboards/routes";
 import { WHITEBOARD_IMPORT_MAX_BYTES } from "./whiteboards/import";
 import { registerVaultRoutes } from "./vault/routes";
 import { registerAgentRoutes } from "./agents/routes";
+import { noteServer, SERVER_IDLE_TIMEOUT_SECONDS } from "./longRequests";
 import { publicShareHeaders, registerPublicChatShareApi } from "./agents/publicRoutes";
 import { agentsFeature, initAgentsStatus } from "./agents/status";
 import { markInterruptedRuns } from "./agents/runs";
@@ -1041,7 +1042,13 @@ startMailDispatcher();
 export default {
   port: config.port,
   hostname: "0.0.0.0",
-  fetch: app.fetch,
+  // Bun's server goes to server/longRequests.ts, so the SSE streams and the calls that wait for an
+  // agent's answer can lift the idle timeout for themselves (QA D1); every other request keeps it.
+  fetch: (request: Request, server: unknown) => {
+    noteServer(server);
+    return app.fetch(request, server);
+  },
+  idleTimeout: SERVER_IDLE_TIMEOUT_SECONDS,
   // Uploads need a larger transport cap; JSON and MCP bodies are bounded separately while reading.
   // Whiteboard scenes are read through their own 4 MiB bounded reader (413 SCENE_TOO_LARGE), and
   // imports through a 32 MiB one (413 IMPORT_TOO_LARGE), so the transport cap leaves room for both.

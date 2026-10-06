@@ -13,6 +13,7 @@ import { auditRoute, chatBackAction, chatGroup, chatRoute, type ChatRoute } from
 import { Select } from "../ui/Select";
 import { useConfirm } from "../ui/useConfirm";
 import { useHistoryDialogGuard } from "../ui/useHistoryDialogGuard";
+import { dropSharedChat, forkFailureText, syncSharedChat } from "./sharedChatState";
 import { AGENT_BOUNDS, type AgentSummary, type ChatDetail, type ChatMessage, type ChatSummary, type DailyUsage, type PendingConfirmation, type PublicLinkState, type RunStatus, type TokenUsage, type ToolCallView } from "../../shared/agents";
 import { agentsStatus, cancelRun, confirmRun, createChat, deleteChat, errorCode, followChatUpdates, followRun, forkChat, getChat, listAgents, listChats, listSharedChats, messageOf, myUsage, regenerate, sendMessage, updateChat, type AgentsStatus, type SequencedRunEvent, type StartedRun } from "./chatApi";
 import { PublicLinkSheet } from "./PublicLinkSheet";
@@ -253,6 +254,7 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
     } catch (reason) {
       if (generation !== detailGeneration.current) return;
       if (reason instanceof ApiError && reason.status === 404) {
+        setSharedChats((list) => dropSharedChat(list, chatId));
         flash("Chat not found");
         go(chatRoute(), true);
       } else {
@@ -303,11 +305,20 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
     return () => document.removeEventListener("visibilitychange", onVisibility);
   }, []);
   const updatesChatId = detail && detail.chat.yourLevel === "view" ? detail.chat.id : null;
+  // The list reload, by ref: a new loadChats never reconnects the updates stream.
+  const loadChatsRef = useRef(loadChats);
+  loadChatsRef.current = loadChats;
   useEffect(() => {
     if (!updatesChatId || !tabVisible) return;
     const controller = new AbortController();
     let timer: number | null = null;
     let newRun = false;
+    let listChanged = false;
+    // QA L1: unshared or deleted, the chat leaves "Shared with me" at once (the list then reloads).
+    const gone = () => {
+      setSharedChats((list) => dropSharedChat(list, updatesChatId));
+      void loadChatsRef.current(queryRef.current);
+    };
     // Events come in pairs (a message, then its run): one reload for both.
     const schedule = () => {
       if (timer !== null) return;
@@ -318,20 +329,27 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
         const keepLive = !newRun && Boolean(current && !current.status);
         newRun = false;
         void refreshDetail(updatesChatId, keepLive);
+        if (listChanged) {
+          listChanged = false;
+          void loadChatsRef.current(queryRef.current);
+        }
       }, 150);
     };
     void (async () => {
       for (let attempt = 0; !controller.signal.aborted; attempt += 1) {
         try {
-          await followChatUpdates(updatesChatId, detailRef.current?.chat.id === updatesChatId ? detailRef.current.chat.revision : 0, (event) => {
+          const ended = await followChatUpdates(updatesChatId, detailRef.current?.chat.id === updatesChatId ? detailRef.current.chat.revision : 0, (event) => {
             attempt = 0;
             if (event.type === "run_started" && liveRef.current?.runId !== event.data.runId) newRun = true;
+            // QA L1: a rename or an access change shows in "Shared with me" too.
+            if (event.type === "chat_changed") listChanged = true;
             schedule();
           }, controller.signal);
+          if (ended === "gone") gone();
           return;
         } catch (reason) {
           if (controller.signal.aborted) return;
-          if (reason instanceof ApiError && (reason.status === 404 || reason.status === 403)) return;
+          if (reason instanceof ApiError && (reason.status === 404 || reason.status === 403)) { gone(); return; }
           await new Promise((resolve) => setTimeout(resolve, Math.min(10_000, 1000 * 2 ** Math.min(attempt, 4))));
         }
       }
@@ -341,6 +359,18 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
       if (timer !== null) window.clearTimeout(timer);
     };
   }, [refreshDetail, tabVisible, updatesChatId]);
+  // QA L1: the open shared chat's title (after the owner renames it) is the one in "Shared with me".
+  const sharedTitle = detail && detail.chat.yourLevel === "view" ? detail.chat : null;
+  useEffect(() => {
+    if (sharedTitle) setSharedChats((list) => syncSharedChat(list, sharedTitle));
+  }, [sharedTitle]);
+  // QA L1: coming back to the tab, the lists catch up with what changed while it was hidden.
+  const wasVisible = useRef(tabVisible);
+  useEffect(() => {
+    const regained = tabVisible && !wasVisible.current;
+    wasVisible.current = tabVisible;
+    if (regained && status?.enabled && status.canChat) void loadChats(queryRef.current);
+  }, [loadChats, status?.canChat, status?.enabled, tabVisible]);
 
   useEffect(() => {
     // Wave 39: the app's own name follows APP_NAME.
@@ -498,8 +528,8 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
       void loadChats(query);
       go(chatRoute(chat.id));
     } catch (reason) {
-      const code = errorCode(reason);
-      flash(code === "AGENT_NOT_SHARED" ? "Its agent is not shared with you, so you cannot continue this chat" : code === "AGENT_GONE" ? ERROR_TEXT.AGENT_GONE! : messageOf(reason, "Could not copy the chat"));
+      // QA L2: the server's message ("no longer available" to recipients, "in the Bin" to the agent's owner).
+      flash(forkFailureText(reason));
     } finally {
       setBusy(false);
     }

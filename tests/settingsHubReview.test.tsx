@@ -22,6 +22,7 @@ describe("aliases and deep links (review)", () => {
       ["/settings/team/", "/settings/team/members"],
       ["/settings/keys/", "/settings/keys"],
       ["/settings/mcp/", "/settings/keys"],
+      ["/settings/keys/vault/", "/settings/keys/vault"],
       [`/team/${userId.toUpperCase()}/access/`, `/settings/team/members/${userId}/access`],
       [`/settings/team/groups/${groupId.toUpperCase()}/`, `/settings/team/groups/${groupId}`],
       ["/settings/whatever", "/settings"],

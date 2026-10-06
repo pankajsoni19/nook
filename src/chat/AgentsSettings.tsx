@@ -2,7 +2,8 @@ import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from 
 import { Bot, ChevronLeft, Plus, Share2, UsersRound } from "lucide-react";
 import { ApiError } from "../api";
 import { AccessSheet } from "../access/AccessSheet";
-import { hubDocumentTitle, NEW_AGENT, type Route } from "../router";
+import { hubDocumentTitle, keysTabRoute, NEW_AGENT, type Route } from "../router";
+import { EmojiPicker } from "../ui/EmojiPicker";
 import { Select } from "../ui/Select";
 import { useConfirm } from "../ui/useConfirm";
 import { AGENT_BOUNDS, type AgentApiUsage, type AgentDetail, type AgentSummary, type AgentToolRef, type KnowledgeCatalogBase, type LinkState, type NookLink, type ToolCatalog } from "../../shared/agents";
@@ -19,6 +20,15 @@ type Navigate = (route: Route, options?: { replace?: boolean }) => void;
  * yet): a list, and an editor page below it at /settings/agents/:id (a nested hub page with its
  * own back link). Save uses CAS; a stale save says "Changed elsewhere".
  */
+/**
+ * Where "Manage API keys" goes from an agent's Link Nook key sheet: the API keys General tab, by its
+ * own URL (/settings/keys/general). Not the Agents tab: a linkable key is a general MCP key with the
+ * Nook read grants the agent's tools need, and never one that runs agents (server/agents/tools.ts,
+ * T318), so it is always listed on General (keyTabOf); the Agents tab lists only agents-only keys and
+ * its New key starts as agents:run, which the sheet would refuse to link.
+ */
+export const agentKeysRoute = (): Route => keysTabRoute("general");
+
 export function AgentsSettings({ agentId, navigate, flash, onOpenChat }: { agentId: string | null; navigate: Navigate; flash: (message: string) => void; onOpenChat: (agentId: string) => void }) {
   const [status, setStatus] = useState<AgentsStatus | null>(null);
   const [agents, setAgents] = useState<AgentSummary[] | null>(null);
@@ -40,7 +50,7 @@ export function AgentsSettings({ agentId, navigate, flash, onOpenChat }: { agent
   useEffect(() => { void load(); }, [agentId, load]);
   useEffect(() => { if (!agentId) document.title = hubDocumentTitle("Agents"); }, [agentId]);
 
-  if (agentId) return <AgentEditor agentId={agentId} navigate={navigate} flash={flash} canCreate={status?.canCreate ?? false} onOpenChat={onOpenChat} />;
+  if (agentId) return <AgentEditor agentId={agentId} navigate={navigate} flash={flash} canCreate={status?.canCreate ?? false} onOpenChat={onOpenChat} keysRoute={agentKeysRoute()} />;
   const toList = { app: "settings" as const, section: "agents" as const };
   // Wave 43 (AC-D): your own agents, then those shared with you (with the owner and your level).
   const own = agents?.filter((agent) => agent.yourLevel === "owner") ?? null;
@@ -60,7 +70,7 @@ export function AgentsSettings({ agentId, navigate, flash, onOpenChat }: { agent
     {own && own.length > 0 && <ul className="agents-list" aria-label="Your agents">{own.map(row)}</ul>}
     {agents && agents.length === 0 && status?.enabled && status.canChat && <p className="chat-muted">No agents yet.</p>}
     {shared.length > 0 && <><h4 className="agents-shared-heading"><UsersRound aria-hidden="true" />Shared with you</h4><ul className="agents-list" aria-label="Agents shared with you">{shared.map(row)}</ul></>}
-    {status?.enabled && status.canCreate && <button type="button" className="secondary-button agents-add" onClick={() => navigate({ ...toList, agentId: NEW_AGENT })}><Plus />New agent</button>}
+    {status?.enabled && status.canCreate && <button type="button" className="action-button secondary agents-add" onClick={() => navigate({ ...toList, agentId: NEW_AGENT })}><Plus />New agent</button>}
   </section>;
 }
 
@@ -73,7 +83,7 @@ export function editorDiffers(agent: AgentDetail, form: EditorForm) {
     || form.starters !== agent.starters.join("\n") || form.directWrites !== agent.nookDirectWrites || JSON.stringify(form.tools) !== JSON.stringify(agent.tools);
 }
 
-function AgentEditor({ agentId, navigate, flash, canCreate, onOpenChat }: { agentId: string; navigate: Navigate; flash: (message: string) => void; canCreate: boolean; onOpenChat: (agentId: string) => void }) {
+function AgentEditor({ agentId, navigate, flash, canCreate, onOpenChat, keysRoute }: { agentId: string; navigate: Navigate; flash: (message: string) => void; canCreate: boolean; onOpenChat: (agentId: string) => void; keysRoute: Route }) {
   const creating = agentId === NEW_AGENT;
   const [agent, setAgent] = useState<AgentDetail | null>(null);
   const [name, setName] = useState("");
@@ -183,7 +193,7 @@ function AgentEditor({ agentId, navigate, flash, canCreate, onOpenChat }: { agen
 
   if (creating && !canCreate) return <div className="settings-content settings-team-content"><button type="button" className="team-back team-back-visible" onClick={() => navigate(toList)}><ChevronLeft />Agents</button><p className="settings-warning">Your role cannot create agents.</p></div>;
   // Wave 43 (D356): someone who may only chat with a shared agent sees what it is, never its prompt or tools.
-  if (agent && agent.yourLevel === "view") return <AgentInfo agent={agent} onBack={() => navigate(toList)} onOpenChat={onOpenChat} onLink={() => setLinking(true)} linking={linking} onCloseLink={() => setLinking(false)} onLinkChanged={onLinkChanged} onOpenKeys={() => { setLinking(false); navigate({ app: "settings", section: "mcp" }); }} />;
+  if (agent && agent.yourLevel === "view") return <AgentInfo agent={agent} onBack={() => navigate(toList)} onOpenChat={onOpenChat} onLink={() => setLinking(true)} linking={linking} onCloseLink={() => setLinking(false)} onLinkChanged={onLinkChanged} onOpenKeys={() => { setLinking(false); navigate(keysRoute); }} />;
   const canShareAgent = agent !== null && !creating && (agent.yourLevel === "owner" || agent.yourLevel === "manage");
   return <div className="settings-content settings-team-content agents-editor">
     <button type="button" className="team-back team-back-visible" onClick={() => navigate(toList)}><ChevronLeft />Agents</button>
@@ -197,7 +207,11 @@ function AgentEditor({ agentId, navigate, flash, canCreate, onOpenChat }: { agen
       <label htmlFor={ids.description}>Description</label>
       <input id={ids.description} value={description} maxLength={AGENT_BOUNDS.description} autoComplete="off" placeholder="What it is for" onChange={(event) => setDescription(event.target.value)} />
       <label htmlFor={ids.icon}>Emoji</label>
-      <input id={ids.icon} value={icon} maxLength={16} autoComplete="off" placeholder="🤖" className="agents-icon-input" onChange={(event) => setIcon(event.target.value)} />
+      <div className="agents-icon-row">
+        <EmojiPicker value={icon} onChange={setIcon} label="Agent emoji" placeholder="🤖" />
+        <input id={ids.icon} value={icon} maxLength={16} autoComplete="off" placeholder="🤖" className="agents-icon-input" onChange={(event) => setIcon(event.target.value)} />
+      </div>
+      <p className="file-dialog-hint">Pick one, or type or paste any emoji. Empty shows 🤖.</p>
       <h4>Instructions</h4>
       <label htmlFor={ids.prompt}>System prompt <small>{systemPrompt.length.toLocaleString()} / {AGENT_BOUNDS.systemPrompt.toLocaleString()}</small></label>
       <textarea id={ids.prompt} className="agents-prompt" value={systemPrompt} maxLength={AGENT_BOUNDS.systemPrompt} rows={10} spellCheck={false} onChange={(event) => setSystemPrompt(event.target.value)} />
@@ -227,7 +241,7 @@ function AgentEditor({ agentId, navigate, flash, canCreate, onOpenChat }: { agen
       </footer>
     </form>}
     {agent && !creating && <AgentApiRuns agentId={agent.id} />}
-    {linking && agent && <LinkNookKeySheet agentId={agent.id} agentName={agent.name} onClose={() => setLinking(false)} onChanged={onLinkChanged} onOpenKeys={() => { setLinking(false); navigate({ app: "settings", section: "mcp" }); }} />}
+    {linking && agent && <LinkNookKeySheet agentId={agent.id} agentName={agent.name} onClose={() => setLinking(false)} onChanged={onLinkChanged} onOpenKeys={() => { setLinking(false); navigate(keysRoute); }} />}
     {sharing && agent && <AccessSheet kind="agent" id={agent.id} title={agent.name} guardHistory note={AGENT_SHARE_NOTE} onClose={() => setSharing(false)} onSaved={() => { setSharing(false); flash("Access updated"); }} />}
     {confirm.confirmElement}
   </div>;

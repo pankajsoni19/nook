@@ -1,5 +1,6 @@
 import type { Context, Hono, Next } from "hono";
 import { streamSSE } from "hono/streaming";
+import { keepRequestOpen, SSE_TIMING } from "../longRequests";
 import { z, ZodError } from "zod";
 import type { AppEnv } from "../auth";
 import { db } from "../db";
@@ -440,6 +441,7 @@ export function registerAgentRoutes(app: Hono<AppEnv>) {
         bump(streamsPerUser, userId, -1);
       };
       c.header("X-Accel-Buffering", "no");
+      keepRequestOpen(c.req.raw);
       const stillReadable = () => {
         const row = db.query("SELECT id, owner_id, visibility, deleted_at FROM chats WHERE id = ?").get(chatId) as { id: string; owner_id: string; visibility: string; deleted_at: string | null } | null;
         return row !== null && shareLevel("chat", row, userId) !== "none";
@@ -448,9 +450,12 @@ export function registerAgentRoutes(app: Hono<AppEnv>) {
         const queue: ChatUpdateEvent[] = [];
         let wake: (() => void) | null = null;
         const unsubscribe = subscribeChatUpdates(chatId, (event) => { queue.push(event); wake?.(); });
-        const keepAlive = setInterval(() => { wake?.(); }, 15_000);
+        // A tick wakes the idle loop: a keep-alive every SSE_TIMING.pingMs, an access re-check every accessCheckMs (QA D1).
+        const { pingMs, accessCheckMs } = SSE_TIMING;
+        const keepAlive = setInterval(() => { wake?.(); }, Math.min(pingMs, accessCheckMs));
         stream.onAbort(() => { wake?.(); });
         let lastCheck = Date.now();
+        let lastPing = Date.now();
         try {
           // Headers go out with the first bytes: a comment, so the client knows it is subscribed.
           await stream.write(": open\n\n");
@@ -461,9 +466,12 @@ export function registerAgentRoutes(app: Hono<AppEnv>) {
           for (;;) {
             if (stream.aborted) break;
             if (queue.length === 0) {
-              if (Date.now() - lastCheck >= 15_000) {
+              if (Date.now() - lastCheck >= accessCheckMs) {
                 lastCheck = Date.now();
                 if (!stillReadable()) { await stream.write(chatUpdateFrame({ type: "gone", data: {} })); break; }
+              }
+              if (Date.now() - lastPing >= pingMs) {
+                lastPing = Date.now();
                 await stream.write(": ping\n\n");
               }
               await new Promise<void>((resolve) => { wake = resolve; });
@@ -522,6 +530,7 @@ export function registerAgentRoutes(app: Hono<AppEnv>) {
         bump(streamsPerUser, userId, -1);
       };
       c.header("X-Accel-Buffering", "no");
+      keepRequestOpen(c.req.raw);
       // streamSSE sets no-cache; SSE replies carry chat text, so they are no-store like the rest of /api (T325).
       // Review M1: the confirmation card (its nonce, the arguments' hash, the full arguments) is the
       // owner's alone; recipients following the run never get it, neither from the ring nor live.
@@ -548,7 +557,7 @@ export function registerAgentRoutes(app: Hono<AppEnv>) {
           for (const event of replay) await send(event);
           if (channel.closed) return;
         }
-        // Live: forward events until the run ends or the client leaves; a keep-alive comment every 15 s.
+        // Live: forward events until the run ends or the client leaves; a keep-alive comment every SSE_TIMING.pingMs (QA D1).
         let seen = replay === "overflow" ? channel.lastSeq : Math.max(after, replay.at(-1)?.seq ?? after);
         const queue: SequencedEvent[] = [];
         let wake: (() => void) | null = null;
@@ -558,12 +567,14 @@ export function registerAgentRoutes(app: Hono<AppEnv>) {
           else if (event.seq > seen) queue.push(event);
           wake?.();
         });
-        const keepAlive = setInterval(() => { wake?.(); }, 15_000);
+        const { pingMs } = SSE_TIMING;
+        const keepAlive = setInterval(() => { wake?.(); }, pingMs);
+        stream.onAbort(() => { wake?.(); });
         let lastPing = Date.now();
         try {
           while (!ended || queue.length > 0) {
             if (queue.length === 0) {
-              if (Date.now() - lastPing >= 15_000) {
+              if (Date.now() - lastPing >= pingMs) {
                 await stream.write(": ping\n\n");
                 lastPing = Date.now();
               }

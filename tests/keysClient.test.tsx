@@ -185,7 +185,8 @@ describe("key grants on the client", () => {
     expect(source).toContain("onRevoked={() => { closeDialogAfterReload(revokedFocusKey(dialog.key.id));");
     expect(source).toContain("onClose={() => closeDialogAfterReload(dialog.key.id)}");
     expect(source).toMatch(/\?\? \(newKeyRef\.current && !newKeyRef\.current\.disabled \? newKeyRef\.current : null\)\s+\?\? headingRef\.current;/);
-    expect(source).toContain('<h4 ref={headingRef} tabIndex={-1}>{integration ? `Keys of ${integration.name}` : "Your keys"}</h4>');
+    expect(source).toContain('<h4 ref={headingRef} tabIndex={-1}>{heading}</h4>');
+    expect(source).toContain('const heading = integration ? `Keys of ${integration.name}` : shownTab === "vault" ? "Your vault keys" : shownTab === "agents" ? "Your agent keys" : "Your keys";');
     const review = await Bun.file(new URL("../src/McpBinnedReview.tsx", import.meta.url)).text();
     expect(review).toMatch(/refocusRef\.current = true;\s+setBusy\(false\);/);
     expect(review).toMatch(/if \(busy \|\| !refocusRef\.current\) return;\s+refocusRef\.current = false;\s+closeRef\.current\?\.focus\(\);/);
@@ -226,8 +227,12 @@ describe("Wave 34: surfaces, REST help, and address limits on the client", () =>
   test("new keys default to MCP; REST is offered only where team policy allows it (O-A8)", async () => {
     const { surfaceChoices } = await import("../src/keys/KeysSettings");
     expect(surfaceChoices({ mcpAllowed: true, restAllowed: false }).map((option) => [option.value, option.disabled])).toEqual([["mcp", false], ["rest", true], ["both", true]]);
+    const { createPreset } = await import("../src/keys/KeysSettings");
+    // General and Agents keys start on MCP; a vault key from the Vault tab starts on REST (as switching the kind does).
+    expect(createPreset("general", true, { keyDefaultDays: 90, restAllowed: true }).surfaces).toBe("mcp");
+    expect(createPreset("agents", true, { keyDefaultDays: 90, restAllowed: true }).surfaces).toBe("mcp");
     const source = await Bun.file(new URL("../src/keys/KeysSettings.tsx", import.meta.url)).text();
-    expect(source).toContain("const [surfaces, setSurfaces] = useState<KeySurfaces>(\"mcp\");");
+    expect(source).toContain("const [surfaces, setSurfaces] = useState<KeySurfaces>(preset.surfaces);");
   });
 
   test("the REST example uses a placeholder, never a key, and the key in the Authorization header", async () => {

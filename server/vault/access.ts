@@ -15,11 +15,16 @@ import { db } from "../db";
  * not readable is the same 404; a level too low on an environment the caller can already see is 403
  * `VAULT_LEVEL`.
  *
- * Protected environments (D226, V-O2): a grant for one of them is minted only while the session's
- * re-authentication window is open (password plus TOTP, 15 minutes, `sessions.vault_reauth_at`);
- * otherwise 403 `REAUTH_REQUIRED`. Every read or write of such an environment's values, its import
- * and export, and deleting a secret that holds a value there, goes through a grant, so the window is
- * enforced in one place. Metadata (names, versions list, statuses) needs no window.
+ * Protected environments (D226, V-O2): a READ grant for one of them is minted only while the
+ * session's re-authentication window is open (password plus TOTP, 15 minutes,
+ * `sessions.vault_reauth_at`); otherwise 403 `REAUTH_REQUIRED`. Every read of such an environment's
+ * values (a value, reveal, a version, export) goes through a read grant, so the window is enforced
+ * in one place. Writes (2026-10-06 operator: no re-auth for writes) mint a write grant without the
+ * window: the signed-in session holder changes values with normal write access, CSRF, CAS, quota,
+ * and rate limits. A write grant may open a stored value inside the server (restoring a version,
+ * keeping a comment on import), but no write ever returns plaintext. Lifting protection and
+ * deleting a protected environment still need the window (`requireUnlocked`). Metadata (names,
+ * versions list, statuses) needs no window.
  *
  * Actors: sessions, and `nkv_` vault keys (Wave 27). A key's level on an environment is its grant ∩
  * the creator's live level ∩ the creator's role cap (D218), recomputed on every call: a creator who
@@ -274,6 +279,9 @@ export function requireEnvLevel(access: VaultAccess, envId: string, min: Exclude
 /** Whether this session's re-authentication window is open (protected environments, D226). */
 export const unlocked = (access: VaultAccess) => access.reauthUntil !== null;
 
+/** Whether the caller may see this environment's plaintext without asking: a key (its level is the rule), an unprotected environment, or an open window. */
+export const mayReadPlain = (access: VaultAccess, env: Pick<EnvRow, "protected">) => access.actor.kind === "key" || env.protected === 0 || unlocked(access);
+
 /** 403 `REAUTH_REQUIRED` naming every protected environment among `envIds` while the window is closed. */
 export function requireUnlocked(access: VaultAccess, envIds: readonly string[]) {
   requireChecked(access);
@@ -287,12 +295,14 @@ export function requireUnlocked(access: VaultAccess, envIds: readonly string[]) 
 
 /**
  * The grant for one environment at `min` or above: 404 when the caller cannot see it, 403
- * `VAULT_LEVEL` when they can but their level is lower, and 403 `REAUTH_REQUIRED` when it is
- * protected and the session's window is closed (D226).
+ * `VAULT_LEVEL` when they can but their level is lower, and, for a read grant only, 403
+ * `REAUTH_REQUIRED` when it is protected and the session's window is closed (D226). Write and admin
+ * grants need no window (2026-10-06 operator: no re-auth for writes); callers must never return a
+ * value they open with one.
  */
 export function requireEnvGrant(access: VaultAccess, envId: string, min: Exclude<VaultLevel, "none">, via: VaultVia = viaOf(access.actor)): VaultGrant {
   requireEnvLevel(access, envId, min);
-  requireUnlocked(access, [envId]);
+  if (min === "read") requireUnlocked(access, [envId]);
   return mint({ vaultId: access.vault.id, envId, level: envLevel(access, envId), actorId: access.actor.userId, via });
 }
 

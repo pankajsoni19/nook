@@ -5,8 +5,6 @@
 .keys-card { gap: 12px; }
 .keys-card-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 10px; }
 .keys-card-head > div { min-width: 0; flex: 1 1 220px; }
-.keys-new { display: inline-flex; align-items: center; gap: 7px; min-height: 44px; padding: 0 16px; }
-.keys-new svg { width: 16px; height: 16px; }
 .keys-empty { margin: 0; color: #88888f; font-size: .84rem; }
 
 .keys-list { display: grid; margin: 0; padding: 0; list-style: none; border-top: 1px solid #29292d; }
@@ -52,7 +50,8 @@
 .keys-dialog header .icon-button { flex: none; width: 44px; height: 44px; }
 .keys-dialog-body { min-height: 0; overflow: auto; overscroll-behavior: contain; }
 .keys-dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
-.keys-dialog-actions button { min-height: 44px; padding: 0 16px; }
+/* Footer buttons share the action-button metrics (styles.css): one height and text size for Cancel and the primary. */
+.keys-dialog-actions button { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; margin: 0; padding: 0 16px; font-size: .84rem; font-weight: 650; line-height: 1.2; }
 .keys-dialog-actions.inline { margin-top: 4px; }
 .primary-button.danger { background: #e07474; color: #2a0f0f; }
 .primary-button.danger:hover { background: #ec8b8b; }
@@ -127,7 +126,7 @@
 
 /* Wave 34: the REST help and the address limit. */
 .keys-allowlist-off { margin: 0; color: #88888f; font-size: .78rem; line-height: 1.45; }
-.keys-input textarea { min-height: 72px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.keys-input textarea.keys-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .keys-rest-help pre { overflow-x: auto; max-width: 100%; white-space: pre; }
 .keys-rest-help p code { overflow-wrap: anywhere; }
 
@@ -156,3 +155,10 @@
 .keys-switch small.keys-switch-warning { color: #e3cf9c; }
 .keys-switch input { width: 20px; height: 20px; flex: none; accent-color: #d7b86a; }
 .scope-chips li.keys-flag { border-style: dashed; }
+
+
+/* API keys' tabs (SettingsTabs): General, Vault, Agents. The bar is the grid item, so the scrolling row keeps its height. */
+.keys-tabs-bar { min-width: 0; }
+.keys-tabpanel:not([hidden]) { gap: 16px; }
+.keys-tabpanel:focus-visible { outline: 2px solid var(--yellow); outline-offset: 4px; border-radius: 6px; }
+.keys-tab-intro { margin: 0; color: #a9a9ae; font-size: .84rem; }
