@@ -81,25 +81,6 @@ Only open work lives here. Shipped work is in [CHANGELOG.md](CHANGELOG.md), the 
 - [ ] `tests/agentsReview.test.ts:351` returned 409 instead of 201 once in a full run (2026-10-06); give it its own agent/chat if it recurs.
 - [ ] `tests/calendarFeeds` "with TOTP required…" hit its 5 s timeout once in Docker verify under load; watch on release builds.
 
-## Operator to-do (cannot be done by agents)
-
-- [ ] Set `AGENT_SECRETS_KEY` (Chat is off in production until then).
-- [ ] Set `VAULT_ENCRYPTION_KEY` (the Vault is off until then).
-- [ ] **Google sign-in:**
-  - create the OAuth client (redirect `APP_ORIGIN/api/auth/google/callback`)
-  - set `AUTH_METHODS`, linking existing accounts in `both` before switching to `google`
-  - set `GOOGLE_ALLOWED_DOMAINS`
-  - the first real Google round trip is untested
-- [ ] **Behind a proxy:**
-  - set `TRUSTED_PROXY_HOPS`, plus `TRUSTED_PROXY_ADDRESSES` (or bind port 2026 to localhost) when hops ≥ 1
-  - firewall port 2026
-- [ ] **Email:** set `RESEND_API_KEY`, `MAIL_FROM` and optionally `RESEND_WEBHOOK_SECRET`.
-- [ ] **Registration:** choose open or invite-only (open registration is on today).
-- [ ] **Real-phone checks:**
-  - the system Back gesture
-  - the on-screen keyboard
-  - online/offline events
-  - whiteboards and chat on a real device
 
 ## Standing rules for agent briefs
 
