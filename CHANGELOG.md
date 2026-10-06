@@ -2,6 +2,16 @@
 
 Release notes for Nook, newest first. Upgrade steps for each release are in [docs/OPERATIONS.md](docs/OPERATIONS.md#upgrades).
 
+## v0.30.0 — 2026-10-07
+
+- **Knowledge bases**: in **Settings → Knowledge**, gather published notes, text, Markdown, or CSV files from Files, and pasted text into a base. Nook indexes them in the background and keeps them current when a note is republished. **Try it** shows the best passages with where they came from (for example "Billing › Refunds").
+- **Agents that know your material**: tick a base in an agent's **Knowledge** tools and the agent searches it while answering; the chat shows **Searched knowledge** with the passages it used. Search combines meaning and keywords, and falls back to keywords when the provider is unavailable or the budget is spent.
+- **Sharing**: share a base at **Can view** (search it) or **Manager** (also add sources, rename, re-index, and attach it to agents). Attaching a base to an agent needs manage. People who can't open a source note see its passages without its title.
+- **Always current access**: a note or file that is unshared, moved to the Bin, or deleted stops appearing in search at once, and a blocked owner's bases stop answering. If a base's embedding provider is removed, the base switches to keyword search and says so; Nook never sends its text to another provider.
+- **API keys**: Chat → Read can be limited to chosen knowledge bases, giving a key that can only `search_knowledge` over MCP or `/api/v1/tools`.
+- **Fixes**: the Add source sheet scrolls with its buttons always in view; dialog footers no longer let rows show beneath them.
+- Migration 042 runs on the first boot, so back up first. No new settings. Indexing sends each source's text to your default AI provider's embeddings endpoint, and each search sends the query. See [docs/OPERATIONS.md](docs/OPERATIONS.md#upgrades).
+
 ## v0.29.0 — 2026-10-06
 
 - **Share agents and chats**: share an agent or a chat with people, groups, or everyone signed in, at **Can view** or **Manager**, from the Access sheet. People you share a chat with read it live: new messages, renames, and unshares reach their open page at once, and **Continue as a copy** starts their own chat. A shared agent always runs with the runner's own access, never the owner's. Optional **public chat links** (a read-only snapshot anyone with the link can open) stay off until an admin allows them in Settings → AI.

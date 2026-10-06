@@ -102,7 +102,7 @@ You need Git, Docker Engine, and Docker Compose.
 git clone https://github.com/pankajsoni19/nook.git && cd nook
 cp .env.example .env            # set ALLOWED_EMAILS, TOTP_POLICY, APP_ORIGINS as needed
 sudo mkdir -p /srv/mynotes && sudo chown 1000:1000 /srv/mynotes   # or set MYNOTES_DATA_DIR
-APP_VERSION=0.29.0 GIT_SHA=$(git rev-parse --short HEAD) docker compose up -d --build
+APP_VERSION=0.30.0 GIT_SHA=$(git rev-parse --short HEAD) docker compose up -d --build
 curl http://localhost:2026/api/health   # then open http://localhost:2026 and create the first account (the admin)
 ```
 
@@ -114,11 +114,11 @@ Back up first (`./scripts/backup.sh --force`), pull, rebuild, and let migrations
 
 ## What's new
 
-Release notes for every version are in [CHANGELOG.md](CHANGELOG.md). Latest (v0.29.0):
+Release notes for every version are in [CHANGELOG.md](CHANGELOG.md). Latest (v0.30.0):
 
-- **Share agents and chats** with people and groups; shared chats update live, with optional public links an admin can allow.
-- **Tabbed Settings → AI and API keys pages**, an emoji picker for agents, and one consistent button and field style.
-- **Vault** saves values in protected environments without asking for your password; **migration 041** runs on the first boot, so back up first.
+- **Knowledge bases** in Settings → Knowledge: notes, files, and pasted text that agents search while answering, with the source of every passage.
+- **Shared like everything else**: view to search, manage to add sources and attach to agents; unshared or deleted notes leave search at once.
+- **Migration 042** runs on the first boot, so back up first; source text is sent to your AI provider's embeddings endpoint.
 
 ## Documentation
 

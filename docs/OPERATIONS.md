@@ -8,7 +8,7 @@ Internal identifiers keep the original `mynotes` prefix for compatibility with e
 
 1. Clone the repository and copy `.env.example` to `.env` if you need to override the defaults.
 2. Ensure `/srv/mynotes` exists and is writable by UID 1000, or set `MYNOTES_DATA_DIR` to another host directory.
-3. Run `APP_VERSION=0.29.0 GIT_SHA=$(git rev-parse --short HEAD) docker compose up -d --build`.
+3. Run `APP_VERSION=0.30.0 GIT_SHA=$(git rev-parse --short HEAD) docker compose up -d --build`.
 4. Open `http://localhost:2026` and create the first account.
 
 ### Accounts
@@ -401,7 +401,7 @@ Compose passes these variables from `.env` (see `.env.example`). Invalid values 
 | `MAIL_TRANSPORT` | `resend` | `resend`, or `file` for development and tests only (refused when `NODE_ENV=production`). |
 | `MAIL_FILE_PATH` | empty | With `MAIL_TRANSPORT=file`: the absolute path of the JSON file messages are written to. |
 | `GOOGLE_OIDC_TEST_BASE_URL` | empty | Tests and local QA only: a fake Google issuer (`tests/support/fakeGoogle.ts`). Refused when `NODE_ENV=production`. |
-| `APP_VERSION` | `0.29.0` | Build metadata shown in Settings → About and reported by the MCP server. |
+| `APP_VERSION` | `0.30.0` | Build metadata shown in Settings → About and reported by the MCP server. |
 | `GIT_SHA` | `development` | Commit shown in Settings → About (first 40 characters). |
 
 Fixed limits that are not configurable: 3 uploads in progress per user on the server (the app sends 2 at a time), 30-day Bin retention, 1 MiB text previews, 20 searches per 10 seconds per user, and an hourly sweeper.
@@ -484,6 +484,8 @@ curl http://localhost:2026/api/health
 ```
 
 Every image carries immutable numbered migrations under `server/migrations`. They run transactionally and are recorded in SQLite's `schema_migrations` table before the HTTP server accepts requests. New schema changes are always added as a new migration; released migrations are never edited.
+
+**Upgrading to 0.30.0:** back up first with `./scripts/backup.sh --force`. Migration 042 (knowledge bases: source bookkeeping, a rebuilt full-text index with headings, queue indexes, and a trigger that removes agents' picks when a base is purged) runs once on the first boot and can only be undone by restoring that backup. No new settings. Knowledge bases add one outbound call: `POST {baseUrl}/embeddings` on the provider a base was created with, through the same egress guard as chat; indexing sends each source's full text and each search sends its query (see *Agent chat → Knowledge bases*). Pull, rebuild with `APP_VERSION=0.30.0`, and restart as above.
 
 **Upgrading to 0.29.0:** back up first with `./scripts/backup.sh --force`. Migration 041 (agent and chat sharing: access rows for agents and chats, public chat link tokens stored as hashes, and the `public_chat_links` policy, off by default) runs once on the first boot and can only be undone by restoring that backup. No new settings. Long-lived requests (live chat updates, run streams, plain API runs) are now exempt from the server's 10-second idle timeout and send a keep-alive every 5 seconds; a reverse proxy in front of Nook must not buffer `text/event-stream` responses. In protected vault environments, writes no longer need the 15-minute re-authentication window; reads and exports still do (see *Vault*). Pull, rebuild with `APP_VERSION=0.29.0`, and restart as above.
 
