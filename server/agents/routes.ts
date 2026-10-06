@@ -6,12 +6,13 @@ import { db } from "../db";
 import { parseJson, uuid } from "../validation";
 import { AGENT_BOUNDS, AGENT_ROLE_OPTIONS, DEFAULT_MODEL } from "../../shared/agents";
 import { createAgent, deleteAgent, agentDetail, listUsableAgents, manageableAgent, updateAgent } from "./agentsService";
-import { chatDetail, createChat, deleteChat, listChats, updateChat } from "./chats";
+import { chatDetail, createChat, deleteChat, listChats, messageOf, updateChat } from "./chats";
 import { createProvider, deleteProvider, listProviders, providerModels, providerRow, providerSummary, testProvider, updateProvider } from "./providers";
 import { activeRunForChat, cancelChatRuns, cancelRun, dailyUsage, runOwnedBy, runSnapshot, startChatRun } from "./runs";
 import { readAgentSettings, roleMayChat, roleMayCreate, writeAgentSettings } from "./settings";
-import { AgentError, agentsStatus, requireAgentsEnabled } from "./status";
+import { AgentError, adminRecoveryAllowed, agentsStatus, recheckAgentsStatus, requireAgentsEnabled } from "./status";
 import { channelOf, sseFrame, type SequencedEvent } from "./stream";
+import { ProviderError } from "./loop";
 import "./bin";
 
 /**
@@ -106,10 +107,36 @@ const handle = (handler: Handler) => async (c: Context<AppEnv>) => {
     return fail(c, error);
   }
 };
+/**
+ * Admin provider routes that must work while the module is off by `key_mismatch` (review M3): the
+ * list, one provider, PATCH (remove or re-enter the key), and DELETE. After a write the status is
+ * decided again, so the module comes back once every stored secret opens.
+ */
+const handleRecovery = (handler: Handler) => async (c: Context<AppEnv>) => {
+  try {
+    if (!adminRecoveryAllowed()) requireAgentsEnabled();
+    const result = await handler(c);
+    if (c.req.method !== "GET") recheckAgentsStatus();
+    return result instanceof Response ? result : c.json(result as object);
+  } catch (error) {
+    return fail(c, error);
+  }
+};
 const adminOnly = (handler: Handler): Handler => (c) => {
   if (c.get("user").role !== "admin") throw new AgentError(404, "NOT_FOUND", "Not found");
   return handler(c);
 };
+
+/** Open SSE streams per run and per person (review L6): a browser needs one; a tab storm gets 429. */
+export const STREAM_CAPS = { perRun: 4, perUser: 12 } as const;
+const streamsPerRun = new Map<string, number>();
+const streamsPerUser = new Map<string, number>();
+const bump = (map: Map<string, number>, key: string, by: 1 | -1) => {
+  const next = (map.get(key) ?? 0) + by;
+  if (next <= 0) map.delete(key);
+  else map.set(key, next);
+};
+export const openStreamCounts = (runId: string, userId: string) => ({ run: streamsPerRun.get(runId) ?? 0, user: streamsPerUser.get(userId) ?? 0 });
 const chatter = (handler: Handler): Handler => (c) => {
   if (!roleMayChat(c.get("user").role)) throw new AgentError(403, "ROLE_REFUSED", "Your role cannot chat with agents");
   return handler(c);
@@ -142,11 +169,11 @@ export function registerAgentRoutes(app: Hono<AppEnv>) {
     if (patch.defaultProviderId) providerRow(patch.defaultProviderId);
     return { settings: writeAgentSettings(c.get("user").id, patch, expectedRevision) };
   })));
-  app.get("/api/agents/admin/providers", handle(adminOnly(() => ({ providers: listProviders() }))));
+  app.get("/api/agents/admin/providers", handleRecovery(adminOnly(() => ({ providers: listProviders() }))));
   app.post("/api/agents/admin/providers", handle(adminOnly(async (c) => c.json({ provider: createProvider(c.get("user").id, await parseJson(c.req.raw, providerCreateSchema)) }, 201))));
-  app.get("/api/agents/admin/providers/:providerId", handle(adminOnly((c) => ({ provider: providerSummary(providerRow(id(c, "providerId"))) }))));
-  app.patch("/api/agents/admin/providers/:providerId", handle(adminOnly(async (c) => ({ provider: updateProvider(c.get("user").id, id(c, "providerId"), await parseJson(c.req.raw, providerPatchSchema)) }))));
-  app.delete("/api/agents/admin/providers/:providerId", handle(adminOnly((c) => { deleteProvider(c.get("user").id, id(c, "providerId")); return { ok: true }; })));
+  app.get("/api/agents/admin/providers/:providerId", handleRecovery(adminOnly((c) => ({ provider: providerSummary(providerRow(id(c, "providerId"))) }))));
+  app.patch("/api/agents/admin/providers/:providerId", handleRecovery(adminOnly(async (c) => ({ provider: updateProvider(c.get("user").id, id(c, "providerId"), await parseJson(c.req.raw, providerPatchSchema)) }))));
+  app.delete("/api/agents/admin/providers/:providerId", handleRecovery(adminOnly((c) => { deleteProvider(c.get("user").id, id(c, "providerId")); return { ok: true }; })));
   app.post("/api/agents/admin/providers/:providerId/test", handle(adminOnly(async (c) => {
     const providerId = id(c, "providerId");
     await parseJson(c.req.raw, emptySchema);
@@ -158,7 +185,8 @@ export function registerAgentRoutes(app: Hono<AppEnv>) {
       return await providerModels(providerId, { fresh: c.req.query("fresh") === "1" });
     } catch (error) {
       if (error instanceof AgentError) throw error;
-      throw new AgentError(502, "PROVIDER_ERROR", error instanceof Error && "code" in error ? error.message : "The provider could not be reached");
+      // Admins get the fuller excerpt (review L3); chat runs get the redacted one.
+      throw new AgentError(502, "PROVIDER_ERROR", error instanceof ProviderError ? error.adminMessage : error instanceof Error && "code" in error ? error.message : "The provider could not be reached");
     }
   })));
   // Usage (counts only, D73): tokens and runs per day per person or agent.
@@ -199,14 +227,15 @@ export function registerAgentRoutes(app: Hono<AppEnv>) {
     const chatId = id(c, "chatId");
     const body = await parseJson(c.req.raw, messageSchema);
     const started = startChatRun(actorOf(c), chatId, { kind: "send", content: body.content, parentId: body.parentId });
-    return c.json({ runId: started.runId, userMessage: started.userMessage, assistantMessage: started.assistantMessage }, 201);
+    // The contract's camelCase message shape (QA Q12), the same as `messages[]` in GET /api/chats/:id.
+    return c.json({ runId: started.runId, userMessage: started.userMessage ? messageOf(started.userMessage) : null, assistantMessage: messageOf(started.assistantMessage) }, 201);
   })));
   app.post("/api/chats/:chatId/messages/:messageId/regenerate", handle(chatter(async (c) => {
     const chatId = id(c, "chatId");
     const messageId = id(c, "messageId");
     await parseJson(c.req.raw, emptySchema);
     const started = startChatRun(actorOf(c), chatId, { kind: "regenerate", messageId });
-    return c.json({ runId: started.runId, userMessage: null, assistantMessage: started.assistantMessage }, 201);
+    return c.json({ runId: started.runId, userMessage: null, assistantMessage: messageOf(started.assistantMessage) }, 201);
   })));
   app.get("/api/chats/:chatId/run", handle(chatter((c) => {
     const chatId = id(c, "chatId");
@@ -230,18 +259,31 @@ export function registerAgentRoutes(app: Hono<AppEnv>) {
       const afterRaw = c.req.query("after") ?? "0";
       const after = /^\d{1,9}$/.test(afterRaw) ? Number(afterRaw) : 0;
       const channel = channelOf(runId);
+      const userId = c.get("user").id;
+      const counts = openStreamCounts(runId, userId);
+      if (counts.run >= STREAM_CAPS.perRun || counts.user >= STREAM_CAPS.perUser) throw new AgentError(429, "TOO_MANY_STREAMS", "Too many open streams; close another tab following this answer", { retryAfterSeconds: 2 });
+      bump(streamsPerRun, runId, 1);
+      bump(streamsPerUser, userId, 1);
+      let released = false;
+      const release = () => {
+        if (released) return;
+        released = true;
+        bump(streamsPerRun, runId, -1);
+        bump(streamsPerUser, userId, -1);
+      };
       c.header("X-Accel-Buffering", "no");
       // streamSSE sets no-cache; SSE replies carry chat text, so they are no-store like the rest of /api (T325).
-      const response = streamSSE(c, async (stream) => {
+      const follow = async (stream: Parameters<Parameters<typeof streamSSE>[1]>[0]) => {
         const send = (event: SequencedEvent) => stream.write(sseFrame(event));
         const snapshot = async () => {
-          const fresh = runOwnedBy(runId, c.get("user").id);
+          const fresh = runOwnedBy(runId, userId);
           await stream.write(`id: 0\nevent: snapshot\ndata: ${JSON.stringify(runSnapshot(fresh))}\n\n`);
         };
         if (!channel) {
           await snapshot();
           return;
         }
+        // `after` past the ring (or past everything the run emitted) is an overflow too (review L7): a snapshot, not an empty stream.
         const replay = channel.replay(after);
         if (replay === "overflow") {
           await snapshot();
@@ -282,7 +324,14 @@ export function registerAgentRoutes(app: Hono<AppEnv>) {
           clearInterval(keepAlive);
           unsubscribe();
         }
-      });
+      };
+      const response = streamSSE(c, async (stream) => {
+        try {
+          await follow(stream);
+        } finally {
+          release();
+        }
+      }, async () => { release(); });
       response.headers.set("Cache-Control", "no-store");
       return response;
     } catch (error) {

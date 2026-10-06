@@ -87,39 +87,39 @@ describe("review: migration 039", () => {
     expect(rows(db)).toEqual(beforeRows);
   });
 
-  test("038 applied after 039: grants cannot be inserted until 038 adds the key column the copied trigger names; then 038 adds nothing twice", () => {
+  test("038 applied after 039 (defensive; the runner never orders them so): the table stays usable, and 038 then adds its column and triggers once (L10)", () => {
     const db = openWithout([38]);
-    // 039 rebuilt without 038's column present: protected_at_grant is created with its default.
+    // 039 rebuilt without 038's shape present: protected_at_grant is created with its default, and 038's
+    // triggers (which read mcp_api_keys.vault_protected_access) are left for 038, so inserts still prepare.
     expect(columnsOf(db).some((column) => column.startsWith("protected_at_grant:INTEGER:1:0:"))).toBe(true);
-    expect(schemaOf(db, "trigger")).toHaveLength(6);
-    // Evidence: 038's copied trigger reads mcp_api_keys.vault_protected_access, which only 038 adds, so every
-    // INSERT into api_key_grants fails at prepare time while 038 is missing (no key could be created).
-    expect(() => seed(db, false)).toThrow(/no such column: vault_protected_access/);
-    db.transaction(() => vaultKeysMigration.up(db))();
-    // The users, vault, and keys of the seed went in before the grants failed; the grants go in now.
-    const grant = db.query("INSERT INTO api_key_grants (id, key_id, module, permission, resource_kind, resource_id, env_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
-    grant.run("g1", "k1", "notes", "read", null, null, null, at);
-    grant.run("g2", "k1", "agents", "read", null, null, null, at);
-    grant.run("g6", "k2", "vault", "read", "vault", "v1", null, at);
-    grant.run("g8", "k2", "vault", "read", "vault", "v1", "e2", at);
+    expect(schemaOf(db, "trigger")).toHaveLength(2);
+    expect(seed(db, false)).toBe(9);
     const beforeRows = rows(db);
-    expect(beforeRows).toHaveLength(4);
     db.transaction(() => vaultKeysMigration.up(db))();
     expect(columnsOf(db).filter((column) => column.startsWith("protected_at_grant"))).toHaveLength(1);
     expect(schemaOf(db, "trigger")).toHaveLength(6);
     expect(rows(db)).toEqual(beforeRows);
+    db.transaction(() => vaultKeysMigration.up(db))();
+    expect(schemaOf(db, "trigger")).toHaveLength(6);
     expect(db.query("PRAGMA integrity_check").get()).toEqual({ integrity_check: "ok" });
   });
 
-  test("purge triggers on the new tables fire and cascade: chats, messages, runs, fts, access rows", () => {
+  test("purging an agent leaves its chats with agent_id NULL; purging a chat cascades to messages, runs, fts, and access rows (M2)", () => {
     const db = openWithout([]);
     seed(db);
     db.query("INSERT INTO agents (id, owner_id, name, created_at, updated_at) VALUES ('a1', 'u2', 'Helper', ?, ?)").run(at, at);
     db.query("INSERT INTO chats (id, owner_id, agent_id, title, created_at, updated_at) VALUES ('c1', 'u2', 'a1', 'Hello', ?, ?)").run(at, at);
-    // An agent with a chat cannot be hard-deleted: chats.agent_id has no ON DELETE clause.
-    expect(() => db.query("DELETE FROM agents WHERE id = 'a1'").run()).toThrow(/FOREIGN KEY/);
-    db.query("DELETE FROM chats WHERE id = 'c1'").run();
+    db.query("INSERT INTO chat_messages (id, chat_id, role, content, created_at) VALUES ('m1', 'c1', 'user', 'hi', ?)").run(at);
+    db.query("INSERT INTO chat_fts (chat_id, owner_id, title, body) VALUES ('c1', 'u2', 'Hello', 'hi')").run();
+    db.query("INSERT INTO agent_access (resource_kind, resource_id, user_id, level, created_at) VALUES ('chat', 'c1', 'u1', 'view', ?)").run(at);
+    db.query("INSERT INTO agent_access (resource_kind, resource_id, user_id, level, created_at) VALUES ('agent', 'a1', 'u1', 'view', ?)").run(at);
+    db.query("INSERT INTO agent_runs (id, via, agent_id, agent_revision, prompt_sha256, preamble_version, chat_id, user_id, model, status, queued_at) VALUES ('r1', 'chat', 'a1', 1, 'x', 1, 'c1', 'u2', 'm', 'ok', ?)").run(at);
     db.query("DELETE FROM agents WHERE id = 'a1'").run();
-    expect(db.query("SELECT COUNT(*) AS count FROM agents").get()).toEqual({ count: 0 });
+    expect(db.query("SELECT agent_id FROM chats WHERE id = 'c1'").get()).toEqual({ agent_id: null });
+    expect(db.query("SELECT COUNT(*) AS count FROM agent_access WHERE resource_kind = 'agent'").get()).toEqual({ count: 0 });
+    expect(db.query("SELECT COUNT(*) AS count FROM chat_messages").get()).toEqual({ count: 1 });
+    db.query("DELETE FROM chats WHERE id = 'c1'").run();
+    for (const table of ["chat_messages", "agent_runs", "chat_fts", "agent_access"]) expect({ table, ...db.query(`SELECT COUNT(*) AS count FROM ${table}`).get() as object }).toEqual({ table, count: 0 });
+    expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
   });
 });

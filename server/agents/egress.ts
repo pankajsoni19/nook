@@ -14,10 +14,14 @@ import { addressInRanges, parseEntry } from "../../shared/ipRanges";
  * 2. The host is resolved (bounded) and every address is checked with `isPrivateAddress`: loopback,
  *    RFC 1918, CGNAT, link-local including 169.254.169.254, ULA, mapped forms, and 0.0.0.0 are
  *    refused unless the host name, or a CIDR covering every address, is on the allowlist. The check
- *    runs again on every request, so a DNS change is seen at the next call; the race between the
- *    check and the connect is accepted and documented (T307).
+ *    runs again on every request, so a DNS change is seen at the next call.
+ *    The connection is pinned to the first checked address (T307, review L1): the request goes to
+ *    `https://<address>:<port>/path` with `Host: <host>` and TLS `serverName: <host>` (Bun ignores
+ *    `checkServerIdentity`, so the certificate is checked against the SNI name instead), so a DNS
+ *    answer that changes between the check and the connect is never the one connected to.
  * 3. `redirect: "manual"`: any 3xx is `REDIRECT_REFUSED`.
- * 4. Nook's own origins (APP_ORIGINS) are refused.
+ * 4. Nook's own origins (APP_ORIGINS) are refused, and so is any loopback or private address on
+ *    Nook's own port (review L2): an alias of the listener that APP_ORIGINS does not spell.
  * 5. The body is read under a byte cap and three timeouts (first byte, idle between chunks, total).
  * 6. Outbound headers are exactly what the caller sets (the provider's Authorization, Content-Type,
  *    Accept) plus `User-Agent: Nook/<version>`: no cookie, session, or Nook key ever leaves (T306).
@@ -90,14 +94,33 @@ async function resolveBounded(host: string): Promise<string[]> {
  * `EgressError`. Called before every request.
  */
 export async function assertEgressAllowed(value: string, allowlist: readonly string[] = config.agents.allowedPrivateHosts): Promise<URL> {
+  return (await resolveEgressTarget(value, allowlist)).url;
+}
+
+export type EgressTarget = { url: URL; host: string; addresses: string[] };
+
+/** `assertEgressAllowed` plus the addresses the check saw, so the connection can be pinned to one of them. */
+export async function resolveEgressTarget(value: string, allowlist: readonly string[] = config.agents.allowedPrivateHosts, ownPort: number = config.port): Promise<EgressTarget> {
   const url = checkEgressUrl(value);
   const host = hostOf(url);
   const addresses = await resolveBounded(host);
   if (addresses.length === 0) throw new EgressError("DNS_FAILED", "The endpoint's host has no address");
   const listed = privateHostAllowed(host, addresses, allowlist);
   if (url.protocol === "http:" && !listed) throw new EgressError("URL_REFUSED", "Plain http is allowed only for hosts in AGENT_ALLOWED_PRIVATE_HOSTS");
-  if (!listed && addresses.some((address) => isPrivateAddress(address))) throw new EgressError("PRIVATE_ADDRESS", "The endpoint resolves to a private or local address; list it in AGENT_ALLOWED_PRIVATE_HOSTS to allow it");
-  return url;
+  const local = addresses.some((address) => isPrivateAddress(address));
+  if (!listed && local) throw new EgressError("PRIVATE_ADDRESS", "The endpoint resolves to a private or local address; list it in AGENT_ALLOWED_PRIVATE_HOSTS to allow it");
+  // Nook's own listener under another name (127.0.0.1, a container alias): the allowlist does not open it (review L2).
+  const port = Number(url.port || (url.protocol === "https:" ? 443 : 80));
+  if (local && port === ownPort) throw new EgressError("URL_REFUSED", "The endpoint must not be this Nook");
+  return { url, host, addresses };
+}
+
+/** The URL actually connected to: the checked address in place of the host (IPv6 in brackets), same port, path, and query. */
+export function pinnedUrl(target: EgressTarget): string {
+  const address = target.addresses[0]!;
+  if (isIP(address) === 0 || address === hostOf(target.url)) return target.url.toString();
+  const literal = address.includes(":") ? `[${address}]` : address;
+  return `${target.url.protocol}//${literal}${target.url.port ? `:${target.url.port}` : ""}${target.url.pathname}${target.url.search}`;
 }
 
 export type EgressCaps = { maxBytes: number; firstByteMs: number; idleMs: number; totalMs: number };
@@ -109,7 +132,12 @@ export type EgressResponse = { status: number; headers: Headers; body: AsyncIter
  * provider needs.
  */
 export async function egressFetch(value: string, init: { method: "GET" | "POST"; headers?: Record<string, string>; body?: string; signal?: AbortSignal }, caps: EgressCaps): Promise<EgressResponse> {
-  const url = await assertEgressAllowed(value);
+  const target = await resolveEgressTarget(value);
+  const { url } = target;
+  const pinned = pinnedUrl(target);
+  // Pinned (T307): the address the check saw, with the name in Host and in the TLS SNI, so the certificate
+  // is still checked against the configured host. An IP-literal endpoint is already its own address.
+  const pin: { headers?: Record<string, string>; tls?: { serverName: string } } = pinned === url.toString() ? {} : { headers: { Host: url.host }, ...(url.protocol === "https:" ? { tls: { serverName: target.host } } : {}) };
   const controller = new AbortController();
   const abort = (reason: EgressError) => controller.abort(reason);
   const onOuter = () => controller.abort(init.signal?.reason);
@@ -120,13 +148,14 @@ export async function egressFetch(value: string, init: { method: "GET" | "POST";
   const cleanup = () => { clearTimeout(firstByte); clearTimeout(total); init.signal?.removeEventListener("abort", onOuter); };
   let response: Response;
   try {
-    response = await agentNet.fetch(url.toString(), {
+    response = await agentNet.fetch(pinned, {
       method: init.method,
-      headers: { ...(init.headers ?? {}), "User-Agent": `Nook/${config.appVersion}` },
+      headers: { ...(init.headers ?? {}), "User-Agent": `Nook/${config.appVersion}`, ...(pin.headers ?? {}) },
       body: init.body,
       redirect: "manual",
-      signal: controller.signal
-    });
+      signal: controller.signal,
+      ...(pin.tls ? { tls: pin.tls } : {})
+    } as RequestInit);
   } catch (error) {
     cleanup();
     if (controller.signal.aborted && controller.signal.reason instanceof EgressError) throw controller.signal.reason;

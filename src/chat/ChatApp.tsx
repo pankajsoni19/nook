@@ -12,7 +12,7 @@ import { chatBackAction, chatGroup, chatRoute, type ChatRoute } from "../chatRou
 import { Select } from "../ui/Select";
 import { useConfirm } from "../ui/useConfirm";
 import { useHistoryDialogGuard } from "../ui/useHistoryDialogGuard";
-import type { AgentSummary, ChatDetail, ChatMessage, ChatSummary, DailyUsage, RunStatus, TokenUsage } from "../../shared/agents";
+import { AGENT_BOUNDS, type AgentSummary, type ChatDetail, type ChatMessage, type ChatSummary, type DailyUsage, type RunStatus, type TokenUsage } from "../../shared/agents";
 import { agentsStatus, cancelRun, createChat, deleteChat, errorCode, followRun, getChat, listAgents, listChats, messageOf, myUsage, regenerate, sendMessage, updateChat, type AgentsStatus, type SequencedRunEvent, type StartedRun } from "./chatApi";
 import { leafForSibling, shownBranch, type Shown } from "./chatTree";
 import { Markdown, type RenderContext } from "./markdown/render";
@@ -158,7 +158,7 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
       if (!current || current.runId !== (event.type === "run" ? event.data.runId : current.runId)) return current;
       const next: LiveRun = { ...current, seq: Math.max(current.seq, event.seq) };
       if (event.type === "run") next.messageId = event.data.messageId;
-      else if (event.type === "delta") next.text = (replaying && current.seq === 0 ? "" : current.text) + event.data.text;
+      else if (event.type === "delta") next.text = ((replaying && current.seq === 0 ? "" : current.text) + event.data.text).slice(0, AGENT_BOUNDS.assistantMessageChars);
       else if (event.type === "usage") next.usage = event.data.usage;
       else if (event.type === "error") next.error = { code: event.data.code, message: event.data.message };
       else if (event.type === "done") next.status = event.data.status;
@@ -438,7 +438,7 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
       <h3>{group}</h3>
       <ul>{items.map((chat) => <li key={chat.id}><button type="button" className={`chat-row${route.chatId === chat.id ? " active" : ""}`} aria-current={route.chatId === chat.id ? "page" : undefined} onClick={() => go(chatRoute(chat.id))}>
         <span className="chat-row-title">{chat.title}</span>
-        <span className="chat-row-meta">{chat.agentIcon ? `${chat.agentIcon} ` : ""}{chat.agentName}{chat.running && <span className="chat-running-dot" aria-label="Answering" />}</span>
+        <span className="chat-row-meta">{chat.agentIcon ? `${chat.agentIcon} ` : ""}{chat.agentName ?? "(agent deleted)"}{chat.running && <span className="chat-running-dot" aria-label="Answering" />}</span>
       </button></li>)}</ul>
     </div>)}
     <div className="chat-list-foot">
@@ -496,7 +496,7 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
       : <div className="chat-thread">
         <header className="chat-thread-header">
           {phone && <button type="button" className="icon-button chat-back" onClick={back} aria-label="Back to chats"><ChevronLeft /></button>}
-          <button type="button" className="chat-agent-chip" onClick={() => { if (chatAgent?.isOwner) onOpenAgents(chatAgent.id); }} title={chatAgent ? chatAgent.description : "This agent is in the Bin"}>{chatAgent?.icon ? `${chatAgent.icon} ` : ""}{detail.chat.agentName}</button>
+          <button type="button" className="chat-agent-chip" onClick={() => { if (chatAgent?.isOwner) onOpenAgents(chatAgent.id); }} title={chatAgent ? chatAgent.description : detail.chat.agentId ? "This agent is in the Bin" : "This agent was deleted; start a new chat with another agent"}>{chatAgent?.icon ? `${chatAgent.icon} ` : ""}{detail.chat.agentName ?? "(agent deleted)"}</button>
           <span className="chat-model-chip">{chatAgent?.model ?? status?.defaultModel ?? ""}</span>
           <h2 className="chat-title">{detail.chat.title}</h2>
           <div className="chat-menu-anchor">
@@ -537,7 +537,7 @@ function failureText(reason: unknown, fallback: string) {
   if (code === "NO_PROVIDER") return "No model provider is configured; an admin sets one in Settings → AI";
   if (code === "RUN_ACTIVE") return "This chat is still answering; stop it first";
   if (code === "AGENT_BUSY") return messageOf(reason, "Too many chats are answering right now");
-  if (code === "AGENT_GONE") return "This chat's agent is in the Bin; restore it to continue";
+  if (code === "AGENT_GONE") return "This chat's agent is in the Bin or was deleted; restore it, or start a new chat";
   return messageOf(reason, fallback);
 }
 
@@ -624,7 +624,8 @@ export function ExternalLinkSheet({ href, onClose }: { href: string; onClose: ()
   const [copied, setCopied] = useState(false);
   let host = href;
   try { host = new URL(href).host; } catch { /* shown as is */ }
-  return <ModalDialog title="Open this link?" eyebrow={host} onClose={onClose} variant="sheet" className="chat-dialog chat-link-sheet">
+  // A dialog, not the full-screen "sheet" variant: on phones it is a bottom sheet sized to its content (QA Q9).
+  return <ModalDialog title="Open this link?" eyebrow={host} onClose={onClose} className="chat-dialog chat-link-sheet">
     <p className="chat-link-url"><code>{href}</code></p>
     <p className="file-dialog-hint">This link came from the agent's reply. Check the address, including anything after “?”, before opening it.</p>
     <footer className="file-dialog-actions">

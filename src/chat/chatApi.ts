@@ -11,14 +11,14 @@ export const getAgent = (id: string) => api<{ agent: AgentDetail }>(`/agents/${i
 export type AgentInput = { name: string; description?: string; icon?: string | null; color?: string | null; systemPrompt?: string; providerId?: string | null; model?: string | null; maxSteps?: number; temperature?: number | null; maxOutputTokens?: number | null; starters?: string[] };
 export const createAgent = (input: AgentInput) => api<{ agent: AgentDetail }>("/agents", { method: "POST", body: JSON.stringify(input) });
 export const updateAgent = (id: string, input: Partial<AgentInput> & { expectedRevision: number }) => api<{ agent: AgentDetail }>(`/agents/${id}`, { method: "PATCH", body: JSON.stringify(input) });
-export const deleteAgent = (id: string) => api<{ ok: true }>(`/agents/${id}`, { method: "DELETE" });
+export const deleteAgent = (id: string) => api<{ ok: true }>(`/agents/${id}`, { method: "DELETE", body: "{}" });
 export const myUsage = () => api<{ usage: DailyUsage }>("/agents/usage");
 
 export const listChats = (q?: string) => api<{ chats: ChatSummary[] }>(`/chats${q ? `?q=${encodeURIComponent(q)}` : ""}`);
 export const getChat = (id: string) => api<ChatDetail>(`/chats/${id}`);
 export const createChat = (agentId: string) => api<{ chat: ChatSummary }>("/chats", { method: "POST", body: JSON.stringify({ agentId }) });
 export const updateChat = (id: string, input: { title?: string; pinned?: boolean; activeLeafId?: string | null; expectedRevision: number }) => api<{ chat: ChatSummary }>(`/chats/${id}`, { method: "PATCH", body: JSON.stringify(input) });
-export const deleteChat = (id: string) => api<{ ok: true }>(`/chats/${id}`, { method: "DELETE" });
+export const deleteChat = (id: string) => api<{ ok: true }>(`/chats/${id}`, { method: "DELETE", body: "{}" });
 export type StartedRun = { runId: string; userMessage: ChatMessage | null; assistantMessage: ChatMessage };
 /** `parentId` undefined: under the active leaf; null: a new first message (an edit of the first turn). */
 export const sendMessage = (chatId: string, content: string, parentId?: string | null) => api<StartedRun>(`/chats/${chatId}/messages`, { method: "POST", body: JSON.stringify({ content, ...(parentId !== undefined ? { parentId } : {}) }) });
@@ -30,7 +30,7 @@ export type ProviderInput = { name: string; baseUrl?: string; apiKey?: string | 
 export const listProviders = () => api<{ providers: ProviderSummary[] }>("/agents/admin/providers");
 export const createProvider = (input: ProviderInput) => api<{ provider: ProviderSummary }>("/agents/admin/providers", { method: "POST", body: JSON.stringify(input) });
 export const updateProvider = (id: string, input: Partial<ProviderInput> & { expectedRevision: number; removeSecret?: boolean }) => api<{ provider: ProviderSummary }>(`/agents/admin/providers/${id}`, { method: "PATCH", body: JSON.stringify(input) });
-export const deleteProvider = (id: string) => api<{ ok: true }>(`/agents/admin/providers/${id}`, { method: "DELETE" });
+export const deleteProvider = (id: string) => api<{ ok: true }>(`/agents/admin/providers/${id}`, { method: "DELETE", body: "{}" });
 export type ProviderTest = { ok: boolean; models: { ok: boolean; count: number | null; latencyMs: number | null; error: string | null }; completion: { ok: boolean; model: string | null; latencyMs: number | null; error: string | null } };
 export const testProvider = (id: string) => api<{ test: ProviderTest }>(`/agents/admin/providers/${id}/test`, { method: "POST", body: "{}" });
 export const providerModels = (id: string) => api<{ models: string[]; cachedAt: string }>(`/agents/admin/providers/${id}/models`);

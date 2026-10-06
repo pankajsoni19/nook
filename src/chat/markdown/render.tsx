@@ -1,6 +1,7 @@
 import { Check, Copy } from "lucide-react";
 import { lexer, type Token, type Tokens } from "marked";
-import { memo, useState, type ReactNode } from "react";
+import { memo, useEffect, useRef, useState, type ReactNode } from "react";
+import { AGENT_BOUNDS } from "../../../shared/agents";
 
 /**
  * Agent Markdown (agent chat plan §8, D370, T303, T304): `marked.lexer` tokens are turned straight
@@ -10,20 +11,42 @@ import { memo, useState, type ReactNode } from "react";
  * sheet with the full URL) instead of navigating. Headings render one level smaller so an h1 in a
  * message is not a page title. No syntax highlighting in v1 (AC-O13).
  *
+ * A Nook path is what the browser would keep on this origin (review M1): `/\host` is read by every
+ * browser as `//host`, so the href a middle click or "Copy link" uses would leave Nook. A path with a
+ * backslash is text; every other `/…` is canonicalised with `new URL(path, location.origin)` and is a
+ * Nook path only when that URL keeps the origin. A `mailto:` keeps the address only: its `?subject=`
+ * and `?body=` (which can pre-fill a mail with a request for a password) are dropped.
+ *
  * Streaming (§8): completed top-level blocks are memoised by their source (`raw`), so only the tail
- * re-renders while text arrives; an unclosed fence renders as an open code block.
+ * re-renders while text arrives; an unclosed fence renders as an open code block. The tail is lexed
+ * at most every `TAIL_LEX_MS` and the text shown live is capped at the stored message bound (review L5).
  */
 
 export type LinkHandler = (href: string) => void;
 export type RenderContext = { onExternalLink: LinkHandler; onNookLink: LinkHandler };
 
-const NOOK_PATH = /^\/(?!\/)[^\s]*$/;
+/** The origin Nook paths are resolved against: the page's, or a placeholder where there is no window (tests). */
+const pageOrigin = () => (typeof location !== "undefined" && location.origin && location.origin !== "null" ? location.origin : "https://nook.invalid");
+
+/** How often at most the streaming tail is re-lexed (review L5); the settled prefix is memoised. */
+export const TAIL_LEX_MS = 250;
 
 /** The link kinds the renderer follows: external http(s), mailto, or a Nook path; anything else is text. */
-export function classifyLink(href: string): { kind: "external"; url: URL } | { kind: "mailto"; href: string } | { kind: "nook"; path: string } | { kind: "text" } {
+export function classifyLink(href: string, origin = pageOrigin()): { kind: "external"; url: URL } | { kind: "mailto"; href: string } | { kind: "nook"; path: string } | { kind: "text" } {
   const value = href.trim();
-  if (NOOK_PATH.test(value)) return { kind: "nook", path: value };
-  if (/^mailto:[^\s@]+@[^\s@]+$/i.test(value)) return { kind: "mailto", href: value };
+  if (value.startsWith("/")) {
+    // `/\host`: browsers treat a backslash like a slash, so this is a protocol-relative URL in disguise.
+    if (value.startsWith("//") || value.includes("\\") || /\s/.test(value)) return { kind: "text" };
+    try {
+      const url = new URL(value, origin);
+      if (url.origin !== origin || !url.pathname.startsWith("/")) return { kind: "text" };
+      return { kind: "nook", path: `${url.pathname}${url.search}${url.hash}` };
+    } catch {
+      return { kind: "text" };
+    }
+  }
+  const mail = /^mailto:([^\s@?#/\\]+@[^\s@?#/\\]+)(?:[?#].*)?$/i.exec(value);
+  if (mail) return { kind: "mailto", href: `mailto:${mail[1]}` };
   try {
     const url = new URL(value);
     if (url.protocol === "http:" || url.protocol === "https:") return { kind: "external", url };
@@ -170,9 +193,27 @@ const Settled = memo(function Settled({ source, context }: { source: string; con
   return <>{blocks(lex(source), context, "s")}</>;
 }, (previous, next) => previous.source === next.source && previous.context === next.context);
 
-/** Renders Markdown; while `streaming`, the completed prefix is memoised and only the tail re-lexes. */
+/** The latest value at most every `intervalMs`, always ending on the last one (trailing edge). */
+function useThrottled<T>(value: T, intervalMs: number): T {
+  const [shown, setShown] = useState(value);
+  const lastAt = useRef(0);
+  useEffect(() => {
+    if (Object.is(shown, value)) return;
+    const wait = Math.max(0, lastAt.current + intervalMs - Date.now());
+    const timer = window.setTimeout(() => { lastAt.current = Date.now(); setShown(value); }, wait);
+    return () => window.clearTimeout(timer);
+  }, [value, intervalMs, shown]);
+  return shown;
+}
+
+function StreamingMarkdown({ text, context }: { text: string; context: RenderContext }) {
+  const { settled, tail } = splitStreaming(text.length > AGENT_BOUNDS.assistantMessageChars ? text.slice(0, AGENT_BOUNDS.assistantMessageChars) : text);
+  const shownTail = useThrottled(tail, TAIL_LEX_MS);
+  return <div className="chat-md">{settled && <Settled source={settled} context={context} />}{shownTail && blocks(lex(shownTail), context, "t")}</div>;
+}
+
+/** Renders Markdown; while `streaming`, the completed prefix is memoised and only the tail re-lexes (at most every 250 ms). */
 export function Markdown({ text, context, streaming = false }: { text: string; context: RenderContext; streaming?: boolean }) {
   if (!streaming) return <div className="chat-md">{blocks(lex(text), context)}</div>;
-  const { settled, tail } = splitStreaming(text);
-  return <div className="chat-md">{settled && <Settled source={settled} context={context} />}{tail && blocks(lex(tail), context, "t")}</div>;
+  return <StreamingMarkdown text={text} context={context} />;
 }

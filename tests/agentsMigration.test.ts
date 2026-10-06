@@ -128,6 +128,30 @@ describe("migration 039 agent chat", () => {
     expect({ triggers: schemaOf(db, "trigger"), rows: rows(db) }).toEqual(after);
   });
 
+  test("against the genuine 025+038 shape (every migration but 039 applied), the rebuild reproduces the indexes and triggers and keeps every row (T326, review L10)", () => {
+    const db = new Database(":memory:", { strict: true });
+    db.exec("PRAGMA foreign_keys = ON");
+    db.exec("CREATE TABLE IF NOT EXISTS schema_migrations (id INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL)");
+    db.query("INSERT INTO schema_migrations (id, name, applied_at) VALUES (39, 'skipped', ?)").run(at);
+    runMigrations(db);
+    db.query("DELETE FROM schema_migrations WHERE id = 39").run();
+    const normalize = (list: Array<{ name: string; sql: string }>) => list.map((row) => ({ name: row.name, sql: row.sql.replace(/\s+/g, " ").trim() }));
+    const before = { triggers: normalize(schemaOf(db, "trigger")), indexes: normalize(schemaOf(db, "index")), columns: db.query("PRAGMA table_info(api_key_grants)").all() };
+    expect(before.triggers).toHaveLength(6);
+    expect(before.indexes).toHaveLength(2);
+    seed(db);
+    const beforeRows = rows(db);
+    expect(() => db.query("INSERT INTO api_key_grants (id, key_id, module, permission, created_at) VALUES ('gx', 'k1', 'agents', 'read', ?)").run(at)).toThrow();
+    db.transaction(() => agentChatMigration.up(db))();
+    expect(normalize(schemaOf(db, "trigger"))).toEqual(before.triggers);
+    expect(normalize(schemaOf(db, "index"))).toEqual(before.indexes);
+    expect(db.query("PRAGMA table_info(api_key_grants)").all()).toEqual(before.columns);
+    expect(rows(db)).toEqual(beforeRows);
+    expect(db.query("PRAGMA legacy_alter_table").get()).toEqual({ legacy_alter_table: 0 });
+    expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
+    db.query("INSERT INTO api_key_grants (id, key_id, module, permission, created_at) VALUES ('gx', 'k1', 'agents', 'read', ?)").run(at);
+  });
+
   test("the widened word lists contain every old word", () => {
     for (const word of ["notes", "files", "tasks", "today", "calendar", "collections", "team", "inbox", "bin", "whiteboards", "vault"]) expect(GRANT_WORDS.module).toContain(word);
     for (const word of ["read", "comment", "write", "draft", "publish", "create"]) expect(GRANT_WORDS.permission).toContain(word);
@@ -142,7 +166,7 @@ describe("migration 039 agent chat", () => {
     db.query("INSERT INTO agent_access (resource_kind, resource_id, user_id, level, created_at) VALUES ('agent', 'a1', 'u1', 'view', ?)").run(at);
     db.query("INSERT INTO chats (id, owner_id, agent_id, title, created_at, updated_at) VALUES ('c1', 'u2', 'a1', 'Hello', ?, ?)").run(at, at);
     db.query("INSERT INTO chat_messages (id, chat_id, role, content, created_at) VALUES ('m1', 'c1', 'user', 'hi', ?)").run(at);
-    db.query("INSERT INTO chat_fts (chat_id, title, body) VALUES ('c1', 'Hello', 'hi')").run();
+    db.query("INSERT INTO chat_fts (chat_id, owner_id, title, body) VALUES ('c1', 'u2', 'Hello', 'hi')").run();
     db.query("INSERT INTO agent_runs (id, via, agent_id, agent_revision, prompt_sha256, preamble_version, chat_id, user_id, model, status, queued_at) VALUES ('r1', 'chat', 'a1', 1, 'x', 1, 'c1', 'u2', 'm', 'ok', ?)").run(at);
     db.query("DELETE FROM chats WHERE id = 'c1'").run();
     expect(db.query("SELECT COUNT(*) AS count FROM chat_messages").get()).toEqual({ count: 0 });

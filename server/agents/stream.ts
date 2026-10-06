@@ -64,6 +64,8 @@ export class RunChannel {
   replay(after: number): SequencedEvent[] | "overflow" {
     if (this.ring.length === 0) return [];
     if (after + 1 < this.ring[0]!.seq) return "overflow";
+    // Past everything this run emitted (a stale or forged cursor, review L7): the client needs the snapshot, not silence.
+    if (after > this.seq) return "overflow";
     return this.ring.filter((event) => event.seq > after);
   }
 

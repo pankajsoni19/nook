@@ -129,8 +129,9 @@ export type AgentSummary = {
   starters: string[]; revision: number; createdAt: string; updatedAt: string; isOwner: boolean;
 };
 export type AgentDetail = AgentSummary & { systemPrompt: string };
+/** `agentId` and `agentName` are null once the chat's agent was purged from the Bin; the chat stays readable. */
 export type ChatSummary = {
-  id: string; agentId: string; agentName: string; agentIcon: string | null; title: string; pinned: boolean; activeLeafId: string | null;
+  id: string; agentId: string | null; agentName: string | null; agentIcon: string | null; title: string; pinned: boolean; activeLeafId: string | null;
   revision: number; createdAt: string; updatedAt: string; running: boolean;
 };
 export type ChatMessage = {

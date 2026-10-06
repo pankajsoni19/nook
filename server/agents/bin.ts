@@ -28,14 +28,23 @@ function purgeNow(table: "chats" | "agents", id: string, options: { reason: Purg
   })();
 }
 
-async function sweepTable(table: "chats" | "agents", cutoff: string): Promise<BinSweepCounts> {
+/**
+ * One sweep of a table. A purge that throws (a constraint, a locked file) counts as pending and the
+ * batch goes on (review M2): one stuck row never stalls the rest, and the row is retried next hour.
+ */
+export async function sweepTable(table: "chats" | "agents", cutoff: string): Promise<BinSweepCounts> {
   const resumed = db.query(`SELECT id FROM ${table} WHERE purge_started_at IS NOT NULL LIMIT ?`).all(SWEEP_RESUME_BATCH_SIZE) as Array<{ id: string }>;
   const due = db.query(`SELECT id FROM ${table} WHERE deleted_at IS NOT NULL AND purge_started_at IS NULL AND purge_after <= ? ORDER BY purge_after LIMIT ?`).all(cutoff, SWEEP_BATCH_SIZE) as Array<{ id: string }>;
   const counts: BinSweepCounts = { purged: 0, pending: 0 };
   for (const [items, reason] of [[resumed, "resumed"], [due, "retention"]] as const) {
     for (const { id } of items) {
-      const outcome = await withResourceLock(`${table}:${id}`, async () => purgeNow(table, id, { reason, actorId: null, dueBy: cutoff }));
-      if (outcome === "purged") counts.purged += 1;
+      try {
+        const outcome = await withResourceLock(`${table}:${id}`, async () => purgeNow(table, id, { reason, actorId: null, dueBy: cutoff }));
+        if (outcome === "purged") counts.purged += 1;
+      } catch (error) {
+        counts.pending += 1;
+        console.error(`Bin sweep could not purge a ${table === "chats" ? "chat" : "agent"}`, error instanceof Error ? error.name : "Unknown error");
+      }
     }
   }
   return counts;

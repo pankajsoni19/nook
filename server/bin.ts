@@ -242,10 +242,16 @@ export async function sweepBin(options: { nowMs?: number } = {}): Promise<BinSwe
   // fresh 30 days, so they run after documents.
   counts.purged += await sweepTaskBin(cutoff, SWEEP_BATCH_SIZE);
   // Provided types (collections, rows) purge due items in their own order: parents first.
-  for (const provider of providers.values()) {
-    const provided = await provider.sweep(cutoff);
-    counts.purged += provided.purged;
-    counts.pending += provided.pending;
+  for (const [type, provider] of providers.entries()) {
+    // One provider's failure never stops the others' batches (Wave 40 review M2); the hour after retries it.
+    try {
+      const provided = await provider.sweep(cutoff);
+      counts.purged += provided.purged;
+      counts.pending += provided.pending;
+    } catch (error) {
+      counts.pending += 1;
+      console.error(`Bin sweep failed for ${type} items`, error instanceof Error ? error.name : "Unknown error");
+    }
   }
   return counts;
 }

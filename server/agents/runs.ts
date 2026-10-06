@@ -184,8 +184,14 @@ async function execute(run: ActiveRun, channel: RunChannel, agent: AgentRow, dis
             firstToken = true;
             db.query("UPDATE agent_runs SET first_token_at = ? WHERE id = ?").run(now(), run.runId);
           }
-          text += chunk;
-          pendingDelta += chunk;
+          // Past the stored bound nothing more is kept or streamed (review L5): the final cut adds its marker,
+          // and the browser never lexes more than it will ever show. One extra character marks the overflow.
+          const cap = AGENT_BOUNDS.assistantMessageChars;
+          if (text.length > cap) return;
+          const room = cap - text.length;
+          const kept = chunk.length > room ? chunk.slice(0, room) : chunk;
+          text += chunk.length > room ? chunk.slice(0, room + 1) : chunk;
+          pendingDelta += kept;
           // Coalesced to at most one event every 50 ms (plan §2.3).
           deltaTimer ??= setTimeout(flushDelta, 50);
           persist();
@@ -238,7 +244,18 @@ async function execute(run: ActiveRun, channel: RunChannel, agent: AgentRow, dis
       db.query("UPDATE chats SET updated_at = ? WHERE id = ?").run(now(), chat.id);
     })();
   } catch (error) {
+    // Never leave the row streaming (QA Q4): the message ends as an error with a message, the run as recorded as it can be.
     console.error("Agent run could not be recorded", error instanceof Error ? error.name : "Unknown error");
+    status = "error";
+    errorCode = "INTERNAL";
+    errorMessage = "The answer could not be saved";
+    try {
+      db.query("UPDATE chat_messages SET content = CASE WHEN length(content) > ? THEN substr(content, 1, ?) ELSE content END, status = 'error', error_code = 'INTERNAL', finished_at = ? WHERE id = ?")
+        .run(AGENT_BOUNDS.assistantMessageChars, AGENT_BOUNDS.assistantMessageChars, now(), messageId);
+      db.query("UPDATE agent_runs SET status = 'error', error_code = 'INTERNAL', finished_at = ? WHERE id = ?").run(now(), run.runId);
+    } catch (again) {
+      console.error("Agent run could not be marked failed", again instanceof Error ? again.name : "Unknown error");
+    }
   }
   audit(run.userId, null, "agents.run.finish", { runId: run.runId, chatId: chat.id, status, errorCode, promptTokens: usage?.promptTokens ?? 0, completionTokens: usage?.completionTokens ?? 0 });
   if (errorCode && errorMessage) channel.emit({ type: "error", data: { code: errorCode, message: errorMessage } });
