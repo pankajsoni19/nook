@@ -4,7 +4,7 @@ import { audit, db, ensureDefaultFolder, now, type NoteRow } from "./db";
 import { config } from "./config";
 import { recordNoteDraftProposal, rejectEffectFor, resolveNoteDraftProposals, type DraftBase, type ProposalBaseRow, type RejectEffect } from "./inbox/noteDraftProposals";
 import { indexNote, unindexNote } from "./searchIndex";
-import { notePublishedHook } from "./knowledge/hooks";
+import { notePublishedHook, sourceAccessChangedHook } from "./knowledge/hooks";
 import { checksum, storage, withNoteLock } from "./storage";
 import { deriveNoteTitle } from "./validation";
 import { neutralizeWhiteboardEmbeds } from "../shared/whiteboardEmbed";
@@ -141,6 +141,8 @@ export function moveNoteToBin(note: NoteRow, userId: string) {
     if (result.changes !== 1) throw new Error("Concurrent note update detected");
     audit(userId, note.id, "note.delete");
   })();
+  // Wave 44 fixes (M1): a binned note's passages leave every knowledge base at once.
+  sourceAccessChangedHook({ kind: "note", ids: [note.id] });
   return { ok: true as const, purgeAfter };
 }
 

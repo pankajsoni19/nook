@@ -2,6 +2,7 @@ import type { Context, Hono, Next } from "hono";
 import { z, ZodError } from "zod";
 import type { AppEnv } from "../auth";
 import { audit } from "../db";
+import { keepRequestOpen } from "../longRequests";
 import { parseJson, uuid } from "../validation";
 import { KNOWLEDGE_BOUNDS } from "../../shared/knowledge";
 import { readShareAccess, writeShareAccess } from "../agents/sharing";
@@ -15,7 +16,8 @@ import "./bin";
 /**
  * The knowledge base session API (plan §12 "Knowledge", docs/plan/API_CONTRACTS.md § Knowledge
  * bases): `/api/knowledge/*`. Every route needs a session and a role that may chat; mutations need
- * CSRF and pass the role write gate. Guests get 404 everywhere (AC-O2); with the module off every
+ * CSRF and pass the role write gate. Guests get 404 everywhere (AC-O2), mutations included (QA LOW-1:
+ * the role write gate answers a guest's write there with the same 404); with the module off every
  * route answers 503 `AGENTS_DISABLED`. Missing and forbidden are the same 404 (D73); a viewer of a
  * base who tries to change it gets 403 `READ_ONLY`.
  */
@@ -119,9 +121,11 @@ export function registerKnowledgeRoutes(app: Hono<AppEnv>) {
     const kbId = id(c, "kbId");
     const body = await parseJson(c.req.raw, searchSchema);
     const { kb } = readableKb(kbId, c.get("user").id);
+    // The query's embedding may take up to 30 s to its first byte: no idle timeout (server/longRequests.ts).
+    keepRequestOpen(c.req.raw);
     const outcome = await searchBases([kb], body.query, body.k ?? KNOWLEDGE_BOUNDS.k.default, { userId: c.get("user").id });
     audit(c.get("user").id, null, "knowledge.search", { via: "web", kbId, hits: outcome.hits.length, mode: outcome.mode });
-    return { hits: presentHits(outcome.hits, c.get("user").id, new Map([[kb.id, kb.name]])), mode: outcome.mode };
+    return { hits: presentHits(outcome.hits, c.get("user").id, new Map([[kb.id, kb.name]])), mode: outcome.mode, ...(outcome.notice ? { notice: outcome.notice } : {}) };
   }));
 
   // The Access sheet (owner and managers; managers share at view only), as for agents.

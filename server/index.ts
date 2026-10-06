@@ -44,6 +44,7 @@ import { agentsFeature, initAgentsStatus } from "./agents/status";
 import { markInterruptedRuns } from "./agents/runs";
 import { registerKnowledgeRoutes } from "./knowledge/routes";
 import { resumeKnowledgeIndexing } from "./knowledge/index";
+import { sourceAccessChangedHook } from "./knowledge/hooks";
 import { initStdioDeclarations } from "./agents/stdio";
 import { initVaultStatus, vaultFeature } from "./vault/status";
 import { scheduleRotationRun } from "./vault/rotation";
@@ -607,7 +608,14 @@ app.patch("/api/folders/:id", async (c) => {
 app.delete("/api/folders/:id", (c) => {
   const id = uuid.parse(c.req.param("id"));
   const userId = c.get("user").id;
+  const notesIn = (db.query("SELECT id FROM notes WHERE folder_id = ?").all(id) as Array<{ id: string }>).map((row) => row.id);
+  const filesIn = (db.query("SELECT id FROM documents WHERE folder_id = ?").all(id) as Array<{ id: string }>).map((row) => row.id);
   const result = db.query("DELETE FROM folders WHERE id = ? AND owner_id = ? AND is_default = 0").run(id, userId);
+  if (result.changes) {
+    // Wave 44 fixes (M1): notes and files that used its access may no longer be readable by a knowledge base's owner.
+    sourceAccessChangedHook({ kind: "note", ids: notesIn });
+    sourceAccessChangedHook({ kind: "document", ids: filesIn });
+  }
   return result.changes ? c.json({ ok: true }) : c.json({ error: "Folder not found" }, 404);
 });
 
@@ -646,6 +654,7 @@ app.put("/api/folders/:id/sharing", async (c) => {
     db.query("UPDATE folders SET visibility = ?, updated_at = ? WHERE id = ? AND owner_id = ?").run(body.visibility, now(), id, userId);
   })();
   audit(userId, null, "folder.sharing_changed", { folderId: id, visibility: body.visibility, recipientCount: uniqueIds.length });
+  sourceAccessChangedHook({ kind: "folder", ids: [id] });
   return c.json({ ok: true });
 });
 
@@ -737,6 +746,8 @@ app.patch("/api/notes/:id", async (c) => {
     }
     db.query("UPDATE notes SET folder_id = ?, updated_at = ? WHERE id = ? AND owner_id = ? AND draft_revision IS ?")
       .run(body.folderId ?? null, now(), id, userId, note.draft_revision);
+    // A note that uses its folder's access may change audience with the move (Wave 44 fixes, M1).
+    sourceAccessChangedHook({ kind: "note", ids: [id] });
     return c.json({ ok: true });
   });
 });
@@ -880,6 +891,7 @@ app.put("/api/notes/:id/sharing", async (c) => {
         .run(visibility, body.visibility === "inherit" ? 0 : 1, now(), id, userId);
     })();
     audit(userId, id, "note.sharing_changed", { visibility: body.visibility, recipientCount: uniqueIds.length });
+    sourceAccessChangedHook({ kind: "note", ids: [id] });
     return c.json({ ok: true });
   });
 });

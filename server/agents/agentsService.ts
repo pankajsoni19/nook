@@ -5,7 +5,7 @@ import { readAgentSettings, roleMayCreate } from "./settings";
 import { shareLevel, shareReadableSql, type ShareLevel } from "./sharing";
 import { AgentError } from "./status";
 import { agentToolRefs, linkStateOf, refKeyOf, setAgentTools, trifectaOf } from "./tools";
-import { viewableKbIds } from "../knowledge/service";
+import { manageableKbIds } from "../knowledge/service";
 import { serversAvailableTo } from "./toolServers";
 import { agentChangeMask, notifyAccess } from "../access/notices";
 
@@ -43,8 +43,9 @@ const roleQuery = db.query("SELECT role FROM users WHERE id = ?");
  */
 export function toolsVisibleTo(tools: AgentToolRef[], role: string, userId?: string): { shown: AgentToolRef[]; hidden: AgentToolRef[] } {
   const usable = new Set(serversAvailableTo(role).map((server) => server.id));
-  // AC-E: a manager is not shown a knowledge base they cannot open either (its name stays private).
-  const kbs = userId ? viewableKbIds(userId, tools.flatMap((tool) => tool.source === "knowledge" ? [tool.kbId] : [])) : null;
+  // AC-E: a manager is not shown a knowledge base they cannot manage either (its name stays private, and
+  // they could not attach it: M4); like a server they cannot use, it stays on save.
+  const kbs = userId ? manageableKbIds(userId, tools.flatMap((tool) => tool.source === "knowledge" ? [tool.kbId] : [])) : null;
   const shown: AgentToolRef[] = [];
   const hidden: AgentToolRef[] = [];
   for (const tool of tools) ((tool.source === "server" && !usable.has(tool.serverId)) || (tool.source === "knowledge" && kbs !== null && !kbs.has(tool.kbId)) ? hidden : shown).push(tool);

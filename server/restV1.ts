@@ -263,7 +263,8 @@ async function handle(c: Context<AppEnv>): Promise<Response> {
       return refuse(409, RECURSION_MESSAGE, "AGENT_RECURSION");
     }
     // run_agent waits for the agent's answer (up to 5 minutes): no idle timeout for it (QA D1, server/longRequests.ts).
-    if (spec.name === "run_agent") keepRequestOpen(c.req.raw);
+    // search_knowledge may wait up to 30 s for its query's embedding (Wave 44 fixes): the same.
+    if (spec.name === "run_agent" || spec.name === "search_knowledge") keepRequestOpen(c.req.raw);
     const body = await readJsonObject(c.req.raw);
     if (body instanceof Response) return body;
     const result = await runTool(spec, body, auth.id, "rest");

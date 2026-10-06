@@ -206,17 +206,18 @@ export async function withMcpRequestSlot(operation: () => Promise<Response>) {
 
 export { mcpJsonError, mcpResponse };
 
-/** Whether a JSON-RPC body (one message or a batch) calls `run_agent`; unreadable bodies are left to the handler. */
-async function callsRunAgent(request: Request) {
+/** Whether a JSON-RPC body (one message or a batch) calls tool `name`; unreadable bodies are left to the handler. */
+async function callsTool(request: Request, name: string) {
   try {
     const value = JSON.parse(await request.clone().text()) as unknown;
     const messages = Array.isArray(value) ? value : [value];
     return messages.some((message) => message && typeof message === "object" && (message as { method?: unknown }).method === "tools/call"
-      && (message as { params?: { name?: unknown } }).params?.name === "run_agent");
+      && (message as { params?: { name?: unknown } }).params?.name === name);
   } catch {
     return false;
   }
 }
+const callsRunAgent = (request: Request) => callsTool(request, "run_agent");
 
 export async function handleMcpRequest(request: Request, clientIp: string | null = null) {
   const authenticated = authenticateMcpRequest(request, clientIp);
@@ -236,8 +237,9 @@ export async function handleMcpRequest(request: Request, clientIp: string | null
     // From inside an agent run (review M1, T318): a tool server calling back with Nook-Agent-Run cannot run an agent.
     const runsAgent = await callsRunAgent(bounded);
     if (runsAgent && fromAgentRun(request)) return mcpJsonError(RECURSION_MESSAGE, 409, false, "AGENT_RECURSION");
-    // run_agent waits for the agent's answer (up to 5 minutes): no idle timeout for it (QA D1, server/longRequests.ts).
-    if (runsAgent) keepRequestOpen(request);
+    // run_agent waits for the agent's answer (up to 5 minutes), and search_knowledge for a query
+    // embedding (up to 30 s to its first byte): no idle timeout for them (QA D1, server/longRequests.ts).
+    if (runsAgent || await callsTool(bounded, "search_knowledge")) keepRequestOpen(request);
     // Effective grants and scopes: grants ∩ the holder's current role ∩ team policy (T81, D263).
     const { scopes, grants } = key.actor;
     const context: McpKeyContext = { keyId: key.id, userId: key.user_id, name: key.name, scopes, grants, kind: key.actor.kind };

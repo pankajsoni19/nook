@@ -242,8 +242,11 @@ export type ToolServerSummary = {
 export type DeclaredStdioServer = { id: string; name: string; command: string; args: string[]; envNames: string[]; adopted: boolean };
 /** What the tool picker lists (plan §5.2, `GET /api/agents/catalog`). */
 export type NookCatalogTool = { name: string; title: string; module: string; write: boolean; /** A write the Inbox can carry as a proposal (D353). */ proposable: boolean; scope: string; /** The module scope a proposal of it needs besides inbox:write (QA L7); null when not proposable. */ proposalScope: string | null };
-/** A knowledge base the picker offers (AC-E): one the editor can open. */
-export type KnowledgeCatalogBase = { id: string; name: string; description: string; ownerName: string; yours: boolean; status: "empty" | "indexing" | "ready" | "error"; chunkCount: number };
+/**
+ * A knowledge base the picker knows (AC-E): one the editor can open. Only `manageable` ones (owned or
+ * managed) can be attached (Wave 44 fixes, M4); a view-only one shows only when already attached.
+ */
+export type KnowledgeCatalogBase = { id: string; name: string; description: string; ownerName: string; yours: boolean; manageable?: boolean; status: "empty" | "indexing" | "ready" | "error"; chunkCount: number };
 export type ToolCatalog = {
   servers: Array<{ id: string; slug: string; name: string; enabled: boolean; status: ServerStatus; availability: ServerAvailability; tools: Array<Pick<CatalogTool, "name" | "title" | "description" | "readOnly" | "openWorld" | "policy">> }>;
   nook: { linked: boolean; linkState: LinkState; tools: NookCatalogTool[] };

@@ -11,7 +11,7 @@ import { AgentError } from "./status";
 import { defaultPolicy, parseTools, serverAvailableTo, serverPolicies, serverRowOrNull, serversAvailableTo, type ToolServerRow } from "./toolServers";
 import { KNOWLEDGE_TOOL } from "../../shared/knowledge";
 import { knowledgeToolDescription, knowledgeToolParameters, liveAttachedBases, type KnowledgeToolSpec } from "../knowledge/tool";
-import { listKnowledge, viewableKbIds } from "../knowledge/service";
+import { listKnowledge, manageableKbIds, viewableKbIds } from "../knowledge/service";
 
 /**
  * An agent's tools (plan §5.2, §5.3, D358, D359; Wave 41 AC-B): the picks in `agent_tools`, the
@@ -60,8 +60,9 @@ export const refKeyOf = (ref: AgentToolRef) => ref.source === "server" ? `server
 
 /**
  * Replaces the agent's picks (PATCH `tools`): every server tool must exist in a catalog the editor may
- * see; every Nook tool must be offered; every knowledge base (AC-E) must be one both the editor and
- * the agent's owner can open (the tool searches what the owner may attach, D367).
+ * see; every Nook tool must be offered; every new knowledge base pick (AC-E) must be one both the
+ * editor and the agent's owner own or manage (Wave 44 fixes, M4, operator 2026-10-06: view is search
+ * and Try it only). A view-only editor gets 403 `KB_MANAGE_REQUIRED`; a base they cannot open, 400.
  */
 export function setAgentTools(agentId: string, role: string, submitted: AgentToolRef[], options: { keepHidden?: boolean; userId?: string } = {}) {
   const visible = new Map(serversAvailableTo(role).map((row) => [row.id, new Set(parseTools(row.tools_json).map((tool) => tool.name))]));
@@ -72,11 +73,12 @@ export function setAgentTools(agentId: string, role: string, submitted: AgentToo
   const current = all.filter((ref): ref is Extract<AgentToolRef, { source: "server" }> => ref.source === "server");
   const currentKbs = all.filter((ref): ref is Extract<AgentToolRef, { source: "knowledge" }> => ref.source === "knowledge");
   const kept = new Set([...current, ...currentKbs].map(refKeyOf));
-  // AC-E: the editor's and the owner's open bases among those named (new picks need both; a manager's hidden ones stay).
+  // AC-E: the bases named; new picks need the editor and the owner to own or manage them (M4); a manager's hidden ones stay.
   const ownerId = (db.query("SELECT owner_id FROM agents WHERE id = ?").get(agentId) as { owner_id: string } | null)?.owner_id ?? null;
   const named = [...new Set([...submitted, ...currentKbs].flatMap((ref) => ref.source === "knowledge" ? [ref.kbId] : []))];
-  const editorKbs = options.userId ? viewableKbIds(options.userId, named) : new Set(named);
-  const ownerKbs = ownerId ? viewableKbIds(ownerId, named) : new Set<string>();
+  const editorViews = options.userId ? viewableKbIds(options.userId, named) : new Set(named);
+  const editorKbs = options.userId ? manageableKbIds(options.userId, named) : new Set(named);
+  const ownerKbs = ownerId ? manageableKbIds(ownerId, named) : new Set<string>();
   // Review L2: a manager's view withholds picks from servers they cannot use, so their save re-merges them (AC-E: and bases they cannot open).
   const submittedKeys = new Set(submitted.map(refKeyOf));
   const hidden = options.keepHidden ? [
@@ -92,8 +94,9 @@ export function setAgentTools(agentId: string, role: string, submitted: AgentToo
     if (ref.source === "server" && !kept.has(key) && !visible.get(ref.serverId)?.has(ref.toolName)) throw new AgentError(400, "INVALID", "A picked tool is not in a server you can use", { field: "tools" });
     if (ref.source === "nook" && !nook.has(ref.toolName)) throw new AgentError(400, "INVALID", "A picked Nook tool is not offered to agents", { field: "tools" });
     if (ref.source === "knowledge" && !kept.has(key)) {
-      if (!editorKbs.has(ref.kbId)) throw new AgentError(400, "INVALID", "A picked knowledge base is not one you can open", { field: "tools" });
-      if (!ownerKbs.has(ref.kbId)) throw new AgentError(400, "INVALID", "The agent's owner cannot open a picked knowledge base; share it with them first", { field: "tools" });
+      if (!editorViews.has(ref.kbId)) throw new AgentError(400, "INVALID", "A picked knowledge base is not one you can open", { field: "tools" });
+      if (!editorKbs.has(ref.kbId)) throw new AgentError(403, "KB_MANAGE_REQUIRED", "You can search this knowledge base, but attaching it to an agent needs Manage", { field: "tools" });
+      if (!ownerKbs.has(ref.kbId)) throw new AgentError(403, "KB_MANAGE_REQUIRED", "The agent's owner must own or manage a knowledge base to attach it; ask its owner to make them a manager", { field: "tools" });
     }
   }
   db.query("DELETE FROM agent_tools WHERE agent_id = ?").run(agentId);
@@ -198,8 +201,8 @@ export function catalogFor(role: string, agentId: string | null, userId: string)
     };
   });
   const key = agentId ? liveLinkedKey(agentId, userId) : null;
-  // AC-E: the knowledge bases the editor can open (attaching one also needs the agent's owner to open it).
-  const knowledge = listKnowledge(userId).map((kb) => ({ id: kb.id, name: kb.name, description: kb.description, ownerName: kb.ownerName, yours: kb.yourLevel === "owner", status: kb.status, chunkCount: kb.chunkCount }));
+  // AC-E: the knowledge bases the editor can open; only those they own or manage can be attached (M4: `manageable`).
+  const knowledge = listKnowledge(userId).map((kb) => ({ id: kb.id, name: kb.name, description: kb.description, ownerName: kb.ownerName, yours: kb.yourLevel === "owner", manageable: kb.yourLevel !== "view", status: kb.status, chunkCount: kb.chunkCount }));
   // Without a live key the picker lists none of Nook's tools (QA Q4): what runs is bounded by the key.
   return { servers, nook: { linked: key !== null, linkState: agentId ? linkStateOf(agentId, userId).state : "none", tools: key ? nookCatalogFor(key) : [] }, knowledge };
 }

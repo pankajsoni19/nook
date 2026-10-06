@@ -118,6 +118,10 @@ export function restoreResultMessage(item: Pick<BinItem, "type"> & Partial<Pick<
   }
   if (item.type === "calendar" || item.type === "event") return restoredCalendarMessage({ type: item.type, title: "" }, result.calendarName, Boolean(result.alreadyRestored));
   if (item.type === "vault") return result.alreadyRestored ? "The vault was already restored" : "Restored the vault";
+  if (item.type === "knowledge_base") {
+    const name = result.knowledgeBaseName ? ` “${result.knowledgeBaseName}”` : "";
+    return result.alreadyRestored ? `The knowledge base${name} is already restored` : `Restored the knowledge base${name}`;
+  }
   if (item.type === "vault_environment" || item.type === "vault_secret") {
     const where = result.folderName ?? item.folder_name ?? "its vault";
     return result.alreadyRestored ? `Already restored to ${where}` : `Restored to ${where}`;

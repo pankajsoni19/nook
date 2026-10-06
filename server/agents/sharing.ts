@@ -29,7 +29,7 @@ import { publishChatUpdate } from "./chatUpdates";
  * runner's own linked key (server/agents/tools.ts), whoever owns the agent.
  */
 
-/** Wave 44 (AC-E): knowledge bases share the same way as agents (view = search and attach, manage = edit sources, D367). */
+/** Wave 44 (AC-E): knowledge bases share the same way as agents (view = search, manage = edit sources and attach to agents; D367, Wave 44 fixes M4). */
 export type ShareKind = "agent" | "chat" | "knowledge_base";
 export type ShareLevel = "none" | "view" | "manage" | "owner";
 export const SHARE_RANK: Record<ShareLevel, number> = { none: 0, view: 1, manage: 2, owner: 3 };

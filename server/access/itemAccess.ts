@@ -16,6 +16,7 @@ import { itemLevel } from "./effective";
 import { recordAccessEvent } from "./events";
 import { AUDIENCE_LEVELS, KIND_LEVELS, LEVELS, isLevel, levelToShareRole, shareRoleToLevel, type AccessKind, type ItemLevel, type Level } from "./levels";
 import { directShares, guestShareAdditions, GUEST_SHARE_DISABLED, writeDirectShares } from "./shares";
+import { sourceAccessChangedHook } from "../knowledge/hooks";
 
 /**
  * The item access API behind the Access sheet (access plan §C.5, §C.7, D270–D275, T204, T207,
@@ -263,7 +264,7 @@ export type AccessPut = z.infer<typeof accessPutSchema>;
 export async function writeAccess(kind: AccessKind, id: string, userId: string, body: AccessPut, ifMatch: string | undefined) {
   if (!ifMatch) throw new AccessError(428, "ETAG_REQUIRED", "Send If-Match with the ETag from GET …/access");
   const config = CONFIG[kind];
-  return config.lock(id, async () => db.transaction(() => {
+  const written = await config.lock(id, async () => db.transaction(() => {
       const current = readAccess(kind, id, userId);
       if (ifMatch !== current.etag && ifMatch !== current.etag.slice(1, -1)) {
         throw new AccessError(409, "ACCESS_CHANGED", "Someone else changed who has access. Review the latest and save again.", { access: current });
@@ -289,6 +290,9 @@ export async function writeAccess(kind: AccessKind, id: string, userId: string, 
       recordAccessEvent({ actorId: userId, via: "web", action: "item.access_changed", resource: { kind, id }, meta: { ...counts, ...(current.yourLevel === "manage" ? { asManager: true } : {}) } });
       return readAccess(kind, id, userId);
   })());
+  // Wave 44 fixes (M1): a note, file, or folder unshared from a knowledge base's owner leaves the base at once.
+  if (kind === "note" || kind === "document" || kind === "folder") sourceAccessChangedHook({ kind, ids: [id] });
+  return written;
 }
 
 function dedupe(entries: Array<{ id: string; level: Level }>) {

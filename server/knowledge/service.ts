@@ -13,8 +13,9 @@ import { AgentError } from "../agents/status";
  * Knowledge bases (plan §9, D367; Wave 44 "AC-E"): the record, its sources, and who may do what.
  *
  * - **Levels** come from server/agents/sharing.ts (`knowledge_base` kind, `agent_access` rows):
- *   `view` = search it (Try it) and attach it to agents you edit; `manage` = also add and remove
- *   sources, rename it, re-index it, and share it at view; the owner alone moves it to the Bin.
+ *   `view` = search it (Try it); `manage` = also add and remove sources, rename it, re-index it,
+ *   attach it to agents (Wave 44 fixes, M4, operator 2026-10-06: attaching needs manage), and
+ *   share it at view; the owner alone moves it to the Bin.
  *   Viewers (the team role) are capped at view; guests never reach it (AC-O2); admins are nobody
  *   special (D73): without a share they get the same 404.
  * - **Sources** are read as the base's **owner** at index time (server/knowledge/index.ts). A note
@@ -77,9 +78,31 @@ export function canReadDocument(userId: string, documentId: string) {
 export const canReadSource = (userId: string, kind: SourceKind, refId: string | null) =>
   kind === "text" ? true : refId !== null && (kind === "note" ? canReadNote(userId, refId) : canReadDocument(userId, refId));
 
+/**
+ * Whether a base's owner is an active account (Wave 44 fixes, M2). A blocked owner reads nothing:
+ * their bases pause (no indexing, no sweep) and answer no search, as their agents stop; an unblock
+ * resumes them.
+ */
+export const ownerIsActive = (ownerId: string) => Boolean(db.query("SELECT 1 FROM users WHERE id = ? AND disabled_at IS NULL").get(ownerId));
+
+/** The error a source gets, and the note search adds, when the base's embedding provider was removed (M3: fail closed, never the default). */
+export const PROVIDER_REMOVED = "The embedding provider was removed";
+export const PROVIDER_REMOVED_NOTICE = "The embedding provider this knowledge base was made with was removed. Search uses keywords only, and nothing new is indexed; make a new knowledge base to use the current provider.";
+export const OWNER_BLOCKED_NOTICE = "This knowledge base's owner is blocked. It is paused and answers no searches until they are unblocked.";
+
+/** The base's own provider row (no fallback to the default: M3), or null when it was removed. */
+export function kbProvider(kb: Pick<KbRow, "provider_id">): { id: string; base_url: string } | null {
+  if (!kb.provider_id) return null;
+  return db.query("SELECT id, base_url FROM agent_providers WHERE id = ?").get(kb.provider_id) as { id: string; base_url: string } | null;
+}
+
 /** The media type without parameters, lower case. */
 export const bareType = (mime: string) => mime.split(";")[0]!.trim().toLowerCase();
 export const isKnowledgeType = (mime: string) => (KNOWLEDGE_DOCUMENT_TYPES as readonly string[]).includes(bareType(mime));
+/** The file names a document source may have (QA LOW-5): text, Markdown, or CSV by extension, so `.json` and the like are refused. */
+export const KNOWLEDGE_FILE_NAME = /\.(txt|text|md|markdown|csv)$/i;
+const KNOWLEDGE_EXTENSIONS_SQL = ["txt", "text", "md", "markdown", "csv"].map((extension) => `lower(d.name) LIKE '%.${extension}'`).join(" OR ");
+export const isKnowledgeFile = (mime: string, name: string) => isKnowledgeType(mime) && KNOWLEDGE_FILE_NAME.test(name);
 
 /**
  * How a Files document is chunked. Files stores every text upload as `text/plain` (it sniffs, never
@@ -120,7 +143,8 @@ export function knowledgeSummary(kb: KbRow, userId: string, level: ShareLevel = 
     id: kb.id, name: kb.name, description: kb.description, ownerId: kb.owner_id, ownerName: ownerName(kb.owner_id), yourLevel,
     embeddingModel: kb.embedding_model, dims: kb.dims, status: statusOf(counts), chunkCount: kb.chunk_count,
     sourceCount: counts.pending + counts.indexing + counts.ready + counts.error + counts.unavailable, counts,
-    audience: yourLevel === "owner" ? kb.visibility as KnowledgeSummary["audience"] : null, revision: kb.revision, createdAt: kb.created_at, updatedAt: kb.updated_at
+    audience: yourLevel === "owner" ? kb.visibility as KnowledgeSummary["audience"] : null, revision: kb.revision, createdAt: kb.created_at, updatedAt: kb.updated_at,
+    notice: !ownerIsActive(kb.owner_id) ? OWNER_BLOCKED_NOTICE : kbProvider(kb) === null ? PROVIDER_REMOVED_NOTICE : null
   };
 }
 
@@ -218,7 +242,7 @@ export function addSource(actor: { userId: string }, kbId: string, input: Source
       refId = input.documentId.toLowerCase();
       if (!canReadDocument(actor.userId, refId) || !canReadDocument(kb.owner_id, refId)) throw new AgentError(404, "NOT_FOUND", "That file was not found, or the knowledge base's owner cannot read it");
       const document = db.query("SELECT name, mime_type, size_bytes FROM documents WHERE id = ?").get(refId) as { name: string; mime_type: string; size_bytes: number };
-      if (!isKnowledgeType(document.mime_type)) throw new AgentError(400, "UNSUPPORTED_TYPE", "Only text, Markdown, and CSV files can be knowledge sources", { field: "documentId" });
+      if (!isKnowledgeFile(document.mime_type, document.name)) throw new AgentError(400, "UNSUPPORTED_TYPE", "Only text (.txt), Markdown (.md), and CSV (.csv) files can be knowledge sources", { field: "documentId" });
       if (document.size_bytes > KNOWLEDGE_BOUNDS.documentBytes) throw new AgentError(400, "TOO_LARGE", "A file source can be at most 1 MiB", { field: "documentId" });
       title = document.name;
       bytes = document.size_bytes;
@@ -283,9 +307,20 @@ export function sourceCandidates(actor: { userId: string }, kbId: string, kind: 
   const types = KNOWLEDGE_DOCUMENT_TYPES.map((type) => `'${type}'`).join(",");
   const rows = db.query(`SELECT d.id, d.name, d.mime_type, d.size_bytes, u.display_name AS owner_name FROM documents d JOIN users u ON u.id = d.owner_id
     WHERE d.purpose = 'file' AND ${readableDocumentPredicate} AND ${ownerDocument} AND lower(trim(substr(d.mime_type, 1, instr(d.mime_type || ';', ';') - 1))) IN (${types})
-      AND d.size_bytes <= $max AND d.name LIKE $like ESCAPE '\\' AND NOT EXISTS (SELECT 1 FROM whiteboards w WHERE w.document_id = d.id)
+      AND d.size_bytes <= $max AND (${KNOWLEDGE_EXTENSIONS_SQL}) AND d.name LIKE $like ESCAPE '\\' AND NOT EXISTS (SELECT 1 FROM whiteboards w WHERE w.document_id = d.id)
     ORDER BY d.updated_at DESC LIMIT 50`).all({ userId: actor.userId, ownerId: kb.owner_id, like, max: KNOWLEDGE_BOUNDS.documentBytes }) as Array<{ id: string; name: string; mime_type: string; size_bytes: number; owner_name: string }>;
   return rows.map((row) => ({ id: row.id, title: row.name, detail: `${documentLabel(row.mime_type, row.name)} · ${Math.max(1, Math.round(row.size_bytes / 1024))} KiB · ${row.owner_name}`, added: added.has(row.id) }));
+}
+
+/**
+ * The knowledge bases `userId` owns or manages now, by id (Wave 44 fixes, M4, operator 2026-10-06):
+ * attaching a base to an agent needs manage, and a base answers in an agent only while the agent's
+ * owner still owns or manages it. View is search and Try it only.
+ */
+export function manageableKbIds(userId: string, ids: readonly string[]): Set<string> {
+  if (ids.length === 0) return new Set();
+  const rows = db.query("SELECT * FROM knowledge_bases WHERE id IN (SELECT value FROM json_each(?)) AND deleted_at IS NULL").all(JSON.stringify(ids)) as KbRow[];
+  return new Set(rows.filter((kb) => { const level = kbLevel(kb, userId); return level === "owner" || level === "manage"; }).map((kb) => kb.id));
 }
 
 /** The knowledge bases `userId` can open now, by id (for the tool picker and run-time checks). */

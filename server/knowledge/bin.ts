@@ -64,7 +64,7 @@ registerBinProvider("knowledge_base", {
       const row = db.query(`${select} WHERE id = ?`).get(id) as Binned | null;
       if (!row || row.owner_id !== userId) return { status: "not_found" };
       if (row.purge_started_at !== null) return { status: "purging" };
-      if (row.deleted_at === null) return { status: "already_restored", folderId: id, folderName: FOLDER };
+      if (row.deleted_at === null) return { status: "knowledge_restored", alreadyRestored: true, knowledgeBaseId: id, knowledgeBaseName: row.title };
       const live = (db.query("SELECT COUNT(*) AS count FROM knowledge_bases WHERE owner_id = ? AND deleted_at IS NULL").get(userId) as { count: number }).count;
       const limit = readAgentSettings().kbsPerUser;
       if (live >= limit) return { status: "limit_reached", message: `You can have up to ${limit} knowledge bases` };
@@ -73,7 +73,7 @@ registerBinProvider("knowledge_base", {
       audit(userId, null, "knowledge.restore", { kbId: id });
       // Work that waited while it was binned resumes.
       scheduleKnowledge(id);
-      return { status: "restored", folderId: id, folderName: FOLDER, visibility: row.visibility };
+      return { status: "knowledge_restored", alreadyRestored: false, knowledgeBaseId: id, knowledgeBaseName: row.title };
     });
   },
   purge(id, userId) {

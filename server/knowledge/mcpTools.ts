@@ -55,6 +55,7 @@ export const knowledgeTools: McpToolSpec[] = [
       return {
         results: presentHits(outcome.hits, key.userId, names).map((hit) => ({ heading: hit.heading, kb: hit.kb, source: hit.source, score: hit.score, text: hit.text })),
         mode: outcome.mode,
+        ...(outcome.notice ? { note: outcome.notice } : {}),
         bases: bases.length
       };
     }

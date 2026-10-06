@@ -84,6 +84,10 @@ const coversEverything = (reach: ToolReach) => reach.reach === "all" && reach.al
 function toolFits(spec: McpToolSpec, reach: ToolReach) {
   if (coversEverything(reach)) return true;
   if (spec.access.mode === "global") return false;
+  if (spec.access.mode === "list" && spec.access.listsNeedReach) {
+    const { reach: scope } = reach;
+    return scope !== null && (spec.access.lists ?? []).some((kind) => scope === "all" || (scope.kinds.get(kind)?.size ?? 0) > 0);
+  }
   if (spec.access.mode !== "items") return true;
   return (spec.access.items ?? []).filter((item) => item.ifAbsent !== "allow")
     .every((item) => [reach.reach, ...reach.also].every((each) => reachCanCover(each, item.kind)));

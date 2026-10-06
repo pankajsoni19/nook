@@ -71,12 +71,15 @@ export const agentTools: McpToolSpec[] = [
     description: `List the agents the key's owner can chat with: id, name, description, model override, and max steps. A key that may only run agents lists the agents its grant covers. The system prompt is never returned. ${UNTRUSTED}`,
     // AC-C: a run-only key lists what it may run (its grant may name chosen agents).
     scopes: ["agents:read", "agents:run"],
-    access: { mode: "list", lists: ["agent"] },
+    // QA LOW-6: hidden from a key whose grants name only knowledge bases (it would list nothing).
+    access: { mode: "list", lists: ["agent"], listsNeedReach: true },
     write: false,
     inputSchema: z.object({}),
     handler: (_args, key) => {
       requireOn(key.userId);
-      const reach = hasScope(key.scopes, "agents:read") ? "all" as const : keyReach(key, "agents:run");
+      // Review: every agent only when agents:read reaches everything (a grant over chosen knowledge
+      // bases reads no agents), whatever the key's scopes say; otherwise the agents it may run.
+      const reach = keyReach(key, "agents:read") === "all" ? "all" as const : keyReach(key, "agents:run");
       return { agents: listUsableAgents(key.userId).filter((agent) => reachCovers(reach, [{ kind: "agent", id: agent.id }])).map((agent) => ({ id: agent.id, name: agent.name, description: agent.description, model: agent.model, maxSteps: agent.maxSteps, updatedAt: agent.updatedAt })) };
     }
   }),

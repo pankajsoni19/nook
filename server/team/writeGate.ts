@@ -123,6 +123,8 @@ const GUEST_QUERY_BODY = { error: "Guests can only list cards assigned to them (
 export async function roleWriteGate(c: Context<AppEnv>, next: Next) {
   const role = c.get("user")?.role;
   if (!role || can(role, "content.write") || ["GET", "HEAD", "OPTIONS"].includes(c.req.method)) return next();
+  // Knowledge bases (Wave 44 fixes, QA LOW-1): guests never reach them (AC-O2), so a guest's write there is the module's 404, not ROLE_READ_ONLY.
+  if (role === "guest" && (c.req.path === "/api/knowledge" || c.req.path.startsWith("/api/knowledge/"))) return c.json({ error: "Not found" }, 404);
   // Hono matches routes case-sensitively on the raw path, so the gate compares the same path.
   if (!isAllowedReadOnlyWrite(role, c.req.method, c.req.path)) return c.json(ROLE_READ_ONLY_BODY, 403);
   if (role === "guest" && c.req.method === "POST" && c.req.path === "/api/tasks/query") {

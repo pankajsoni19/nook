@@ -38,7 +38,7 @@ export function levelDescription(kind: AccessKind, level: Level): string {
     case "chat":
       return "Read the conversation, tool calls and results included, and continue in their own copy";
     case "knowledge_base":
-      return level === "manage" ? "Also add and remove sources, re-index, and share it at Can view; never delete it" : "Search it and attach it to agents they edit";
+      return level === "manage" ? "Also add and remove sources, re-index, attach it to agents, and share it at Can view; never delete it" : "Search it (Try it); attaching it to agents needs Manage";
   }
 }
 

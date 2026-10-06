@@ -45,6 +45,11 @@ export type KnowledgeSummary = {
   /** Sources by state, for the list's line. */
   counts: { pending: number; indexing: number; ready: number; error: number; unavailable: number };
   audience: "private" | "selected" | "all_users" | null; revision: number; createdAt: string; updatedAt: string;
+  /**
+   * Why the base is not working normally (Wave 44 fixes), shown on its page: its embedding provider
+   * was removed (M3: keyword search only, nothing new indexed), or its owner is blocked (M2: paused).
+   */
+  notice: string | null;
 };
 
 /**
@@ -76,4 +81,7 @@ export type KnowledgeCandidate = { id: string; title: string; detail: string; ad
 export const KNOWLEDGE_TOOL = { server: "knowledge", tool: "search_knowledge", modelName: "knowledge__search_knowledge" } as const;
 
 /** The Access sheet's note (D367): who reads a base's text. */
-export const KNOWLEDGE_SHARE_NOTE = "Anyone who can use an agent with this knowledge base can read its text. Can view: search it and attach it to agents they edit. Manager: also add and remove sources.";
+export const KNOWLEDGE_SHARE_NOTE = "Anyone who can use an agent with this knowledge base can read its text. View: search it. Manage: also add sources and attach it to agents.";
+
+/** A source waits on the daily token budget (`pending` with the pause reason, QA LOW-3). */
+export const isPausedSource = (source: { status: SourceStatus; error: string | null }) => source.status === "pending" && source.error !== null;

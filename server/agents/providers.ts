@@ -5,6 +5,7 @@ import { completeStreaming, listModels, ProviderError, type ProviderConnection }
 import { openSecret, sealSecret, secretHint, shownHint } from "./secrets";
 import { readAgentSettings } from "./settings";
 import { AgentError } from "./status";
+import { knowledgeProviderHook } from "../knowledge/hooks";
 
 /**
  * Providers (plan §4.1): at most five OpenAI-compatible endpoints, one of them the default. The API
@@ -89,7 +90,8 @@ export function createProvider(actorId: string, input: ProviderInput): ProviderS
 }
 
 export function updateProvider(actorId: string, id: string, input: Partial<ProviderInput> & { expectedRevision: number; removeSecret?: boolean }): ProviderSummary {
-  return db.transaction(() => {
+  const beforeUrl = providerRow(id).base_url;
+  const updated = db.transaction(() => {
     const row = providerRow(id);
     if (row.revision !== input.expectedRevision) throw new AgentError(409, "REVISION_MISMATCH", "This provider changed elsewhere; reload and try again", { revision: row.revision });
     const apiKey = input.apiKey?.trim() || null;
@@ -107,6 +109,9 @@ export function updateProvider(actorId: string, id: string, input: Partial<Provi
     audit(actorId, null, "agents.provider.update", { providerId: id, secretChanged: apiKey !== null || input.removeSecret === true });
     return providerSummary(providerRow(id));
   })();
+  // Wave 44 fixes (M3): a provider pointed at another address re-embeds the knowledge bases made with it.
+  if (updated.baseUrl !== beforeUrl) knowledgeProviderHook({ kind: "changed", providerId: id });
+  return updated;
 }
 
 export function deleteProvider(actorId: string, id: string) {
@@ -120,6 +125,8 @@ export function deleteProvider(actorId: string, id: string) {
     audit(actorId, null, "agents.provider.delete", { providerId: id });
   })();
   modelCache.delete(id);
+  // Wave 44 fixes (M3): its knowledge bases fail closed (never the new default).
+  knowledgeProviderHook({ kind: "removed", providerId: id });
 }
 
 /** The default provider row, or null when none is configured. */

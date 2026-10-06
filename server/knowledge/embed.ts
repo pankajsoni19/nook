@@ -7,7 +7,7 @@ import { excerpt, ProviderError, type ProviderConnection } from "../agents/loop"
  * Embeddings (plan §9, D368; Wave 44 "AC-E"): `POST {baseUrl}/embeddings` on the configured
  * provider, through the same egress guard as every other outbound call (D347: https or an allowed
  * private host, DNS checked and pinned on every request, no redirects, byte and time caps, only the
- * provider's Authorization header). Inputs go in batches of 64; `dimensions` is sent to models that
+ * provider's Authorization header). Inputs go in batches of 64 (fewer for wide vectors); `dimensions` is sent to models that
  * take it (OpenAI's text-embedding-3 family); every vector is L2-normalized and stored as
  * little-endian float32.
  *
@@ -16,6 +16,13 @@ import { excerpt, ProviderError, type ProviderConnection } from "../agents/loop"
 
 /** The response cap per call (plan §3.2 item 5) and the timeouts, on an object so tests can shorten them. */
 export const embeddingLimits = { maxBytes: 4 * 1024 * 1024, firstByteMs: 30_000, idleMs: 30_000, totalMs: 120_000 };
+
+/**
+ * Inputs per request (Wave 44 fixes, L2): 64 at 512 dimensions, fewer for wider vectors, so an answer
+ * stays well under the 4 MiB cap (a float is about 20 bytes of JSON: 10 × 3072 is about 0.6 MiB).
+ * With no size asked for (a model that answers in its own), the widest supported size is assumed.
+ */
+export const batchSizeFor = (dims: number | null) => Math.max(1, Math.min(EMBEDDING_BATCH, Math.floor((EMBEDDING_BATCH * 512) / (dims ?? 3072))));
 
 /** Whether a model takes the `dimensions` parameter (text-embedding-3 models do; ada-002 and most others do not). */
 export const takesDimensions = (model: string) => /text-embedding-3/i.test(model);
@@ -67,7 +74,7 @@ function rethrow(error: unknown): never {
 }
 
 /**
- * One request of at most 64 inputs. The vectors come back in input order (by `index`), each of
+ * One request of at most `batchSizeFor(dims)` inputs. The vectors come back in input order (by `index`), each of
  * `dims` numbers when `dims` is given.
  */
 async function embedBatch(connection: ProviderConnection, model: string, dims: number | null, inputs: readonly string[], signal?: AbortSignal): Promise<EmbeddingResult> {
@@ -115,15 +122,16 @@ async function embedBatch(connection: ProviderConnection, model: string, dims: n
 }
 
 /**
- * Embeds `inputs` in batches of 64. `beforeBatch` runs before each request (the budget check: a
+ * Embeds `inputs` in batches (`batchSizeFor`: 64 at 512 dimensions, 10 at 3072). `beforeBatch` runs before each request (the budget check: a
  * refused batch costs nothing) and `afterBatch` after it (charging its tokens).
  */
 export async function embedTexts(connection: ProviderConnection, model: string, dims: number | null, inputs: readonly string[], hooks: { beforeBatch?: (count: number) => void; afterBatch?: (tokens: number) => void; signal?: AbortSignal } = {}): Promise<EmbeddingResult> {
   const vectors: Float32Array[] = [];
   let tokens = 0;
   let estimated = false;
-  for (let start = 0; start < inputs.length; start += EMBEDDING_BATCH) {
-    const batch = inputs.slice(start, start + EMBEDDING_BATCH);
+  const size = batchSizeFor(dims);
+  for (let start = 0; start < inputs.length; start += size) {
+    const batch = inputs.slice(start, start + size);
     hooks.beforeBatch?.(batch.length);
     const result = await embedBatch(connection, model, dims, batch, hooks.signal);
     hooks.afterBatch?.(result.tokens);

@@ -134,7 +134,7 @@ export function runSweep(options: { boot?: boolean; nowMs?: number } = {}) {
       }
       try {
         // Knowledge bases (Wave 44, AC-E): sources the owner can no longer read become unavailable; changed ones are indexed again.
-        const knowledge = sweepKnowledge();
+        const knowledge = await sweepKnowledge();
         if (knowledge.unavailable || knowledge.changed) console.info(`Knowledge sweep: ${knowledge.unavailable} sources unavailable, ${knowledge.changed} changed, ${knowledge.queued} bases queued`);
       } catch (error) {
         console.error("Knowledge sweep failed", error instanceof Error ? error.name : "Unknown error");

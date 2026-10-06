@@ -170,7 +170,7 @@ describe("the index lifecycle (plan §9)", () => {
 
   test("an unchanged source is not embedded again: the sweep and Re-index all", async () => {
     const before = embeddingCalls().length;
-    const swept = sweepKnowledge();
+    const swept = await sweepKnowledge();
     expect(swept).toMatchObject({ unavailable: 0, changed: 0 });
     await settle();
     expect(embeddingCalls().length).toBe(before);
@@ -196,7 +196,7 @@ describe("the index lifecycle (plan §9)", () => {
     await publishNote(owner, "# Onboarding\n\nDesks are assigned on arrival.", noteId);
     resetKnowledgeTimersForTests();
     knowledgeTimers.publishDebounceMs = 30;
-    expect(sweepKnowledge().changed).toBe(1);
+    expect((await sweepKnowledge()).changed).toBe(1);
     await settle();
     expect((db.query("SELECT c.text FROM kb_chunks c JOIN kb_sources s ON s.id = c.source_id WHERE s.kb_id = ? AND s.kind = 'note'").get(kbId) as { text: string }).text).toContain("Desks are assigned");
   });
@@ -207,14 +207,15 @@ describe("the index lifecycle (plan §9)", () => {
     await settle();
     const added = (await sources()).find((source) => source.refId === friendNoteId)!;
     expect(added).toMatchObject({ status: "ready", title: "Friend's guide" });
+    // Unsharing it from the owner removes its chunks at once (Wave 44 fixes, M1: the access hook, not the hourly sweep).
     await shareNote(friend, friendNoteId, []);
-    expect(sweepKnowledge().unavailable).toBe(1);
     const gone = (await sources()).find((source) => source.id === added.id)!;
     expect(gone).toMatchObject({ status: "unavailable", chunkCount: 0 });
     expect((db.query("SELECT COUNT(*) AS count FROM kb_chunks WHERE source_id = ?").get(added.id) as { count: number }).count).toBe(0);
     expect((db.query("SELECT COUNT(*) AS count FROM kb_chunk_fts WHERE kb_chunk_fts MATCH 'plants'").get() as { count: number }).count).toBe(0);
+    expect((await sweepKnowledge()).unavailable).toBe(0);
+    // Shared again: the hook queues it at once.
     await shareNote(friend, friendNoteId, [{ id: owner.userId, level: "view" }]);
-    expect(sweepKnowledge().changed).toBe(1);
     await settle();
     expect((await sources()).find((source) => source.id === added.id)!.status).toBe("ready");
     // Adding a note the owner cannot read is refused like a missing one.
@@ -227,8 +228,12 @@ describe("the index lifecycle (plan §9)", () => {
   });
 
   test("sources are bounded: file types and sizes, pasted text, and the pickers offer only what both can read", async () => {
-    const binary = await upload(owner, "photo.json", "{\"a\":1}");
-    expect((await send(owner, "POST", `/knowledge/${kbId}/sources`, { kind: "document", documentId: binary })).status).toBe(201);
+    // QA LOW-5: text, Markdown, and CSV by extension only; a .json file (stored as text/plain) is refused, and never offered.
+    const json = await upload(owner, "photo.json", "{\"a\":1}");
+    const refused = await send(owner, "POST", `/knowledge/${kbId}/sources`, { kind: "document", documentId: json });
+    expect(refused.status).toBe(400);
+    expect(refused.body.code).toBe("UNSUPPORTED_TYPE");
+    expect((await send(owner, "GET", `/knowledge/${kbId}/candidates?kind=document&q=photo`)).body.candidates).toEqual([]);
     const huge = await send(owner, "POST", `/knowledge/${kbId}/sources`, { kind: "text", title: "Huge", text: "x".repeat(256 * 1024 + 1) });
     expect(huge.status).toBe(400);
     const notes = await send(owner, "GET", `/knowledge/${kbId}/candidates?kind=note&q=`);
@@ -323,7 +328,7 @@ describe("budgets and egress (T314, T305)", () => {
       const current = readAgentSettings();
       writeAgentSettings(admin.userId, { dailyTokensUser: 500_000 }, current.revision);
     }
-    sweepKnowledge();
+    await sweepKnowledge();
     await settle();
     expect((await sources()).every((source) => source.status === "ready" || source.status === "error")).toBe(true);
   });

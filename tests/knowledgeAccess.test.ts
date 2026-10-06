@@ -169,7 +169,8 @@ describe("knowledge bases: the access matrix (D367)", () => {
     expect(asViewer.body.knowledgeBase.sources.find((source: { kind: string }) => source.kind === "text")).toMatchObject({ title: "Billing FAQ" });
     const searched = await send(viewer, "POST", `${path}/search`, { query: "on-call engineer outages" });
     expect(searched.status).toBe(200);
-    expect(searched.body.hits[0]).toMatchObject({ heading: "Owner's runbook › Escalation", source: { kind: "note" } });
+    // QA LOW-2: the note's own title (its H1) is left out of the heading path for someone who cannot open it.
+    expect(searched.body.hits[0]).toMatchObject({ heading: "Escalation", source: { kind: "note" } });
     expect(searched.body.hits[0].source.id).toBeUndefined();
     expect(searched.body.hits[0].source.title).toBeUndefined();
     expect(searched.body.hits[0].text).toContain("Page the on-call engineer");
@@ -237,7 +238,8 @@ describe("search_knowledge in chats (§5.2, T320)", () => {
     expect((await share(owner, `/agents/${agentId}`, { audience: "selected", people: [{ id: stranger.userId, level: "view" }] })).status).toBe(200);
     await chatOnce(stranger, agentId, "tool:knowledge__search_knowledge:{\"query\":\"on-call engineer\",\"k\":1}");
     const [hit] = resultJson(lastToolResult()).results;
-    expect(hit).toMatchObject({ heading: "Owner's runbook › Escalation", source: { kind: "note" } });
+    expect(hit).toMatchObject({ heading: "Escalation", source: { kind: "note" } });
+    expect(lastToolResult()).not.toContain("Owner's runbook");
     expect(hit!.source).toEqual({ kind: "note" });
     expect(hit!.text).toContain("Page the on-call engineer");
     // A base binned (or no longer open to the agent's owner) drops out at the next step.
@@ -292,13 +294,14 @@ describe("search_knowledge for keys (MCP, agents:read + a knowledge_base grant)"
 
     const chosen = key(owner, [kbGrant(otherKbId)]);
     const live = loadLiveKey(chosen.id)!;
-    expect(mcpToolSpecs.filter((spec) => toolVisible(spec, live)).map((spec) => spec.name).sort()).toEqual(["list_agents", "search_knowledge"]);
+    // QA LOW-6: a key over chosen knowledge bases is not offered list_agents (it reads no agents).
+    expect(mcpToolSpecs.filter((spec) => toolVisible(spec, live)).map((spec) => spec.name).sort()).toEqual(["search_knowledge"]);
     const narrowed = await mcp(chosen.id, "search_knowledge", { query: "refunds spring" });
     expect(narrowed.value.results.map((hit: { kb: { id: string } }) => hit.kb.id)).toEqual(narrowed.value.results.map(() => otherKbId));
     expect(narrowed.value.bases).toBe(1);
     expect((await mcp(chosen.id, "search_knowledge", { query: "refunds", kb: kbId })).value.code).toBe("NOT_FOUND");
     expect((await mcp(chosen.id, "list_chats", {})).value.code).toBe("SCOPE_REQUIRED");
-    expect((await mcp(chosen.id, "list_agents", {})).value.agents).toEqual([]);
+    expect((await mcp(chosen.id, "list_agents", {})).value.code).toBe("SCOPE_REQUIRED");
 
     const none = key(owner, [all("notes", "read")]);
     expect(mcpToolSpecs.filter((spec) => toolVisible(spec, loadLiveKey(none.id)!)).some((spec) => spec.name === "search_knowledge")).toBe(false);

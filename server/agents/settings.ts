@@ -2,6 +2,7 @@ import { config } from "../config";
 import { audit, db, now } from "../db";
 import { AGENT_ROLE_OPTIONS, DEFAULT_AGENT_SETTINGS, type AgentRole, type AgentSettings } from "../../shared/agents";
 import { AgentError } from "./status";
+import { knowledgeProviderHook } from "../knowledge/hooks";
 
 /**
  * Instance policy (plan §4.1): one `agent_settings` row per key, each with its own revision. The
@@ -48,7 +49,8 @@ export type SettingsPatch = Partial<AgentSettings>;
 
 /** Writes the given keys (CAS on the summed revision) and returns the new settings. */
 export function writeAgentSettings(actorId: string, patch: SettingsPatch, expectedRevision: number) {
-  return db.transaction(() => {
+  const before = readAgentSettings();
+  const written = db.transaction(() => {
     const current = readAgentSettings();
     if (current.revision !== expectedRevision) throw new AgentError(409, "REVISION_MISMATCH", "The settings changed elsewhere; reload and try again", { revision: current.revision });
     const timestamp = now();
@@ -63,6 +65,9 @@ export function writeAgentSettings(actorId: string, patch: SettingsPatch, expect
     if (patch.publicChatLinks !== undefined && patch.publicChatLinks !== current.publicChatLinks) audit(actorId, null, "agents.policy.public_chat_links", { on: patch.publicChatLinks });
     return readAgentSettings();
   })();
+  // Wave 44 fixes (QA LOW-3): a budget changed wakes knowledge sources paused on it (still over it, they pause again at no cost).
+  if (written.dailyTokensUser !== before.dailyTokensUser || written.dailyTokensInstance !== before.dailyTokensInstance) knowledgeProviderHook({ kind: "budget" });
+  return written;
 }
 
 /** Whether a role may chat (policy `chat_roles`); guests never. */

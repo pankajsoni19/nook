@@ -4,7 +4,8 @@ import { assertBudget, chargeUsage } from "../agents/runs";
 import { connectionFor } from "../agents/providers";
 import { AgentError } from "../agents/status";
 import { blobToVector, embedTexts, takesDimensions } from "./embed";
-import { canReadSource, type KbRow } from "./service";
+import { canReadSource, kbProvider, ownerIsActive, PROVIDER_REMOVED_NOTICE, type KbRow } from "./service";
+import { recheckLater } from "./index";
 
 /**
  * Search (plan §9, D368; Wave 44 "AC-E"): brute-force cosine over each base's vectors (a dot product,
@@ -17,8 +18,13 @@ import { canReadSource, type KbRow } from "./service";
  * the chunks moves the revision, and the next search reloads.
  *
  * The query is embedded with the base's own provider and model (charged to whoever searches, after
- * the same budget check as a run). When that fails, or the budget is used up, the search still
- * answers from BM25 alone (`mode: "keyword"`).
+ * the same budget check as a run). When that fails, the budget is used up, or the base's provider
+ * was removed (M3: never the default instead), that group answers from BM25 alone, and the whole
+ * search reports `mode: "keyword"` (L6).
+ *
+ * Wave 44 fixes: a base whose owner is blocked answers nothing (M2), and a hit whose note or file
+ * the base's owner can no longer read is dropped before it is returned (M1); its source is marked
+ * `unavailable` afterwards, outside the search.
  */
 
 type Matrix = { kbId: string; revision: number; dims: number; ids: Int32Array; vectors: Float32Array; bytes: number };
@@ -121,7 +127,7 @@ export type RawHit = {
   chunkId: number; kbId: string; heading: string | null; text: string; score: number; ranks: { vector: number | null; keyword: number | null };
   source: { id: string; kind: SourceKind; refId: string | null; title: string };
 };
-export type SearchOutcome = { hits: RawHit[]; mode: "hybrid" | "keyword" };
+export type SearchOutcome = { hits: RawHit[]; mode: "hybrid" | "keyword"; notice?: string };
 /** Who pays for the query's embedding: the person searching (and the calling key over MCP or the API). */
 export type SearchPayer = { userId: string; keyId?: string };
 
@@ -131,12 +137,15 @@ const CANDIDATES = 50;
  * Searches the bases (already checked by the caller: live, and open to whoever asked). Each group
  * of bases that share a provider, model, and size gets one query embedding.
  */
-export async function searchBases(kbs: readonly KbRow[], query: string, k: number, payer: SearchPayer, signal?: AbortSignal): Promise<SearchOutcome> {
+export async function searchBases(all: readonly KbRow[], query: string, k: number, payer: SearchPayer, signal?: AbortSignal): Promise<SearchOutcome> {
   const text = query.trim().slice(0, KNOWLEDGE_BOUNDS.queryChars);
   const limit = Math.max(1, Math.min(KNOWLEDGE_BOUNDS.k.max, Math.floor(k) || KNOWLEDGE_BOUNDS.k.default));
+  // M2: a blocked owner's bases answer nothing.
+  const kbs = all.filter((kb) => ownerIsActive(kb.owner_id));
   if (!text || kbs.length === 0) return { hits: [], mode: "hybrid" };
   const vectorHits: Array<{ id: number; score: number }> = [];
   let vectorFailed = false;
+  let providerRemoved = false;
   const groups = new Map<string, KbRow[]>();
   for (const kb of kbs) {
     if (kb.chunk_count === 0) continue;
@@ -145,8 +154,15 @@ export async function searchBases(kbs: readonly KbRow[], query: string, k: numbe
   }
   for (const group of groups.values()) {
     const first = group[0]!;
+    // M3: the base's own provider or none (never the current default): keyword-only, with a note.
+    const provider = kbProvider(first);
+    if (!provider) {
+      vectorFailed = true;
+      providerRemoved = true;
+      continue;
+    }
     try {
-      const connection = connectionFor(first.provider_id, null);
+      const connection = connectionFor(provider.id, null);
       const result = await embedTexts(connection, first.embedding_model, takesDimensions(first.embedding_model) ? first.dims : null, [text], {
         beforeBatch: () => assertBudget(payer.userId),
         afterBatch: (tokens) => chargeUsage(payer.userId, `kb:${first.id}`, { promptTokens: tokens, completionTokens: 0, estimated: false }, 0, payer.keyId ?? ""),
@@ -164,17 +180,47 @@ export async function searchBases(kbs: readonly KbRow[], query: string, k: numbe
   vectorHits.sort((left, right) => right.score - left.score || left.id - right.id);
   const vectorIds = vectorHits.slice(0, CANDIDATES).map((hit) => hit.id);
   const keywordIds = keywordTop(kbs.map((kb) => kb.id), text, CANDIDATES);
-  const fused = fuse([vectorIds, keywordIds]).slice(0, limit);
-  if (fused.length === 0) return { hits: [], mode: vectorFailed ? "keyword" : "hybrid" };
+  const fused = fuse([vectorIds, keywordIds]);
+  const outcome = (hits: RawHit[]): SearchOutcome => ({ hits, mode: vectorFailed ? "keyword" : "hybrid", ...(providerRemoved ? { notice: PROVIDER_REMOVED_NOTICE } : {}) });
+  if (fused.length === 0) return outcome([]);
   const rows = db.query(`SELECT c.id, c.kb_id, c.heading, c.text, s.id AS source_id, s.kind, s.ref_id, s.title FROM kb_chunks c JOIN kb_sources s ON s.id = c.source_id
     WHERE c.id IN (SELECT value FROM json_each($ids))`).all({ ids: JSON.stringify(fused.map((hit) => hit.id)) }) as Array<{ id: number; kb_id: string; heading: string | null; text: string; source_id: string; kind: SourceKind; ref_id: string | null; title: string }>;
   const byId = new Map(rows.map((row) => [row.id, row]));
-  const hits = fused.flatMap((hit): RawHit[] => {
+  const owners = new Map(kbs.map((kb) => [kb.id, kb.owner_id]));
+  // M1: a handful of distinct sources per search, each checked once against its base's owner.
+  const readable = new Map<string, boolean>();
+  const stale: Array<{ kind: "note" | "document"; refId: string }> = [];
+  const hits: RawHit[] = [];
+  for (const hit of fused) {
+    if (hits.length >= limit) break;
     const row = byId.get(hit.id);
-    if (!row) return [];
-    return [{ chunkId: row.id, kbId: row.kb_id, heading: row.heading, text: row.text, score: Math.round(hit.score * 1e6) / 1e6, ranks: { vector: hit.ranks[0] ?? null, keyword: hit.ranks[1] ?? null }, source: { id: row.source_id, kind: row.kind, refId: row.ref_id, title: row.title } }];
-  });
-  return { hits, mode: vectorFailed ? "keyword" : "hybrid" };
+    if (!row) continue;
+    if (row.kind !== "text") {
+      const owner = owners.get(row.kb_id)!;
+      const key = `${owner}:${row.kind}:${row.ref_id}`;
+      if (!readable.has(key)) {
+        const open = canReadSource(owner, row.kind, row.ref_id);
+        readable.set(key, open);
+        if (!open && row.ref_id) stale.push({ kind: row.kind, refId: row.ref_id });
+      }
+      if (!readable.get(key)) continue;
+    }
+    hits.push({ chunkId: row.id, kbId: row.kb_id, heading: row.heading, text: row.text, score: Math.round(hit.score * 1e6) / 1e6, ranks: { vector: hit.ranks[0] ?? null, keyword: hit.ranks[1] ?? null }, source: { id: row.source_id, kind: row.kind, refId: row.ref_id, title: row.title } });
+  }
+  recheckLater(stale);
+  return outcome(hits);
+}
+
+/**
+ * QA LOW-2: the heading path as someone who cannot open the source sees it. A note's own title (its
+ * H1, the path's first segment when it equals the source's title) is dropped; the sub-headings stay.
+ */
+export function headingFor(heading: string | null, sourceTitle: string, open: boolean): string | null {
+  if (open || !heading) return heading;
+  const segments = heading.split(" › ");
+  if (segments[0]!.trim().toLowerCase() !== sourceTitle.trim().toLowerCase()) return heading;
+  const rest = segments.slice(1).join(" › ");
+  return rest || null;
 }
 
 /**
@@ -189,6 +235,6 @@ export function presentHits(hits: readonly RawHit[], readerId: string, names: Re
     if (!readable.has(key)) readable.set(key, canReadSource(readerId, hit.source.kind, hit.source.refId));
     const open = readable.get(key)!;
     const source: KnowledgeHit["source"] = hit.source.kind === "text" ? { kind: "text", title: hit.source.title } : open ? { kind: hit.source.kind, id: hit.source.refId!, title: hit.source.title } : { kind: hit.source.kind };
-    return { kb: { id: hit.kbId, name: names.get(hit.kbId) ?? "" }, heading: hit.heading, source, text: hit.text.length > KNOWLEDGE_BOUNDS.hitTextChars ? `${hit.text.slice(0, KNOWLEDGE_BOUNDS.hitTextChars - 1)}…` : hit.text, score: hit.score, ranks: hit.ranks };
+    return { kb: { id: hit.kbId, name: names.get(hit.kbId) ?? "" }, heading: hit.source.kind === "text" ? hit.heading : headingFor(hit.heading, hit.source.title, open), source, text: hit.text.length > KNOWLEDGE_BOUNDS.hitTextChars ? `${hit.text.slice(0, KNOWLEDGE_BOUNDS.hitTextChars - 1)}…` : hit.text, score: hit.score, ranks: hit.ranks };
   });
 }

@@ -109,4 +109,7 @@ export type BinRestoreResult = {
   /** Calendars and events. */
   calendarId?: string;
   calendarName?: string;
+  /** Knowledge bases (Wave 44 fixes): the base itself, not a folder. */
+  knowledgeBaseId?: string;
+  knowledgeBaseName?: string;
 };

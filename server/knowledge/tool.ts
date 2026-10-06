@@ -16,11 +16,15 @@ import type { KbRow } from "./service";
 
 export type KnowledgeToolSpec = { kbs: Array<{ id: string; name: string; description: string }> };
 
-/** The attached bases an agent may search now: live, and still open to the agent's owner. */
+/**
+ * The attached bases an agent may search now: live, and still owned or managed by the agent's owner
+ * (Wave 44 fixes, M4, operator 2026-10-06: attaching needs manage). A base downgraded to view, or
+ * unshared, or binned, drops out at the next step.
+ */
 export function liveAttachedBases(agent: { id: string; owner_id: string }): KbRow[] {
   const rows = db.query(`SELECT k.* FROM agent_tools t JOIN knowledge_bases k ON k.id = t.kb_id
     WHERE t.agent_id = ? AND t.source = 'knowledge' AND k.deleted_at IS NULL ORDER BY k.name COLLATE NOCASE, k.id`).all(agent.id) as KbRow[];
-  return rows.filter((kb) => shareLevel("knowledge_base", kb, agent.owner_id) !== "none");
+  return rows.filter((kb) => { const level = shareLevel("knowledge_base", kb, agent.owner_id); return level === "owner" || level === "manage"; });
 }
 
 /** The JSON Schema the model sees. */
@@ -61,7 +65,8 @@ export async function runKnowledgeTool(spec: KnowledgeToolSpec, args: Record<str
   const names = new Map(live.map((kb) => [kb.id, kb.name]));
   const hits = presentHits(outcome.hits, context.runner.userId, names).map((hit) => ({ heading: hit.heading, source: hit.source, kb: hit.kb.name, score: hit.score, text: hit.text }));
   audit(context.runner.userId, null, "knowledge.search", { via: "agent", runId: context.runId, agentId: context.agent.id, bases: live.length, hits: hits.length, mode: outcome.mode });
-  return { ok: true, text: JSON.stringify({ results: hits, ...(outcome.mode === "keyword" ? { note: "Matched by keywords only (the embedding model was not available)" } : {}) }) };
+  const note = outcome.notice ?? (outcome.mode === "keyword" ? "Matched by keywords only (the embedding model was not available)" : null);
+  return { ok: true, text: JSON.stringify({ results: hits, ...(note ? { note } : {}) }) };
 }
 
 export { KNOWLEDGE_TOOL };
