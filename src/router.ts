@@ -41,9 +41,13 @@ export type Route =
   // and one secret at /vault/:vaultId/secrets/:secretId (its values stacked per environment).
   // Wave 26: who has access at /vault/:vaultId/access, and its Activity at /vault/:vaultId/activity.
   | { app: "vault"; vaultId: string | null; envId: string | null; secretId: string | null; page: "access" | "activity" | null }
+  // Agent chat (Wave 40, plan §13.1): the list at /chat (desktop: the list beside an empty state),
+  // a new chat at /chat/new (optionally `?agent=<id>` preselects the agent), and one chat at /chat/:chatId.
+  | { app: "chat"; chatId: string | null; newChat?: true; agentId?: string }
   // The Settings hub (Wave 37): a page at /settings (the section list on phones), and one account
   // section at /settings/:section. Team sections are `team` routes under /settings/team/… (above).
-  | { app: "settings"; section: SettingsSection | null };
+  // Wave 40: Settings → Agents has an editor below it at /settings/agents/:agentId (or /settings/agents/new).
+  | { app: "settings"; section: SettingsSection | null; agentId?: string };
 
 const idPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -158,7 +162,21 @@ export function parseRoute(pathname: string, search = ""): Route {
     return { app: "whiteboards", folder, boardId: itemId };
   }
   if (app === "vault") return parseVault(rest);
+  if (app === "chat") return parseChat(rest, search);
   return { app: "home" };
+}
+
+export const NEW_AGENT = "new";
+
+// /chat, /chat/new (with ?agent=<id>), and /chat/:chatId. Anything malformed opens the list.
+function parseChat(segments: string[], search: string): Route {
+  const [first] = segments;
+  if (first === undefined || segments.length !== 1) return { app: "chat", chatId: null };
+  if (first === "new") {
+    const agent = new URLSearchParams(search).get("agent");
+    return agent && isRouteId(agent) ? { app: "chat", chatId: null, newChat: true, agentId: agent.toLowerCase() } : { app: "chat", chatId: null, newChat: true };
+  }
+  return isRouteId(first) ? { app: "chat", chatId: first.toLowerCase() } : { app: "chat", chatId: null };
 }
 
 /**
@@ -200,6 +218,8 @@ function parseTeam(rest: string[], hub: boolean): Route {
  */
 function parseSettings(rest: string[]): Route {
   if (rest[0] === "team") return parseTeam(rest.slice(1), true);
+  // Wave 40: the agent editor, /settings/agents/:agentId or /settings/agents/new.
+  if (rest[0] === "agents" && rest.length === 2 && rest[1] !== undefined && (rest[1] === NEW_AGENT || isRouteId(rest[1]))) return { app: "settings", section: "agents", agentId: rest[1].toLowerCase() };
   if (rest.length === 1 && rest[0] === "bin") return { app: "bin" };
   const section = rest.length === 1 ? settingsSectionForSlug(rest[0]!) : null;
   return { app: "settings", section };
@@ -260,7 +280,15 @@ export function formatRoute(route: Route): string {
   if (route.app === "notifications") return "/notifications";
   if (route.app === "bin") return "/settings/bin";
   if (route.app === "team") return formatTeam(route);
-  if (route.app === "settings") return route.section && SETTINGS_SECTIONS.includes(route.section) ? settingsPath(route.section) : "/settings";
+  if (route.app === "settings") {
+    if (route.section === "agents" && route.agentId && (route.agentId === NEW_AGENT || isRouteId(route.agentId))) return `${settingsPath("agents")}/${route.agentId.toLowerCase()}`;
+    return route.section && SETTINGS_SECTIONS.includes(route.section) ? settingsPath(route.section) : "/settings";
+  }
+  if (route.app === "chat") {
+    if (route.chatId && isRouteId(route.chatId)) return `/chat/${route.chatId.toLowerCase()}`;
+    if (route.newChat) return route.agentId && isRouteId(route.agentId) ? `/chat/new?agent=${route.agentId.toLowerCase()}` : "/chat/new";
+    return "/chat";
+  }
   if (route.app === "whiteboards") return formatCollection("/whiteboards", route.folder, route.boardId);
   if (route.app === "vault") {
     if (!route.vaultId || !isRouteId(route.vaultId)) return "/vault";
@@ -305,14 +333,15 @@ function formatTasksHome(home: TasksHome) {
  * sections and back to the page Settings was opened from.
  */
 // `access` (Wave 33): Settings → My access, read-only, every role but guest.
-export const SETTINGS_SECTIONS = ["security", "modules", "mcp", "access", "notifications", "about"] as const;
+// `agents` and `ai` (Wave 40): Settings → Agents (every role that chats) and Settings → AI (admins: providers and policy).
+export const SETTINGS_SECTIONS = ["security", "modules", "mcp", "access", "notifications", "agents", "ai", "about"] as const;
 export type SettingsSection = typeof SETTINGS_SECTIONS[number];
 
 /**
  * The URL slug of each section. API keys (section id "mcp" since Wave 8) lives at `/settings/keys`
  * (C3); the old `/settings/mcp` still opens it and is rewritten in place (no extra history entry).
  */
-const SETTINGS_SLUGS: Record<SettingsSection, string> = { security: "security", modules: "modules", mcp: "keys", access: "access", notifications: "notifications", about: "about" };
+const SETTINGS_SLUGS: Record<SettingsSection, string> = { security: "security", modules: "modules", mcp: "keys", access: "access", notifications: "notifications", agents: "agents", ai: "ai", about: "about" };
 const LEGACY_SETTINGS_SLUGS: Record<string, SettingsSection> = { mcp: "mcp" };
 
 function settingsSectionForSlug(slug: string): SettingsSection | null {
@@ -333,7 +362,7 @@ export function isLegacySettingsPath(pathname: string) {
   return section !== null && pathname !== settingsPath(section);
 }
 
-export const SETTINGS_SECTION_NAMES: Record<SettingsSection, string> = { security: "Security", modules: "Modules", mcp: "API keys", access: "My access", notifications: "Notifications", about: "About" };
+export const SETTINGS_SECTION_NAMES: Record<SettingsSection, string> = { security: "Security", modules: "Modules", mcp: "API keys", access: "My access", notifications: "Notifications", agents: "Agents", ai: "AI", about: "About" };
 
 /** The document title on an account section: "Settings · Notifications · Nook". */
 export const settingsDocumentTitle = (section: SettingsSection) => hubDocumentTitle(SETTINGS_SECTION_NAMES[section]);
@@ -349,7 +378,8 @@ export const routeFromLocation = (location: { pathname: string; search: string }
  * on Tasks URLs (the only app whose URLs carry one).
  */
 export function locationUrl(location: { pathname: string; search: string }) {
-  return /^\/tasks(\/|$)/.test(location.pathname) ? `${location.pathname}${location.search}` : location.pathname;
+  // Tasks URLs carry the board query; /chat/new carries the preselected agent (Wave 40).
+  return /^\/tasks(\/|$)/.test(location.pathname) || location.pathname === "/chat/new" ? `${location.pathname}${location.search}` : location.pathname;
 }
 
 export function sameRoute(left: Route, right: Route) {

@@ -7,15 +7,15 @@ import { MCP_PERMISSIONS, offeredMcpPermissions, type McpScope } from "../mcpPer
  * builder's rules and summaries are unit-tested.
  */
 
-export type GrantModule = "notes" | "files" | "tasks" | "today" | "calendar" | "collections" | "team" | "inbox" | "bin" | "whiteboards";
-export type KeyPermission = "read" | "comment" | "write" | "draft" | "publish" | "create";
+export type GrantModule = "notes" | "files" | "tasks" | "today" | "calendar" | "collections" | "team" | "inbox" | "bin" | "whiteboards" | "agents";
+export type KeyPermission = "read" | "comment" | "write" | "draft" | "publish" | "create" | "run";
 export type ResourceKind = "folder" | "note" | "document" | "board" | "task_view" | "collection" | "calendar" | "routine" | "whiteboard";
 export type KeySurfaces = "mcp" | "rest" | "both";
 
-export const GRANT_MODULES: readonly GrantModule[] = ["notes", "files", "tasks", "today", "calendar", "collections", "team", "inbox", "bin", "whiteboards"];
+export const GRANT_MODULES: readonly GrantModule[] = ["notes", "files", "tasks", "today", "calendar", "collections", "team", "inbox", "bin", "whiteboards", "agents"];
 
 export const MODULE_LABELS: Record<GrantModule, string> = {
-  notes: "Notes", files: "Files", tasks: "Tasks", today: "Today", calendar: "Calendar", collections: "Collections", team: "Team", inbox: "Inbox", bin: "Bin", whiteboards: "Whiteboards"
+  notes: "Notes", files: "Files", tasks: "Tasks", today: "Today", calendar: "Calendar", collections: "Collections", team: "Team", inbox: "Inbox", bin: "Bin", whiteboards: "Whiteboards", agents: "Chat"
 };
 
 /** Every `{module, permission}` pair a key can hold, and the MCP scope it is. */
@@ -29,7 +29,8 @@ export const GRANT_SCOPES: Record<GrantModule, Partial<Record<KeyPermission, Mcp
   team: { read: "team:read" },
   inbox: { read: "inbox:read", write: "inbox:write" },
   bin: { write: "bin:write" },
-  whiteboards: { read: "whiteboards:read", write: "whiteboards:write" }
+  whiteboards: { read: "whiteboards:read", write: "whiteboards:write" },
+  agents: { read: "agents:read" }
 };
 
 export const scopeFor = (module: GrantModule, permission: KeyPermission) => GRANT_SCOPES[module][permission] ?? null;

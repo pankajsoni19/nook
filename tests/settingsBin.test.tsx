@@ -61,7 +61,7 @@ describe("the hub's entries", () => {
   });
 
   test("the Bin module off removes the entry; the Team module still decides Team", () => {
-    expect(ids(hubEntries("member", { teamModuleEnabled: true, binModuleEnabled: false }))).toEqual(["security", "notifications", "access", "mcp", "modules", "about", "team-members"]);
+    expect(ids(hubEntries("member", { teamModuleEnabled: true, binModuleEnabled: false }))).toEqual(["security", "notifications", "access", "mcp", "agents", "modules", "about", "team-members"]);
     expect(ids(hubEntries("guest", { teamModuleEnabled: true, binModuleEnabled: false }))).toEqual(["security", "notifications", "mcp", "modules", "about"]);
     expect(ids(hubEntries("admin", { teamModuleEnabled: false, binModuleEnabled: false }))).not.toContain("bin");
     // While two-factor setup is required there is only Security.

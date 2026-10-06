@@ -2,7 +2,7 @@
 import type { BinItem, BinRestoreResult, Visibility } from "../types";
 import { whiteboardDisplayName } from "../../shared/whiteboardScene";
 
-export type BinFilter = "all" | "note" | "document" | "tasks" | "collections" | "calendar" | "vault";
+export type BinFilter = "all" | "note" | "document" | "tasks" | "collections" | "calendar" | "vault" | "chat" | "agent";
 
 export const isTaskBinItem = (item: Pick<BinItem, "type">) => item.type === "card" || item.type === "board";
 export const isCollectionItem = (item: Pick<BinItem, "type">) => item.type === "collection" || item.type === "collection_row";
@@ -55,12 +55,12 @@ export function filterBinItems(items: BinItem[], filter: BinFilter) {
   return items.filter((item) => item.type === filter);
 }
 
-const untitled: Record<BinItem["type"], string> = { note: "Untitled note", document: "Untitled file", card: "Untitled card", board: "Untitled board", collection: "Untitled collection", collection_row: "Untitled row", calendar: "Untitled calendar", event: "Untitled event", vault: "Untitled vault", vault_environment: "Untitled environment", vault_secret: "Untitled secret" };
+const untitled: Record<BinItem["type"], string> = { note: "Untitled note", document: "Untitled file", card: "Untitled card", board: "Untitled board", collection: "Untitled collection", collection_row: "Untitled row", calendar: "Untitled calendar", event: "Untitled event", vault: "Untitled vault", vault_environment: "Untitled environment", vault_secret: "Untitled secret", chat: "Untitled chat", agent: "Untitled agent" };
 
 export function binItemLabel(item: Pick<BinItem, "title" | "type"> & Partial<Pick<BinItem, "kind">>) {
   // QA L6: a whiteboard reads by its name, without the ".excalidraw" of its file.
   if (item.type === "document" && item.kind === "whiteboard") return whiteboardDisplayName(item.title).trim() || "Untitled whiteboard";
-  return item.title.trim() || untitled[item.type];
+  return item.title.trim() || untitled[item.type] || "Untitled item";
 }
 
 const attachmentKindLabel = (item: Partial<Pick<BinItem, "attachment_kind">>) =>
@@ -94,6 +94,9 @@ export function binKindLabel(item: Pick<BinItem, "type" | "attachment"> & Partia
   if (item.type === "vault") return "Vault";
   if (item.type === "vault_environment") return "Environment";
   if (item.type === "vault_secret") return "Secret";
+  if (item.type === "chat") return "Chat";
+  if (item.type === "agent") return "Agent";
+  if (item.type !== "document") return "Item";
   return item.attachment ? attachmentKindLabel(item) : "File";
 }
 

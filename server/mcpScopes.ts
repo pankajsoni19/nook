@@ -23,7 +23,10 @@ export const MCP_SCOPES = [
   // Agent inbox (Wave 21, D151): suggest changes for the key owner to approve; never applies anything.
   "inbox:read", "inbox:write",
   // Whiteboards (Wave 23, D205): list and read boards as bounded JSON; write only creates an empty board.
-  "whiteboards:read", "whiteboards:write"
+  "whiteboards:read", "whiteboards:write",
+  // Agent chat (Wave 40, plan §7.1): list agents and read the key owner's own chats. `agents:run`
+  // (external runs, the Audit log) arrives with AC-C.
+  "agents:read"
 ] as const;
 export type McpScope = typeof MCP_SCOPES[number];
 

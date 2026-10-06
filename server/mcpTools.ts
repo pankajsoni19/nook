@@ -26,6 +26,7 @@ import { collectionTools } from "./collections/mcpTools";
 import { teamTools } from "./team/mcpTools";
 import { inboxTools } from "./inbox/mcpTools";
 import { whiteboardTools } from "./whiteboards/mcpTools";
+import { agentTools } from "./agents/mcpTools";
 import { neutralizeWhiteboardEmbeds } from "../shared/whiteboardEmbed";
 import { countRunToolCall } from "./inbox/routineHooks";
 import { canWriteContent } from "./team/userRole";
@@ -459,7 +460,8 @@ export const mcpToolSpecs: readonly McpToolSpec[] = [
   ...todayTools,
   ...teamTools,
   ...inboxTools,
-  ...whiteboardTools
+  ...whiteboardTools,
+  ...agentTools
 ];
 
 /** Whether a key holding `scopes` may see and call `spec`: any one of its scopes and all of alsoRequires (D172). */

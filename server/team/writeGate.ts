@@ -71,7 +71,14 @@ export const ROLE_READ_ONLY_ALLOWED_WRITES: readonly AllowedWrite[] = [
   // Agent inbox (D152): a demoted owner keeps clearing their own proposals; approve stays refused.
   { method: "POST", path: "/api/inbox/proposals/:id/reject", roles: ["viewer"], why: "clear own proposals" },
   { method: "POST", path: "/api/inbox/proposals/bulk", roles: ["viewer"], why: "clear own proposals; the handler refuses approve for read-only roles" },
-  { method: "PUT", path: "/api/inbox/settings", roles: ["viewer"], why: "own proposal push setting" }
+  { method: "PUT", path: "/api/inbox/settings", roles: ["viewer"], why: "own proposal push setting" },
+  // Agent chat (Wave 40, plan §12): viewers chat with agents under the `chat_roles` policy; the handlers check it.
+  { method: "POST", path: "/api/chats", roles: ["viewer"], why: "own chat (the chat_roles policy decides)" },
+  { method: "PATCH", path: "/api/chats/:chatId", roles: ["viewer"], why: "own chat title, pin, and branch" },
+  { method: "DELETE", path: "/api/chats/:chatId", roles: ["viewer"], why: "own chat to the Bin" },
+  { method: "POST", path: "/api/chats/:chatId/messages", roles: ["viewer"], why: "a message in an own chat" },
+  { method: "POST", path: "/api/chats/:chatId/messages/:messageId/regenerate", roles: ["viewer"], why: "regenerate in an own chat" },
+  { method: "POST", path: "/api/runs/:runId/cancel", roles: ["viewer"], why: "stop an own run" }
 ];
 
 /**

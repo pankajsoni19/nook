@@ -11,10 +11,10 @@ export const BIN_RETENTION_MS = 30 * 86_400_000;
 /** Types stored in the core tables below. */
 export type CoreBinType = "note" | "document";
 /** Types whose module registers a BinProvider (Collections and Calendar, WAVES_10-12.md D68; the Vault, D225). */
-export type ProvidedBinType = "collection" | "collection_row" | "calendar" | "event" | "vault" | "vault_environment" | "vault_secret";
+export type ProvidedBinType = "collection" | "collection_row" | "calendar" | "event" | "vault" | "vault_environment" | "vault_secret" | "chat" | "agent";
 export type BinType = CoreBinType | ProvidedBinType;
 const CORE_BIN_TYPES: readonly CoreBinType[] = ["note", "document"];
-const PROVIDED_BIN_TYPES: readonly ProvidedBinType[] = ["collection", "collection_row", "calendar", "event", "vault", "vault_environment", "vault_secret"];
+const PROVIDED_BIN_TYPES: readonly ProvidedBinType[] = ["collection", "collection_row", "calendar", "event", "vault", "vault_environment", "vault_secret", "chat", "agent"];
 /**
  * Why an item was purged, as recorded in the audit metadata. "resumed" marks a
  * purge the sweeper finished after it was interrupted: the original reason
@@ -242,10 +242,16 @@ export async function sweepBin(options: { nowMs?: number } = {}): Promise<BinSwe
   // fresh 30 days, so they run after documents.
   counts.purged += await sweepTaskBin(cutoff, SWEEP_BATCH_SIZE);
   // Provided types (collections, rows) purge due items in their own order: parents first.
-  for (const provider of providers.values()) {
-    const provided = await provider.sweep(cutoff);
-    counts.purged += provided.purged;
-    counts.pending += provided.pending;
+  for (const [type, provider] of providers.entries()) {
+    // One provider's failure never stops the others' batches (Wave 40 review M2); the hour after retries it.
+    try {
+      const provided = await provider.sweep(cutoff);
+      counts.purged += provided.purged;
+      counts.pending += provided.pending;
+    } catch (error) {
+      counts.pending += 1;
+      console.error(`Bin sweep failed for ${type} items`, error instanceof Error ? error.name : "Unknown error");
+    }
   }
   return counts;
 }

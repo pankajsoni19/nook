@@ -45,6 +45,10 @@ import { InboxApp } from "./inbox/InboxApp";
 const WhiteboardsApp = lazy(() => import("./whiteboards/WhiteboardsApp").then((module) => ({ default: module.WhiteboardsApp })));
 // The Vault (Wave 25) is its own chunk too: nobody who never opens it downloads it.
 const VaultApp = lazy(() => import("./vault/VaultApp").then((module) => ({ default: module.VaultApp })));
+// Chat (Wave 40) and its Settings screens are one lazy chunk: the Markdown renderer loads only when a chat opens.
+const ChatApp = lazy(() => import("./chat/ChatApp").then((module) => ({ default: module.ChatApp })));
+const AiSettings = lazy(() => import("./chat/AiSettings").then((module) => ({ default: module.AiSettings })));
+const AgentsSettings = lazy(() => import("./chat/AgentsSettings").then((module) => ({ default: module.AgentsSettings })));
 import { lineDiff } from "./diff/lineDiff";
 import { TeamSection } from "./team/TeamApp";
 import { useBlockedCount } from "./team/blockedCount";
@@ -115,13 +119,13 @@ import { SEARCH_MAX_CHARS, type NoteSearchHit } from "./search/searchApi";
 import { useNoteSearch } from "./search/useNoteSearch";
 import { useWhiteboardSearch, WhiteboardSearchResults } from "./search/WhiteboardSearchResults";
 import { ModulesSettings } from "./ModulesSettings";
-import { hiddenEntryStep, hiddenModuleForApp, normalizeDisabledModules, recordPopDepth, isAppEnabled, isModuleEnabled, moduleOffHint, ModulesContext, parsePreferences, unavailableModules, type ModuleId } from "./modules";
+import { hiddenEntryStep, hiddenModuleForApp, normalizeDisabledModules, recordPopDepth, isAppEnabled, isModuleEnabled, moduleOffHint, ModulesContext, parsePreferences, unavailableModules, type ModuleId, moduleDef } from "./modules";
 import { usePreferences, type PreferencesStatus } from "./usePreferences";
 
 type TotpState = { enabled: boolean; required: boolean; setupRequired: boolean };
 // `preferences` comes with /api/auth/me only (not with sign-in); see usePreferences.
 // `notices` (Wave 35 review N2c) comes with /api/auth/me only.
-type SessionResponse = { user: User; csrfToken: string; totp: TotpState; preferences?: unknown; notices?: { googleReset?: GoogleResetNotice | null }; features?: { vault?: boolean }; app?: { name?: string } };
+type SessionResponse = { user: User; csrfToken: string; totp: TotpState; preferences?: unknown; notices?: { googleReset?: GoogleResetNotice | null }; features?: { vault?: boolean; agents?: boolean }; app?: { name?: string } };
 type ModulesSettingsProps = { disabledModules: readonly ModuleId[]; status: PreferencesStatus; onToggle: (id: ModuleId, enabled: boolean) => void; role?: Role; unavailable?: readonly ModuleId[] };
 type NoteSort = "updated-desc" | "updated-asc" | "created-desc" | "created-asc" | "title-asc" | "title-desc";
 
@@ -652,6 +656,8 @@ function SettingsPage({ session, modules, googleResult = null, navigate, flash, 
     : section === "mcp" ? <KeysSettings notice={googleNoticeLine} onPendingChange={onMcpKeyPending} totpEnabled={state.enabled} role={session.user.role} />
     : section === "access" ? <MyAccess />
     : section === "notifications" ? <NotificationSettings />
+    : section === "agents" ? <Suspense fallback={<section className="settings-content" aria-busy="true"><p className="sr-only" role="status">Loading agents…</p></section>}><AgentsSettings agentId={route.app === "settings" ? route.agentId ?? null : null} navigate={go} flash={flash} onOpenChat={(agentId) => navigate({ app: "chat", chatId: null, newChat: true, agentId })} /></Suspense>
+    : section === "ai" ? (session.user.role === "admin" ? <Suspense fallback={<section className="settings-content" aria-busy="true"><p className="sr-only" role="status">Loading AI settings…</p></section>}><AiSettings flash={flash} /></Suspense> : <section className="settings-content"><p className="settings-warning">That section is for admins.</p></section>)
     : section === "about" ? <section className="settings-content about-settings" aria-labelledby="about-heading"><div className="settings-section-heading"><span className="settings-icon"><Info /></span><div><h3 id="about-heading">About {appName()}</h3><p>A private, self-hosted workspace for notes, files, and ideas.</p></div></div><div className="about-card"><div className="brand-mark"><Sparkles /></div><div><h4>{appName()}</h4><p>{appName() === "Nook" ? "Built by Pankaj" : "Built on Nook by Pankaj"}</p></div><dl><div><dt>Version</dt><dd>{appInfo.version}</dd></div><div><dt>Git SHA</dt><dd><code>{appInfo.gitSha}</code></dd></div></dl><a href="https://github.com/pankajsoni19" target="_blank" rel="noopener noreferrer">github.com/pankajsoni19</a></div></section>
     : securitySection;
 
@@ -1106,7 +1112,7 @@ export function App() {
   useEffect(() => {
     // The Settings hub names its own screens (Team's sections and the Bin too).
     if (activeApp === "settings" || activeApp === "team" || activeApp === "bin") return;
-    const sectionName = { home: "Home", notes: "Notes", files: "Files", tasks: "Tasks", collections: "Collections", calendar: "Calendar", notifications: "Notifications", inbox: "Inbox", whiteboards: "Whiteboards", vault: "Vault" }[activeApp];
+    const sectionName = { home: "Home", notes: "Notes", files: "Files", tasks: "Tasks", collections: "Collections", calendar: "Calendar", notifications: "Notifications", inbox: "Inbox", whiteboards: "Whiteboards", vault: "Vault", chat: "Chat" }[activeApp];
     const detail = activeApp === "notes" && note && note.id === selectedNoteId ? note.title || "Untitled" : null;
     document.title = session ? `${detail ? `${detail} · ` : ""}${sectionName} · ${appName()}` : `Sign in · ${appName()}`;
   }, [activeApp, note, selectedNoteId, session]);
@@ -1631,6 +1637,7 @@ export function App() {
     if (section === "inbox") return { app: "inbox", view: "pending", proposalId: null };
     if (section === "whiteboards") return { app: "whiteboards", folder: "all", boardId: null };
     if (section === "vault") return { app: "vault", vaultId: null, envId: null, secretId: null, page: null };
+    if (section === "chat") return { app: "chat", chatId: null };
     return { app: section };
   }
 
@@ -2107,7 +2114,7 @@ export function App() {
     void api("/auth/notices/google-reset/dismiss", { method: "POST", body: "{}" }).catch(() => undefined);
   };
   const toastStatus = <>{appConfirm.confirmElement}{resetNotice && <GoogleResetNoticeBanner notice={resetNotice} onDismiss={dismissResetNotice} />}{toast && <div className="toast" role="status">{toast}</div>}{moduleHint && <div className="module-hint" role="status">
-    <p>{unavailable.includes(moduleHint) ? "The vault is not available on this server." : moduleOffHint(moduleHint)}</p>
+    <p>{unavailable.includes(moduleHint) ? `${moduleDef(moduleHint).label} is not available on this server.` : moduleOffHint(moduleHint)}</p>
     {!unavailable.includes(moduleHint) && <button className="secondary-button" onClick={() => { setHighlightModule(moduleHint); setModuleHint(null); openSettings("modules"); }}>Turn on in Settings</button>}
     <button className="icon-button" onClick={() => setModuleHint(null)} aria-label="Dismiss"><X /></button>
   </div>}</>;
@@ -2159,6 +2166,7 @@ export function App() {
       : shownApp === "notifications" ? <NotificationsApp {...account} onHome={() => { void openHome(); }} onOpenPath={openNotificationPath} />
       : shownApp === "inbox" ? <InboxApp {...account} navigate={navigate} flash={flash} onHome={() => { void openHome(); }} onOpenPath={openInboxPath} />
       : shownApp === "vault" ? <Suspense fallback={<main className="app-page" aria-busy="true"><p className="sr-only" role="status">Loading the vault…</p></main>}><VaultApp {...account} role={session.user.role ?? "member"} navigate={navigate} flash={flash} onHome={() => { void openHome(); }} /></Suspense>
+      : shownApp === "chat" ? <Suspense fallback={<main className="app-page" aria-busy="true"><p className="sr-only" role="status">Loading chat…</p></main>}><ChatApp {...account} role={session.user.role ?? "member"} navigate={navigate} flash={flash} onHome={() => { void openHome(); }} onOpenAgents={(agentId) => { void openRoute({ app: "settings", section: "agents", ...(agentId ? { agentId } : {}) }); }} onOpenPath={openInboxPath} /></Suspense>
       : shownApp === "whiteboards" ? <Suspense fallback={<main className="app-page" aria-busy="true"><p className="sr-only" role="status">Loading whiteboards…</p></main>}><WhiteboardsApp {...account} userId={session.user.id} navigate={navigate} flash={flash} onHome={() => { void openHome(); }} onOpenPath={openInboxPath} /></Suspense>
       // Settings, Team, and the Bin (Wave 38) are the hub's routes.
       : settingsPage(false)}

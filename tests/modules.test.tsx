@@ -37,7 +37,7 @@ describe("module registry (D92)", () => {
   });
 
   test("Settings lists every module, Team included, but never shows Team to guests", () => {
-    expect(SETTINGS_MODULES.map((module) => module.id)).toEqual(["notes", "files", "tasks", "collections", "calendar", "whiteboards", "vault", "search", "bin", "notifications", "team", "inbox"]);
+    expect(SETTINGS_MODULES.map((module) => module.id)).toEqual(["notes", "files", "tasks", "collections", "calendar", "whiteboards", "vault", "agents", "search", "bin", "notifications", "team", "inbox"]);
     expect(settingsModulesFor("admin").map((module) => module.id)).toContain("team");
     expect(settingsModulesFor("viewer").map((module) => module.id)).toContain("team");
     expect(settingsModulesFor("guest").map((module) => module.id)).not.toContain("team");
@@ -97,7 +97,9 @@ describe("Settings → Modules", () => {
     // Guests have no inbox either (agent inbox D152), nor a vault (V-O3).
     expect(guest).not.toContain("module-label-inbox");
     expect(guest).not.toContain("module-label-vault");
-    expect([...guest.matchAll(/role="switch"/g)]).toHaveLength(SETTINGS_MODULES.length - 3);
+    // Nor Chat (Wave 40, AC-O2).
+    expect(guest).not.toContain("module-label-agents");
+    expect([...guest.matchAll(/role="switch"/g)]).toHaveLength(SETTINGS_MODULES.length - 4);
     expect(render(["team"], null, "admin")).toContain("You are an admin: Team stays available from Settings.");
   });
 
@@ -124,10 +126,10 @@ describe("gating (client only)", () => {
   const launcher = (markup: string) => [...markup.matchAll(/class="today-app today-app-([a-z]+)"/g)].map(([, section]) => section);
 
   test("the launcher is derived from the registry and drops modules that are off", () => {
-    expect(TODAY_APPS.map((app) => app.section)).toEqual(["notes", "files", "tasks", "collections", "calendar", "whiteboards", "vault"]);
-    expect(enabledTodayApps(["calendar", "search"]).map((app) => app.section)).toEqual(["notes", "files", "tasks", "collections", "whiteboards", "vault"]);
-    expect(launcher(home([]))).toEqual(["notes", "files", "tasks", "collections", "calendar", "whiteboards", "vault"]);
-    expect(launcher(home(["calendar", "tasks", "vault"]))).toEqual(["notes", "files", "collections", "whiteboards"]);
+    expect(TODAY_APPS.map((app) => app.section)).toEqual(["notes", "files", "tasks", "collections", "calendar", "whiteboards", "vault", "chat"]);
+    expect(enabledTodayApps(["calendar", "search"]).map((app) => app.section)).toEqual(["notes", "files", "tasks", "collections", "whiteboards", "vault", "chat"]);
+    expect(launcher(home([]))).toEqual(["notes", "files", "tasks", "collections", "calendar", "whiteboards", "vault", "chat"]);
+    expect(launcher(home(["calendar", "tasks", "vault", "agents"]))).toEqual(["notes", "files", "collections", "whiteboards"]);
   });
 
   test("Wave 38: no header has a Bin or Team button, whatever the modules; Bin off removes Settings → Bin", () => {
