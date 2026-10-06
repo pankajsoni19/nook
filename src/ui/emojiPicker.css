@@ -1,0 +1,34 @@
+/*
+ * EmojiPicker (src/ui/EmojiPicker.tsx): a 44 px trigger, then the shared popup (8 fixed columns) or
+ * the phone sheet (7 flexible columns, so nothing scrolls sideways at 390 px).
+ */
+.emoji-picker { display: inline-flex; flex: none; }
+.emoji-picker-trigger { width: 44px; height: 44px; display: grid; place-items: center; border: 1px solid #333338; border-radius: 10px; padding: 0; background: #0b0b0d; color: #b4b4ba; font-size: 24px; line-height: 1; cursor: pointer; touch-action: manipulation; }
+.emoji-picker-trigger:hover, .emoji-picker-trigger:focus-visible, .emoji-picker-trigger[aria-expanded="true"] { border-color: #6b582f; outline: none; }
+.emoji-picker-trigger svg { width: 20px; height: 20px; }
+.emoji-picker-placeholder { opacity: .45; filter: grayscale(.6); }
+
+.emoji-picker-head { display: grid; gap: 4px; }
+.emoji-picker-jump { display: flex; gap: 2px; padding: 0 6px 2px; overflow-x: auto; overscroll-behavior-x: contain; }
+.emoji-picker-jump button { width: 36px; height: 32px; flex: 1 0 auto; display: grid; place-items: center; border: 0; border-radius: 8px; padding: 0; background: transparent; font-size: 18px; line-height: 1; cursor: pointer; }
+.emoji-picker-jump button:hover, .emoji-picker-jump button:focus-visible { background: #26262b; outline: none; }
+
+.emoji-picker-section h5 { margin: 6px 4px 4px; color: #8d8d94; font-size: .72rem; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; }
+.emoji-picker-grid { display: grid; grid-template-columns: repeat(8, 38px); gap: 2px; }
+.emoji-picker-cell { width: 100%; height: 38px; display: grid; place-items: center; border: 1px solid transparent; border-radius: 8px; padding: 0; background: transparent; font-size: 22px; line-height: 1; cursor: pointer; touch-action: manipulation; }
+.emoji-picker-cell:hover, .emoji-picker-cell:focus-visible { background: #26262b; outline: none; }
+.emoji-picker-cell:focus-visible { border-color: #8a7340; }
+.emoji-picker-cell[aria-pressed="true"] { border-color: #6b572c; background: #2b261b; }
+.emoji-picker-empty { margin: 14px 8px; color: #8d8d94; font-size: .84rem; text-align: center; }
+
+.emoji-picker-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; border-top: 1px solid #2a2a2f; padding: 6px 8px; }
+.emoji-picker-current { min-width: 0; overflow: hidden; color: #b4b4ba; font-size: .8rem; text-overflow: ellipsis; white-space: nowrap; }
+.emoji-picker-footer .secondary-button { min-height: 34px; display: inline-flex; flex: none; align-items: center; gap: 6px; padding: 0 10px; }
+.emoji-picker-footer .secondary-button svg { width: 15px; height: 15px; }
+
+.ui-sheet .emoji-picker-jump { padding: 0 12px 4px; }
+.ui-sheet .emoji-picker-jump button { height: 40px; }
+.ui-sheet .emoji-picker-grid { grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.ui-sheet .emoji-picker-cell { height: 48px; font-size: 26px; }
+.ui-sheet .emoji-picker-footer { padding: 8px 12px 12px; }
+.ui-sheet .emoji-picker-footer .secondary-button { min-height: 44px; }
