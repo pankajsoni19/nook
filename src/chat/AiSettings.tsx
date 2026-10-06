@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useId, useState, type FormEvent } from "react";
-import { Cpu, Plus, ShieldAlert } from "lucide-react";
+import { Cpu, Plus, ShieldAlert, SlidersHorizontal } from "lucide-react";
 import { ModalDialog } from "../files/Dialog";
-import { hubDocumentTitle } from "../router";
+import { hubDocumentTitle, type AiTab } from "../router";
+import { AI_TAB_LABELS } from "../settings/hubModel";
+import { SettingsTabs, settingsTabIds, type SettingsTab } from "../settings/SettingsTabs";
 import { Select } from "../ui/Select";
 import { useConfirm } from "../ui/useConfirm";
 import { useHistoryDialogGuard } from "../ui/useHistoryDialogGuard";
@@ -20,8 +22,13 @@ import "./chat.css";
 export const SECRET_HONESTY = "Encrypted at rest; anyone with the server and its key can read these secrets.";
 const ROLE_LABELS: Record<AgentRole, string> = { admin: "Admins", member: "Members", viewer: "Viewers" };
 
-export function AiSettings({ flash }: { flash: (message: string) => void }) {
+/**
+ * Tabs (each its own URL): Model providers, Tool servers, Chat policy. `tabs` are the ones the
+ * role sees (hubModel's aiTabsFor) and `tab` the one on screen; `onSelectTab` navigates.
+ */
+export function AiSettings({ flash, tabs, tab, onSelectTab }: { flash: (message: string) => void; tabs: readonly AiTab[]; tab: AiTab; onSelectTab: (tab: AiTab) => void }) {
   const [status, setStatus] = useState<AgentsStatus | null>(null);
+  const [serverCount, setServerCount] = useState<number | null>(null);
   const [providers, setProviders] = useState<ProviderSummary[] | null>(null);
   const [settings, setSettings] = useState<(AgentSettings & { revision: number }) | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -86,7 +93,17 @@ export function AiSettings({ flash }: { flash: (message: string) => void }) {
       </div>
     </section>;
   }
-  return <section className="settings-content ai-settings" aria-labelledby="ai-heading">
+  const tabRow: Array<SettingsTab<AiTab>> = tabs.map((id) => ({
+    id,
+    label: AI_TAB_LABELS[id],
+    ...(id === "providers" && providers ? { count: providers.length, countNoun: "provider" } : {}),
+    ...(id === "tools" && serverCount !== null ? { count: serverCount, countNoun: "tool server" } : {})
+  }));
+  // Every tab stays mounted (hidden when not selected): an unsaved policy edit survives a tab switch, and the tool server count stays live.
+  const panel = (id: AiTab) => ({ role: "tabpanel", id: settingsTabIds("ai", id).panel, "aria-labelledby": settingsTabIds("ai", id).tab, hidden: id !== tab, className: "settings-tab-panel" });
+  return <section className="settings-content ai-settings" aria-label="AI">
+    <SettingsTabs label="AI settings" idPrefix="ai" tabs={tabRow} selected={tab} onSelect={onSelectTab} />
+    {tabs.includes("providers") && <div {...panel("providers")}>
     <div className="settings-section-heading"><span className="settings-icon"><Cpu /></span><div><h3 id="ai-heading">Model providers</h3><p>OpenAI-compatible endpoints the server calls for every chat. Every message, prompt, and reply leaves this Nook for the provider you configure. At most {AGENT_BOUNDS.providers}; one is the default.</p></div></div>
     <ul className="ai-providers">
       {providers?.map((provider) => {
@@ -116,9 +133,12 @@ export function AiSettings({ flash }: { flash: (message: string) => void }) {
     {providers && providers.length === 0 && <p className="chat-muted">No provider yet. Chats need one.</p>}
     <p className="policy-copy">{SECRET_HONESTY}</p>
     <button type="button" className="secondary-button ai-add" onClick={() => setEditing("new")} disabled={(providers?.length ?? 0) >= AGENT_BOUNDS.providers}><Plus />Add provider</button>
-
-    <ToolServersSection flash={flash} />
-    {settings && <PolicyForm settings={settings} providers={providers ?? []} flash={flash} onSaved={(next) => setSettings(next)} />}
+    </div>}
+    {tabs.includes("tools") && <div {...panel("tools")}><ToolServersSection flash={flash} onCountChange={setServerCount} /></div>}
+    {tabs.includes("policy") && <div {...panel("policy")}>
+      <div className="settings-section-heading"><span className="settings-icon"><SlidersHorizontal /></span><div><h3 id="ai-policy-heading">Chat policy</h3><p>Who creates agents, who chats, daily token budgets, and the default provider.</p></div></div>
+      {settings && <PolicyForm settings={settings} providers={providers ?? []} flash={flash} onSaved={(next) => setSettings(next)} />}
+    </div>}
     {editing && <ProviderDialog provider={editing === "new" ? null : editing} onCancel={() => setEditing(null)} onSaved={() => { setEditing(null); void load(); }} />}
     {confirm.confirmElement}
   </section>;
@@ -143,8 +163,7 @@ function PolicyForm({ settings, providers, flash, onSaved }: { settings: AgentSe
     }
   }
   const roleBoxes = (field: "createRoles" | "chatRoles") => <div className="ai-roles">{AGENT_ROLE_OPTIONS.map((role) => <label key={role}><input type="checkbox" checked={draft[field].includes(role)} onChange={() => toggleRole(field, role)} />{ROLE_LABELS[role]}</label>)}</div>;
-  return <form className="security-card ai-policy" onSubmit={save}>
-    <strong>Chat policy</strong>
+  return <form className="security-card ai-policy" onSubmit={save} aria-labelledby="ai-policy-heading">
     <p>Guests never see Chat. Budgets reset at midnight UTC; a run is refused before it starts once the budget is used up.</p>
     <div className="ai-policy-grid">
       <div><span className="ai-label">Who can create agents</span>{roleBoxes("createRoles")}</div>
