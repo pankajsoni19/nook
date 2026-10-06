@@ -55,6 +55,8 @@
 .keys-dialog-actions.inline { margin-top: 4px; }
 /* v0.29 L2: the shared sticky footer (as .file-dialog's): a form's own actions, last in the scrolling
    body, stay in view at its bottom edge, so Create is always reachable on a long form. */
+/* A field brought into view (Tab, or a tap that scrolls) stops above that footer, never under it. */
+.keys-dialog-body:has(> form > .keys-dialog-actions.inline:last-child) { scroll-padding-bottom: 72px; }
 .keys-dialog-body > form > .keys-dialog-actions.inline:last-child { position: sticky; bottom: 0; z-index: 1; margin-top: 0; padding-top: 12px; background: #1b1b1f; }
 .primary-button.danger { background: #e07474; color: #2a0f0f; }
 .primary-button.danger:hover { background: #ec8b8b; }
@@ -62,6 +64,8 @@
   .keys-dialog, .keys-dialog.wide { inset: 0; width: auto; max-height: none; height: 100dvh; transform: none; border: 0; border-radius: 0; padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); }
   .keys-dialog-actions { flex-direction: column-reverse; }
   .keys-dialog-actions button { width: 100%; }
+  /* Two stacked footer buttons on a phone. */
+  .keys-dialog-body:has(> form > .keys-dialog-actions.inline:last-child) { scroll-padding-bottom: 124px; }
 }
 
 .keys-form { display: grid; gap: 14px; }

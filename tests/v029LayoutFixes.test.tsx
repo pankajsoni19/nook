@@ -49,6 +49,8 @@ describe("v0.29 layout fixes", () => {
     const footer = rule(keys, ".keys-dialog-body > form > .keys-dialog-actions.inline:last-child");
     expect(footer).toContain("position: sticky");
     expect(footer).toContain("bottom: 0");
+    // A field scrolled into view stops above the footer, not under it.
+    expect(rule(keys, ".keys-dialog-body:has(> form > .keys-dialog-actions.inline:last-child)")).toContain("scroll-padding-bottom");
     const styles = await read("styles.css");
     expect(styles).toMatch(/:is\(\.keys-dialog, \.team-dialog\) :is\([^)]*\.keys-fieldset > legend[^)]*\.grant-field > span:first-child\) \{[^}]*text-transform: uppercase/);
     for (const file of ["keys/GrantBuilder.tsx", "keys/VaultGrantBuilder.tsx"]) expect(await read(file)).toContain('className="action-button secondary grant-add"');

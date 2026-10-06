@@ -24,7 +24,10 @@ const PREFIX = process.env.ACCOUNT_PREFIX ?? "co-scroll";
 const RUN = Date.now().toString(36).slice(-5);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const browser = await puppeteer.launch({ executablePath: process.env.CHROME ?? "/usr/bin/google-chrome", headless: true, args: ["--no-sandbox"] });
+const launchBrowser = () => puppeteer.launch({ executablePath: process.env.CHROME ?? "/usr/bin/google-chrome", headless: true, args: ["--no-sandbox"] });
+// v0.29: a page that crashes or closes its target no longer takes the rest of the run with it: each
+// route runs in a fresh tab of the signed-in context, and a lost tab, context or browser is replaced.
+let browser = await launchBrowser();
 
 async function session(email, name, width = 1280, height = 800) {
   const context = await browser.createBrowserContext();
@@ -543,6 +546,34 @@ async function hubPanes(page) {
   return problems;
 }
 const HUB = { split: true, check: hubPanes };
+
+/** v0.29 H1: a section's tab row keeps its height, every tab is the element at its own centre, and a click opens it. */
+async function tabsClickable(page, target) {
+  const problems = [];
+  const row = await page.evaluate(() => {
+    const list = document.querySelector("[role=tablist]");
+    if (!list) return null;
+    const tabs = [...list.querySelectorAll("[role=tab]")].map((tab) => {
+      const rect = tab.getBoundingClientRect();
+      const x = Math.min(Math.max(rect.left + rect.width / 2, 1), innerWidth - 1);
+      return { id: tab.id, height: Math.round(rect.height), hit: document.elementFromPoint(x, rect.top + rect.height / 2)?.closest("[role=tab]") === tab };
+    });
+    return { height: Math.round(list.getBoundingClientRect().height), slot: Math.round(list.parentElement.getBoundingClientRect().height), tabs };
+  });
+  if (!row) return ["no tab row"];
+  if (row.slot < row.height) problems.push(`the tab row's slot is ${row.slot} px for a ${row.height} px row`);
+  const covered = row.tabs.filter((tab) => !tab.hit).map((tab) => tab.id);
+  if (!page.mobile && covered.length) problems.push(`tabs under other content: ${covered.join(", ")}`);
+  const id = `#${row.tabs.find((tab) => tab.id.endsWith(target.split("/").pop()))?.id}`;
+  const handle = await page.$(id);
+  if (!handle) return [...problems, `no tab for ${target}`];
+  if (page.mobile) await handle.tap(); else await handle.click();
+  await sleep(500);
+  if (new URL(page.url()).pathname !== target) problems.push(`clicking ${id} stayed on ${new URL(page.url()).pathname}`);
+  await page.goBack();
+  await sleep(400);
+  return problems;
+}
 const HUB_SPLIT = { split: true, check: async (page) => [...await hubPanes(page), ...await splitPanes(page)] };
 
 // ------------------------------------------------------------------ page keys (F6)
@@ -581,6 +612,26 @@ async function readOnlyNote(page, seeded) {
   } finally {
     await viewer.browserContext().close();
   }
+}
+
+// ------------------------------------------------------------------ fresh tabs (v0.29)
+
+/** A fresh tab in the signed-in session's context: same cookies, viewport, CSRF token and dialog log. */
+async function routePage(base) {
+  const page = await base.browserContext().newPage();
+  await page.setViewport(base.viewport());
+  Object.assign(page, { mobile: base.mobile, csrf: base.csrf, userId: base.userId, nativeDialogs: base.nativeDialogs, crashed: null });
+  page.on("dialog", async (dialog) => { base.nativeDialogs.push(dialog.message()); await dialog.dismiss(); });
+  // Puppeteer's "error" event is the renderer crashing: an app defect, reported with the route.
+  page.on("error", (error) => { page.crashed = error.message; });
+  return page;
+}
+/** A lost tab, context or browser (Target closed, detached Frame): sign in again in a new context. */
+const lostTarget = (error) => /detached Frame|Target closed|Session closed|Connection closed|crash|Protocol error/i.test(error?.message ?? "");
+async function freshSession(base, width, height) {
+  await base?.browserContext().close().catch(() => undefined);
+  if (!browser.connected) browser = await launchBrowser();
+  return session(`${PREFIX}-admin@nook.test`, "Scroll Admin", width, height);
 }
 
 // ------------------------------------------------------------------ routes
@@ -654,6 +705,8 @@ const ROUTES = (s) => [
   // 2026-10-06: the AI dialogs need only the module on (AGENT_SECRETS_KEY), not a provider. The Add
   // provider dialog was taller than the window and cut off its Save button, with nothing to scroll.
   ...(s.agents ? [
+    // v0.29 H1: at 1280 × 600 the tab row collapsed to its 1 px border under the Chat policy panel.
+    ["Settings · AI: Chat policy tabs", "/settings/ai/policy", null, { split: true, check: async (page) => [...await hubPanes(page), ...await tabsClickable(page, "/settings/ai/providers")] }],
     ["Settings · AI: Add provider", "/settings/ai", async (page) => { await tapText(page, "button", "Add provider"); await page.waitForSelector(".chat-dialog"); }, { scope: ".chat-dialog" }],
     ["Settings · AI: Add tool server", "/settings/ai/tools", async (page) => { await tapText(page, "button", "Add tool server"); await page.waitForSelector(".chat-dialog"); }, { scope: ".chat-dialog" }]
   ] : []),
@@ -705,6 +758,9 @@ const PUBLIC_ROUTES = (s) => [
 async function tapText(page, selector, text) {
   const handle = (await page.evaluateHandle((selector, text) => [...document.querySelectorAll(selector)].find((element) => (!text || element.textContent.includes(text) || element.getAttribute("aria-label")?.includes(text)) && element.getClientRects().length) ?? null, selector, text ?? null)).asElement();
   if (!handle) throw new Error(`no ${selector} ${text ?? ""}`);
+  // Centred first, as a person would scroll to it: a control at a scroller's bottom edge can sit
+  // under a sticky dialog footer, and a tap there lands on Cancel (v0.29, New vault key at 390 px).
+  await handle.evaluate((element) => element.scrollIntoView({ block: "center" }));
   if (page.mobile) await handle.tap(); else await handle.click();
   await sleep(400);
 }
@@ -720,23 +776,32 @@ try {
   const only = process.env.ONLY ? new RegExp(process.env.ONLY, "i") : null;
   // 1280 × 600 is a short computer window: only the two-pane pages, whose panes are bounded by it.
   for (const [width, height] of [[1280, 800], [390, 844], [1280, 600]]) {
-    const page = await session(`${PREFIX}-admin@nook.test`, "Scroll Admin", width, height);
+    let base = await session(`${PREFIX}-admin@nook.test`, "Scroll Admin", width, height);
+    const nativeDialogs = base.nativeDialogs;
     for (const [name, path, setup, options] of ROUTES(seeded)) {
       if (only && !only.test(name)) continue;
       // 1280 × 600 also covers every dialog and sheet (a scope): a short window is where they overflow.
       if (height === 600 && !options?.split && !options?.scope) continue;
+      let page = null;
       try {
+        if (!browser.connected || base.isClosed()) base = await freshSession(base, width, height);
+        base.nativeDialogs = nativeDialogs;
+        page = await routePage(base);
         await page.goto(`${ORIGIN}${path}`, { waitUntil: "networkidle2" });
         await sleep(600);
         if (setup) await setup(page, seeded);
         results.push({ width: `${width}x${height}`, ...(await audit(page, name, options)) });
       } catch (error) {
-        results.push({ width: `${width}x${height}`, name, ok: false, detail: `setup failed: ${error.message}` });
+        const crashed = page?.crashed ? ` (the tab crashed: ${page.crashed})` : "";
+        results.push({ width: `${width}x${height}`, name, ok: false, detail: `setup failed: ${error.message}${crashed}` });
+        if (lostTarget(error)) base = await freshSession(base, width, height).catch(() => base);
+      } finally {
+        await page?.close().catch(() => undefined);
       }
       console.log(`${results.at(-1).ok ? "PASS" : "FAIL"} ${width}x${height} ${name} — ${results.at(-1).detail}`);
     }
-    if (page.nativeDialogs.length) results.push({ width: `${width}x${height}`, name: "native dialogs", ok: false, detail: page.nativeDialogs.join("; ") });
-    await page.browserContext().close();
+    if (nativeDialogs.length) results.push({ width: `${width}x${height}`, name: "native dialogs", ok: false, detail: nativeDialogs.join("; ") });
+    await base.browserContext().close().catch(() => undefined);
   }
   for (const [width, height] of [[1280, 800], [390, 844], [844, 390]]) {
     const page = await session(null, null, width, height);
@@ -749,7 +814,7 @@ try {
     await page.browserContext().close();
   }
 } finally {
-  await browser.close();
+  await browser.close().catch(() => undefined);
 }
 const failed = results.filter((result) => !result.ok);
 console.log(`\n${results.length - failed.length}/${results.length} passed${failed.length ? `; failed: ${failed.map((result) => `${result.width} ${result.name}`).join(", ")}` : ""}`);
