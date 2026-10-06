@@ -8,6 +8,7 @@ import { EXTERNAL_BOUNDS, isOneLineLabel } from "../../shared/agents";
 import { holdPlainRun } from "./limits";
 import { cancelExternalRun, externalRunResult, runnableAgents, startExternalRun, type ExternalEvent, type ExternalRequest } from "./external";
 import { AgentError } from "./status";
+import { keepRequestOpen, SSE_TIMING } from "../longRequests";
 
 /**
  * The agents' REST API for general Nook keys, `/api/v1/agents/*` (Wave 42 "AC-C", plan §7.2,
@@ -120,6 +121,8 @@ export async function handleAgentRest(request: Request, route: AgentRoute, auth:
     const runRequest: ExternalRequest = { agentId: route.agentId, input: body.input, messages: body.messages, label: body.label ?? null };
     // A plain run holds its request until it ends: at most half of the REST slots do (review L2).
     const release = body.stream ? null : holdPlainRun("rest");
+    // Streamed or not, the request stays open for the whole run: no idle timeout (QA D1, server/longRequests.ts).
+    keepRequestOpen(request);
     let started: ReturnType<typeof startExternalRun>;
     try {
       started = startExternalRun({ keyId, surface: "rest", via: "api", clientIp }, runRequest);
@@ -159,7 +162,7 @@ export async function handleAgentRest(request: Request, route: AgentRoute, auth:
           write(frame(++seq, event));
           if (event.type === "done") close();
         });
-        keepAlive = setInterval(() => write(": ping\n\n"), 15_000);
+        keepAlive = setInterval(() => write(": ping\n\n"), SSE_TIMING.pingMs);
         // A run that ended before the subscription (it cannot, but never hang): close on its result.
         void started.done.then((result) => { if (!closed) { write(frame(++seq, { type: "done", data: result })); close(); } });
       },

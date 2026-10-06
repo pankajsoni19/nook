@@ -14,6 +14,7 @@ import { handleVaultRest, matchVaultRoute } from "./vault/rest";
 import { handleAgentRest, matchAgentRoute } from "./agents/api";
 import { fromAgentRun, RECURSION_MESSAGE } from "./agents/depth";
 import { REQUEST_SLOTS } from "./agents/limits";
+import { keepRequestOpen } from "./longRequests";
 
 /**
  * The REST surface `/api/v1` (Wave 34, access plan D280, O-A12, T210): the MCP tools over plain
@@ -261,6 +262,8 @@ async function handle(c: Context<AppEnv>): Promise<Response> {
       countKeyUsage(auth.id, "denied", "rest");
       return refuse(409, RECURSION_MESSAGE, "AGENT_RECURSION");
     }
+    // run_agent waits for the agent's answer (up to 5 minutes): no idle timeout for it (QA D1, server/longRequests.ts).
+    if (spec.name === "run_agent") keepRequestOpen(c.req.raw);
     const body = await readJsonObject(c.req.raw);
     if (body instanceof Response) return body;
     const result = await runTool(spec, body, auth.id, "rest");
