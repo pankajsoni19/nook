@@ -1035,7 +1035,7 @@ Real-browser pass (Wave 41): the production build on a scratch data directory wi
 
 ### External runs and the Audit log (Wave 42, AC-C)
 
-Plan §15 item 10 and the AC-C parts of items 6 and 13 (`MYNOTES_TEST_PORT=24500 bun test`). No test calls the internet: `tests/agentsExternal.test.ts` runs its own fake provider (127.0.0.1:24503) and fake MCP server (24504, a bearer credential that doubles as a canary).
+Plan §15 item 10 and the AC-C parts of items 6 and 13 (`MYNOTES_TEST_PORT=24500 bun test`). No test calls the internet: `tests/agentsExternal.test.ts` runs its own fake provider (127.0.0.1:24506) and fake MCP server (24504, a bearer credential that doubles as a canary).
 
 | File | Covers |
 | --- | --- |

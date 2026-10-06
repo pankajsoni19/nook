@@ -30,7 +30,7 @@ type Grant = import("../server/keyGrants").Grant;
  */
 
 retireUsersAfterFile();
-const fake = startFakeProvider(24503);
+const fake = startFakeProvider(24506);
 const mcp = startFakeMcpServer(24504, { bearer: "srv-canary-w42-0001" });
 const PROVIDER_CANARY = "sk-canary-w42-provider-0000000001";
 let admin: Session;
@@ -350,6 +350,11 @@ describe("MCP run_agent (§7.2, T318)", () => {
     expect(JSON.parse(nested.content[0]!.text).code).toBe("AGENT_RECURSION");
     // Outside the grant is NOT_FOUND, the same as missing.
     expect(JSON.parse((await invokeMcpToolForTests("run_agent", { agentId: secondAgentId, input: "echo:x" }, key.id)).content[0]!.text).code).toBe("NOT_FOUND");
+    // The same tool over REST (POST /api/v1/tools/run_agent) is an API run on the REST surface.
+    const restKey = runKey(owner, [agentGrant(agentId)], "rest");
+    const viaRest = await rest(restKey.token, "POST", "/tools/run_agent", { agentId, input: "echo:Tool route." });
+    expect(viaRest.body).toMatchObject({ status: "ok", output: "Tool route." });
+    expect(db.query("SELECT via FROM agent_runs WHERE id = ?").get(viaRest.body.runId)).toEqual({ via: "api" });
     // A chat agent cannot pick run_agent as a Nook tool.
     expect((await api(owner, "PATCH", `/agents/${secondAgentId}`, { tools: [{ source: "nook", toolName: "run_agent" }], expectedRevision: 1 })).status).toBe(400);
   });

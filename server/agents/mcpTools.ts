@@ -79,7 +79,9 @@ export const agentTools: McpToolSpec[] = [
       if (!agentsStatus().enabled) throw new McpToolError("AGENTS_DISABLED", "Agent chat is not configured on this server");
       let started: ReturnType<typeof startExternalRun>;
       try {
-        started = startExternalRun({ keyId: key.keyId, surface: key.surface ?? "mcp", via: "mcp", clientIp: null }, { agentId: agentId.toLowerCase(), input, label: label ?? null });
+        // Over MCP, or as POST /api/v1/tools/run_agent (then it is an API run on the REST surface).
+        const surface = key.surface ?? "mcp";
+        started = startExternalRun({ keyId: key.keyId, surface, via: surface === "rest" ? "api" : "mcp", clientIp: null }, { agentId: agentId.toLowerCase(), input, label: label ?? null });
       } catch (error) {
         if (error instanceof AgentError) {
           if (error.status === 404) throw notFound("Agent");
