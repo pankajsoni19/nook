@@ -263,7 +263,8 @@ export function grantSummary(rows: readonly GrantRow[]) {
     const selector = selectorFor(row.module, row.permission);
     // Creating a whiteboard makes a new, private board: it is not "on" any existing ones (QA Q7);
     // reading agents and chats is about everything you have (Wave 42).
-    const createOnly = (row.module === "whiteboards" && row.permission === "write") || ALL_ONLY.has(`${row.module}:${row.permission}`);
+    // Wave 44: Chat → Read on everything also reads agents and chats, so it names no "all knowledge bases".
+    const createOnly = (row.module === "whiteboards" && row.permission === "write") || ALL_ONLY.has(`${row.module}:${row.permission}`) || (row.module === "agents" && row.permission === "read" && row.applies !== "chosen");
     const kinds = new Set(row.resourceIds.map((token) => parseResourceToken(token)?.kind));
     const only = kinds.size === 1 ? [...kinds][0] : undefined;
     const noun = only ? KIND_NOUNS[only] : ["item", "items"] as const;

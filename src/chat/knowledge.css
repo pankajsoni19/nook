@@ -1,7 +1,8 @@
 /* Settings → Knowledge (Wave 44, AC-E): sources, Add source, and Try it. Phones: one column, nothing scrolls sideways. */
 .knowledge-warning { margin: 4px 0 8px; }
 .knowledge-actions { justify-content: flex-start; margin: 8px 0 4px; }
-.knowledge-actions svg { width: 16px; height: 16px; }
+.knowledge-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; padding: 0 14px; }
+.knowledge-actions svg { width: 16px; height: 16px; flex: none; }
 .knowledge-subheading { margin: 18px 0 8px; color: #fafafa; font-size: .95rem; }
 .knowledge-sources, .knowledge-candidates, .knowledge-hits { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .knowledge-source, .knowledge-candidates li { display: flex; align-items: center; gap: 10px; min-height: 52px; border: 1px solid #303035; border-radius: 12px; padding: 8px 12px; background: #0f0f11; }

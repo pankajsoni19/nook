@@ -87,9 +87,15 @@ function GrantRowEditor({ row, index, role, policy, disabled, rows, ceiling, nar
     // Narrowing keeps the permission or lowers it to read (D278).
     permissions = permissions.filter((option) => option.value === ceiling.permission || option.value === "read").map((option) => ({ ...option, disabled: false }));
   }
+  // Wave 44 (AC-E): Chat → Read is everything (agents, chats, knowledge bases) or chosen knowledge bases to search.
+  const readsChat = row.module === "agents" && row.permission === "read";
   const appliesOptions: Option<"all" | "chosen">[] = selector ? [
-    { value: "all", label: `All ${selector.many}`, description: `Every ${selector.one} ${opener} can open, now and later`, disabled: narrowing && ceiling?.applies === "chosen" },
-    { value: "chosen", label: `Chosen ${selector.many}`, description: `Only the ${selector.many} you pick` }
+    readsChat
+      ? { value: "all", label: "Everything", description: `Agents, chats, and every knowledge base ${opener} can open`, disabled: narrowing && ceiling?.applies === "chosen" }
+      : { value: "all", label: `All ${selector.many}`, description: `Every ${selector.one} ${opener} can open, now and later`, disabled: narrowing && ceiling?.applies === "chosen" },
+    readsChat
+      ? { value: "chosen", label: "Chosen knowledge bases", description: "Only searching the knowledge bases you pick; no agents or chats" }
+      : { value: "chosen", label: `Chosen ${selector.many}`, description: `Only the ${selector.many} you pick` }
   ] : [];
   const writable = row.permission !== "read";
   // A module may offer several kinds; a row lists only those its permission names (Wave 44: Chat → Read lists knowledge bases).
