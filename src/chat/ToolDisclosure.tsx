@@ -16,6 +16,10 @@ export const TOOL_ERROR_TEXT: Record<string, string> = {
   TOOL_TIMEOUT: "The tool did not answer in time",
   TOOL_LIMIT: "Tool-call limit reached",
   UNKNOWN_TOOL: "Unknown tool",
+  EXPIRED: "Not answered in time",
+  TOOL_UNAVAILABLE: "No longer available; not run",
+  SCOPE_REQUIRED: "The linked key lacks the rights",
+  DUPLICATE_CALL: "Repeated call; not run",
   INVALID_ARGUMENTS: "The arguments were not valid JSON",
   EGRESS_REFUSED: "The tool server's address is not allowed",
   NETWORK: "The tool server could not be reached",
@@ -32,6 +36,7 @@ export function callOutcome(call: ToolCallView): string {
   if (call.ok === null) return call.decision === null ? "Running…" : "Waiting…";
   if (call.decision === "denied") return "Denied";
   if (call.decision === "expired") return "Not answered in time";
+  if (call.decision === "cancelled") return "Stopped before an answer";
   if (call.ok) return call.proposalId ? "Proposed in the Inbox" : "Done";
   try {
     const parsed = JSON.parse(call.resultPreview ?? "") as { code?: string };
@@ -40,7 +45,8 @@ export function callOutcome(call: ToolCallView): string {
   return "Failed";
 }
 
-export const callLabel = (call: ToolCallView) => `Called ${call.server}/${call.tool}`;
+/** Wave 41 QA L7: a tool the model made up reads "Unknown tool <name>", never "?/<name>". */
+export const callLabel = (call: ToolCallView) => call.server ? `Called ${call.server}/${call.tool}` : `Unknown tool ${call.tool}`;
 
 export function ToolCallsDisclosure({ calls = [], running }: { calls?: ToolCallView[]; running: boolean }) {
   const [open, setOpen] = useState(false);
@@ -73,7 +79,15 @@ export function ToolCallsDisclosure({ calls = [], running }: { calls?: ToolCallV
 export function ConfirmationCard({ confirmation, busy, onDecide }: { confirmation: PendingConfirmation; busy: boolean; onDecide: (decision: "once" | "deny", card: PendingConfirmation) => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const [showAll, setShowAll] = useState(false);
-  useEffect(() => { ref.current?.focus(); }, [confirmation.confirmationId]);
+  useEffect(() => {
+    const card = ref.current;
+    if (!card) return;
+    // Wave 41 QA L3: a new card comes fully into view above the pinned composer (on a phone it would sit under it).
+    const composer = document.querySelector(".chat-composer");
+    card.style.scrollMarginBottom = `${Math.ceil((composer?.getBoundingClientRect().height ?? 0) + 16)}px`;
+    card.focus({ preventScroll: true });
+    card.scrollIntoView({ block: "end" });
+  }, [confirmation.confirmationId]);
   const json = JSON.stringify(confirmation.args ?? {}, null, 2);
   const lines = json.split("\n");
   const long = lines.length > 20;

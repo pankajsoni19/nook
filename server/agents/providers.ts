@@ -1,10 +1,8 @@
 import { audit, db, now } from "../db";
 import { AGENT_BOUNDS, DEFAULT_BASE_URL, DEFAULT_COMPAT, DEFAULT_MODEL, type ProviderCompat, type ProviderSummary } from "../../shared/agents";
-import { isIP } from "node:net";
-import { isPrivateAddress } from "../calendar/push";
-import { checkEgressUrl, EgressError, privateHostAllowed } from "./egress";
+import { checkSavedEndpoint, EgressError } from "./egress";
 import { completeStreaming, listModels, ProviderError, type ProviderConnection } from "./loop";
-import { openSecret, sealSecret, secretHint } from "./secrets";
+import { openSecret, sealSecret, secretHint, shownHint } from "./secrets";
 import { readAgentSettings } from "./settings";
 import { AgentError } from "./status";
 
@@ -33,7 +31,7 @@ export function parseCompat(json: string | null): ProviderCompat {
 
 export const providerSummary = (row: ProviderRow): ProviderSummary => ({
   id: row.id, name: row.name, baseUrl: row.base_url, defaultModel: row.default_model, embeddingModel: row.embedding_model, embeddingDims: row.embedding_dims,
-  compat: parseCompat(row.compat_json), isDefault: row.is_default === 1, hasSecret: row.api_key_ct !== null, hint: row.api_key_ct ? row.api_key_hint : null,
+  compat: parseCompat(row.compat_json), isDefault: row.is_default === 1, hasSecret: row.api_key_ct !== null, hint: shownHint(row.api_key_ct, row.api_key_hint),
   revision: row.revision, createdAt: row.created_at, updatedAt: row.updated_at
 });
 
@@ -60,12 +58,7 @@ export type ProviderInput = {
 function normalizeBaseUrl(value: string) {
   const trimmed = value.trim().replace(/\/+$/, "");
   try {
-    const url = checkEgressUrl(trimmed);
-    const host = url.hostname.toLowerCase().replace(/\.$/, "").replace(/^\[|\]$/g, "");
-    const literal = isIP(host) ? [host] : [];
-    const listed = privateHostAllowed(host, literal);
-    if (url.protocol === "http:" && !listed) throw new EgressError("URL_REFUSED", "Plain http is allowed only for hosts in AGENT_ALLOWED_PRIVATE_HOSTS");
-    if (!listed && literal.some((address) => isPrivateAddress(address))) throw new EgressError("PRIVATE_ADDRESS", "The endpoint is a private or local address; list it in AGENT_ALLOWED_PRIVATE_HOSTS to allow it");
+    checkSavedEndpoint(trimmed);
   } catch (error) {
     if (error instanceof EgressError) throw new AgentError(400, "EGRESS_REFUSED", error.message, { field: "baseUrl" });
     throw new AgentError(400, "INVALID", "The base URL is not valid", { field: "baseUrl" });

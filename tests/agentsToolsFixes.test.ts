@@ -39,6 +39,7 @@ beforeAll(async () => {
   expect((await api(admin, "POST", `/agents/admin/servers/${serverId}/sync`, {})).body.server.status).toBe("ok");
 });
 afterAll(async () => {
+  await api(admin, "DELETE", `/agents/admin/servers/${serverId}`);
   await resetToolServersForTests();
   mcp.stop();
 });
@@ -97,6 +98,27 @@ describe("M3: a session is never opened from a stale server row", () => {
     expect(updated.status).toBe(200);
     expect(() => sessionFor(before)).toThrow(expect.objectContaining({ code: "TOOL_UNAVAILABLE" }));
     expect(sessionFor(serverRow(serverId))).toBeDefined();
+  });
+});
+
+describe("Wave 41 QA L5 and L6: tool server slugs and credential hints", () => {
+  test("reserved slugs are refused when typed and avoided when derived from the name", async () => {
+    for (const slug of ["nook", "system", "tools", "mcp"]) {
+      const refused = await api(admin, "POST", "/agents/admin/servers", { name: "Reserved", slug, url: "https://tools.example.test/mcp" });
+      expect({ slug, status: refused.status, field: refused.body.field }).toEqual({ slug, status: 400, field: "slug" });
+    }
+    const derived = await api(admin, "POST", "/agents/admin/servers", { name: "Nook", url: "https://tools.example.test/mcp" });
+    expect(derived.status).toBe(201);
+    expect(derived.body.server.slug).toBe("nook-srv");
+    await api(admin, "DELETE", `/agents/admin/servers/${derived.body.server.id}`);
+  });
+
+  test("a credential shorter than 16 characters has no hint (the UI says Saved); a longer one shows its ends", async () => {
+    const short = await api(admin, "POST", "/agents/admin/servers", { name: "Short secret", url: "https://tools.example.test/mcp", authKind: "bearer", secret: "short-1" });
+    expect(short.body.server).toMatchObject({ hasSecret: true, hint: null });
+    const long = await api(admin, "POST", "/agents/admin/servers", { name: "Long secret", url: "https://tools.example.test/mcp", authKind: "bearer", secret: "long-secret-value-0042" });
+    expect(long.body.server).toMatchObject({ hasSecret: true, hint: "lon…0042" });
+    for (const id of [short.body.server.id, long.body.server.id]) await api(admin, "DELETE", `/agents/admin/servers/${id}`);
   });
 });
 

@@ -153,7 +153,8 @@ export type ToolCallView = {
   ok: boolean | null;
   truncated: boolean;
   durationMs: number | null;
-  decision: "allowed" | "denied" | "expired" | null;
+  /** `cancelled`: the run ended (Stop, the wall clock, the chat deleted) while the card waited (Wave 41 QA Q3). */
+  decision: "allowed" | "denied" | "expired" | "cancelled" | null;
   /** A Nook write turned into an inbox proposal (D353). */
   proposalId: string | null;
 };
@@ -178,7 +179,7 @@ export type RunEvent =
   | { type: "tool_call"; data: { messageId: string; callId: string; tool: string; server: string; serverId: string | null; argsPreview: string } }
   | { type: "tool_result"; data: { messageId: string; callId: string; ok: boolean; resultPreview: string; truncated: boolean; durationMs: number; decision: ToolCallView["decision"]; proposalId: string | null } }
   | { type: "confirmation_required"; data: { messageId: string } & PendingConfirmation }
-  | { type: "confirmation_resolved"; data: { messageId: string; confirmationId: string; callId: string; decision: "allowed" | "denied" | "expired" } }
+  | { type: "confirmation_resolved"; data: { messageId: string; confirmationId: string; callId: string; decision: "allowed" | "denied" | "expired" | "cancelled" } }
   | { type: "snapshot"; data: { status: RunStatus; messageId: string; content: string; messageStatus: MessageStatus; usage: TokenUsage | null; errorCode: string | null; toolCalls: ToolCallView[]; pendingConfirmation: PendingConfirmation | null } };
 export type RunEventType = RunEvent["type"];
 
@@ -197,6 +198,8 @@ export type AgentSummary = {
   starters: string[]; revision: number; createdAt: string; updatedAt: string; isOwner: boolean;
   /** AC-B: the picked tools, whether direct Nook writes are on (AC-O11), whether the caller linked a key, and the trifecta (plan §5.2). */
   tools: AgentToolRef[]; nookDirectWrites: boolean; linked: boolean; trifecta: boolean;
+  /** Wave 41 QA Q4: `linked` is true only for a live key; a link whose key died says so, to link another. */
+  linkState: LinkState;
 };
 export type AgentDetail = AgentSummary & { systemPrompt: string };
 
@@ -210,13 +213,15 @@ export type ToolServerSummary = {
 /** A stdio server the host declared in AGENT_MCP_STDIO_FILE (plan §3.3, D348): read-only in the UI. */
 export type DeclaredStdioServer = { id: string; name: string; command: string; args: string[]; envNames: string[]; adopted: boolean };
 /** What the tool picker lists (plan §5.2, `GET /api/agents/catalog`). */
-export type NookCatalogTool = { name: string; title: string; module: string; write: boolean; /** A write the Inbox can carry as a proposal (D353). */ proposable: boolean; scope: string };
+export type NookCatalogTool = { name: string; title: string; module: string; write: boolean; /** A write the Inbox can carry as a proposal (D353). */ proposable: boolean; scope: string; /** The module scope a proposal of it needs besides inbox:write (QA L7); null when not proposable. */ proposalScope: string | null };
 export type ToolCatalog = {
   servers: Array<{ id: string; slug: string; name: string; enabled: boolean; status: ServerStatus; availability: ServerAvailability; tools: Array<Pick<CatalogTool, "name" | "title" | "description" | "readOnly" | "openWorld" | "policy">> }>;
-  nook: { linked: boolean; tools: NookCatalogTool[] };
+  nook: { linked: boolean; linkState: LinkState; tools: NookCatalogTool[] };
 };
 /** A key the person may link to an agent (plan §5.3): their own live general key with the MCP surface. */
 export type LinkableKey = { id: string; name: string; prefix: string; state: string; expiresAt: string | null; grants: Array<{ module: string; permission: string; resource: { kind: string; name: string | null } | null; active: boolean }> };
+/** The caller's link on an agent (QA Q4): none, a live key, or a key that is no longer live. */
+export type LinkState = "none" | "live" | "revoked" | "expired" | "inactive";
 export type NookLink = { keyId: string; name: string; prefix: string; state: string } | null;
 /** `agentId` and `agentName` are null once the chat's agent was purged from the Bin; the chat stays readable. */
 export type ChatSummary = {

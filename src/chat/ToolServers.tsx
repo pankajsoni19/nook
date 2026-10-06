@@ -70,6 +70,12 @@ export function ToolServersSection({ flash }: { flash: (message: string) => void
     }
   }
   async function setPolicy(server: ToolServerSummary, tool: CatalogTool, policy: ToolPolicy) {
+    // Wave 41 QA L1: a tool its server does not declare read-only runs without asking only after a confirm.
+    if (policy === "auto" && !tool.readOnly && !await confirm.ask({
+      title: `Run ${tool.name} without asking?`,
+      message: "This tool can change things outside Nook, and its arguments are written by the model. With Runs on its own, agents call it without a card in the chat.",
+      confirmLabel: "Run without asking", danger: true
+    })) return;
     try {
       const { server: next } = await setServerPolicies(server.id, { [tool.name]: policy });
       setList((current) => current ? { ...current, servers: current.servers.map((item) => item.id === next.id ? next : item) } : current);
@@ -99,7 +105,7 @@ export function ToolServersSection({ flash }: { flash: (message: string) => void
           </div>
         </div>
         <dl className="ai-provider-facts">
-          <div><dt>Credential</dt><dd>{server.hasSecret ? <code>{server.authKind === "header" ? `${server.authHeader}: ` : "Bearer "}{server.hint}</code> : <span className="chat-muted">none</span>}</dd></div>
+          <div><dt>Credential</dt><dd>{server.hasSecret ? <code>{server.authKind === "header" ? `${server.authHeader}: ` : "Bearer "}{server.hint ?? "Saved"}</code> : <span className="chat-muted">none</span>}</dd></div>
           <div><dt>Who may use it</dt><dd>{AVAILABILITY_LABELS[server.availability]}</dd></div>
           <div><dt>Timeout</dt><dd>{server.timeoutMs / 1000} s</dd></div>
           <div><dt>Result cap</dt><dd>{Math.round(server.resultCapBytes / 1024)} KiB</dd></div>
@@ -131,6 +137,13 @@ export function ToolServersSection({ flash }: { flash: (message: string) => void
   </section>;
 }
 
+/** A whole number typed into a field, within bounds; null for empty, fractional, or out-of-range text (Wave 41 QA L2). */
+export function wholeIn(text: string, min: number, max: number): number | null {
+  if (!/^\s*\d+\s*$/.test(text)) return null;
+  const value = Number(text);
+  return value >= min && value <= max ? value : null;
+}
+
 function ServerDialog({ server, adopt, onCancel, onSaved }: { server: ToolServerSummary | null; adopt: DeclaredStdioServer | null; onCancel: () => void; onSaved: () => void }) {
   const stdio = server?.transport === "stdio" || adopt !== null;
   const [name, setName] = useState(server?.name ?? adopt?.name ?? "");
@@ -139,8 +152,9 @@ function ServerDialog({ server, adopt, onCancel, onSaved }: { server: ToolServer
   const [authHeader, setAuthHeader] = useState(server?.authHeader ?? "");
   const [secret, setSecret] = useState("");
   const [removeSecret, setRemoveSecret] = useState(false);
-  const [timeoutS, setTimeoutS] = useState(Math.round((server?.timeoutMs ?? AGENT_BOUNDS.toolTimeoutMs.default) / 1000));
-  const [capKib, setCapKib] = useState(Math.round((server?.resultCapBytes ?? AGENT_BOUNDS.resultCapBytes.default) / 1024));
+  // Kept as typed (Wave 41 QA L2): a cleared field stays empty and is checked on save, never replaced while typing.
+  const [timeoutS, setTimeoutS] = useState(String(Math.round((server?.timeoutMs ?? AGENT_BOUNDS.toolTimeoutMs.default) / 1000)));
+  const [capKib, setCapKib] = useState(String(Math.round((server?.resultCapBytes ?? AGENT_BOUNDS.resultCapBytes.default) / 1024)));
   const [availability, setAvailability] = useState<ServerAvailability>(server?.availability ?? "admins");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -151,9 +165,13 @@ function ServerDialog({ server, adopt, onCancel, onSaved }: { server: ToolServer
     event.preventDefault();
     if (!name.trim()) return setError("Enter a name.");
     if (!stdio && !url.trim()) return setError("Enter the server's URL.");
+    const timeout = wholeIn(timeoutS, AGENT_BOUNDS.toolTimeoutMs.min / 1000, AGENT_BOUNDS.toolTimeoutMs.max / 1000);
+    if (timeout === null) return setError(`Enter a tool timeout of ${AGENT_BOUNDS.toolTimeoutMs.min / 1000} to ${AGENT_BOUNDS.toolTimeoutMs.max / 1000} whole seconds.`);
+    const cap = wholeIn(capKib, AGENT_BOUNDS.resultCapBytes.min / 1024, AGENT_BOUNDS.resultCapBytes.max / 1024);
+    if (cap === null) return setError(`Enter a result cap of ${AGENT_BOUNDS.resultCapBytes.min / 1024} to ${AGENT_BOUNDS.resultCapBytes.max / 1024} whole KiB.`);
     setBusy(true);
     setError(null);
-    const common = { name: name.trim(), authKind: stdio ? "none" as const : authKind, authHeader: authKind === "header" ? authHeader.trim() : null, timeoutMs: Math.min(AGENT_BOUNDS.toolTimeoutMs.max, Math.max(AGENT_BOUNDS.toolTimeoutMs.min, timeoutS * 1000)), resultCapBytes: Math.min(AGENT_BOUNDS.resultCapBytes.max, Math.max(AGENT_BOUNDS.resultCapBytes.min, capKib * 1024)), availability };
+    const common = { name: name.trim(), authKind: stdio ? "none" as const : authKind, authHeader: authKind === "header" ? authHeader.trim() : null, timeoutMs: timeout * 1000, resultCapBytes: cap * 1024, availability };
     try {
       if (server) await updateServer(server.id, { ...common, ...(stdio ? {} : { url: url.trim() }), ...(secret.trim() ? { secret: secret.trim() } : {}), removeSecret, expectedRevision: server.revision });
       else await createServer({ ...common, ...(adopt ? { stdioId: adopt.id } : { url: url.trim() }), secret: secret.trim() || null });
@@ -165,7 +183,7 @@ function ServerDialog({ server, adopt, onCancel, onSaved }: { server: ToolServer
     }
   }
   return <ModalDialog title={server ? "Edit tool server" : adopt ? `Adopt ${adopt.name}` : "Add tool server"} eyebrow="AI" onClose={onCancel} busy={busy} variant="sheet" className="chat-dialog">
-    <form className="file-dialog-form ai-provider-form" onSubmit={submit}>
+    <form className="file-dialog-form ai-provider-form" onSubmit={submit} noValidate>
       <label htmlFor={ids.name}>Name</label>
       <input id={ids.name} value={name} maxLength={AGENT_BOUNDS.serverName} autoFocus autoComplete="off" placeholder="GitHub tools" onChange={(event) => setName(event.target.value)} />
       {stdio ? <p className="file-dialog-hint">A stdio server declared by the host: <code>{server?.stdioId ?? adopt?.id}</code>. It runs as Nook's user with full trust (Nook's keys, database, and vault); Nook cannot sandbox it.</p> : <>
@@ -179,16 +197,16 @@ function ServerDialog({ server, adopt, onCancel, onSaved }: { server: ToolServer
           <input id={ids.header} value={authHeader} maxLength={64} autoComplete="off" spellCheck={false} placeholder="X-API-Key" onChange={(event) => setAuthHeader(event.target.value)} />
         </>}
         {authKind !== "none" && <>
-          <label htmlFor={ids.secret}>Credential {server?.hasSecret && !removeSecret ? <small>(saved: {server.hint}; leave empty to keep it)</small> : null}</label>
+          <label htmlFor={ids.secret}>Credential {server?.hasSecret && !removeSecret ? <small>({server.hint ? `saved: ${server.hint}` : "saved"}; leave empty to keep it)</small> : null}</label>
           <input id={ids.secret} type="password" value={secret} maxLength={4096} autoComplete="off" placeholder={server?.hasSecret ? "Keep the saved credential" : "The token or header value"} onChange={(event) => { setSecret(event.target.value); setRemoveSecret(false); }} />
           {server?.hasSecret && <label className="ai-check"><input type="checkbox" checked={removeSecret} onChange={(event) => setRemoveSecret(event.target.checked)} />Remove the saved credential</label>}
           <p className="file-dialog-hint">{SECRET_HONESTY} It is sent only to this server and never shown again.</p>
         </>}
       </>}
       <label htmlFor={ids.timeout}>Tool timeout (seconds, {AGENT_BOUNDS.toolTimeoutMs.min / 1000}–{AGENT_BOUNDS.toolTimeoutMs.max / 1000})</label>
-      <input id={ids.timeout} type="number" min={AGENT_BOUNDS.toolTimeoutMs.min / 1000} max={AGENT_BOUNDS.toolTimeoutMs.max / 1000} value={timeoutS} onChange={(event) => setTimeoutS(Math.floor(Number(event.target.value) || 30))} />
+      <input id={ids.timeout} type="number" min={AGENT_BOUNDS.toolTimeoutMs.min / 1000} max={AGENT_BOUNDS.toolTimeoutMs.max / 1000} value={timeoutS} onChange={(event) => setTimeoutS(event.target.value)} />
       <label htmlFor={ids.cap}>Result cap (KiB of text the model sees, {AGENT_BOUNDS.resultCapBytes.min / 1024}–{AGENT_BOUNDS.resultCapBytes.max / 1024})</label>
-      <input id={ids.cap} type="number" min={AGENT_BOUNDS.resultCapBytes.min / 1024} max={AGENT_BOUNDS.resultCapBytes.max / 1024} value={capKib} onChange={(event) => setCapKib(Math.floor(Number(event.target.value) || 16))} />
+      <input id={ids.cap} type="number" min={AGENT_BOUNDS.resultCapBytes.min / 1024} max={AGENT_BOUNDS.resultCapBytes.max / 1024} value={capKib} onChange={(event) => setCapKib(event.target.value)} />
       <span className="ai-label" id={ids.availability}>Who may attach its tools</span>
       <Select<ServerAvailability> labelledBy={ids.availability} label="Who may attach its tools" value={availability} onChange={setAvailability} options={[{ value: "admins", label: AVAILABILITY_LABELS.admins }, { value: "all", label: AVAILABILITY_LABELS.all, description: "Members and viewers who can chat" }]} />
       {error && <p className="form-error" role="alert">{error}</p>}

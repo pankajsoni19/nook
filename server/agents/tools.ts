@@ -1,7 +1,7 @@
 import { audit, db, now } from "../db";
 import { listApiKeys, ownApiKey } from "../apiKeys";
 import { loadLiveKey, type McpKeyContext } from "../mcpTools";
-import type { AgentToolPolicy, AgentToolRef, LinkableKey, NookLink, ToolCatalog, ToolPolicy } from "../../shared/agents";
+import type { AgentToolPolicy, AgentToolRef, LinkableKey, LinkState, NookLink, ToolCatalog, ToolPolicy } from "../../shared/agents";
 import type { AgentRow } from "./agentsService";
 import { nookCatalogFor, nookToolSpec, nookToolsFor, type NookResolved } from "./nookBridge";
 import { roleMayChat } from "./settings";
@@ -122,6 +122,28 @@ export function liveLinkedKey(agentId: string, userId: string): McpKeyContext | 
   return key;
 }
 
+/**
+ * The caller's link as the editor and the chat show it (Wave 41 QA Q4): none, live, or a key that is
+ * no longer live (revoked, expired, or otherwise inactive), named so the person can link another.
+ */
+export function linkStateOf(agentId: string, userId: string): { state: LinkState; keyName: string | null } {
+  const row = linkRow(agentId, userId);
+  if (!row?.nook_key_id) return { state: "none", keyName: null };
+  if (liveLinkedKey(agentId, userId)) return { state: "live", keyName: ownApiKey(userId, row.nook_key_id)?.name ?? null };
+  const key = ownApiKey(userId, row.nook_key_id);
+  if (!key) return { state: "inactive", keyName: null };
+  return { state: key.state === "revoked" ? "revoked" : key.state === "expired" ? "expired" : "inactive", keyName: key.name };
+}
+
+/** The tool-result text for a Nook call through a link whose key is gone (QA Q4): names the key, says what to do. */
+export function inactiveLinkMessage(agentId: string, userId: string): string | null {
+  const link = linkStateOf(agentId, userId);
+  if (link.state === "none" || link.state === "live") return null;
+  const name = link.keyName ? `"${link.keyName}"` : "";
+  const why = link.state === "revoked" ? "was revoked" : link.state === "expired" ? "has expired" : "is no longer active";
+  return `The linked Nook key ${name}${name ? " " : ""}${why}, so Nook's tools are off for this agent. The person can link another key in the agent's settings.`;
+}
+
 // --- The catalog (plan §12 `GET /api/agents/catalog`) -----------------------------------------------
 
 export function catalogFor(role: string, agentId: string | null, userId: string): ToolCatalog {
@@ -133,7 +155,8 @@ export function catalogFor(role: string, agentId: string | null, userId: string)
     };
   });
   const key = agentId ? liveLinkedKey(agentId, userId) : null;
-  return { servers, nook: { linked: key !== null, tools: nookCatalogFor(key) } };
+  // Without a live key the picker lists none of Nook's tools (QA Q4): what runs is bounded by the key.
+  return { servers, nook: { linked: key !== null, linkState: agentId ? linkStateOf(agentId, userId).state : "none", tools: key ? nookCatalogFor(key) : [] } };
 }
 
 // --- Per-step resolution (plan §2.1 `toolCatalog`, D358) ---------------------------------------------

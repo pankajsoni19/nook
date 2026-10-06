@@ -211,9 +211,25 @@ describe("tool servers (admin, §4.1, D349, D354)", () => {
   });
 
   test("the egress guard refuses a private host and a refused credential marks the server auth_failed (T305)", async () => {
-    const privateServer = await api(admin, "POST", "/agents/admin/servers", { name: "Private", url: "https://10.0.0.7/mcp" });
+    // Wave 41 QA Q1: the providers' save-time rules: a private literal or plain http to an unlisted host is refused at save.
+    for (const url of ["https://10.0.0.7/mcp", "http://192.168.1.1/mcp", "http://tools.example.test/mcp", "https://169.254.169.254/mcp", "https://[::1]/mcp"]) {
+      const refused = await api(admin, "POST", "/agents/admin/servers", { name: "Private", url });
+      expect({ url, status: refused.status, code: refused.body.code, field: refused.body.field }).toEqual({ url, status: 400, code: "EGRESS_REFUSED", field: "url" });
+    }
+    // A saved server whose name later resolves to a private address is still refused at call time (the guard runs per request).
+    const privateServer = await api(admin, "POST", "/agents/admin/servers", { name: "Private", url: "https://tools.example.test/mcp" });
     expect(privateServer.status).toBe(201);
-    const synced = await api(admin, "POST", `/agents/admin/servers/${privateServer.body.server.id}/sync`, {});
+    expect((await api(admin, "PATCH", `/agents/admin/servers/${privateServer.body.server.id}`, { url: "https://10.0.0.7/mcp", expectedRevision: privateServer.body.server.revision })).body).toMatchObject({ code: "EGRESS_REFUSED", field: "url" });
+    // No real DNS: the name "resolves" to a private address through the test seam.
+    const { agentNet } = await import("../server/agents/egress");
+    const realResolve = agentNet.resolve;
+    agentNet.resolve = async () => ["10.0.0.7"];
+    let synced: Awaited<ReturnType<typeof api>>;
+    try {
+      synced = await api(admin, "POST", `/agents/admin/servers/${privateServer.body.server.id}/sync`, {});
+    } finally {
+      agentNet.resolve = realResolve;
+    }
     expect(synced.body.server.status).toBe("unreachable");
     expect(synced.body.server.lastError).toContain("private");
     expect(synced.body.server.lastError).not.toContain("10.0.0.7");
@@ -230,14 +246,25 @@ describe("tool servers (admin, §4.1, D349, D354)", () => {
     expect(catalog.status).toBe(200);
     expect(catalog.body.catalog.servers.map((server: { id: string }) => server.id)).toEqual([serverId]);
     expect(catalog.body.catalog.nook.linked).toBe(false);
-    expect(catalog.body.catalog.nook.tools.map((tool: { name: string }) => tool.name)).toContain("list_notes");
-    // Never offered: proposal machinery, uploads, Bin, and the module's own tools (T318).
-    const offered = catalog.body.catalog.nook.tools.map((tool: { name: string }) => tool.name);
-    for (const name of ["submit_proposals", "begin_upload", "bin_note", "restore_card", "list_chats", "get_chat", "list_agents"]) expect(offered).not.toContain(name);
-    expect(catalog.body.catalog.nook.tools.find((tool: { name: string }) => tool.name === "create_card")).toMatchObject({ write: true, proposable: true, module: "tasks" });
-    expect(catalog.body.catalog.nook.tools.find((tool: { name: string }) => tool.name === "move_card")).toMatchObject({ write: true, proposable: false });
+    // Wave 41 QA Q4: without a live key the picker lists none of Nook's tools.
+    expect(catalog.body.catalog.nook.tools).toEqual([]);
     // echo says openWorldHint false, so private data plus echo is not the trifecta.
     const agent = await newAgent(member, { tools: [serverTool("echo"), { source: "nook", toolName: "list_notes" }] });
+    // With a broad live key linked, the catalog lists what it reaches; never offered: proposal machinery, uploads, Bin, and the module's own tools (T318).
+    const broad = makeKey(member, ["notes:read", "tasks:read", "tasks:write", "inbox:write", "bin:write", "agents:read"], "Catalog key");
+    expect((await api(member, "PUT", `/agents/${agent.id}/link`, { nookKeyId: broad.id })).status).toBe(200);
+    const linkedCatalog = (await api(member, "GET", `/agents/catalog?agentId=${agent.id}`)).body.catalog;
+    expect(linkedCatalog.nook).toMatchObject({ linked: true, linkState: "live" });
+    const offered = linkedCatalog.nook.tools.map((tool: { name: string }) => tool.name);
+    expect(offered).toContain("list_notes");
+    for (const name of ["submit_proposals", "begin_upload", "bin_note", "restore_card", "list_chats", "get_chat", "list_agents"]) expect(offered).not.toContain(name);
+    expect(linkedCatalog.nook.tools.find((tool: { name: string }) => tool.name === "create_card")).toMatchObject({ write: true, proposable: true, module: "tasks", proposalScope: "tasks:read" });
+    expect(linkedCatalog.nook.tools.find((tool: { name: string }) => tool.name === "move_card")).toMatchObject({ write: true, proposable: false, proposalScope: null });
+    // A revoked linked key: the summary and the catalog say so, and the catalog lists no Nook tools again.
+    db.query("UPDATE mcp_api_keys SET revoked_at = ? WHERE id = ?").run(new Date().toISOString(), broad.id);
+    expect((await api(member, "GET", `/agents/${agent.id}`)).body.agent).toMatchObject({ linked: false, linkState: "revoked" });
+    expect((await api(member, "GET", `/agents/catalog?agentId=${agent.id}`)).body.catalog.nook).toMatchObject({ linked: false, linkState: "revoked", tools: [] });
+    expect((await api(member, "PUT", `/agents/${agent.id}/link`, { nookKeyId: null })).status).toBe(200);
     expect(agent.tools.length).toBe(2);
     expect(agent.trifecta).toBe(false);
     expect((await api(member, "POST", "/agents", { name: "Bad", tools: [serverTool("nope")] })).status).toBe(400);
@@ -348,6 +375,35 @@ describe("the loop with tools (§2.1, §5.4, D342, D343, D350, D352)", () => {
     const rest = await readEvents(member, runId, { after: events.at(-1)!.seq });
     expect(rest.at(-1)!.data.status).toBe("cancelled");
     expect(db.query("SELECT status FROM chat_messages WHERE run_id = ? AND role = 'assistant'").get(runId)).toEqual({ status: "cancelled" });
+    // Wave 41 QA Q3: a Stop while the card waits is recorded as cancelled, never as the person's refusal.
+    expect(rest.find((event) => event.type === "confirmation_resolved")!.data.decision).toBe("cancelled");
+    const stored = (await api(member, "GET", `/chats/${chat.id}`)).body.messages.find((message: { runId: string | null }) => message.runId === runId);
+    expect(stored.toolCalls[0]).toMatchObject({ ok: false, decision: "cancelled" });
+  });
+
+  test("Wave 41 QA Q3: the wall clock pauses while a card waits; the card's own expiry tells the model and the run goes on", async () => {
+    const savedTimeout = config.agents.runTimeoutS;
+    (config.agents as { runTimeoutS: number }).runTimeoutS = 1;
+    confirmationTimeouts.ttlMs = 2000;
+    try {
+      const agent = await newAgent(member, { tools: [serverTool("write_thing")] });
+      const chat = await newChat(member, agent.id);
+      const { runId, events } = await sendAndWait(member, chat.id, 'tool:fake-tools__write_thing:{"what":"slow answer"}', awaitingConfirmation);
+      const card = events.find((event) => event.type === "confirmation_required")!;
+      // The card says when it expires, and that is when it does (2 s, past the 1 s wall clock).
+      const shownFor = Date.parse(card.data.expiresAt) - Date.now();
+      expect(shownFor).toBeGreaterThan(1200);
+      expect(shownFor).toBeLessThanOrEqual(2000);
+      const rest = await readEvents(member, runId, { after: card.seq });
+      expect(rest.find((event) => event.type === "confirmation_resolved")!.data.decision).toBe("expired");
+      expect(rest.find((event) => event.type === "tool_result")!.data).toMatchObject({ ok: false, decision: "expired" });
+      expect(rest.at(-1)!.data.status).toBe("ok");
+      // The model was told the person did not answer, and answered from there.
+      expect(lastCompletion().messages.at(-1)!.content).toContain("did not answer the confirmation in time");
+    } finally {
+      confirmationTimeouts.ttlMs = 15 * 60_000;
+      (config.agents as { runTimeoutS: number }).runTimeoutS = savedTimeout;
+    }
   });
 
   test("the step cap: the last step goes out without tools and the run ends step_limit; unknown tools and bad JSON are tool errors", async () => {

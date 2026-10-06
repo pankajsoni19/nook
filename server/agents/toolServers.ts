@@ -1,8 +1,8 @@
 import { audit, db, now } from "../db";
 import { AGENT_BOUNDS, type CatalogTool, type ServerAuthKind, type ServerAvailability, type ServerStatus, type ToolPolicy, type ToolServerSummary } from "../../shared/agents";
-import { checkEgressUrl, EgressError } from "./egress";
+import { checkSavedEndpoint, EgressError } from "./egress";
 import { describeMcpError, McpHttpTransport, McpSession, type McpToolInfo } from "./mcpClient";
-import { openSecret, sealSecret, secretHint } from "./secrets";
+import { openSecret, sealSecret, secretHint, shownHint } from "./secrets";
 import { AgentError } from "./status";
 import { declaredStdioServer, McpStdioTransport, stdioEnabled } from "./stdio";
 
@@ -61,7 +61,7 @@ export function toolsWithPolicies(row: ToolServerRow): CatalogTool[] {
 
 export const serverSummary = (row: ToolServerRow): ToolServerSummary => ({
   id: row.id, slug: row.slug, name: row.name, transport: row.transport, url: row.url, stdioId: row.stdio_id, authKind: row.auth_kind, authHeader: row.auth_header,
-  hasSecret: row.secret_ct !== null, hint: row.secret_ct ? row.secret_hint : null, timeoutMs: row.timeout_ms, resultCapBytes: row.result_cap_bytes,
+  hasSecret: row.secret_ct !== null, hint: shownHint(row.secret_ct, row.secret_hint), timeoutMs: row.timeout_ms, resultCapBytes: row.result_cap_bytes,
   availability: availabilityOf(row.visibility), enabled: row.enabled === 1, status: statusOf(row.status), lastError: row.last_error, tools: toolsWithPolicies(row),
   toolsSyncedAt: row.tools_synced_at, revision: row.revision, createdAt: row.created_at, updatedAt: row.updated_at
 });
@@ -92,6 +92,7 @@ export type ToolServerInput = {
 };
 
 const SLUG = /^[a-z0-9][a-z0-9_-]{0,23}$/;
+const RESERVED_SLUGS = new Set(["nook", "mynotes", "system", "user", "assistant", "tool", "tools", "function", "functions", "admin", "mcp", "agent", "agents"]);
 /**
  * Custom credential header names are an allowlist (review L6): `X-…` names or `Authorization`.
  * Hop-by-hop, proxy, and identity headers are refused even when they would match.
@@ -103,16 +104,23 @@ export const headerNameAllowed = (name: string) => (name.toLowerCase() === "auth
 function slugFrom(name: string, explicit?: string) {
   const candidate = (explicit ?? name).trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, AGENT_BOUNDS.serverSlug);
   if (!SLUG.test(candidate)) throw new AgentError(400, "INVALID", "The slug must be 1-24 characters of a-z, 0-9, hyphens, and underscores", { field: "slug" });
+  // `nook` names Nook's own tools to the model (`nook__…`); the others are roles or machinery (Wave 41 QA L6).
+  if (RESERVED_SLUGS.has(candidate)) {
+    if (explicit !== undefined) throw new AgentError(400, "INVALID", `The slug "${candidate}" is reserved; pick another`, { field: "slug" });
+    return `${candidate}-srv`;
+  }
   return candidate;
 }
 
+/** Save-time checks (Wave 41 QA Q1): the providers' rules, so plain http and private literals need AGENT_ALLOWED_PRIVATE_HOSTS. */
 function normalizeUrl(value: string) {
   const trimmed = value.trim();
   if (trimmed.length > AGENT_BOUNDS.serverUrl) throw new AgentError(400, "INVALID", "The URL is too long", { field: "url" });
   try {
-    checkEgressUrl(trimmed);
+    checkSavedEndpoint(trimmed);
   } catch (error) {
-    throw new AgentError(400, "INVALID", error instanceof EgressError ? error.message : "The URL is not valid", { field: "url" });
+    if (error instanceof EgressError) throw new AgentError(400, "EGRESS_REFUSED", error.message, { field: "url" });
+    throw new AgentError(400, "INVALID", "The URL is not valid", { field: "url" });
   }
   return trimmed;
 }

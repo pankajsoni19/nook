@@ -5,6 +5,7 @@ import { submitProposal, TITLE_MAX } from "../inbox/service";
 import { hasScope, type McpScope } from "../mcpScopes";
 import { loadLiveKey, mcpToolSpecs, runTool, toolVisible, McpToolError, type McpKeyContext, type McpToolSpec } from "../mcpTools";
 import { keyReach } from "../keyResources";
+import { markKeyUsed } from "../apiKeys";
 import { PROPOSAL_KIND_DEFS } from "../inbox/kinds";
 import type { NookCatalogTool } from "../../shared/agents";
 import type { AgentRow } from "./agentsService";
@@ -76,7 +77,8 @@ const moduleOf = (scope: McpScope) => scope.split(":")[0]!;
  */
 export function nookCatalogFor(key: McpKeyContext | null): NookCatalogTool[] {
   return offeredSpecs().filter((spec) => !key || reachable(spec, key, true)).map((spec) => ({
-    name: spec.name, title: spec.title, module: moduleOf(spec.scopes[0]!), write: spec.write, proposable: spec.write && spec.name in TOOL_KIND, scope: spec.scopes[0]!
+    name: spec.name, title: spec.title, module: moduleOf(spec.scopes[0]!), write: spec.write, proposable: spec.write && spec.name in TOOL_KIND, scope: spec.scopes[0]!,
+    proposalScope: spec.write && TOOL_KIND[spec.name] ? PROPOSAL_KIND_DEFS[TOOL_KIND[spec.name]!].scope : null
   }));
 }
 
@@ -139,6 +141,8 @@ function proposalPayload(name: string, args: Record<string, unknown>): Record<st
 export async function runNookTool(resolved: NookResolved, args: Record<string, unknown>, context: { runId: string; agentId: string; agentName: string }): Promise<NookOutcome> {
   const spec = resolved.spec ?? nookToolSpec(resolved.toolName);
   if (!spec || !agentMayUse(spec.name)) return { text: JSON.stringify({ error: "Unknown tool", code: "NOT_FOUND" }), ok: false, proposalId: null };
+  // An agent's call is a use of the key like an MCP call (Wave 41 QA L4): Settings → API keys shows it as last used.
+  markKeyUsed(resolved.keyId, "mcp");
   return withAuditContext({ via: "agent", runId: context.runId, agentId: context.agentId }, async () => {
     if (resolved.mode === "proposal") {
       const kind = TOOL_KIND[spec.name];

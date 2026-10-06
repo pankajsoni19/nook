@@ -218,10 +218,10 @@ describe("tools (Wave 41 AC-B: the picker model, disclosure, the confirmation ca
       { name: "create_issue", title: null, description: "Create", readOnly: false, openWorld: true, policy: "confirm" as const },
       { name: "nuke", title: null, description: "", readOnly: false, openWorld: true, policy: "off" as const }
     ] }],
-    nook: { linked: true, tools: [
-      { name: "list_notes", title: "List notes", module: "notes", write: false, proposable: false, scope: "notes:read" },
-      { name: "create_card", title: "Create a card", module: "tasks", write: true, proposable: true, scope: "tasks:write" },
-      { name: "move_card", title: "Move a card", module: "tasks", write: true, proposable: false, scope: "tasks:write" }
+    nook: { linked: true, linkState: "live" as const, tools: [
+      { name: "list_notes", title: "List notes", module: "notes", write: false, proposable: false, scope: "notes:read", proposalScope: null },
+      { name: "create_card", title: "Create a card", module: "tasks", write: true, proposable: true, scope: "tasks:write", proposalScope: "tasks:read" },
+      { name: "move_card", title: "Move a card", module: "tasks", write: true, proposable: false, scope: "tasks:write", proposalScope: null }
     ] }
   };
   const serverId = catalog.servers[0]!.id;

@@ -263,8 +263,8 @@ describe("review 1: the Nook bridge runs as the linked key, never the session", 
     expect((await api(member, "POST", `/runs/${pending.runId}/confirm`, { ...answer(card.data), decision: "once" })).status).toBe(200);
     const rest = await readEvents(member, pending.runId, finished, card.seq);
     expect(rest.find((event) => event.type === "tool_result")!.data.ok).toBe(false);
-    // Fixed (M3): the call is re-resolved against the live key after the card, so it is refused before the bridge runs.
-    expect(lastToolTurns()[0]!.content).toContain("TOOL_UNAVAILABLE");
+    // Fixed (M3, QA Q4): the call is re-resolved against the live key after the card and refused with a message naming the key.
+    expect(lastToolTurns()[0]!.content).toContain("KEY_INACTIVE");
     expect((db.query("SELECT COUNT(*) AS count FROM proposals WHERE key_id = ?").get(proposer.id) as { count: number }).count).toBe(0);
     // Direct: the flag and a write key; the key expires while the card waits.
     const detail = (await api(member, "GET", `/agents/${agent.id}`)).body.agent;
@@ -278,6 +278,34 @@ describe("review 1: the Nook bridge runs as the linked key, never the session", 
     expect((await api(member, "POST", `/runs/${direct.runId}/confirm`, { ...answer(directCard.data), decision: "once" })).status).toBe(200);
     await readEvents(member, direct.runId, finished, directCard.seq);
     expect((db.query("SELECT COUNT(*) AS count FROM cards WHERE title = 'Expired direct'").get() as { count: number }).count).toBe(0);
+  });
+
+  test("Wave 41 QA Q4 and L4: a call marks the key used; after the key is revoked a Nook call says the key is inactive and names it", async () => {
+    resetMcpLimits();
+    const key = makeKey(member, ["notes:read"], "Soon revoked");
+    const agent = await newAgent(member, { tools: [{ source: "nook", toolName: "list_notes" }, serverTool("echo")] });
+    expect((await api(member, "PUT", `/agents/${agent.id}/link`, { nookKeyId: key.id })).status).toBe(200);
+    db.query("UPDATE mcp_api_keys SET last_used_at = NULL, last_used_mcp_at = NULL WHERE id = ?").run(key.id);
+    const live = await start(member, agent.id, [{ calls: [call("nook__list_notes", {})] }, { text: "done" }]);
+    await readEvents(member, live.runId, finished);
+    expect((db.query("SELECT last_used_mcp_at FROM mcp_api_keys WHERE id = ?").get(key.id) as { last_used_mcp_at: string | null }).last_used_mcp_at).not.toBeNull();
+    db.query("UPDATE mcp_api_keys SET revoked_at = ? WHERE id = ?").run(new Date().toISOString(), key.id);
+    // Other tools are still offered, so the call reaches the executor: KEY_INACTIVE naming the key, never UNKNOWN_TOOL.
+    const dead = await start(member, agent.id, [{ calls: [call("nook__list_notes", {})] }, { text: "done" }]);
+    const events = await readEvents(member, dead.runId, finished);
+    expect(events.find((event) => event.type === "tool_call")!.data).toMatchObject({ server: "nook", tool: "list_notes" });
+    const turn = lastToolTurns()[0]!.content!;
+    expect(turn).toContain("KEY_INACTIVE");
+    expect(turn).toContain("Soon revoked");
+    expect(turn).not.toContain("UNKNOWN_TOOL");
+    // With no tool offered at all, the answer ends with the same reason (QA L9).
+    const nookOnly = await newAgent(member, { tools: [{ source: "nook", toolName: "list_notes" }] });
+    expect((await api(member, "PUT", `/agents/${nookOnly.id}/link`, { nookKeyId: makeKey(member, ["notes:read"], "Revoked too").id })).status).toBe(200);
+    db.query("UPDATE mcp_api_keys SET revoked_at = ? WHERE name = 'Revoked too' AND user_id = ?").run(new Date().toISOString(), member.userId);
+    const ended = await start(member, nookOnly.id, [{ calls: [call("nook__list_notes", {})] }]);
+    const text = (await readEvents(member, ended.runId, finished)).filter((event) => event.type === "delta").map((event) => event.data.text).join("");
+    expect(text).toContain("no tools were available");
+    expect(text).toContain(`The linked Nook key "Revoked too" was revoked`);
   });
 
   test("FIXED M2: a key narrowed (inbox:write removed) while a proposal waits on the card files nothing", async () => {

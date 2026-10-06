@@ -102,7 +102,7 @@ export function AiSettings({ flash }: { flash: (message: string) => void }) {
             </div>
           </div>
           <dl className="ai-provider-facts">
-            <div><dt>API key</dt><dd>{provider.hasSecret ? <code>{provider.hint}</code> : <span className="chat-muted">none</span>}</dd></div>
+            <div><dt>API key</dt><dd>{provider.hasSecret ? <code>{provider.hint ?? "Saved"}</code> : <span className="chat-muted">none</span>}</dd></div>
             <div><dt>Default model</dt><dd><code>{provider.defaultModel}</code></dd></div>
             <div><dt>Token parameter</dt><dd><code>{provider.compat.tokenParam}</code></dd></div>
             <div><dt>Context</dt><dd>{provider.compat.contextTokens.toLocaleString()} tokens{provider.compat.streamUsage ? "" : " · usage estimated"}</dd></div>
@@ -197,7 +197,7 @@ function ProviderDialog({ provider, onCancel, onSaved }: { provider: ProviderSum
       <label htmlFor={ids.url}>Base URL</label>
       <input id={ids.url} value={baseUrl} maxLength={AGENT_BOUNDS.baseUrl} autoComplete="off" spellCheck={false} placeholder={DEFAULT_BASE_URL} onChange={(event) => setBaseUrl(event.target.value)} />
       <p className="file-dialog-hint">https only. A private host (Ollama, LiteLLM, vLLM on your network) must be listed in AGENT_ALLOWED_PRIVATE_HOSTS on the server.</p>
-      <label htmlFor={ids.key}>API key {provider?.hasSecret && !removeSecret ? <small>(saved: {provider.hint}; leave empty to keep it)</small> : null}</label>
+      <label htmlFor={ids.key}>API key {provider?.hasSecret && !removeSecret ? <small>({provider.hint ? `saved: ${provider.hint}` : "saved"}; leave empty to keep it)</small> : null}</label>
       <input id={ids.key} type="password" value={apiKey} maxLength={1024} autoComplete="off" placeholder={provider?.hasSecret ? "Keep the saved key" : "sk-…"} onChange={(event) => { setApiKey(event.target.value); setRemoveSecret(false); }} />
       {provider?.hasSecret && <label className="ai-check"><input type="checkbox" checked={removeSecret} onChange={(event) => setRemoveSecret(event.target.checked)} />Remove the saved key</label>}
       <p className="file-dialog-hint">{SECRET_HONESTY} The key is sent only to this provider's endpoint and is never shown again.</p>

@@ -53,7 +53,8 @@ export function orphanRefs(refs: readonly AgentToolRef[], catalog: ToolCatalog):
   const known = new Set<string>();
   for (const server of catalog.servers) for (const tool of server.tools) known.add(`server:${server.id}:${tool.name}`);
   for (const tool of catalog.nook.tools) known.add(`nook:${tool.name}`);
-  return refs.filter((ref) => !known.has(refKey(ref)));
+  // Without a live key the catalog lists no Nook tools (QA Q4): those picks are inactive, not orphans.
+  return refs.filter((ref) => !known.has(refKey(ref)) && (ref.source !== "nook" || catalog.nook.linked));
 }
 
 /** What a Nook write tool does in a chat, from the catalog's flags and the agent's direct-writes setting. */

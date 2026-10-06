@@ -241,6 +241,8 @@ export type LoopInput = {
   tools?: (step: number) => Promise<ModelTool[]> | ModelTool[];
   /** Runs one call (gate, confirmation, timeout, cap, and marker are the executor's); returns the tool turn's content. */
   execute?: (call: ModelToolCall, step: number) => Promise<ToolExecution>;
+  /** Why no tools were offered, when the run knows (a linked key that died, QA Q4); the answer then ends with it. */
+  noToolsReason?: () => string | null;
   /** Calls run per step and per run (defaults: AGENT_BOUNDS); calls past either are dropped, not executed. */
   limits?: { perStep: number; perRun: number };
 };
@@ -305,6 +307,16 @@ export async function runLoop(input: LoopInput): Promise<LoopResult> {
       input.messages.push({ role: "assistant", content: reply.content });
       // On the last step the model got no tools (D342); still wanting one after earlier steps had them is the step limit.
       const wanted = last && offeredAny && reply.toolCalls.length > 0;
+      // A tool call nothing could run (none offered at this step) ends the answer with a reason, never an empty reply (Wave 41 QA L9).
+      if (reply.toolCalls.some((call) => call.name)) {
+        const reason = wanted ? null : input.noToolsReason?.() ?? null;
+        const note = wanted
+          ? "[The answer reached its step limit while the model still wanted to use a tool.]"
+          : `[The model tried to use a tool, but no tools were available to it here, so the answer stops.${reason ? ` ${reason}` : ""}]`;
+        const lead = content ? "\n\n" : "";
+        content += lead + note;
+        input.sink.delta(lead + note);
+      }
       return { status: wanted ? "step_limit" : "stop", content, steps: step, usage: total, model, toolCalls, droppedToolCalls };
     }
     input.messages.push({ role: "assistant", content: reply.content, tool_calls: calls.map((call) => ({ id: call.id, type: "function", function: { name: call.name, arguments: call.arguments } })) });

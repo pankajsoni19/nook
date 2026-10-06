@@ -1,7 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { config } from "../config";
 import { audit, db, now } from "../db";
-import { AGENT_BOUNDS, CHAT_RUN_TIMEOUT_S, CONFIRMATION_TTL_MS, PREAMBLE_VERSION, preambleFor, RUN_SLOTS, toolResultEnd, toolResultMarker,type DailyUsage, type PendingConfirmation, type RunErrorCode, type RunStatus, type TokenUsage, type ToolCallView } from "../../shared/agents";
+import { AGENT_BOUNDS, CHAT_RUN_TIMEOUT_S, CONFIRMATION_TTL_MS, PREAMBLE_VERSION, preambleFor, RUN_SLOTS, toolResultEnd, toolResultMarker, type DailyUsage, type PendingConfirmation, type RunErrorCode, type RunStatus, type TokenUsage, type ToolCallView } from "../../shared/agents";
 import type { AgentRow } from "./agentsService";
 import { chatAgent, finishAssistantMessage, flushAssistantText, flushToolCalls, insertAssistantPlaceholder, insertUserMessage, ownedChat, parseToolCalls, pathTo, type ChatRow, type MessageRow } from "./chats";
 import { McpClientError } from "./mcpClient";
@@ -11,7 +11,7 @@ import { connectionFor } from "./providers";
 import { readAgentSettings, roleMayChat } from "./settings";
 import { AgentError } from "./status";
 import { channelOf, openChannel, type RunChannel } from "./stream";
-import { identityOf, liveRunner, liveToolFor, resolveTools, type ResolvedTool } from "./tools";
+import { identityOf, inactiveLinkMessage, liveRunner, liveToolFor, resolveTools, type ResolvedTool } from "./tools";
 import { sessionFor } from "./toolServers";
 
 /**
@@ -196,7 +196,9 @@ function toolExecutor(run: ActiveRun, channel: RunChannel, agent: AgentRow, mess
   const execute = async (call: ModelToolCall): Promise<ToolExecution> => {
     const started = Date.now();
     const offered = resolved.find((item) => item.modelName === call.name) ?? null;
-    const view: ToolCallView = { id: call.id, tool: offered?.toolName ?? call.name, server: offered?.server ?? "?", serverId: offered?.serverId ?? null, argsPreview: argsPreviewOf(call.arguments), resultPreview: null, ok: null, truncated: false, durationMs: null, decision: null, proposalId: null };
+    // A Nook tool through a link whose key died is named as such (QA Q4), not as an unknown tool.
+    const deadLink = !offered && call.name.startsWith("nook__") ? inactiveLinkMessage(agent.id, run.userId) : null;
+    const view: ToolCallView = { id: call.id, tool: offered?.toolName ?? (deadLink ? call.name.slice("nook__".length) : call.name), server: offered?.server ?? (deadLink ? "nook" : ""), serverId: offered?.serverId ?? null, argsPreview: argsPreviewOf(call.arguments), resultPreview: null, ok: null, truncated: false, durationMs: null, decision: null, proposalId: null };
     const fail = (code: string, message: string, extra: { decision?: ToolCallView["decision"] } = {}) => {
       const text = toolError(code, message);
       finish(view, { ok: false, text, truncated: false, durationMs: Date.now() - started, ...extra });
@@ -209,7 +211,7 @@ function toolExecutor(run: ActiveRun, channel: RunChannel, agent: AgentRow, mess
     run.toolCalls.push(view);
     channel.emit({ type: "tool_call", data: { messageId, callId: call.id, tool: view.tool, server: view.server, serverId: view.serverId, argsPreview: view.argsPreview } });
     if (run.toolCalls.length > AGENT_BOUNDS.toolCallsPerRun) return fail("TOOL_LIMIT", `This run has used its ${AGENT_BOUNDS.toolCallsPerRun} tool calls; answer with what you have`);
-    if (!offered) return fail("UNKNOWN_TOOL", "unknown tool");
+    if (!offered) return deadLink ? fail("KEY_INACTIVE", deadLink) : fail("UNKNOWN_TOOL", "unknown tool");
     let args: Record<string, unknown>;
     try {
       const parsed: unknown = call.arguments.trim() ? JSON.parse(call.arguments) : {};
@@ -221,7 +223,11 @@ function toolExecutor(run: ActiveRun, channel: RunChannel, agent: AgentRow, mess
     // Rights are live per call (review M3): the tool is re-resolved against the live agent row, role,
     // server row (same revision), policy, and key before the gate, and again after any confirmation.
     const identity = identityOf(offered);
-    const unavailable = () => fail("TOOL_UNAVAILABLE", "This tool is no longer available to this agent (it was disabled, removed, changed, or the rights changed); the call was not run");
+    const unavailable = () => {
+      const dead = identity.kind === "nook" ? inactiveLinkMessage(agent.id, run.userId) : null;
+      return dead ? fail("KEY_INACTIVE", dead) : unavailableTool();
+    };
+    const unavailableTool = () => fail("TOOL_UNAVAILABLE", "This tool is no longer available to this agent (it was disabled, removed, changed, or the rights changed); the call was not run");
     let tool = liveToolFor(agent.id, run.userId, identity);
     if (!tool) return unavailable();
     if (tool.policy === "confirm") {
@@ -229,7 +235,13 @@ function toolExecutor(run: ActiveRun, channel: RunChannel, agent: AgentRow, mess
         confirmationId: randomBytes(16).toString("hex"), argsHash: argsHashOf(args), callId: call.id, tool: tool.toolName, server: tool.server, args,
         expiresAt: new Date(Date.now() + confirmationTimeouts.ttlMs).toISOString(), proposal: tool.nook?.mode === "proposal"
       });
-      if (decision !== "allowed") return fail("DENIED", decision === "expired" ? "The person did not answer the confirmation in time; the call was refused" : "The person refused this call", { decision });
+      if (decision === "cancelled") {
+        // The run is ending (Stop, the wall clock, the chat deleted): the call is recorded cancelled, never as the person's refusal.
+        view.decision = "cancelled";
+        throw new Error("cancelled");
+      }
+      if (decision === "expired") return fail("EXPIRED", "The person did not answer the confirmation in time, so the call was not run. Continue without it, or ask them.", { decision });
+      if (decision !== "allowed") return fail("DENIED", "The person refused this call", { decision });
       view.decision = "allowed";
       tool = liveToolFor(agent.id, run.userId, identity);
       if (!tool) return unavailable();
@@ -279,25 +291,61 @@ function withTimeout<T>(promise: Promise<T>, ms: number, signal: AbortSignal): P
 /** The confirmation wait (15 minutes, then Deny), on an object so tests can shorten it. */
 export const confirmationTimeouts = { ttlMs: CONFIRMATION_TTL_MS };
 
-/** Pauses the run on the card (plan §5.4): Allow once, Deny, 15 minutes (then Deny), or Stop. */
-function awaitConfirmation(run: ActiveRun, channel: RunChannel, messageId: string, confirmation: PendingConfirmation): Promise<"allowed" | "denied" | "expired"> {
+/**
+ * The run's wall clock (plan §2.2, Wave 41 QA Q3): it counts the run's own work only. It pauses
+ * while a card waits (the card has its own 15-minute cap) and resumes with what was left.
+ */
+type WallClock = { remainingMs: number; startedAt: number; timer: ReturnType<typeof setTimeout> | null };
+const wallClocks = new WeakMap<ActiveRun, WallClock>();
+
+function startWallClock(run: ActiveRun, ms: number) {
+  const clock: WallClock = { remainingMs: ms, startedAt: Date.now(), timer: null };
+  wallClocks.set(run, clock);
+  resumeWallClock(run);
+}
+function resumeWallClock(run: ActiveRun) {
+  const clock = wallClocks.get(run);
+  if (!clock || clock.timer) return;
+  clock.startedAt = Date.now();
+  clock.timer = setTimeout(() => run.controller.abort("timeout" satisfies CancelReason), Math.max(0, clock.remainingMs));
+}
+function pauseWallClock(run: ActiveRun) {
+  const clock = wallClocks.get(run);
+  if (!clock?.timer) return;
+  clearTimeout(clock.timer);
+  clock.timer = null;
+  clock.remainingMs -= Date.now() - clock.startedAt;
+}
+function stopWallClock(run: ActiveRun) {
+  const clock = wallClocks.get(run);
+  if (clock?.timer) clearTimeout(clock.timer);
+  wallClocks.delete(run);
+}
+
+/**
+ * Pauses the run on the card (plan §5.4): Allow once, Deny, 15 minutes (then `expired`, and the
+ * model is told the person did not answer), or the run ending (`cancelled`, never blamed on the person).
+ */
+function awaitConfirmation(run: ActiveRun, channel: RunChannel, messageId: string, confirmation: PendingConfirmation): Promise<"allowed" | "denied" | "expired" | "cancelled"> {
   return new Promise((resolve) => {
     let settled = false;
-    const settle = (decision: "allowed" | "denied" | "expired") => {
+    const settle = (decision: "allowed" | "denied" | "expired" | "cancelled") => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       run.controller.signal.removeEventListener("abort", onAbort);
       run.pending = null;
+      resumeWallClock(run);
       db.query("UPDATE agent_runs SET status = 'running' WHERE id = ? AND status = 'awaiting_confirmation'").run(run.runId);
       db.query("UPDATE chat_messages SET status = 'streaming' WHERE id = ? AND status = 'awaiting_confirmation'").run(messageId);
       channel.emit({ type: "confirmation_resolved", data: { messageId, confirmationId: confirmation.confirmationId, callId: confirmation.callId, decision } });
       audit(run.userId, null, "agents.tool.confirm", { runId: run.runId, callId: confirmation.callId, server: confirmation.server, tool: confirmation.tool, decision });
       resolve(decision);
     };
-    const onAbort = () => settle("denied");
-    const timer = setTimeout(() => settle("expired"), confirmationTimeouts.ttlMs);
+    const onAbort = () => settle("cancelled");
+    const timer = setTimeout(() => settle("expired"), Math.max(0, Date.parse(confirmation.expiresAt) - Date.now()));
     timer.unref?.();
+    pauseWallClock(run);
     run.pending = { confirmation, resolve: settle };
     db.query("UPDATE agent_runs SET status = 'awaiting_confirmation' WHERE id = ?").run(run.runId);
     db.query("UPDATE chat_messages SET status = 'awaiting_confirmation' WHERE id = ? AND status = 'streaming'").run(messageId);
@@ -332,7 +380,7 @@ export const pendingConfirmationFor = (runId: string | null): PendingConfirmatio
 async function execute(run: ActiveRun, channel: RunChannel, agent: AgentRow, actor: { userId: string; role: string; displayName: string }, chat: ChatRow, messageId: string, parentId: string, connection: ReturnType<typeof connectionFor>) {
   const displayName = actor.displayName;
   const timeoutS = config.agents.runTimeoutS || CHAT_RUN_TIMEOUT_S;
-  const wallClock = setTimeout(() => run.controller.abort("timeout" satisfies CancelReason), timeoutS * 1000);
+  startWallClock(run, timeoutS * 1000);
   const executor = toolExecutor(run, channel, agent, messageId);
   let text = "";
   let flushedAt = Date.now();
@@ -398,7 +446,8 @@ async function execute(run: ActiveRun, channel: RunChannel, agent: AgentRow, act
         if (more) assertBudget(run.userId);
       },
       tools: executor.tools,
-      execute: executor.execute
+      execute: executor.execute,
+      noToolsReason: () => inactiveLinkMessage(agent.id, run.userId)
     });
     usage = result.usage;
     model = result.model ?? model;
@@ -424,7 +473,7 @@ async function execute(run: ActiveRun, channel: RunChannel, agent: AgentRow, act
       console.error("Agent run failed", error instanceof Error ? error.name : "Unknown error");
     }
   } finally {
-    clearTimeout(wallClock);
+    stopWallClock(run);
     if (deltaTimer) clearTimeout(deltaTimer);
     flushDelta();
     active.delete(run.runId);
