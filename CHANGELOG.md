@@ -2,6 +2,16 @@
 
 Release notes for Nook, newest first. Upgrade steps for each release are in [docs/OPERATIONS.md](docs/OPERATIONS.md#upgrades).
 
+## v0.29.0 — 2026-10-06
+
+- **Share agents and chats**: share an agent or a chat with people, groups, or everyone signed in, at **Can view** or **Manager**, from the Access sheet. People you share a chat with read it live: new messages, renames, and unshares reach their open page at once, and **Continue as a copy** starts their own chat. A shared agent always runs with the runner's own access, never the owner's. Optional **public chat links** (a read-only snapshot anyone with the link can open) stay off until an admin allows them in Settings → AI.
+- **Tabbed settings pages**: Settings → AI has **Model providers**, **Tool servers**, and **Chat policy** tabs, and Settings → API keys has **General**, **Vault**, and **Agents** tabs, each with its own address, a count, and New key starting from the tab you are on. Browser Back and Forward move between tabs.
+- **Vault**: saving, importing, clearing, or restoring values in a protected environment no longer asks for your password; seeing, copying, or exporting values still does. Saving a new value keeps the value's comment unless you type a new one.
+- **Agents**: an emoji picker (search, recently used, remove) when creating or editing an agent. The empty Chat screen has a proper **Create an agent** button, and admins without a model provider get a link to add one.
+- **Consistent look**: every New/Add button in Settings is the same size; text boxes, multi-line boxes, and dropdowns share one border, one focus ring, and one font; dialog labels and footer buttons match everywhere.
+- **Fixes**: long dialogs (Add provider, Add tool server, New API key, Link Nook key) scroll with their buttons always visible, including on short laptop screens; short dialogs on phones no longer stretch; icons no longer drop above button labels (the vault generator's **Again**, **Sync tools**); Vault settings is wider; idle live updates no longer drop every 12 seconds.
+- Migration 041 runs on the first boot, so back up first. No new settings. See [docs/OPERATIONS.md](docs/OPERATIONS.md#upgrades).
+
 ## v0.28.0 — 2026-10-06
 
 - **Run agents from scripts and CI**: create an API key in Settings → API keys with **Chat → Run agents** (on all your agents or chosen ones) and call `POST /api/v1/agents/<id>/runs` with `{"input": "…"}` or a short `messages` conversation; add `"stream": true` for server-sent events. `GET /api/v1/agents` lists what the key may run (never the system prompt). MCP clients get `run_agent` and `list_agents`. These runs never create chats.

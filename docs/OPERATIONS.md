@@ -8,7 +8,7 @@ Internal identifiers keep the original `mynotes` prefix for compatibility with e
 
 1. Clone the repository and copy `.env.example` to `.env` if you need to override the defaults.
 2. Ensure `/srv/mynotes` exists and is writable by UID 1000, or set `MYNOTES_DATA_DIR` to another host directory.
-3. Run `APP_VERSION=0.28.0 GIT_SHA=$(git rev-parse --short HEAD) docker compose up -d --build`.
+3. Run `APP_VERSION=0.29.0 GIT_SHA=$(git rev-parse --short HEAD) docker compose up -d --build`.
 4. Open `http://localhost:2026` and create the first account.
 
 ### Accounts
@@ -196,7 +196,7 @@ docker compose up -d app && docker compose exec app bun server/agent-admin.ts ve
 
 **A leaked `agents:run` key** lets whoever holds it run the agents its grant names, as their owner, until it is revoked: spend the key's and the owner's daily token budgets (at most 500 runs a day), call the agents' `auto` tools (remote servers and Nook reads), file Inbox proposals, and read the answers, which may include anything those tools return. It cannot read chats (that is a separate permission), change settings, approve proposals, or run anything that asks first. To stop it: the owner revokes it in **Settings → API keys** (or rotates it with no grace), or an admin revokes it in **Team → Keys** with a reason; the next request gets 401 and a run in progress ends at its next step with `KEY_INACTIVE`. Then read its runs in the owner's Audit log (filter by key) to see what was asked and what the tools returned. Limit the damage in advance: grant chosen agents rather than all, give the key an expiry and an address allowlist, and keep agents that hold write-capable or open-world tools off run keys.
 
-**Not in this release:** sharing and public links (the `public_chat_links` policy stays off), and knowledge bases. The MCP server offers read-only `list_agents`, `list_chats`, and `get_chat` for keys with **Read agents and chats** (your own agents, never the prompt; your own chats), and `run_agent` for keys with **Run agents** (`list_agents` then lists the agents the grant covers); Nook's own tools are never offered to agents over HTTP to Nook itself.
+**Not in this release:** knowledge bases. The MCP server offers read-only `list_agents`, `list_chats`, and `get_chat` for keys with **Read agents and chats** (your own agents, never the prompt; your own chats), and `run_agent` for keys with **Run agents** (`list_agents` then lists the agents the grant covers); Nook's own tools are never offered to agents over HTTP to Nook itself.
 
 ### Passwords
 
@@ -393,7 +393,7 @@ Compose passes these variables from `.env` (see `.env.example`). Invalid values 
 | `MAIL_TRANSPORT` | `resend` | `resend`, or `file` for development and tests only (refused when `NODE_ENV=production`). |
 | `MAIL_FILE_PATH` | empty | With `MAIL_TRANSPORT=file`: the absolute path of the JSON file messages are written to. |
 | `GOOGLE_OIDC_TEST_BASE_URL` | empty | Tests and local QA only: a fake Google issuer (`tests/support/fakeGoogle.ts`). Refused when `NODE_ENV=production`. |
-| `APP_VERSION` | `0.28.0` | Build metadata shown in Settings → About and reported by the MCP server. |
+| `APP_VERSION` | `0.29.0` | Build metadata shown in Settings → About and reported by the MCP server. |
 | `GIT_SHA` | `development` | Commit shown in Settings → About (first 40 characters). |
 
 Fixed limits that are not configurable: 3 uploads in progress per user on the server (the app sends 2 at a time), 30-day Bin retention, 1 MiB text previews, 20 searches per 10 seconds per user, and an hourly sweeper.
@@ -476,6 +476,8 @@ curl http://localhost:2026/api/health
 ```
 
 Every image carries immutable numbered migrations under `server/migrations`. They run transactionally and are recorded in SQLite's `schema_migrations` table before the HTTP server accepts requests. New schema changes are always added as a new migration; released migrations are never edited.
+
+**Upgrading to 0.29.0:** back up first with `./scripts/backup.sh --force`. Migration 041 (agent and chat sharing: access rows for agents and chats, public chat link tokens stored as hashes, and the `public_chat_links` policy, off by default) runs once on the first boot and can only be undone by restoring that backup. No new settings. Long-lived requests (live chat updates, run streams, plain API runs) are now exempt from the server's 10-second idle timeout and send a keep-alive every 5 seconds; a reverse proxy in front of Nook must not buffer `text/event-stream` responses. In protected vault environments, writes no longer need the 15-minute re-authentication window; reads and exports still do (see *Vault*). Pull, rebuild with `APP_VERSION=0.29.0`, and restart as above.
 
 **Upgrading to 0.28.0:** back up first with `./scripts/backup.sh --force`. Migration 040 (agent audit: the append-only triggers on the audit tables, a guarded retention table, persistent per-key run limits, and reader indexes) runs once on the first boot and can only be undone by restoring that backup. New optional setting `AGENT_AUDIT_RETENTION_DAYS` (default 30, 7–365; an admin's value in Settings → AI wins). `AGENT_MAX_CONCURRENT_RUNS` is now capped at 16, and plain (non-streaming) API runs may hold at most half of the REST and MCP request slots. See *Agent chat* for what a leaked `agents:run` key can do and how to revoke it. Pull, rebuild with `APP_VERSION=0.28.0`, and restart as above.
 

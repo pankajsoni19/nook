@@ -102,7 +102,7 @@ You need Git, Docker Engine, and Docker Compose.
 git clone https://github.com/pankajsoni19/nook.git && cd nook
 cp .env.example .env            # set ALLOWED_EMAILS, TOTP_POLICY, APP_ORIGINS as needed
 sudo mkdir -p /srv/mynotes && sudo chown 1000:1000 /srv/mynotes   # or set MYNOTES_DATA_DIR
-APP_VERSION=0.28.0 GIT_SHA=$(git rev-parse --short HEAD) docker compose up -d --build
+APP_VERSION=0.29.0 GIT_SHA=$(git rev-parse --short HEAD) docker compose up -d --build
 curl http://localhost:2026/api/health   # then open http://localhost:2026 and create the first account (the admin)
 ```
 
@@ -114,11 +114,11 @@ Back up first (`./scripts/backup.sh --force`), pull, rebuild, and let migrations
 
 ## What's new
 
-Release notes for every version are in [CHANGELOG.md](CHANGELOG.md). Latest (v0.28.0):
+Release notes for every version are in [CHANGELOG.md](CHANGELOG.md). Latest (v0.29.0):
 
-- **Run agents from scripts and CI** with `POST /api/v1/agents/<id>/runs` and a key holding Chat → Run agents; MCP clients get `run_agent`.
-- **Audit log** of every API and MCP run, full for the key's owner, metadata only for admins.
-- **Migration 040** runs on the first boot, so back up first.
+- **Share agents and chats** with people and groups; shared chats update live, with optional public links an admin can allow.
+- **Tabbed Settings → AI and API keys pages**, an emoji picker for agents, and one consistent button and field style.
+- **Vault** saves values in protected environments without asking for your password; **migration 041** runs on the first boot, so back up first.
 
 ## Documentation
 
