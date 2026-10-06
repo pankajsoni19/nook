@@ -1,5 +1,5 @@
 import { config } from "../config";
-import { db, now } from "../db";
+import { audit, db, now } from "../db";
 import { AGENT_ROLE_OPTIONS, DEFAULT_AGENT_SETTINGS, type AgentRole, type AgentSettings } from "../../shared/agents";
 import { AgentError } from "./status";
 
@@ -44,7 +44,7 @@ export function readAgentSettings(): AgentSettings & { revision: number } {
   return { ...settings, revision };
 }
 
-export type SettingsPatch = Partial<Omit<AgentSettings, "publicChatLinks">> & { publicChatLinks?: boolean };
+export type SettingsPatch = Partial<AgentSettings>;
 
 /** Writes the given keys (CAS on the summed revision) and returns the new settings. */
 export function writeAgentSettings(actorId: string, patch: SettingsPatch, expectedRevision: number) {
@@ -57,10 +57,10 @@ export function writeAgentSettings(actorId: string, patch: SettingsPatch, expect
     for (const [field, column] of Object.entries(KEYS) as Array<[keyof AgentSettings, string]>) {
       if (!(field in patch)) continue;
       const value = patch[field];
-      // AC-O1: public chat links stay off in this slice (AC-D adds the pages behind the policy).
-      if (field === "publicChatLinks" && value === true) throw new AgentError(400, "INVALID", "Public chat links are not available yet");
       upsert.run(column, JSON.stringify(value ?? null), actorId, timestamp);
     }
+    // AC-O1 (Wave 43): turning public chat links on or off is recorded (off makes every link 404 at once; rows stay).
+    if (patch.publicChatLinks !== undefined && patch.publicChatLinks !== current.publicChatLinks) audit(actorId, null, "agents.policy.public_chat_links", { on: patch.publicChatLinks });
     return readAgentSettings();
   })();
 }

@@ -1,14 +1,18 @@
 import type { Context, Hono, Next } from "hono";
 import { streamSSE } from "hono/streaming";
+import { keepRequestOpen, SSE_TIMING } from "../longRequests";
 import { z, ZodError } from "zod";
 import type { AppEnv } from "../auth";
 import { db } from "../db";
 import { parseJson, uuid } from "../validation";
-import { AGENT_BOUNDS, AGENT_ROLE_OPTIONS, DEFAULT_MODEL, SERVER_AUTH_KINDS, SERVER_AVAILABILITIES, TOOL_POLICIES } from "../../shared/agents";
+import { AGENT_BOUNDS, AGENT_ROLE_OPTIONS, DEFAULT_MODEL, SERVER_AUTH_KINDS, SERVER_AVAILABILITIES, TOOL_POLICIES, type ChatUpdateEvent } from "../../shared/agents";
 import { createAgent, deleteAgent, agentDetail, listUsableAgents, manageableAgent, updateAgent, usableAgent } from "./agentsService";
-import { chatDetail, createChat, deleteChat, listChats, messageOf, updateChat } from "./chats";
+import { chatDetail, createChat, deleteChat, forkChat, listChats, listSharedChats, messageOf, readableChat, updateChat } from "./chats";
+import { publicLinkFor, publicLinksOn, publicLinkState, revokePublicLink, roleMayPublish, upsertPublicLink } from "./publicShares";
+import { readShareAccess, shareLevel, writeShareAccess, type ShareKind } from "./sharing";
+import { subscribeChatUpdates } from "./chatUpdates";
 import { createProvider, deleteProvider, listProviders, providerModels, providerRow, providerSummary, testProvider, updateProvider } from "./providers";
-import { activeRunForChat, cancelChatRuns, cancelRun, confirmRun, dailyUsage, pendingConfirmationFor, runOwnedBy, runSnapshot, startChatRun } from "./runs";
+import { activeRunForChat, cancelChatRuns, cancelRun, confirmRun, dailyUsage, pendingConfirmationFor, runReadableBy, runSnapshot, startChatRun } from "./runs";
 import { readAgentSettings, roleMayChat, roleMayCreate, writeAgentSettings } from "./settings";
 import { AgentError, adminRecoveryAllowed, agentsStatus, recheckAgentsStatus, requireAgentsEnabled } from "./status";
 import { declaredStdioServers, stdioEnabled } from "./stdio";
@@ -108,6 +112,16 @@ const messageSchema = z.object({
   parentId: uuid.nullable().optional()
 }).strict();
 const emptySchema = z.object({}).strict();
+// Wave 43 (AC-D): the Access sheet's body (src/access/accessApi.ts), Continue as a copy, and the public link.
+const sharePrincipal = z.object({ id: uuid, level: z.enum(["view", "manage", "comment", "edit"]) }).strict();
+const shareAccessSchema = z.object({
+  audience: z.enum(["private", "selected", "all_users", "inherit"]),
+  audienceLevel: z.enum(["view", "comment", "edit", "manage"]).optional(),
+  people: z.array(sharePrincipal).max(100).default([]),
+  groups: z.array(sharePrincipal).max(20).default([])
+}).strict();
+const forkSchema = z.object({ messageId: uuid }).strict();
+const publicLinkSchema = z.object({ includeToolResults: z.boolean().default(false), newLink: z.boolean().optional() }).strict();
 
 /** Ids in the path: anything that is not a UUID is the same 404 as a missing item. */
 function id(c: Context<AppEnv>, name: string) {
@@ -166,6 +180,11 @@ const bump = (map: Map<string, number>, key: string, by: 1 | -1) => {
   if (next <= 0) map.delete(key);
   else map.set(key, next);
 };
+/** Chat update streams per person per chat (QA M1); they also count in `streamsPerUser`. */
+const updatesPerChat = new Map<string, number>();
+const chatUpdateFrame = (event: ChatUpdateEvent) => `event: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`;
+/** Stream events only the run's owner receives (review M1): the confirmation card and its outcome. */
+const OWNER_ONLY_EVENTS: ReadonlySet<string> = new Set(["confirmation_required", "confirmation_resolved"]);
 export const openStreamCounts = (runId: string, userId: string) => ({ run: streamsPerRun.get(runId) ?? 0, user: streamsPerUser.get(userId) ?? 0 });
 const chatter = (handler: Handler): Handler => (c) => {
   if (!roleMayChat(c.get("user").role)) throw new AgentError(403, "ROLE_REFUSED", "Your role cannot chat with agents");
@@ -193,6 +212,8 @@ export function registerAgentRoutes(app: Hono<AppEnv>) {
       enabled: status.enabled, reason: role === "admin" ? status.reason : null, canChat: status.enabled && roleMayChat(role), canCreate: status.enabled && roleMayCreate(role), defaultModel: DEFAULT_MODEL,
       // AC-C: whether the Audit log link shows (admins, and people with `agents:run` keys or runs).
       auditVisible: status.enabled && auditVisibleTo({ userId: c.get("user").id, role }),
+      // AC-D (AC-O1): whether this person may create public chat links now (the policy on, member and above).
+      publicChatLinks: status.enabled && roleMayPublish(role) && publicLinksOn(),
       // Admins only: whether a model provider exists, for the empty Chat list's "add one" line.
       ...(role === "admin" ? { hasProvider: db.query("SELECT 1 FROM agent_providers LIMIT 1").get() !== null } : {})
     });
@@ -311,17 +332,56 @@ export function registerAgentRoutes(app: Hono<AppEnv>) {
   // --- Agents (plan §5.1): own agents in this slice ---
   app.get("/api/agents", handle(chatter((c) => ({ agents: listUsableAgents(c.get("user").id) }))));
   app.post("/api/agents", handle(async (c) => c.json({ agent: createAgent(actorOf(c), await parseJson(c.req.raw, agentCreateSchema)) }, 201)));
-  app.get("/api/agents/:agentId", handle(chatter((c) => ({ agent: agentDetail(manageableAgent(id(c, "agentId"), c.get("user").id), c.get("user").id) }))));
+  app.get("/api/agents/:agentId", handle(chatter((c) => ({ agent: agentDetail(usableAgent(id(c, "agentId"), c.get("user").id), c.get("user").id) }))));
   app.patch("/api/agents/:agentId", handle(async (c) => ({ agent: updateAgent(actorOf(c), id(c, "agentId"), await parseJson(c.req.raw, agentPatchSchema)) })));
   app.delete("/api/agents/:agentId", handle((c) => deleteAgent(actorOf(c), id(c, "agentId"))));
 
+  // --- Sharing (AC-D, plan §6.2, D356, D361): the Access sheet for agents (owner and managers) and chats (owner) ---
+  const shareRoutes = (kind: ShareKind, path: string, param: string) => {
+    app.get(path, handle(chatter((c) => {
+      const access = readShareAccess(kind, id(c, param), c.get("user").id);
+      c.header("ETag", access.etag);
+      return access;
+    })));
+    app.put(path, handle(chatter(async (c) => {
+      const itemId = id(c, param);
+      const body = await parseJson(c.req.raw, shareAccessSchema);
+      const access = writeShareAccess(kind, itemId, { userId: c.get("user").id }, body, c.req.header("If-Match"));
+      c.header("ETag", access.etag);
+      return access;
+    })));
+  };
+  shareRoutes("agent", "/api/agents/:agentId/access", "agentId");
+  shareRoutes("chat", "/api/chats/:chatId/access", "chatId");
+
   // --- Chats (plan §6.1) ---
-  app.get("/api/chats", handle(chatter((c) => ({ chats: listChats(c.get("user").id, { q: c.req.query("q")?.slice(0, 200) }) }))));
+  app.get("/api/chats", handle(chatter((c) => {
+    const q = c.req.query("q")?.slice(0, 200);
+    // AC-D: `?shared=1` lists the chats others shared with the caller ("Shared with me").
+    return c.req.query("shared") === "1" ? { chats: listSharedChats(c.get("user").id, { q }) } : { chats: listChats(c.get("user").id, { q }) };
+  })));
   app.post("/api/chats", handle(chatter(async (c) => c.json({ chat: createChat(c.get("user").id, (await parseJson(c.req.raw, chatCreateSchema)).agentId) }, 201))));
   app.get("/api/chats/:chatId", handle(chatter((c) => {
     const detail = chatDetail(id(c, "chatId"), c.get("user").id);
-    return { ...detail, pendingConfirmation: pendingConfirmationFor(detail.activeRunId) };
+    const owner = detail.chat.yourLevel === "owner";
+    // Recipients read the transcript (tool calls and results included); the confirmation card and the public link are the owner's.
+    return { ...detail, pendingConfirmation: owner ? pendingConfirmationFor(detail.activeRunId) : null, ...(owner ? { publicLink: publicLinkState(detail.chat.id) } : {}) };
   })));
+  // Continue as a copy (D361): the caller's own chat holding the branch up to `messageId`.
+  app.post("/api/chats/:chatId/fork", handle(chatter(async (c) => {
+    const chatId = id(c, "chatId");
+    const body = await parseJson(c.req.raw, forkSchema);
+    return c.json({ chat: forkChat(c.get("user").id, chatId, body.messageId.toLowerCase()) }, 201);
+  })));
+  // Public link (AC-O1, D362): owner only, behind `public_chat_links`; every route 404 with the policy off.
+  app.get("/api/chats/:chatId/public", handle(chatter((c) => publicLinkFor(actorOf(c), id(c, "chatId")))));
+  app.put("/api/chats/:chatId/public", handle(chatter(async (c) => {
+    const chatId = id(c, "chatId");
+    if (!publicLinksOn()) throw new AgentError(404, "NOT_FOUND", "Not found");
+    const body = await parseJson(c.req.raw, publicLinkSchema);
+    return upsertPublicLink(actorOf(c), chatId, body);
+  })));
+  app.delete("/api/chats/:chatId/public", handle(chatter((c) => revokePublicLink(actorOf(c), id(c, "chatId")))));
   app.patch("/api/chats/:chatId", handle(chatter(async (c) => ({ chat: updateChat(c.get("user").id, id(c, "chatId"), await parseJson(c.req.raw, chatPatchSchema)) }))));
   app.delete("/api/chats/:chatId", handle(chatter((c) => {
     const chatId = id(c, "chatId");
@@ -346,10 +406,94 @@ export function registerAgentRoutes(app: Hono<AppEnv>) {
   })));
   app.get("/api/chats/:chatId/run", handle(chatter((c) => {
     const chatId = id(c, "chatId");
-    chatDetail(chatId, c.get("user").id);
+    readableChat(chatId, c.get("user").id);
     const live = activeRunForChat(chatId);
     return { run: live ? { id: live.runId, messageId: live.messageId } : null };
   })));
+
+  /**
+   * Chat updates (Wave 43 fixes, QA M1): an SSE stream for someone reading a chat (the owner's other
+   * tabs too) that says when a message was added, a run started (`run_started {runId}`, which the
+   * client follows on /api/runs/:id/events), the chat changed, or it can no longer be read (`gone`).
+   * `since` is the chat revision the client has: when the chat moved on, a catch-up event goes first.
+   * Access is re-checked on every event and every 15 s. The streams count against the per-person cap
+   * of run streams, and at most `STREAM_CAPS.perRun` per person per chat.
+   */
+  app.get("/api/chats/:chatId/updates", (c) => {
+    try {
+      requireAgentsEnabled();
+      if (!roleMayChat(c.get("user").role)) throw new AgentError(403, "ROLE_REFUSED", "Your role cannot chat with agents");
+      const chatId = id(c, "chatId");
+      const userId = c.get("user").id;
+      const chat = readableChat(chatId, userId);
+      const sinceRaw = c.req.query("since") ?? "0";
+      const since = /^\d{1,9}$/.test(sinceRaw) ? Number(sinceRaw) : 0;
+      const slot = `${chatId}:${userId}`;
+      if ((updatesPerChat.get(slot) ?? 0) >= STREAM_CAPS.perRun || (streamsPerUser.get(userId) ?? 0) >= STREAM_CAPS.perUser) throw new AgentError(429, "TOO_MANY_STREAMS", "Too many open streams; close another tab with this chat", { retryAfterSeconds: 2 });
+      bump(updatesPerChat, slot, 1);
+      bump(streamsPerUser, userId, 1);
+      let released = false;
+      const release = () => {
+        if (released) return;
+        released = true;
+        bump(updatesPerChat, slot, -1);
+        bump(streamsPerUser, userId, -1);
+      };
+      c.header("X-Accel-Buffering", "no");
+      keepRequestOpen(c.req.raw);
+      const stillReadable = () => {
+        const row = db.query("SELECT id, owner_id, visibility, deleted_at FROM chats WHERE id = ?").get(chatId) as { id: string; owner_id: string; visibility: string; deleted_at: string | null } | null;
+        return row !== null && shareLevel("chat", row, userId) !== "none";
+      };
+      const response = streamSSE(c, async (stream) => {
+        const queue: ChatUpdateEvent[] = [];
+        let wake: (() => void) | null = null;
+        const unsubscribe = subscribeChatUpdates(chatId, (event) => { queue.push(event); wake?.(); });
+        // A tick wakes the idle loop: a keep-alive every SSE_TIMING.pingMs, an access re-check every accessCheckMs (QA D1).
+        const { pingMs, accessCheckMs } = SSE_TIMING;
+        const keepAlive = setInterval(() => { wake?.(); }, Math.min(pingMs, accessCheckMs));
+        stream.onAbort(() => { wake?.(); });
+        let lastCheck = Date.now();
+        let lastPing = Date.now();
+        try {
+          // Headers go out with the first bytes: a comment, so the client knows it is subscribed.
+          await stream.write(": open\n\n");
+          if (chat.revision > since) {
+            const live = activeRunForChat(chatId);
+            await stream.write(chatUpdateFrame(live ? { type: "run_started", data: { runId: live.runId, messageId: live.messageId, revision: chat.revision } } : { type: "chat_changed", data: { revision: chat.revision } }));
+          }
+          for (;;) {
+            if (stream.aborted) break;
+            if (queue.length === 0) {
+              if (Date.now() - lastCheck >= accessCheckMs) {
+                lastCheck = Date.now();
+                if (!stillReadable()) { await stream.write(chatUpdateFrame({ type: "gone", data: {} })); break; }
+              }
+              if (Date.now() - lastPing >= pingMs) {
+                lastPing = Date.now();
+                await stream.write(": ping\n\n");
+              }
+              await new Promise<void>((resolve) => { wake = resolve; });
+              wake = null;
+              continue;
+            }
+            const event = queue.shift()!;
+            // Live per event (T325): someone taken off the chat, or a chat deleted, ends here.
+            if (event.type === "gone" || !stillReadable()) { await stream.write(chatUpdateFrame({ type: "gone", data: {} })); break; }
+            await stream.write(chatUpdateFrame(event));
+          }
+        } finally {
+          clearInterval(keepAlive);
+          unsubscribe();
+          release();
+        }
+      }, async () => { release(); });
+      response.headers.set("Cache-Control", "no-store");
+      return response;
+    } catch (error) {
+      return fail(c, error);
+    }
+  });
 
   // --- Runs (plan §2.3): resume, cancel, and confirm (plan §5.4) ---
   app.post("/api/runs/:runId/cancel", handle(chatter(async (c) => {
@@ -367,7 +511,8 @@ export function registerAgentRoutes(app: Hono<AppEnv>) {
       requireAgentsEnabled();
       if (!roleMayChat(c.get("user").role)) throw new AgentError(403, "ROLE_REFUSED", "Your role cannot chat with agents");
       const runId = id(c, "runId");
-      const run = runOwnedBy(runId, c.get("user").id);
+      // AC-D: the chat's owner, or someone it is shared with (read-only, re-checked per request, T325).
+      const run = runReadableBy(runId, c.get("user").id);
       const afterRaw = c.req.query("after") ?? "0";
       const after = /^\d{1,9}$/.test(afterRaw) ? Number(afterRaw) : 0;
       const channel = channelOf(runId);
@@ -384,12 +529,19 @@ export function registerAgentRoutes(app: Hono<AppEnv>) {
         bump(streamsPerUser, userId, -1);
       };
       c.header("X-Accel-Buffering", "no");
+      keepRequestOpen(c.req.raw);
       // streamSSE sets no-cache; SSE replies carry chat text, so they are no-store like the rest of /api (T325).
+      // Review M1: the confirmation card (its nonce, the arguments' hash, the full arguments) is the
+      // owner's alone; recipients following the run never get it, neither from the ring nor live.
+      const ownerOnly = !run.owner;
       const follow = async (stream: Parameters<Parameters<typeof streamSSE>[1]>[0]) => {
-        const send = (event: SequencedEvent) => stream.write(sseFrame(event));
+        const send = async (event: SequencedEvent) => {
+          if (ownerOnly && OWNER_ONLY_EVENTS.has(event.type)) return;
+          await stream.write(sseFrame(event));
+        };
         const snapshot = async () => {
-          const fresh = runOwnedBy(runId, userId);
-          await stream.write(`id: 0\nevent: snapshot\ndata: ${JSON.stringify(runSnapshot(fresh))}\n\n`);
+          const fresh = runReadableBy(runId, userId);
+          await stream.write(`id: 0\nevent: snapshot\ndata: ${JSON.stringify(runSnapshot(fresh, { owner: fresh.owner }))}\n\n`);
         };
         if (!channel) {
           await snapshot();
@@ -404,7 +556,7 @@ export function registerAgentRoutes(app: Hono<AppEnv>) {
           for (const event of replay) await send(event);
           if (channel.closed) return;
         }
-        // Live: forward events until the run ends or the client leaves; a keep-alive comment every 15 s.
+        // Live: forward events until the run ends or the client leaves; a keep-alive comment every SSE_TIMING.pingMs (QA D1).
         let seen = replay === "overflow" ? channel.lastSeq : Math.max(after, replay.at(-1)?.seq ?? after);
         const queue: SequencedEvent[] = [];
         let wake: (() => void) | null = null;
@@ -414,12 +566,14 @@ export function registerAgentRoutes(app: Hono<AppEnv>) {
           else if (event.seq > seen) queue.push(event);
           wake?.();
         });
-        const keepAlive = setInterval(() => { wake?.(); }, 15_000);
+        const { pingMs } = SSE_TIMING;
+        const keepAlive = setInterval(() => { wake?.(); }, pingMs);
+        stream.onAbort(() => { wake?.(); });
         let lastPing = Date.now();
         try {
           while (!ended || queue.length > 0) {
             if (queue.length === 0) {
-              if (Date.now() - lastPing >= 15_000) {
+              if (Date.now() - lastPing >= pingMs) {
                 await stream.write(": ping\n\n");
                 lastPing = Date.now();
               }

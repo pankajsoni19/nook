@@ -114,15 +114,18 @@ describe("providers and policy (admin, §4.1)", () => {
     // A provider pointing at a refused address is refused at creation, not at run time.
     expect((await api(admin, "POST", "/agents/admin/providers", { name: "Self", baseUrl: `${origin}/v1` })).status).toBe(400);
     expect((await api(admin, "POST", "/agents/admin/providers", { name: "Creds", baseUrl: "https://u:p@api.example.test/v1" })).status).toBe(400);
-    // Settings: defaults, CAS, and the public-links policy stays off (AC-O1).
+    // Settings: defaults, CAS, and the public-links policy off by default (AC-O1).
     const settings = await api(admin, "GET", "/agents/admin/settings");
     expect(settings.body.settings).toMatchObject({ createRoles: ["admin", "member"], chatRoles: ["admin", "member", "viewer"], dailyTokensUser: 500_000, dailyTokensKey: 200_000, dailyTokensInstance: 0, publicChatLinks: false, auditRetentionDays: 30, agentsPerUser: 50 });
     const written = await api(admin, "PUT", "/agents/admin/settings", { agentsPerUser: 3, expectedRevision: settings.body.settings.revision });
     expect(written.status).toBe(200);
     expect(written.body.settings.agentsPerUser).toBe(3);
     expect((await api(admin, "PUT", "/agents/admin/settings", { agentsPerUser: 4, expectedRevision: settings.body.settings.revision })).status).toBe(409);
-    expect((await api(admin, "PUT", "/agents/admin/settings", { publicChatLinks: true, expectedRevision: written.body.settings.revision })).status).toBe(400);
-    await api(admin, "PUT", "/agents/admin/settings", { agentsPerUser: 50, expectedRevision: written.body.settings.revision });
+    // Wave 43 (AC-D): the public-links policy can be turned on now (and is turned off again here).
+    const publicOn = await api(admin, "PUT", "/agents/admin/settings", { publicChatLinks: true, expectedRevision: written.body.settings.revision });
+    expect(publicOn.status).toBe(200);
+    expect(publicOn.body.settings.publicChatLinks).toBe(true);
+    await api(admin, "PUT", "/agents/admin/settings", { agentsPerUser: 50, publicChatLinks: false, expectedRevision: publicOn.body.settings.revision });
     // Usage is counts only.
     const usage = await api(admin, "GET", "/agents/admin/usage?group=user");
     expect(usage.status).toBe(200);

@@ -70,7 +70,22 @@ export function AccessOverview({ summary, loadPage, actions, reloadKey = 0, busy
       </section>;
     })}
     {summary.vaults && summary.vaults.length > 0 && <VaultSection rows={summary.vaults} actions={actions} busy={busy} />}
+    {summary.chat && summary.chat.length > 0 && <ChatSection rows={summary.chat} actions={actions} busy={busy} />}
   </div>;
+}
+
+/**
+ * Agents and chats shared with the person (Wave 43, AC-D): one row per item, with every way they
+ * reach it; the admin page lowers an agent's Manager row to Can view, removes a direct share, or
+ * removes the person from the group. Titles hidden as everywhere else (D269).
+ */
+function ChatSection({ rows, actions, busy }: { rows: AccessRow[]; actions?: AccessRowActions; busy: boolean }) {
+  return <section className="team-card ma-module" aria-labelledby="ma-module-chat">
+    <h3 id="ma-module-chat">Chat</h3>
+    <ul className="group-item-list" aria-label="Agent and chat access">
+      {rows.map((row, index) => <AccessRowItem key={row.sources[0]?.handle ?? `${row.kind}-${row.id ?? index}`} row={{ ...row, title: `${row.kind === "agent" && !row.titleHidden ? "Agent: " : row.kind === "chat" && !row.titleHidden ? "Chat: " : ""}${row.title}` }} actions={actions} busy={busy} />)}
+    </ul>
+  </section>;
 }
 
 function KindSection({ counts, loadPage, actions, reloadKey, busy }: { counts: KindCount; loadPage: (kind: AccessKind, cursor?: string | null) => Promise<AccessPage>; actions?: AccessRowActions; reloadKey: number; busy: boolean }) {

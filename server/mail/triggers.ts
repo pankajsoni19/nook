@@ -93,6 +93,23 @@ export function mailVaultShared(actorId: string, vaultId: string, userIds: reado
   }
 }
 
+/**
+ * #25 for agents and chats (Wave 43, AC-D): people newly given an agent or a chat by name. The mail
+ * names the agent or the chat's title only, resolved when it is sent and only while the recipient can
+ * still open it; never a prompt or a message. Like vaults, these stay out of the digest's share log
+ * (its kinds are fixed by 028).
+ */
+export function mailAgentShared(actorId: string, kind: "agent" | "chat", itemId: string, userIds: readonly string[]) {
+  for (const userId of unique(userIds)) {
+    if (userId === actorId) continue;
+    safely("sharing.shared", () => enqueueMail({
+      userId, template: "sharing.shared", payload: { items: [{ kind, id: itemId }], actorIds: [actorId] },
+      coalesceKey: `sharing.shared:${userId}`, windowMs: WINDOW_MS.activity,
+      merge: (queued: Payload, incoming: Payload) => ({ items: mergeItems(queued.items, incoming.items), actorIds: mergeIds(queued.actorIds, incoming.actorIds, 10) })
+    }));
+  }
+}
+
 /** The explicit share list of an item, read before a sharing change replaces it. */
 export function shareMembers(table: "note_shares" | "folder_shares" | "document_shares" | "board_members" | "calendar_members" | "collection_members" | "task_view_members", column: string, itemId: string) {
   return (db.query(`SELECT user_id FROM ${table} WHERE ${column} = ?`).all(itemId) as Array<{ user_id: string }>).map((row) => row.user_id);

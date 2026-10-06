@@ -14,6 +14,8 @@ import { channelOf, openChannel, type RunChannel } from "./stream";
 import { identityOf, inactiveLinkMessage, liveRunner, liveToolFailure, liveToolFor, resolveTools, type ResolvedTool } from "./tools";
 import { sessionFor } from "./toolServers";
 import { withinAgentRun } from "./depth";
+import { shareLevel } from "./sharing";
+import { publishChatUpdate } from "./chatUpdates";
 
 /**
  * Runs (plan §2.2, §2.3, §2.4, D344, D345): every run is an `agent_runs` row and an in-memory
@@ -131,6 +133,9 @@ export function startChatRun(actor: { userId: string; role: string; displayName:
   if (!roleMayChat(actor.role, settings)) throw new AgentError(403, "ROLE_REFUSED", "Your role cannot chat with agents");
   const chat = ownedChat(chatId, actor.userId);
   const agent = chatAgent(chat);
+  // Wave 43 (AC-D): the chat's owner must still be able to use its agent (theirs, or shared with them
+  // now). A copy of a shared chat whose agent was unshared stays readable and cannot send.
+  if (!liveRunner(agent.id, actor.userId)) throw new AgentError(409, "AGENT_GONE", "This chat's agent is no longer shared with you; start a new chat with another agent");
   assertSlots(actor.userId, chatId);
   assertBudget(actor.userId);
   // The provider is resolved (and its secret opened) before any row is written: a missing provider is a clean 409.
@@ -165,6 +170,10 @@ export function startChatRun(actor: { userId: string; role: string; displayName:
   const channel = openChannel(runId);
   channel.emit({ type: "run", data: { runId, chatId: chat.id, messageId: assistantMessage.id, userMessageId: userMessage?.id ?? null } });
   audit(actor.userId, null, "agents.run.start", { runId, chatId: chat.id, agentId: agent.id });
+  // QA M1: people reading the chat (shared with them) hear of the new turn and follow the run.
+  const revision = (db.query("SELECT revision FROM chats WHERE id = ?").get(chat.id) as { revision: number } | null)?.revision ?? 0;
+  if (userMessage) publishChatUpdate(chat.id, { type: "message_added", data: { messageId: userMessage.id, revision } });
+  publishChatUpdate(chat.id, { type: "run_started", data: { runId, messageId: assistantMessage.id, revision } });
   // Inside the depth guard's frame (AC-C, T318): nothing this run does can start another run.
   void withinAgentRun({ runId, via: "chat" }, () => execute(run, channel, agent, actor, chat, assistantMessage.id, parentId, connection));
   return { runId, userMessage, assistantMessage };
@@ -390,7 +399,7 @@ const sameText = (a: string, b: string) => a.length === b.length && timingSafeEq
  * showed; a settled card's nonce never matches again, so a replayed or stale answer is a 409.
  */
 export function confirmRun(runId: string, userId: string, answer: { confirmationId: string; argsHash: string }, decision: "once" | "deny") {
-  runOwnedBy(runId, userId);
+  runWritableBy(runId, userId);
   const live = active.get(runId);
   const pending = live?.pending;
   if (!pending || !sameText(pending.confirmation.confirmationId, answer.confirmationId) || !sameText(pending.confirmation.argsHash, answer.argsHash)) {
@@ -566,7 +575,7 @@ async function execute(run: ActiveRun, channel: RunChannel, agent: AgentRow, act
 
 /** Stop (plan §2.2): the chat's owner aborts its live run. */
 export function cancelRun(runId: string, userId: string, reason: CancelReason = "stop") {
-  const run = runOwnedBy(runId, userId);
+  const run = runWritableBy(runId, userId);
   const live = active.get(runId);
   if (!live) return { status: run.status };
   live.controller.abort(reason);
@@ -582,15 +591,40 @@ export function runOwnedBy(runId: string, userId: string): RunRow {
   return row;
 }
 
-/** The assistant message a run writes, for the snapshot a resume gets once the ring is gone. */
-export function runSnapshot(run: RunRow) {
+/**
+ * A run the person may act on (Stop, Allow once, Deny): one they started. Someone the chat is shared
+ * with can read the run, so they get 403 READ_ONLY rather than a 404 (Wave 43 fixes, review M1);
+ * everyone else the 404.
+ */
+export function runWritableBy(runId: string, userId: string): RunRow {
+  const run = runReadableBy(runId, userId);
+  if (!run.owner) throw new AgentError(403, "READ_ONLY", "This chat is shared with you read-only; only its owner can stop the answer or answer its confirmations");
+  const { owner: _owner, ...row } = run;
+  return row;
+}
+
+/**
+ * A chat run this person may follow (Wave 43, AC-D, D361): one they started, or one in a chat shared
+ * with them now (the live transcript, read-only), checked on every request (T325); otherwise the 404.
+ */
+export function runReadableBy(runId: string, userId: string): RunRow & { owner: boolean } {
+  const row = db.query("SELECT * FROM agent_runs WHERE id = ? AND via = 'chat'").get(runId) as RunRow | null;
+  if (!row) throw new AgentError(404, "NOT_FOUND", "Not found");
+  if (row.user_id === userId) return { ...row, owner: true };
+  const chat = row.chat_id ? db.query("SELECT id, owner_id, visibility, deleted_at FROM chats WHERE id = ?").get(row.chat_id) as { id: string; owner_id: string; visibility: string; deleted_at: string | null } | null : null;
+  if (!chat || shareLevel("chat", chat, userId) === "none") throw new AgentError(404, "NOT_FOUND", "Not found");
+  return { ...row, owner: false };
+}
+
+/** The assistant message a run writes, for the snapshot a resume gets once the ring is gone. Recipients never get the pending card. */
+export function runSnapshot(run: RunRow, options: { owner?: boolean } = {}) {
   const message = db.query("SELECT id, content, status, usage_json, error_code, tool_calls_json FROM chat_messages WHERE run_id = ? AND role = 'assistant'").get(run.id) as { id: string; content: string; status: MessageRow["status"]; usage_json: string | null; error_code: string | null; tool_calls_json: string | null } | null;
   let usage: TokenUsage | null = null;
   try { usage = message?.usage_json ? JSON.parse(message.usage_json) as TokenUsage : null; } catch { usage = null; }
   const live = active.get(run.id);
   return {
     status: run.status, messageId: message?.id ?? "", content: message?.content ?? "", messageStatus: message?.status ?? "error", usage, errorCode: message?.error_code ?? null,
-    toolCalls: live ? live.toolCalls : parseToolCalls(message?.tool_calls_json ?? null), pendingConfirmation: live?.pending?.confirmation ?? null
+    toolCalls: live ? live.toolCalls : parseToolCalls(message?.tool_calls_json ?? null), pendingConfirmation: options.owner === false ? null : live?.pending?.confirmation ?? null
   };
 }
 

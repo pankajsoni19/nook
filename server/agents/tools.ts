@@ -6,6 +6,7 @@ import type { AgentToolPolicy, AgentToolRef, LinkableKey, LinkState, NookLink, T
 import type { AgentRow } from "./agentsService";
 import { missingNookScope, nookCatalogFor, nookToolSpec, nookToolsFor, type NookResolved } from "./nookBridge";
 import { roleMayChat } from "./settings";
+import { shareLevel } from "./sharing";
 import { AgentError } from "./status";
 import { defaultPolicy, parseTools, serverAvailableTo, serverPolicies, serverRowOrNull, serversAvailableTo, type ToolServerRow } from "./toolServers";
 
@@ -50,15 +51,22 @@ export function agentToolRefs(agentId: string): AgentToolRef[] {
 }
 
 /** Replaces the agent's picks (PATCH `tools`): every server tool must exist in a catalog the editor may see; every Nook tool must be offered. */
-export function setAgentTools(agentId: string, role: string, refs: AgentToolRef[]) {
+export function setAgentTools(agentId: string, role: string, submitted: AgentToolRef[], options: { keepHidden?: boolean } = {}) {
   const visible = new Map(serversAvailableTo(role).map((row) => [row.id, new Set(parseTools(row.tools_json).map((tool) => tool.name))]));
   const nook = new Set(nookCatalogFor(null).map((tool) => tool.name));
+  // Wave 43 (AC-D): a manager may not see every server the owner picked from; picks already on the
+  // agent stay valid as they are (only new picks must come from the editor's own catalog).
+  const current = agentToolRefs(agentId).filter((ref): ref is Extract<AgentToolRef, { source: "server" }> => ref.source === "server");
+  const kept = new Set(current.map((ref) => `server:${ref.serverId}:${ref.toolName}`));
+  // Review L2: a manager's view withholds picks from servers they cannot use, so their save re-merges them.
+  const submittedKeys = new Set(submitted.map((ref) => ref.source === "server" ? `server:${ref.serverId}:${ref.toolName}` : `nook:${ref.toolName}`));
+  const refs = options.keepHidden ? [...submitted, ...current.filter((ref) => !visible.has(ref.serverId) && !submittedKeys.has(`server:${ref.serverId}:${ref.toolName}`))] : submitted;
   const seen = new Set<string>();
   for (const ref of refs) {
     const key = ref.source === "server" ? `server:${ref.serverId}:${ref.toolName}` : `nook:${ref.toolName}`;
     if (seen.has(key)) throw new AgentError(400, "INVALID", "A tool is listed twice", { field: "tools" });
     seen.add(key);
-    if (ref.source === "server" && !visible.get(ref.serverId)?.has(ref.toolName)) throw new AgentError(400, "INVALID", "A picked tool is not in a server you can use", { field: "tools" });
+    if (ref.source === "server" && !kept.has(key) && !visible.get(ref.serverId)?.has(ref.toolName)) throw new AgentError(400, "INVALID", "A picked tool is not in a server you can use", { field: "tools" });
     if (ref.source === "nook" && !nook.has(ref.toolName)) throw new AgentError(400, "INVALID", "A picked Nook tool is not offered to agents", { field: "tools" });
   }
   db.query("DELETE FROM agent_tools WHERE agent_id = ?").run(agentId);
@@ -204,6 +212,9 @@ export function liveRunner(agentId: string, userId: string): { agent: AgentRow; 
   if (!agent) return null;
   const user = db.query("SELECT role FROM users WHERE id = ? AND disabled_at IS NULL").get(userId) as { role: string } | null;
   if (!user || !roleMayChat(user.role)) return null;
+  // Wave 43 (AC-D): the runner can still open the agent (their own, or shared with them now); a share
+  // withdrawn mid-run ends the run at its next step or tool call.
+  if (shareLevel("agent", agent, userId) === "none") return null;
   return { agent, role: user.role };
 }
 

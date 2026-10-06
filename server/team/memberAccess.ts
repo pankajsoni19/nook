@@ -10,6 +10,7 @@ import { SHARE_TABLES } from "../access/shares";
 import { pauseRoutinesOf } from "../inbox/routineHooks";
 import { AUDIENCE_ALL_USERS, type Role } from "./roles";
 import { VaultError } from "../vault/access";
+import { lowerSharedDirect, memberSharedRows, removeSharedDirect, resetSharedDirect, sharedDirectCount, type ShareKind } from "../agents/sharing";
 import { adminLowerVaultMember, adminRemoveVaultMember, memberVaults, resetVaultMemberships, rotateOnLostReach, snapshotVaultReach, vaultMemberCount } from "../vault/members";
 
 /**
@@ -110,7 +111,8 @@ function kindCounts(kind: AccessKind, userId: string, role: Role) {
 
 /** What Reset access removes, counted (the confirm shows these before, the result after). */
 export function resetCounts(userId: string) {
-  let direct = vaultMemberCount(userId);
+  // Wave 43 (AC-D): direct agent and chat shares count with the others.
+  let direct = vaultMemberCount(userId) + sharedDirectCount(userId);
   for (const kind of ACCESS_KINDS) direct += directCount(kind, userId);
   const count = (sql: string) => (db.query(sql).get(userId) as { count: number }).count;
   return {
@@ -163,6 +165,12 @@ export function accessSummary(viewerId: string, userId: string) {
     kinds: ACCESS_KINDS.map((kind) => kindCounts(kind, userId, target.role)),
     // Wave 26: vault memberships, each with an opaque handle on the admin page (D269, T204).
     vaults: memberVaults(viewerId, userId).map(({ vaultId, ...row }) => ({ ...row, ...(viewerId !== userId ? { handle: sealItemHandle(viewerId, userId, { kind: "vault", id: vaultId, via: "direct", groupId: null }) } : {}) })),
+    // Wave 43 (AC-D): agents and chats shared with the person by name or through a group, titles
+    // only when the viewer can open them (D269), each way with its own sealed handle on the admin page.
+    chat: memberSharedRows(viewerId, userId).map(({ sources, ...row }) => ({
+      ...row,
+      sources: sources.map(({ handleItem, ...source }) => ({ ...source, ...(viewerId !== userId ? { handle: sealItemHandle(viewerId, userId, handleItem) } : {}) }))
+    })),
     resetCounts: counts,
     pageSize: ACCESS_PAGE
   };
@@ -260,6 +268,12 @@ function openHandle(actorId: string, userId: string, token: string) {
   return { ...handle, kind: handle.kind as AccessKind };
 }
 
+/** An agent or chat row's handle (Wave 43), or null when the handle is about something else. */
+function sharedHandle(actorId: string, userId: string, token: string) {
+  const handle = openItemHandle(token, actorId, userId);
+  return handle && (handle.kind === "agent" || handle.kind === "chat") ? { ...handle, kind: handle.kind as ShareKind } : null;
+}
+
 /** A vault row's handle (Wave 26), or null when the handle is about something else. */
 function vaultHandle(actorId: string, userId: string, token: string) {
   const handle = openItemHandle(token, actorId, userId);
@@ -284,6 +298,19 @@ export function removeAccess(actorId: string, userId: string, token: string) {
   person(userId);
   const vaultId = vaultHandle(actorId, userId, token);
   if (vaultId) return asMemberAccessError(() => adminRemoveVaultMember(actorId, userId, vaultId));
+  const shared = sharedHandle(actorId, userId, token);
+  if (shared) {
+    if (shared.via === "group") return { removed: "group" as const, ...removeFromGroup(actorId, userId, shared.groupId ?? "") };
+    return db.transaction(() => {
+      const removed = removeSharedDirect(shared.kind, shared.id, userId);
+      if (!removed) throw gone();
+      const timestamp = now();
+      recordAccessEvent({ actorId, via: "web", action: "access.share_removed", targetUserId: userId, resource: { kind: shared.kind, id: shared.id }, meta: { level: removed.level } }, timestamp);
+      audit(actorId, null, "team.access_removed", { targetId: userId, kind: shared.kind });
+      if (removed.ownerId) notifyAccess({ userId: removed.ownerId, kind: "share_removed", actorId, targetUserId: userId, resource: { kind: shared.kind, id: shared.id } }, timestamp);
+      return { removed: "share" as const, kind: shared.kind };
+    })();
+  }
   const handle = openHandle(actorId, userId, token);
   if (handle.via === "group") return { removed: "group" as const, ...removeFromGroup(actorId, userId, handle.groupId ?? "") };
   const { table, column, hasLevel } = SHARE_TABLES[handle.kind];
@@ -308,6 +335,21 @@ export function lowerAccess(actorId: string, userId: string, token: string, leve
     // A vault offers one reduction short of removing: every environment down to read ("view").
     if (level !== "view") throw new MemberAccessError(400, "LEVEL_NOT_OFFERED", "A vault membership can be lowered to read only");
     return asMemberAccessError(() => adminLowerVaultMember(actorId, userId, vaultId, "read"));
+  }
+  const shared = sharedHandle(actorId, userId, token);
+  if (shared) {
+    // An agent's manage row lowers to view; nothing else is lower than view (D268: never up).
+    if (shared.via !== "direct" || shared.kind !== "agent") throw new MemberAccessError(400, "NOT_LOWERABLE", "Only a direct share with a level can be lowered");
+    if (level !== "view") throw new MemberAccessError(400, "LEVEL_NOT_OFFERED", "An agent share can be lowered to Can view only");
+    return db.transaction(() => {
+      const lowered = lowerSharedDirect(shared.kind, shared.id, userId);
+      if (!lowered) throw gone();
+      const timestamp = now();
+      recordAccessEvent({ actorId, via: "web", action: "access.share_lowered", targetUserId: userId, resource: { kind: shared.kind, id: shared.id }, meta: { from: "manage", to: "view" } }, timestamp);
+      audit(actorId, null, "team.access_lowered", { targetId: userId, kind: shared.kind, from: "manage", to: "view" });
+      if (lowered.ownerId) notifyAccess({ userId: lowered.ownerId, kind: "share_lowered", actorId, targetUserId: userId, resource: { kind: shared.kind, id: shared.id }, level: "view" }, timestamp);
+      return { lowered: true as const, kind: shared.kind, from: "manage", to: "view" as const };
+    })();
   }
   const handle = openHandle(actorId, userId, token);
   const { table, column, hasLevel } = SHARE_TABLES[handle.kind];
@@ -383,6 +425,8 @@ export function resetAccess(actorId: string, userId: string) {
     for (const key of keys) adminRevokeKey(actorId, key.id, "Access reset by an admin", { notify: false, meta: { reset: true } });
     // Vault memberships (Wave 26): member rows go (owned vaults stay).
     for (const [ownerId, count] of resetVaultMemberships(actorId, userId)) perOwner.set(ownerId, (perOwner.get(ownerId) ?? 0) + count);
+    // Agents and chats shared by name (Wave 43): their rows go (owned ones and everyone-signed-in stay).
+    for (const [ownerId, count] of resetSharedDirect(userId)) perOwner.set(ownerId, (perOwner.get(ownerId) ?? 0) + count);
     rotateOnLostReach(actorId, reach);
     const feeds = db.query("UPDATE calendar_feeds SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL").run(timestamp, userId).changes;
     const routines = pauseRoutinesOf(userId);

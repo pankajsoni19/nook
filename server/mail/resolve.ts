@@ -8,6 +8,7 @@ import { calendarLevel, readableCalendar } from "../calendar/access";
 import { collectionLevel, readableCollection } from "../collections/access";
 import { atLeast } from "../access/levels";
 import { vaultBestLevel, vaultTitleFor } from "../vault/access";
+import { shareLevelById, sharedTitleFor } from "../agents/sharing";
 import { parseStoredScopes } from "../mcpScopes";
 import { stripMarkdown } from "./html";
 import { isMuted } from "./mutes";
@@ -103,6 +104,13 @@ export function sharedItem(kind: SharedKind, id: string, userId: string): Shared
       if (title === null) return null;
       const best = vaultBestLevel(userId, id);
       return { kind, id, title, access: best === "write" || best === "admin" ? "edit" : "read" };
+    }
+    case "agent":
+    case "chat": {
+      // Wave 43 (AC-D): the agent's name or the chat's title only, while the recipient can open it.
+      const title = sharedTitleFor(kind, id, userId);
+      if (title === null) return null;
+      return { kind, id, title, access: kind === "agent" && shareLevelById("agent", id, userId) !== "view" ? "edit" : "read" };
     }
     case "view": {
       try {

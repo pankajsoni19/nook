@@ -78,7 +78,9 @@ export const ROLE_READ_ONLY_ALLOWED_WRITES: readonly AllowedWrite[] = [
   { method: "DELETE", path: "/api/chats/:chatId", roles: ["viewer"], why: "own chat to the Bin" },
   { method: "POST", path: "/api/chats/:chatId/messages", roles: ["viewer"], why: "a message in an own chat" },
   { method: "POST", path: "/api/chats/:chatId/messages/:messageId/regenerate", roles: ["viewer"], why: "regenerate in an own chat" },
-  { method: "POST", path: "/api/runs/:runId/cancel", roles: ["viewer"], why: "stop an own run" }
+  { method: "POST", path: "/api/runs/:runId/cancel", roles: ["viewer"], why: "stop an own run" },
+  // Wave 43 (AC-D, D361): a viewer reading a shared chat continues it in their own copy (they must be able to use its agent).
+  { method: "POST", path: "/api/chats/:chatId/fork", roles: ["viewer"], why: "an own copy of a chat shared with them" }
 ];
 
 /**

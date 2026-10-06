@@ -13,6 +13,7 @@ import { addressAllowed, ipAllowlistAvailable } from "./ipAllowlist";
 import { readPolicies } from "./team/policies";
 import { fromAgentRun, RECURSION_MESSAGE } from "./agents/depth";
 import { REQUEST_SLOTS } from "./agents/limits";
+import { keepRequestOpen } from "./longRequests";
 
 type McpKeyRow = {
   id: string;
@@ -233,7 +234,10 @@ export async function handleMcpRequest(request: Request, clientIp: string | null
       throw error;
     }
     // From inside an agent run (review M1, T318): a tool server calling back with Nook-Agent-Run cannot run an agent.
-    if (fromAgentRun(request) && await callsRunAgent(bounded)) return mcpJsonError(RECURSION_MESSAGE, 409, false, "AGENT_RECURSION");
+    const runsAgent = await callsRunAgent(bounded);
+    if (runsAgent && fromAgentRun(request)) return mcpJsonError(RECURSION_MESSAGE, 409, false, "AGENT_RECURSION");
+    // run_agent waits for the agent's answer (up to 5 minutes): no idle timeout for it (QA D1, server/longRequests.ts).
+    if (runsAgent) keepRequestOpen(request);
     // Effective grants and scopes: grants ∩ the holder's current role ∩ team policy (T81, D263).
     const { scopes, grants } = key.actor;
     const context: McpKeyContext = { keyId: key.id, userId: key.user_id, name: key.name, scopes, grants, kind: key.actor.kind };

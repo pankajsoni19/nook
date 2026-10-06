@@ -37,6 +37,7 @@ import { vaultSharingMigration } from "./037_vault_sharing";
 import { vaultKeysMigration } from "./038_vault_keys";
 import { agentChatMigration } from "./039_agent_chat";
 import { agentAuditMigration } from "./040_agent_audit";
+import { agentSharingMigration } from "./041_agent_sharing";
 
 const migrations = [initialMigration, folderSharingMigration, totpMigration, totpRecoveryCodesMigration, mcpApiKeysMigration, documentsMigration, binMigration, noteSearchMigration, taskBoardsMigration, mcpKeyScopesMigration, taskDatesMigration, collectionsMigration, calendarMigration, eventNextOccurrenceMigration, taskCardUxMigration, userPreferencesMigration, teamRolesMigration,
   // 018 (Team invites) may reach existing installs after 019 (task hierarchy) and 020 (task views); none depends on another.
@@ -73,8 +74,12 @@ const migrations = [initialMigration, folderSharingMigration, totpMigration, tot
   // widens its CHECK words for agents and messages) needs 001, 005, 025, 032, and 038.
   agentChatMigration,
   // 040 (agent audit, Wave 42 "AC-C": the Audit log's append-only triggers, the retention guard, and
-  // two reader indexes) needs 005 and 039. The Messages migration moves to 041.
-  agentAuditMigration
+  // two reader indexes) needs 005 and 039.
+  agentAuditMigration,
+  // 041 (agent sharing, Wave 43 "AC-D": access_grants_v with agent and chat rows, agent_access
+  // uniqueness and indexes, and the "Copied from" columns on chats) needs 025 and 039. The Messages
+  // migration moves to 042.
+  agentSharingMigration
 ];
 
 /**

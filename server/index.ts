@@ -38,6 +38,8 @@ import { registerWhiteboardRoutes } from "./whiteboards/routes";
 import { WHITEBOARD_IMPORT_MAX_BYTES } from "./whiteboards/import";
 import { registerVaultRoutes } from "./vault/routes";
 import { registerAgentRoutes } from "./agents/routes";
+import { noteServer, SERVER_IDLE_TIMEOUT_SECONDS } from "./longRequests";
+import { publicShareHeaders, registerPublicChatShareApi } from "./agents/publicRoutes";
 import { agentsFeature, initAgentsStatus } from "./agents/status";
 import { markInterruptedRuns } from "./agents/runs";
 import { initStdioDeclarations } from "./agents/stdio";
@@ -144,6 +146,11 @@ const globalSecureHeaders = secureHeaders({
   xFrameOptions: "DENY"
 });
 
+// Public chat links (Wave 43, AC-D, T316): the page and its API keep a stricter header set (no-index,
+// no-store, a CSP allowing only Nook's own files). Registered first, so it writes after secureHeaders.
+app.use("/share/c/*", publicShareHeaders);
+app.use("/api/public/chat-shares/*", publicShareHeaders);
+
 // secureHeaders overwrites headers after next(), so the document content route (and only it)
 // is excluded and sets its own strict header set, including a sandboxing CSP.
 // The vault export (Wave 26) is a plaintext attachment: it gets the same sandboxing header set.
@@ -212,6 +219,8 @@ app.post("/api/auth/invite", async (c) => {
 
 // Email verification and one-click unsubscribe work without a session (outbound email §A.4, §B.2).
 registerPublicMailRoutes(app);
+// A public chat link's snapshot (Wave 43, AC-D, AC-O1): no session; 404 unless the policy is on and the token opens one.
+registerPublicChatShareApi(app);
 // Forgot / reset password (Wave 30, outbound email §A.5): no session, identical answers (T224).
 registerPasswordResetRoutes(app);
 // Google sign-in (Wave 35): start, callback, second factor, and the invite hand-off; no session needed.
@@ -1023,7 +1032,13 @@ startMailDispatcher();
 export default {
   port: config.port,
   hostname: "0.0.0.0",
-  fetch: app.fetch,
+  // Bun's server goes to server/longRequests.ts, so the SSE streams and the calls that wait for an
+  // agent's answer can lift the idle timeout for themselves (QA D1); every other request keeps it.
+  fetch: (request: Request, server: unknown) => {
+    noteServer(server);
+    return app.fetch(request, server);
+  },
+  idleTimeout: SERVER_IDLE_TIMEOUT_SECONDS,
   // Uploads need a larger transport cap; JSON and MCP bodies are bounded separately while reading.
   // Whiteboard scenes are read through their own 4 MiB bounded reader (413 SCENE_TOO_LARGE), and
   // imports through a 32 MiB one (413 IMPORT_TOO_LARGE), so the transport cap leaves room for both.

@@ -40,6 +40,8 @@ export const paths = {
   filesShared: () => "/files/shared",
   collection: (collectionId: string) => `/collections/${id(collectionId)}`,
   vault: (vaultId: string) => `/vault/${id(vaultId)}`,
+  chat: (chatId: string) => `/chat/${id(chatId)}`,
+  chatWithAgent: (agentId: string) => `/chat/new?agent=${id(agentId)}`,
   calendar: () => "/calendar",
   event: (eventId: string) => `/calendar/event/${id(eventId)}`,
   notifications: () => "/notifications",

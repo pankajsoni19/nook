@@ -221,7 +221,7 @@ export function AccessSheet({ kind, id, title, onClose, onSaved, guardHistory = 
                 value={draft.audienceLevel} options={levelOptions(kind, access.audienceLevels)} label="What everyone signed in can do" searchable={false}
                 onChange={(level) => update((current) => ({ ...current, audienceLevel: level }))} />}
             </div>)}
-          </fieldset> : <p className="access-note" role="note"><Share2 aria-hidden="true" />You manage this item: you can add and change people and groups up to {LEVEL_LABELS.edit}. Only {access.owner.displayName} changes managers or who can open it.</p>}
+          </fieldset> : <p className="access-note" role="note"><Share2 aria-hidden="true" />You manage this item: you can add and change people and groups up to {LEVEL_LABELS[access.levels[access.levels.length - 1] ?? "edit"]}. Only {access.owner.displayName} changes managers or who can open it.</p>}
 
           {selected && <section className="access-principals" aria-label="People and groups">
             <PrincipalPicker options={withIntegrationIcons(pickerOptions(draft, access, people, groups))} onPick={(value) => update((current) => addPicked(current, value, access, people, groups))} disabled={busy} onOpening={refreshGuestPolicy}
