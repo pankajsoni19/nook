@@ -342,7 +342,8 @@ describe("review: search, Bin, and resume edges", () => {
     const started = await api(owner, "POST", `/chats/${chat.id}/messages`, { content: "echo:shape" });
     expect(started.status).toBe(201);
     for (const message of [started.body.userMessage, started.body.assistantMessage]) {
-      expect(Object.keys(message).sort()).toEqual(["content", "createdAt", "errorCode", "finishedAt", "id", "model", "parentId", "role", "runId", "status", "usage"]);
+      // Wave 41 (AC-B) adds `toolCalls` to every message.
+      expect(Object.keys(message).sort()).toEqual(["content", "createdAt", "errorCode", "finishedAt", "id", "model", "parentId", "role", "runId", "status", "toolCalls", "usage"]);
     }
     expect(started.body.userMessage).toMatchObject({ role: "user", content: "echo:shape", status: "complete", parentId: null });
     expect(started.body.assistantMessage).toMatchObject({ role: "assistant", status: "streaming", parentId: started.body.userMessage.id, runId: started.body.runId });
