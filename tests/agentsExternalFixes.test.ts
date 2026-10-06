@@ -6,6 +6,7 @@ import { api } from "./support/mcpClient";
 import { startFakeProvider } from "./support/fakeProvider";
 import { startFakeMcpServer } from "./support/fakeMcpServer";
 import { retireUsersAfterFile } from "./support/retireUsers";
+import { settleAgentRunsAfterEach } from "./support/agentRuns";
 
 const { createApiKey, narrowApiKey, rotateApiKey, revokeOwnKey, KeyError } = await import("../server/apiKeys");
 const { invokeMcpToolForTests } = await import("../server/mcpTools");
@@ -24,9 +25,13 @@ type Grant = import("../server/keyGrants").Grant;
  * run_agent's errors by code, the right re-checked while a model call streams (API and chat), the
  * partial step charged on cancel and stop, the facets of the Audit log's filters, the SSE order,
  * the explained ending on API runs, and the shared slots' message.
+ *
+ * Every test uses its own owner and agent, and ends only once its runs have ended
+ * (`settleAgentRunsAfterEach`), so slots and live runs never carry into the next test under load.
  */
 
 retireUsersAfterFile();
+settleAgentRunsAfterEach();
 const fake = startFakeProvider(24536);
 const mcp = startFakeMcpServer(24537);
 

@@ -3,6 +3,7 @@ import { Database } from "bun:sqlite";
 import { existsSync, readFileSync } from "node:fs";
 import { createUser, db, origin, request, type Session } from "./support/harness";
 import { call, newSecret, newVault, resetVaultLimits, setRole, share, unlock, type TestVault } from "./support/vault";
+import { withinOneWindow } from "./support/clock";
 import { registeredMigrationIds, runMigrations } from "../server/migrations";
 
 const { createApiKey, resetKeyDenialsForTests } = await import("../server/apiKeys");
@@ -434,49 +435,64 @@ describe("review 27: REST conformance and per-key limits (T183, T194, T195)", ()
     const vault = await newVault(owner);
     const secret = await newSecret(owner, vault, "BUCKET", { dev: "b0" });
     const key = await vaultKey(owner, [{ module: "vault", permission: "write", vaultId: vault.id }]);
-    const statuses: number[] = [];
-    for (let index = 0; index < 21; index += 1) statuses.push((await rest(key.token, "GET", valuePath(vault, secret.id, "dev"))).status);
-    expect(statuses.slice(0, 20).every((status) => status === 200)).toBe(true);
-    expect(statuses[20]).toBe(429);
-    const row = db.query("SELECT count FROM vault_rate_limits WHERE bucket = ?").get(`keyRead:${key.id}`) as { count: number };
-    expect(row.count).toBe(20);
-    expect(db.query("SELECT 1 FROM vault_rate_limits WHERE bucket = ?").get(`read:${owner.userId}`)).toBeNull();
-    // The creator's session reads freely and charges only the person's bucket.
-    expect((await call(owner, "GET", sessionValuePath(vault, secret.id, "dev"))).status).toBe(200);
-    expect((db.query("SELECT count FROM vault_rate_limits WHERE bucket = ?").get(`read:${owner.userId}`) as { count: number }).count).toBe(1);
-    expect((db.query("SELECT count FROM vault_rate_limits WHERE bucket = ?").get(`keyRead:${key.id}`) as { count: number }).count).toBe(20);
+    // Each minute's count runs inside one minute (under load, 21 requests can straddle a boundary).
+    await withinOneWindow(60_000, async () => {
+      const statuses: number[] = [];
+      for (let index = 0; index < 21; index += 1) statuses.push((await rest(key.token, "GET", valuePath(vault, secret.id, "dev"))).status);
+      expect(statuses.slice(0, 20).every((status) => status === 200)).toBe(true);
+      expect(statuses[20]).toBe(429);
+      const row = db.query("SELECT count FROM vault_rate_limits WHERE bucket = ?").get(`keyRead:${key.id}`) as { count: number };
+      expect(row.count).toBe(20);
+      expect(db.query("SELECT 1 FROM vault_rate_limits WHERE bucket = ?").get(`read:${owner.userId}`)).toBeNull();
+      // The creator's session reads freely and charges only the person's bucket.
+      expect((await call(owner, "GET", sessionValuePath(vault, secret.id, "dev"))).status).toBe(200);
+      expect((db.query("SELECT count FROM vault_rate_limits WHERE bucket = ?").get(`read:${owner.userId}`) as { count: number }).count).toBe(1);
+      expect((db.query("SELECT count FROM vault_rate_limits WHERE bucket = ?").get(`keyRead:${key.id}`) as { count: number }).count).toBe(20);
+    });
     // Writes: 10 a minute.
     let version = 1;
     const sessionWrites = () => (db.query("SELECT count FROM vault_rate_limits WHERE bucket = ?").get(`write:${owner.userId}`) as { count: number } | null)?.count ?? 0;
-    const sessionWritesBefore = sessionWrites();
-    const writes: number[] = [];
-    for (let index = 0; index < 11; index += 1) {
-      const response = await rest(key.token, "PUT", valuePath(vault, secret.id, "dev"), { value: `b${index + 1}`, expectedVersion: version });
-      writes.push(response.status);
-      if (response.status === 200) version = response.body.value.version;
-    }
-    expect(writes.slice(0, 10).every((status) => status === 200)).toBe(true);
-    expect(writes[10]).toBe(429);
-    expect(sessionWrites()).toBe(sessionWritesBefore);
+    resetVaultLimits();
+    await withinOneWindow(60_000, async () => {
+      const sessionWritesBefore = sessionWrites();
+      const writes: number[] = [];
+      for (let index = 0; index < 11; index += 1) {
+        const response = await rest(key.token, "PUT", valuePath(vault, secret.id, "dev"), { value: `b${index + 1}`, expectedVersion: version });
+        writes.push(response.status);
+        if (response.status === 200) version = response.body.value.version;
+      }
+      expect(writes.slice(0, 10).every((status) => status === 200)).toBe(true);
+      expect(writes[10]).toBe(429);
+      expect(sessionWrites()).toBe(sessionWritesBefore);
+    });
     // A refused write writes nothing.
     expect((db.query("SELECT version FROM vault_values WHERE secret_id = ? AND env_id = ?").get(secret.id, vault.envs.dev) as { version: number }).version).toBe(version);
     // Hourly and daily buckets hold too (seeded to their limit).
     resetVaultLimits();
-    const hour = Math.floor(Date.now() / 3_600_000) * 3_600_000;
-    db.query("INSERT INTO vault_rate_limits (bucket, window_start, count, previous_count) VALUES (?, ?, 1000, 0)").run(`keyReadHour:${key.id}`, hour);
-    expect((await rest(key.token, "GET", valuePath(vault, secret.id, "dev"))).status).toBe(429);
-    const day = Math.floor(Date.now() / 86_400_000) * 86_400_000;
-    db.query("INSERT INTO vault_rate_limits (bucket, window_start, count, previous_count) VALUES (?, ?, 200, 0)").run(`keyWriteDay:${key.id}`, day);
-    const refused = await rest(key.token, "PUT", valuePath(vault, secret.id, "dev"), { value: "day", expectedVersion: version });
-    expect(refused.status).toBe(429);
-    expect(Number(refused.headers.get("retry-after"))).toBeGreaterThan(3600);
-  });
+    await withinOneWindow(3_600_000, async () => {
+      const hour = Math.floor(Date.now() / 3_600_000) * 3_600_000;
+      db.query("INSERT INTO vault_rate_limits (bucket, window_start, count, previous_count) VALUES (?, ?, 1000, 0)").run(`keyReadHour:${key.id}`, hour);
+      expect((await rest(key.token, "GET", valuePath(vault, secret.id, "dev"))).status).toBe(429);
+    });
+    await withinOneWindow(86_400_000, async () => {
+      const day = Math.floor(Date.now() / 86_400_000) * 86_400_000;
+      db.query("INSERT INTO vault_rate_limits (bucket, window_start, count, previous_count) VALUES (?, ?, 200, 0)").run(`keyWriteDay:${key.id}`, day);
+      const refused = await rest(key.token, "PUT", valuePath(vault, secret.id, "dev"), { value: "day", expectedVersion: version });
+      expect(refused.status).toBe(429);
+      // The day's wait (until midnight UTC), not a minute's: over an hour, unless midnight is nearer.
+      const toMidnight = Math.floor((day + 86_400_000 - Date.now()) / 1000);
+      expect(Number(refused.headers.get("retry-after"))).toBeGreaterThan(Math.min(3600, toMidnight - 60));
+    });
+  }, 90_000);
 
   test("the limit alert is throttled: one access event per key per 10 minutes and one bell notice a day, however many refusals", async () => {
     const owner = await createUser("R27 alert");
     const vault = await newVault(owner);
     const secret = await newSecret(owner, vault, "ALERT", { dev: "a" });
     const key = await vaultKey(owner, [{ module: "vault", permission: "read", vaultId: vault.id }]);
+    // A seeded minute that never rolls over under the requests (one minute for the whole test).
+    const left = 60_000 - (Date.now() % 60_000);
+    if (left < 20_000) await new Promise((resolve) => setTimeout(resolve, left + 50));
     const minute = Math.floor(Date.now() / 60_000) * 60_000;
     db.query("INSERT INTO vault_rate_limits (bucket, window_start, count, previous_count) VALUES (?, ?, 20, 0)").run(`keyRead:${key.id}`, minute);
     for (let index = 0; index < 5; index += 1) expect((await rest(key.token, "GET", valuePath(vault, secret.id, "dev"))).status).toBe(429);
@@ -487,7 +503,7 @@ describe("review 27: REST conformance and per-key limits (T183, T194, T195)", ()
     resetKeyAlertsForTests();
     expect((await rest(key.token, "GET", valuePath(vault, secret.id, "dev"))).status).toBe(429);
     expect((db.query("SELECT COUNT(*) AS count FROM access_notices WHERE key_id = ? AND kind = 'key_vault_limited'").get(key.id) as { count: number }).count).toBe(1);
-  });
+  }, 60_000);
 });
 
 describe("review 27: detection below the limits (T183, V-O6)", () => {
@@ -516,7 +532,8 @@ describe("review 27: detection below the limits (T183, V-O6)", () => {
     expect((db.query("SELECT COUNT(*) AS count FROM access_events WHERE key_id = ? AND action = 'key.vault.volume'").get(key.id) as { count: number }).count).toBe(1);
     expect(db.query("SELECT count, secret_id, env_id FROM vault_events WHERE key_id = ? AND event = 'key.volume'").all(key.id)).toEqual([{ count: 501, secret_id: null, env_id: null }]);
     expect(db.query("SELECT COUNT(*) AS count FROM access_notices WHERE key_id = ? AND kind = 'key_vault_limited'").get(key.id)).toEqual({ count: 0 });
-  });
+    // 510 requests: over 5 s under load (the Docker verify stage).
+  }, 60_000);
 });
 
 // ------------------------------------------------------------------------------------------------
@@ -710,7 +727,8 @@ describe("review 27: cross-wave invariants with key actors", () => {
     expect(rotationStatus(vault.id).done).toBe(true);
     await readAll();
     expect(db.query("SELECT 1 FROM vault_events WHERE vault_id = ? AND event = 'integrity.fail'").get(vault.id)).toBeNull();
-  });
+    // Dozens of REST and MCP reads with re-encryption between them: over 5 s under load (the Docker verify stage).
+  }, 60_000);
 
   // Fixed (review L5): the key's name is stored with the event, so a rename re-labels nothing.
   test("Activity attribution comes from the server: the key id, creator, and the key's name at the time are recorded (a rename re-labels nothing)", async () => {
