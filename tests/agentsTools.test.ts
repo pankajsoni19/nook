@@ -32,6 +32,7 @@ let admin: Session;
 let member: Session;
 let other: Session;
 let serverId: string;
+let providerId: string;
 
 type SseEvent = { seq: number; type: string; data: Record<string, any> };
 async function readEvents(session: Session, runId: string, options: { after?: number; until?: (events: SseEvent[]) => boolean } = {}): Promise<SseEvent[]> {
@@ -72,7 +73,7 @@ const textOf = (events: SseEvent[]) => events.filter((event) => event.type === "
 const lastCompletion = () => fake.calls.filter((call) => call.path === "/v1/chat/completions").at(-1)!.body as { messages: Array<{ role: string; content: string | null; tool_calls?: Array<{ function: { name: string } }>; tool_call_id?: string }>; tools?: Array<{ type: string; function: { name: string; description: string; parameters: unknown } }>; tool_choice?: string };
 
 async function newAgent(session: Session, patch: Record<string, unknown> = {}) {
-  const created = await api(session, "POST", "/agents", { name: "Tooler", systemPrompt: "Use tools.", ...patch });
+  const created = await api(session, "POST", "/agents", { name: "Tooler", systemPrompt: "Use tools.", providerId, ...patch });
   expect(created.status).toBe(201);
   return created.body.agent as { id: string; revision: number; tools: unknown[]; trifecta: boolean; linked: boolean };
 }
@@ -94,11 +95,14 @@ beforeAll(async () => {
   db.query("UPDATE users SET role = 'admin' WHERE id = ?").run(admin.userId);
   member = await createUser("Tools member");
   other = await createUser("Tools other");
-  if (!(await api(admin, "GET", "/agents/admin/providers")).body.providers.length) {
-    expect((await api(admin, "POST", "/agents/admin/providers", { name: "Fake OpenAI", baseUrl: fake.baseUrl, apiKey: "sk-test-fake-key-0002", defaultModel: "gpt-6-luna" })).status).toBe(201);
-  }
+  // This file's own provider, named on every agent and removed at the end: another file's default
+  // provider is never touched, and this file's fake never becomes the default once it has stopped.
+  const created = await api(admin, "POST", "/agents/admin/providers", { name: "Fake OpenAI (tools)", baseUrl: fake.baseUrl, apiKey: "sk-test-fake-key-0002", defaultModel: "gpt-6-luna" });
+  expect(created.status).toBe(201);
+  providerId = created.body.provider.id;
 });
 afterAll(async () => {
+  await api(admin, "DELETE", `/agents/admin/providers/${providerId}`);
   await resetToolServersForTests();
   fake.stop();
   mcp.stop();

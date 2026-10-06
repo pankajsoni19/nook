@@ -116,7 +116,8 @@ describe("agent secrets (D354, T309)", () => {
       expect((await api(member, "GET", "/auth/me")).body.features.agents).toBe(false);
       expect((await api(admin, "GET", "/auth/me")).body.features.agents).toBe(true);
       // A key that does not open stored secrets keeps the module off with its own reason.
-      expect(setAgentsKeyForTests(Buffer.alloc(32, 77)).reason).toBe(db.query("SELECT 1 FROM agent_providers WHERE api_key_ct IS NOT NULL").get() ? "key_mismatch" : null);
+      // Wave 41: tool-server credentials are checked too.
+      expect(setAgentsKeyForTests(Buffer.alloc(32, 77)).reason).toBe(db.query("SELECT 1 FROM agent_providers WHERE api_key_ct IS NOT NULL UNION ALL SELECT 1 FROM agent_tool_servers WHERE secret_ct IS NOT NULL").get() ? "key_mismatch" : null);
     } finally {
       setAgentsKeyForTests(key);
     }
