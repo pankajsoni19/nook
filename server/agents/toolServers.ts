@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { audit, db, now } from "../db";
 import { AGENT_BOUNDS, type CatalogTool, type ServerAuthKind, type ServerAvailability, type ServerStatus, type ToolPolicy, type ToolServerSummary } from "../../shared/agents";
 import { checkSavedEndpoint, EgressError } from "./egress";
@@ -125,6 +126,22 @@ function normalizeUrl(value: string) {
   return trimmed;
 }
 
+/**
+ * A Nook key is never a tool server's credential (Wave 42 review M1, T318): a server holding one
+ * could call Nook back and start a run from inside a run, which no in-process guard can see. Refused
+ * at save and edit: any word of the value that looks like a Nook key (`mynotes_…`, `nkv_…`), or
+ * whose SHA-256 is the hash of any Nook key, live or not.
+ */
+const NOOK_KEY_SHAPE = /^(mynotes|nkv)_/i;
+export function refuseNookCredential(secret: string | null) {
+  if (!secret) return;
+  const words = [secret, ...secret.split(/[\s,;:=]+/)].map((word) => word.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
+  const hashes = new Set(words.map((word) => createHash("sha256").update(word).digest("hex")));
+  const known = words.some((word) => NOOK_KEY_SHAPE.test(word))
+    || db.query("SELECT 1 FROM mcp_api_keys WHERE token_hash IN (SELECT value FROM json_each(?)) LIMIT 1").get(JSON.stringify([...hashes])) !== null;
+  if (known) throw new AgentError(400, "NOOK_KEY_REFUSED", "A Nook API key cannot be a tool server's credential: the server could use it to start agent runs from inside a run. Give the server its own credential.", { field: "secret" });
+}
+
 function checkAuth(kind: ServerAuthKind, header: string | null | undefined, hasSecret: boolean) {
   if (kind === "header") {
     if (!header || !headerNameAllowed(header)) throw new AgentError(400, "INVALID", "The custom header must be Authorization or an X- header (not X-Forwarded-* or X-Real-IP)", { field: "authHeader" });
@@ -152,6 +169,7 @@ export function createServer(actorId: string, input: ToolServerInput): ToolServe
     const authKind = transport === "stdio" ? "none" : input.authKind ?? "none";
     const secret = input.secret?.trim() || null;
     checkAuth(authKind, input.authHeader, secret !== null);
+    refuseNookCredential(secret);
     const id = crypto.randomUUID();
     const timestamp = now();
     db.query(`INSERT INTO agent_tool_servers (id, slug, name, transport, url, stdio_id, auth_kind, auth_header, secret_ct, secret_hint, timeout_ms, result_cap_bytes, visibility, enabled, created_at, updated_at)
@@ -179,6 +197,7 @@ export function updateServer(actorId: string, id: string, input: Partial<ToolSer
     const hint = secretCt === null ? null : secret ? secretHint(secret) : row.secret_hint;
     const header = authKind === "header" ? (input.authHeader ?? row.auth_header)?.trim() ?? null : null;
     checkAuth(authKind, header, secretCt !== null);
+    refuseNookCredential(secret);
     db.query(`UPDATE agent_tool_servers SET slug = ?, name = ?, url = ?, auth_kind = ?, auth_header = ?, secret_ct = ?, secret_hint = ?, timeout_ms = ?, result_cap_bytes = ?, visibility = ?, enabled = ?,
       revision = revision + 1, updated_at = ? WHERE id = ?`).run(
       slug, (input.name ?? row.name).trim(), url, authKind, header, secretCt, hint, input.timeoutMs ?? row.timeout_ms, input.resultCapBytes ?? row.result_cap_bytes,

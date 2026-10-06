@@ -17,3 +17,18 @@ export const currentAgentRun = (): AgentRunFrame | null => frames.getStore() ?? 
 
 /** Runs `operation` (and everything it awaits or schedules) inside the run's frame. */
 export const withinAgentRun = <T>(frame: AgentRunFrame, operation: () => T): T => frames.run(frame, operation);
+
+/**
+ * Across an HTTP hop (Wave 42 review M1, T318) the frame above cannot follow: Nook sends
+ * `Nook-Agent-Run: <runId>` on every outbound MCP request made inside a run
+ * (server/agents/mcpClient.ts), and refuses to start a run (`POST /api/v1/agents/:id/runs`,
+ * `/api/v1/tools/run_agent`, MCP `run_agent`) for a request that carries it: 409 `AGENT_RECURSION`.
+ * A tool server that drops the header is bounded by the owner's and the instance's run slots, and
+ * by the save-time refusal of Nook keys as tool-server credentials (server/agents/toolServers.ts).
+ */
+export const AGENT_RUN_HEADER = "Nook-Agent-Run";
+
+/** Whether an inbound request says it comes from inside an agent run. */
+export const fromAgentRun = (request: Request) => request.headers.has(AGENT_RUN_HEADER);
+
+export const RECURSION_MESSAGE = "An agent run cannot start another run: this request came from inside one (Nook-Agent-Run)";

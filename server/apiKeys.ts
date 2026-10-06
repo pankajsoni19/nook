@@ -606,6 +606,21 @@ function insertGrantRows(keyId: string, grants: readonly Grant[], createdAt: str
   }
 }
 
+/**
+ * A key linked as an agent's Nook key (`agent_user_links`) never runs agents (Wave 42 review M1,
+ * T318): the agent's Nook tools use that key, so with `agents:run` on it a run's tools would hold
+ * the right to start runs. Checked on create, rotate, and narrow here, and on link
+ * (server/agents/tools.ts setLink).
+ */
+export const keyLinkedToAgent = (keyId: string) => db.query("SELECT 1 FROM agent_user_links WHERE nook_key_id = ? LIMIT 1").get(keyId) !== null;
+export const keyHoldsAgentRun = (keyId: string) => db.query("SELECT 1 FROM api_key_grants WHERE key_id = ? AND module = 'agents' AND permission = 'run' LIMIT 1").get(keyId) !== null;
+export function assertRunGrantUnlinked(keyId: string, grants: readonly Pick<Grant, "module" | "permission">[]) {
+  if (!grants.some((grant) => grant.module === "agents" && grant.permission === "run")) return;
+  if (keyLinkedToAgent(keyId)) {
+    throw new KeyError(409, "KEY_LINKED_TO_AGENT", "This key is linked as an agent's Nook key, so it cannot run agents. Remove “Run agents” from it, or link another key to the agent first.");
+  }
+}
+
 const grantSummary = (grants: readonly Grant[]) => grants.map((grant) => `${grant.module}:${grant.permission}${grant.resourceId ? `@${grant.resourceKind}` : ""}${grant.envId ? "+env" : ""}`);
 
 /**
@@ -625,6 +640,8 @@ export function createApiKey(userId: string, input: { name: string; description?
   const actorId = options.actorId ?? userId;
   return db.transaction(() => {
     const created = insertKey({ userId, name: input.name, description: input.description ?? null, kind, surfaces: input.surfaces, grants: input.grants, expiresAt, limits: input.limits ?? {}, createdAt, ipAllowlist: input.ipAllowlist ?? null, createdBy: options.actorId ?? null, vaultFlags: kind === "vault" ? input.vaultFlags ?? null : null });
+    // A new key is never linked yet; the check keeps the rule in one place (review M1).
+    assertRunGrantUnlinked(created.id, input.grants);
     // The audit shape predates grants (Wave 8): keyId, name, and the scopes the grants amount to.
     audit(actorId, null, "mcp.key_created", { keyId: created.id, name: input.name, scopes: created.scopes, ...(actorId !== userId ? { ownerId: userId } : {}) });
     recordAccessEvent({ actorId, via: options.via ?? "web", action: "key.created", targetUserId: userId, keyId: created.id,
@@ -779,6 +796,8 @@ export function narrowApiKey(userId: string, keyId: string, patch: z.infer<typeo
   const description = patch.description === undefined ? row.description : (patch.description?.trim() || null);
   if (patch.description !== undefined && description !== row.description) changed.push("description");
   if (!changed.length) return { changed };
+  // A linked key still holding "Run agents" (one linked before the rule) must drop it or be unlinked (review M1).
+  assertRunGrantUnlinked(row.id, nextGrants ?? current);
   db.transaction(() => {
     const timestamp = now();
     const scopes = nextGrants ? grantsToScopes(nextGrants) : null;
@@ -854,6 +873,8 @@ export function checkRotation(userId: string, keyId: string, graceHours: typeof 
     }
   }
   if (!grants.length) throw new KeyError(409, "NO_GRANTS", "This key has no permissions left. Create a new key instead.");
+  // Rotating a key linked as an agent's Nook key never gives its successor "Run agents" (review M1).
+  assertRunGrantUnlinked(row.id, grants);
   const ipAllowlist = changes.ipAllowlist === undefined ? storedAllowlist(row.ip_allowlist)
     : changes.ipAllowlist === null ? null : checkCreateAllowlist(changes.ipAllowlist);
   if (graceHours > 0) checkKeyCount(userId, policies);

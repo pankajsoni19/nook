@@ -136,7 +136,7 @@ export const preambleFor = (displayName: string) =>
 export type TokenUsage = { promptTokens: number; completionTokens: number; cachedTokens?: number; estimated: boolean };
 
 /** Error codes a run can end with (plan §2.2, §4.2). */
-export type RunErrorCode = "PROVIDER_ERROR" | "MODEL_TIMEOUT" | "BUDGET_EXCEEDED" | "NO_PROVIDER" | "EGRESS_REFUSED" | "TOO_LARGE" | "INTERNAL";
+export type RunErrorCode = "PROVIDER_ERROR" | "MODEL_TIMEOUT" | "BUDGET_EXCEEDED" | "NO_PROVIDER" | "EGRESS_REFUSED" | "TOO_LARGE" | "ACCESS_REVOKED" | "INTERNAL";
 
 /**
  * One tool call as a message keeps it (AC-B, plan §6.1 and §13.2 "Used N tools"): the tool's own
@@ -252,6 +252,9 @@ export type DailyUsage = { day: string; promptTokens: number; completionTokens: 
 
 // --- AC-C (Wave 42): external runs and the Audit log (plan §7) ---------------------------------------
 
+/** A run's label is one line of text (Wave 42 review L3): no control characters (C0, DEL, C1) and no line or paragraph separators. */
+export const isOneLineLabel = (value: string) => !/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/.test(value);
+
 /** Bounds of an API or MCP run (plan §7.2) and of what the Audit log keeps (plan §7.3). */
 export const EXTERNAL_BOUNDS = {
   /** `{input}`: one user message, in UTF-8 bytes. */
@@ -311,4 +314,14 @@ export type ExternalRunResult = {
 };
 
 /** The per-agent counts its managers see (D366): API and MCP runs per day, never content. */
+/**
+ * The Audit log's filter choices (Wave 42 QA M3, GET /api/agents/audit/facets): the reader's own
+ * keys that can or did run agents and their own agents; for admins also the keys and agents of
+ * every run they can see, as names only (`own: false`, with the key's owner).
+ */
+export type AuditFacets = {
+  keys: Array<{ id: string; name: string; prefix: string; own: boolean; ownerName: string | null }>;
+  agents: Array<{ id: string; name: string | null; own: boolean }>;
+};
+
 export type AgentApiUsage = { days: Array<{ day: string; runs: number; errors: number; promptTokens: number; completionTokens: number }>; totals: { runs: number; errors: number; promptTokens: number; completionTokens: number } };

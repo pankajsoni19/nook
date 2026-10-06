@@ -16,7 +16,7 @@ import { channelOf, sseFrame, type SequencedEvent } from "./stream";
 import { catalogFor, currentLink, linkableKeys, setLink } from "./tools";
 import { createServer, deleteServer, listServers, serverRow, serverSummary, setPolicies, syncServer, updateServer } from "./toolServers";
 import { ProviderError } from "./loop";
-import { agentApiUsage, auditRunDetail, auditVisibleTo, exportAuditRuns, listAuditRuns } from "./audit";
+import { agentApiUsage, auditFacets, auditRunDetail, auditVisibleTo, exportAuditRuns, listAuditRuns } from "./audit";
 import "./bin";
 
 /**
@@ -277,6 +277,8 @@ export function registerAgentRoutes(app: Hono<AppEnv>) {
   };
   const viewerOf = (c: Context<AppEnv>) => ({ userId: c.get("user").id, role: c.get("user").role });
   app.get("/api/agents/audit", handle((c) => listAuditRuns(viewerOf(c), auditFilter(c))));
+  // The filter sheet's choices (QA M3): own keys and agents; admins also the names on every run they can see.
+  app.get("/api/agents/audit/facets", handle((c) => ({ facets: auditFacets(viewerOf(c)) })));
   app.get("/api/agents/audit/export", handle((c) => {
     const raw = c.req.query("runId");
     const runId = raw ? uuid.safeParse(raw.toLowerCase()) : null;

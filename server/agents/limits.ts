@@ -1,4 +1,5 @@
 import { db } from "../db";
+import { AgentError } from "./status";
 
 /**
  * Per-key run limits for API and MCP runs (Wave 42 "AC-C", plan §7.2, T314): 20 runs a minute and
@@ -51,6 +52,33 @@ export function keyRunsToday(keyId: string, nowMs = Date.now()) {
 export function sweepAgentRateLimits(nowMs = Date.now()) {
   return db.query("DELETE FROM agent_rate_limits WHERE window_start < ?").run(nowMs - 2 * KEY_RUN_LIMITS.day.windowMs).changes;
 }
+
+/**
+ * The request slots of each surface (24 REST requests and 24 MCP requests in flight; server/restV1.ts,
+ * server/mcp.ts), and the share of them a held plain run may take (Wave 42 review L2): a run that
+ * is not streamed holds its request until it ends (up to 5 minutes), so at most half of a surface's
+ * slots hold one; the rest stay for every other key's calls. A streamed run answers at once and holds none.
+ */
+export const REQUEST_SLOTS = { rest: 24, mcp: 24 } as const;
+export const HELD_RUN_SLOTS = { rest: REQUEST_SLOTS.rest / 2, mcp: REQUEST_SLOTS.mcp / 2 } as const;
+const held = { rest: 0, mcp: 0 };
+
+/** Takes one held-run slot of the surface, or throws 503 `AGENT_BUSY`; returns its release (idempotent). */
+export function holdPlainRun(surface: "rest" | "mcp"): () => void {
+  if (held[surface] >= HELD_RUN_SLOTS[surface]) {
+    throw new AgentError(503, "AGENT_BUSY", "This Nook is holding as many waiting runs as it can; stream the run (stream: true) or try again in a moment", { retryAfterSeconds: 5, scope: "instance" });
+  }
+  held[surface] += 1;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    held[surface] -= 1;
+  };
+}
+
+/** Test hook: the held plain runs per surface. */
+export const heldPlainRuns = () => ({ ...held });
 
 /** Test hook. */
 export function resetAgentRateLimitsForTests() {

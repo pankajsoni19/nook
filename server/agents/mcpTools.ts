@@ -1,13 +1,14 @@
 import * as z from "zod/v4";
 import { config } from "../config";
-import { defineTool, McpToolError, notFound, type McpToolSpec } from "../mcpToolKit";
+import { defineTool, McpToolError, notFound, type McpErrorCode, type McpToolSpec } from "../mcpToolKit";
 import { db } from "../db";
 import { keyReach, reachCovers } from "../keyResources";
 import { hasScope } from "../mcpScopes";
-import { EXTERNAL_BOUNDS } from "../../shared/agents";
+import { EXTERNAL_BOUNDS, isOneLineLabel } from "../../shared/agents";
 import { listUsableAgents } from "./agentsService";
 import { currentAgentRun } from "./depth";
 import { startExternalRun } from "./external";
+import { holdPlainRun } from "./limits";
 import { chatDetail, listChats, pathTo } from "./chats";
 import { roleMayChat } from "./settings";
 import { AgentError, agentsStatus } from "./status";
@@ -34,6 +35,23 @@ function requireOn(userId: string) {
   if (!agentsStatus().enabled) throw notFound("Agent");
   const owner = db.query("SELECT role FROM users WHERE id = ?").get(userId) as { role: string } | null;
   if (!owner || !roleMayChat(owner.role)) throw notFound("Agent");
+}
+
+/**
+ * A run's refusal as a tool error, by its own code (review L5): the same codes as
+ * `/api/v1/agents/*` (`AGENT_BUSY` with its scope, so REST answers 503 for a full instance and
+ * 429 otherwise, `RATE_LIMITED`, `BUDGET_EXCEEDED`, `NO_PROVIDER`, `AGENTS_DISABLED`), with
+ * `retryAfterSeconds` when there is one. A missing right is the NOT_FOUND every tool gives.
+ */
+const RUN_CODES = new Set<McpErrorCode>(["AGENT_BUSY", "RATE_LIMITED", "BUDGET_EXCEEDED", "NO_PROVIDER", "AGENTS_DISABLED", "AGENT_RECURSION", "TOO_LARGE"]);
+function runRefusal(error: unknown): unknown {
+  if (error instanceof AgentError) {
+    if (error.status === 404) return notFound("Agent");
+    const details = { ...(typeof error.details.retryAfterSeconds === "number" ? { retryAfterSeconds: error.details.retryAfterSeconds } : {}), ...(typeof error.details.scope === "string" ? { scope: error.details.scope } : {}) };
+    return new McpToolError(RUN_CODES.has(error.code as McpErrorCode) ? error.code as McpErrorCode : "INVALID", error.message, details);
+  }
+  if (error instanceof Error && error.name === "AgentSecretError") return new McpToolError("AGENT_SECRET_INTEGRITY", "A stored agent secret failed its integrity check");
+  return error;
 }
 
 function rethrow(error: unknown): never {
@@ -71,26 +89,30 @@ export const agentTools: McpToolSpec[] = [
       agentId: uuid.describe("The agent's id (list_agents)"),
       input: z.string().min(1).max(EXTERNAL_BOUNDS.inputBytes).refine((value) => Buffer.byteLength(value, "utf8") <= EXTERNAL_BOUNDS.inputBytes, `must be at most ${EXTERNAL_BOUNDS.inputBytes / 1024} KiB`)
         .refine((value) => value.trim().length > 0 && !value.includes("\u0000"), "must be text").describe("The message for the agent"),
-      label: z.string().trim().min(1).max(EXTERNAL_BOUNDS.label).optional().describe("A short label for the Audit log")
+      // The REST label's rule (review L3): one line of text, no control characters.
+      label: z.string().trim().min(1).max(EXTERNAL_BOUNDS.label).refine(isOneLineLabel, "must be one line of text").optional().describe("A short label for the Audit log (one line)")
     }),
     handler: async ({ agentId, input, label }, key) => {
       // The depth guard (T318): never from inside a run, whatever key the run's Nook tools use.
       if (currentAgentRun()) throw new McpToolError("AGENT_RECURSION", "run_agent cannot be called from inside an agent run");
       if (!agentsStatus().enabled) throw new McpToolError("AGENTS_DISABLED", "Agent chat is not configured on this server");
+      // Over MCP, or as POST /api/v1/tools/run_agent (then it is an API run on the REST surface).
+      const surface = key.surface ?? "mcp";
       let started: ReturnType<typeof startExternalRun>;
+      let release: (() => void) | null = null;
       try {
-        // Over MCP, or as POST /api/v1/tools/run_agent (then it is an API run on the REST surface).
-        const surface = key.surface ?? "mcp";
+        // The call waits for the run, holding its request: at most half of the surface's slots do (review L2).
+        release = holdPlainRun(surface);
         started = startExternalRun({ keyId: key.keyId, surface, via: surface === "rest" ? "api" : "mcp", clientIp: null }, { agentId: agentId.toLowerCase(), input, label: label ?? null });
       } catch (error) {
-        if (error instanceof AgentError) {
-          if (error.status === 404) throw notFound("Agent");
-          if (error.status === 429 || error.status === 503) throw new McpToolError("RATE_LIMITED", error.message, typeof error.details.retryAfterSeconds === "number" ? { retryAfterSeconds: error.details.retryAfterSeconds, reason: error.code } : { reason: error.code });
-          throw new McpToolError("INVALID", error.message, { reason: error.code });
-        }
-        throw error;
+        release?.();
+        throw runRefusal(error);
       }
-      return await started.done;
+      try {
+        return await started.done;
+      } finally {
+        release();
+      }
     }
   }),
   defineTool({

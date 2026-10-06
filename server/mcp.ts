@@ -11,6 +11,8 @@ import { countKeyUsage, createApiKey, hashKeyToken, isKeyDenial, listApiKeys, ma
 import { grantsForScopes, type KeySurfaces } from "./keyGrants";
 import { addressAllowed, ipAllowlistAvailable } from "./ipAllowlist";
 import { readPolicies } from "./team/policies";
+import { fromAgentRun, RECURSION_MESSAGE } from "./agents/depth";
+import { REQUEST_SLOTS } from "./agents/limits";
 
 type McpKeyRow = {
   id: string;
@@ -192,7 +194,7 @@ export const authenticateMcpRequest = (request: Request, clientIp: string | null
 
 /** Runs `operation` in one of the shared MCP request slots (24 at once), or answers 503. */
 export async function withMcpRequestSlot(operation: () => Promise<Response>) {
-  if (activeRequests >= 24) return mcpJsonError("MCP server is busy", 503);
+  if (activeRequests >= REQUEST_SLOTS.mcp) return mcpJsonError("MCP server is busy", 503);
   activeRequests += 1;
   try {
     return await operation();
@@ -203,12 +205,24 @@ export async function withMcpRequestSlot(operation: () => Promise<Response>) {
 
 export { mcpJsonError, mcpResponse };
 
+/** Whether a JSON-RPC body (one message or a batch) calls `run_agent`; unreadable bodies are left to the handler. */
+async function callsRunAgent(request: Request) {
+  try {
+    const value = JSON.parse(await request.clone().text()) as unknown;
+    const messages = Array.isArray(value) ? value : [value];
+    return messages.some((message) => message && typeof message === "object" && (message as { method?: unknown }).method === "tools/call"
+      && (message as { params?: { name?: unknown } }).params?.name === "run_agent");
+  } catch {
+    return false;
+  }
+}
+
 export async function handleMcpRequest(request: Request, clientIp: string | null = null) {
   const authenticated = authenticateMcpRequest(request, clientIp);
   if (authenticated instanceof Response) return authenticated;
   const key = authenticated;
   const token = /^bearer (.+)$/i.exec((request.headers.get("authorization") ?? "").trim())![1]!;
-  if (activeRequests >= 24) return mcpJsonError("MCP server is busy", 503);
+  if (activeRequests >= REQUEST_SLOTS.mcp) return mcpJsonError("MCP server is busy", 503);
   activeRequests += 1;
   try {
     let bounded: Request;
@@ -218,6 +232,8 @@ export async function handleMcpRequest(request: Request, clientIp: string | null
       if (error instanceof HTTPException && error.status === 413) return mcpJsonError("Request is too large", 413);
       throw error;
     }
+    // From inside an agent run (review M1, T318): a tool server calling back with Nook-Agent-Run cannot run an agent.
+    if (fromAgentRun(request) && await callsRunAgent(bounded)) return mcpJsonError(RECURSION_MESSAGE, 409, false, "AGENT_RECURSION");
     // Effective grants and scopes: grants ∩ the holder's current role ∩ team policy (T81, D263).
     const { scopes, grants } = key.actor;
     const context: McpKeyContext = { keyId: key.id, userId: key.user_id, name: key.name, scopes, grants, kind: key.actor.kind };

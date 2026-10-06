@@ -1,5 +1,5 @@
 import { db, now } from "../db";
-import { EXTERNAL_BOUNDS, RUN_STATUSES, type AgentApiUsage, type AuditRunDetail, type AuditRunSummary, type AuditStepView, type AuditVia, type RunStatus, type TokenUsage } from "../../shared/agents";
+import { EXTERNAL_BOUNDS, RUN_STATUSES, type AgentApiUsage, type AuditFacets, type AuditRunDetail, type AuditRunSummary, type AuditStepView, type AuditVia, type RunStatus, type TokenUsage } from "../../shared/agents";
 import { readAgentSettings } from "./settings";
 import { AgentError } from "./status";
 
@@ -202,6 +202,37 @@ export function exportAuditRuns(viewer: AuditViewer, filter: AuditFilter & { run
   }
   const truncated = rows.length > EXTERNAL_BOUNDS.exportMax;
   return { exportedAt: now(), count: Math.min(rows.length, EXTERNAL_BOUNDS.exportMax), truncated, runs: rows.slice(0, EXTERNAL_BOUNDS.exportMax).map((row) => detailOf(row, viewer)) };
+}
+
+/**
+ * The filter sheet's choices (QA M3), independent of the runs loaded so far: the reader's own keys
+ * that hold "Run agents" or have runs (revoked ones too, their runs stay) and the reader's own
+ * agents (plus agents of their runs that went to the Bin or were purged). Admins also get the key
+ * name and prefix (with the owner's name) and the agent name of every run they can see, as metadata
+ * only. At most 500 of each.
+ */
+export function auditFacets(viewer: AuditViewer): AuditFacets {
+  const keys = new Map<string, AuditFacets["keys"][number]>();
+  const agents = new Map<string, AuditFacets["agents"][number]>();
+  const ownKeys = db.query(`SELECT k.id, k.name, k.key_prefix FROM mcp_api_keys k WHERE k.user_id = $user AND k.kind = 'general'
+      AND (EXISTS (SELECT 1 FROM api_key_grants g WHERE g.key_id = k.id AND g.module = 'agents' AND g.permission = 'run')
+        OR EXISTS (SELECT 1 FROM agent_runs r WHERE r.key_id = k.id AND r.via <> 'chat'))
+    ORDER BY k.name COLLATE NOCASE LIMIT 500`).all({ user: viewer.userId }) as Array<{ id: string; name: string; key_prefix: string }>;
+  for (const key of ownKeys) keys.set(key.id, { id: key.id, name: key.name, prefix: key.key_prefix, own: true, ownerName: null });
+  const ownAgents = db.query(`SELECT id, name FROM agents WHERE owner_id = $user AND deleted_at IS NULL
+    UNION SELECT r.agent_id AS id, a.name FROM agent_runs r LEFT JOIN agents a ON a.id = r.agent_id WHERE r.user_id = $user AND r.via <> 'chat'
+    LIMIT 500`).all({ user: viewer.userId }) as Array<{ id: string; name: string | null }>;
+  for (const agent of ownAgents) agents.set(agent.id, { id: agent.id, name: agent.name, own: true });
+  if (isAdmin(viewer)) {
+    const runKeys = db.query(`SELECT DISTINCT r.key_id AS id, k.name, k.key_prefix, u.display_name FROM agent_runs r JOIN mcp_api_keys k ON k.id = r.key_id LEFT JOIN users u ON u.id = r.user_id
+      WHERE r.via <> 'chat' AND r.user_id <> $user LIMIT 500`).all({ user: viewer.userId }) as Array<{ id: string; name: string; key_prefix: string; display_name: string | null }>;
+    for (const key of runKeys) if (!keys.has(key.id)) keys.set(key.id, { id: key.id, name: key.name, prefix: key.key_prefix, own: false, ownerName: key.display_name });
+    const runAgents = db.query(`SELECT DISTINCT r.agent_id AS id, a.name FROM agent_runs r LEFT JOIN agents a ON a.id = r.agent_id WHERE r.via <> 'chat' AND r.user_id <> $user LIMIT 500`)
+      .all({ user: viewer.userId }) as Array<{ id: string; name: string | null }>;
+    for (const agent of runAgents) if (!agents.has(agent.id)) agents.set(agent.id, { id: agent.id, name: agent.name, own: false });
+  }
+  const byName = <T extends { name: string | null }>(a: T, b: T) => (a.name ?? "").localeCompare(b.name ?? "", undefined, { sensitivity: "base" });
+  return { keys: [...keys.values()].sort(byName), agents: [...agents.values()].sort(byName) };
 }
 
 /** Whether the Audit log nav shows (plan §13.2): admins, and anyone who holds or held an `agents:run` key or has runs. */

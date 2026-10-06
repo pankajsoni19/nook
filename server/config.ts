@@ -129,7 +129,8 @@ export function parseAllowedPrivateHosts(value: string | undefined) {
 }
 const agentAllowedPrivateHosts = parseAllowedPrivateHosts(process.env.AGENT_ALLOWED_PRIVATE_HOSTS);
 if (agentAllowedPrivateHosts.length > 50) throw new Error("AGENT_ALLOWED_PRIVATE_HOSTS takes at most 50 entries");
-const agentMaxConcurrentRuns = integerEnv("AGENT_MAX_CONCURRENT_RUNS", 4, 1, 32);
+// At most 16 (Wave 42 review L2): with the held-run caps, runs never take more than their share of the request slots.
+const agentMaxConcurrentRuns = integerEnv("AGENT_MAX_CONCURRENT_RUNS", 4, 1, 16);
 const agentRunTimeoutS = integerEnv("AGENT_RUN_TIMEOUT_S", 600, 30, 3600);
 /**
  * The agent Audit log's retention (Wave 42, plan §7.3, D366): API and MCP runs are kept this many

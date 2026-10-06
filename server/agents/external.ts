@@ -16,7 +16,7 @@ import { connectionFor } from "./providers";
 import { activeRun, assertBudget, assertKeySlots, capResultText, chargeUsage, dayOf, registerActiveRun, releaseActiveRun, secondsToMidnight, withTimeout, type ActiveRun } from "./runs";
 import { readAgentSettings, roleMayChat } from "./settings";
 import { AgentError, agentsStatus } from "./status";
-import { identityOf, liveToolFor, resolveTools, type ExternalToolOptions, type ResolvedTool } from "./tools";
+import { identityOf, liveToolFailure, liveToolFor, resolveTools, type ExternalToolOptions, type ResolvedTool } from "./tools";
 import { sessionFor } from "./toolServers";
 
 /**
@@ -171,6 +171,8 @@ export function startExternalRun(caller: ExternalCaller, request: ExternalReques
   };
 }
 
+const addUsage = (total: TokenUsage, more: TokenUsage): TokenUsage => ({ promptTokens: total.promptTokens + more.promptTokens, completionTokens: total.completionTokens + more.completionTokens, estimated: total.estimated || more.estimated });
+
 const emit = (state: LiveExternal, event: ExternalEvent) => {
   for (const listener of [...state.listeners]) {
     try { listener(event); } catch { state.listeners.delete(listener); }
@@ -195,6 +197,7 @@ async function execute(state: LiveExternal, active: ActiveRun, caller: ExternalC
   let pendingDelta = "";
   let deltaTimer: ReturnType<typeof setTimeout> | null = null;
   const flushDelta = () => {
+    if (deltaTimer) clearTimeout(deltaTimer);
     deltaTimer = null;
     if (!pendingDelta) return;
     emit(state, { type: "delta", data: { text: pendingDelta } });
@@ -213,6 +216,7 @@ async function execute(state: LiveExternal, active: ActiveRun, caller: ExternalC
     const tool = resolved.find((item) => item.modelName === call.name) ?? null;
     const view = { name: tool?.toolName ?? call.name, server: tool?.server ?? "?", ok: null as boolean | null, durationMs: null as number | null };
     state.toolCalls.push(view);
+    flushDelta();
     emit(state, { type: "tool_call", data: { callId: call.id, tool: view.name, server: view.server, argsPreview: preview(call.arguments) } });
     const record = (ok: boolean, text: string, truncated: boolean) => {
       view.ok = ok;
@@ -239,8 +243,12 @@ async function execute(state: LiveExternal, active: ActiveRun, caller: ExternalC
     }
     // Rights are live per call (AC-B review M3): the tool is re-resolved against the live agent row, the
     // owner's role, the server row (same revision), the policy, and the calling key (re-read just above).
-    const live = liveToolFor(agent.id, active.userId, identityOf(tool), externalOptions(right));
-    if (!live) return fail("TOOL_UNAVAILABLE", "This tool is no longer available to this agent (it was disabled, removed, changed, or the rights changed); the call was not run");
+    const identity = identityOf(tool);
+    const live = liveToolFor(agent.id, active.userId, identity, externalOptions(right));
+    if (!live) {
+      const why = liveToolFailure(agent.id, active.userId, identity, externalOptions(right));
+      return fail(why.code, why.message);
+    }
     // Belt and braces (D352): nothing that asks first is ever offered over the API, so nothing can run here unasked.
     if (live.policy !== "auto") return fail("DENIED", "This tool needs a person's confirmation and cannot run over the API");
     let text: string;
@@ -286,6 +294,8 @@ async function execute(state: LiveExternal, active: ActiveRun, caller: ExternalC
       maxOutputTokens: agent.max_output_tokens,
       signal: active.controller.signal,
       beforeStep: () => { recheck(); },
+      // While a model call streams too (QA M1): a key revoked mid-answer stops the provider call within 2 s.
+      watch: () => { recheck(); },
       sink: {
         delta: (chunk) => {
           if (state.firstTokenAt === null) {
@@ -300,8 +310,25 @@ async function execute(state: LiveExternal, active: ActiveRun, caller: ExternalC
           deltaTimer ??= setTimeout(flushDelta, 50);
         },
         usage: (usage) => {
-          state.usage = { promptTokens: state.usage.promptTokens + usage.promptTokens, completionTokens: state.usage.completionTokens + usage.completionTokens, estimated: state.usage.estimated || usage.estimated };
+          state.usage = addUsage(state.usage, usage);
+          // The step's text goes out before its usage (QA L6): run, delta…, usage, done.
+          flushDelta();
           emit(state, { type: "usage", data: { usage } });
+        },
+        // A model call that ended early (Stop, the wall clock, a lost right; QA M1, M2): its text is kept,
+        // its usage (the provider's, or estimated from the prompt and the text) is charged and recorded.
+        interrupted: (step) => {
+          state.usage = addUsage(state.usage, step.usage);
+          state.steps += 1;
+          seq += 1;
+          try {
+            chargeUsage(active.userId, agent.id, step.usage, 0, caller.keyId);
+            insertAuditStep(runId, seq, { kind: "model", text: step.content, toolCalls: [], usage: step.usage, durationMs: step.durationMs });
+          } catch (error) {
+            console.error("Agent API run could not charge a stopped step", error instanceof Error ? error.name : "Unknown error");
+          }
+          flushDelta();
+          emit(state, { type: "usage", data: { usage: step.usage } });
         },
         step: (step) => {
           state.steps += 1;
@@ -326,7 +353,7 @@ async function execute(state: LiveExternal, active: ActiveRun, caller: ExternalC
       },
       execute: runOne,
       // A tool call nothing could run ends the answer with the reason (AC-B QA L9); the output, and so the Audit log, keeps it.
-      noToolsReason: () => NO_TOOLS_REASON
+      noToolsReason: () => state.toolCalls.length >= AGENT_BOUNDS.toolCallsPerRun ? `This run has used its ${AGENT_BOUNDS.toolCallsPerRun} tool calls.` : NO_TOOLS_REASON
     });
     droppedToolCalls = result.droppedToolCalls;
     status = result.status === "step_limit" ? "step_limit" : "ok";
@@ -345,7 +372,6 @@ async function execute(state: LiveExternal, active: ActiveRun, caller: ExternalC
     }
   } finally {
     clearTimeout(wallClock);
-    if (deltaTimer) clearTimeout(deltaTimer);
     flushDelta();
     releaseActiveRun(runId);
   }

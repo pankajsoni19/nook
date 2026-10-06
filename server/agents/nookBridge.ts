@@ -126,6 +126,22 @@ export function nookToolsFor(key: McpKeyContext, agent: Pick<AgentRow, "nook_dir
   return out;
 }
 
+/**
+ * The scope a live key now lacks to run a Nook tool in the mode it was offered in (AC-B
+ * verification M2), or null when it has them: a read or direct tool needs the tool's own scope;
+ * a proposal needs `inbox:write` and the kind's module scope.
+ */
+export function missingNookScope(key: McpKeyContext, toolName: string, mode: NookMode): McpScope | null {
+  const spec = nookToolSpec(toolName);
+  if (!spec) return null;
+  if (mode === "proposal") {
+    if (!hasScope(key.scopes, "inbox:write")) return "inbox:write";
+    const kind = TOOL_KIND[spec.name];
+    return kind && keyReach(key, PROPOSAL_KIND_DEFS[kind].scope) === null ? PROPOSAL_KIND_DEFS[kind].scope : null;
+  }
+  return toolVisible(spec, key) ? null : spec.scopes[0] ?? null;
+}
+
 export type NookOutcome = { text: string; ok: boolean; proposalId: string | null };
 
 const titleOf = (spec: McpToolSpec, args: Record<string, unknown>) => {

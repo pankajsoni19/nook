@@ -4,7 +4,8 @@ import { countKeyUsage, type KeyActor } from "../apiKeys";
 import { mcpResponse } from "../mcp";
 import { consumeMcpLimits } from "../mcpRateLimit";
 import { readBoundedBody } from "../validation";
-import { EXTERNAL_BOUNDS } from "../../shared/agents";
+import { EXTERNAL_BOUNDS, isOneLineLabel } from "../../shared/agents";
+import { holdPlainRun } from "./limits";
 import { cancelExternalRun, externalRunResult, runnableAgents, startExternalRun, type ExternalEvent, type ExternalRequest } from "./external";
 import { AgentError } from "./status";
 
@@ -30,16 +31,18 @@ const json = (status: number, body: unknown, headers: Record<string, string> = {
 const refuse = (status: number, error: string, code: string, extra: Record<string, unknown> = {}, headers: Record<string, string> = {}) => json(status, { error, code, ...extra }, headers);
 
 const noNul = (value: string) => !value.includes("\u0000");
+/** A run's label (REST and MCP alike, review L3): one line of text, no control characters, at most 60 characters. */
+const labelSchema = z.string().trim().min(1).max(EXTERNAL_BOUNDS.label).refine(isOneLineLabel, "must be one line of text");
 const bytes = (value: string) => Buffer.byteLength(value, "utf8");
 const runSchema = z.object({
   input: z.string().min(1).refine((value) => value.trim().length > 0, "must not be blank").refine(noNul, "must not contain NUL characters")
     .refine((value) => bytes(value) <= EXTERNAL_BOUNDS.inputBytes, `must be at most ${EXTERNAL_BOUNDS.inputBytes / 1024} KiB`).optional(),
-  messages: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().min(1).refine(noNul, "must not contain NUL characters") }).strict())
+  messages: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().min(1).refine((value) => value.trim().length > 0, "must not be blank").refine(noNul, "must not contain NUL characters") }).strict())
     .min(1).max(EXTERNAL_BOUNDS.messages)
     .refine((turns) => turns.reduce((sum, turn) => sum + bytes(turn.content), 0) <= EXTERNAL_BOUNDS.messagesBytes, `must be at most ${EXTERNAL_BOUNDS.messagesBytes / 1024} KiB in total`)
     .refine((turns) => turns.at(-1)?.role === "user", "must end with a user message").optional(),
   stream: z.boolean().optional(),
-  label: z.string().trim().min(1).max(EXTERNAL_BOUNDS.label).refine((value) => !/[\u0000-\u001f\u007f]/.test(value), "must be one line of text").optional()
+  label: labelSchema.optional()
 }).strict().refine((value) => (value.input === undefined) !== (value.messages === undefined), "Send either input or messages");
 
 export type AgentRoute = { name: "list" } | { name: "run"; agentId: string } | { name: "get"; agentId: string; runId: string } | { name: "cancel"; agentId: string; runId: string };
@@ -115,8 +118,22 @@ export async function handleAgentRest(request: Request, route: AgentRoute, auth:
     const body = await readBody(request);
     if (body instanceof Response) return body;
     const runRequest: ExternalRequest = { agentId: route.agentId, input: body.input, messages: body.messages, label: body.label ?? null };
-    const started = startExternalRun({ keyId, surface: "rest", via: "api", clientIp }, runRequest);
-    if (!body.stream) return json(200, await started.done);
+    // A plain run holds its request until it ends: at most half of the REST slots do (review L2).
+    const release = body.stream ? null : holdPlainRun("rest");
+    let started: ReturnType<typeof startExternalRun>;
+    try {
+      started = startExternalRun({ keyId, surface: "rest", via: "api", clientIp }, runRequest);
+    } catch (error) {
+      release?.();
+      throw error;
+    }
+    if (release) {
+      try {
+        return json(200, await started.done);
+      } finally {
+        release();
+      }
+    }
     // SSE (plan §2.3 minus confirmations): a disconnect never cancels the run; GET …/runs/:runId answers afterwards.
     let unsubscribe: (() => void) | null = null;
     let keepAlive: ReturnType<typeof setInterval> | null = null;

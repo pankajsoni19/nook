@@ -12,6 +12,8 @@ import type { McpErrorCode, McpKeyContext } from "./mcpToolKit";
 import { readBoundedBody } from "./validation";
 import { handleVaultRest, matchVaultRoute } from "./vault/rest";
 import { handleAgentRest, matchAgentRoute } from "./agents/api";
+import { fromAgentRun, RECURSION_MESSAGE } from "./agents/depth";
+import { REQUEST_SLOTS } from "./agents/limits";
 
 /**
  * The REST surface `/api/v1` (Wave 34, access plan D280, O-A12, T210): the MCP tools over plain
@@ -36,7 +38,7 @@ import { handleAgentRest, matchAgentRoute } from "./agents/api";
  * Keys never manage access (D265): no tool here shares, deletes forever, or touches keys.
  */
 
-const REST_SLOTS = 24;
+const REST_SLOTS = REQUEST_SLOTS.rest;
 let activeRequests = 0;
 
 const json = (status: number, body: unknown, headers: Record<string, string> = {}) =>
@@ -81,8 +83,13 @@ export const REST_STATUS: Partial<Record<McpErrorCode, number>> = {
   QUOTA_EXCEEDED: 409,
   RUN_ACTIVE: 409,
   RATE_LIMITED: 429,
-  AGENT_RECURSION: 403,
+  AGENT_RECURSION: 409,
   AGENTS_DISABLED: 503,
+  // run_agent (Wave 42 review L5): the same codes and statuses as /api/v1/agents/*; a full instance is 503 (below).
+  AGENT_BUSY: 429,
+  BUDGET_EXCEEDED: 429,
+  NO_PROVIDER: 409,
+  AGENT_SECRET_INTEGRITY: 500,
   INTERNAL: 500
 };
 
@@ -215,7 +222,12 @@ async function handle(c: Context<AppEnv>): Promise<Response> {
       countKeyUsage(auth.id, "denied", "rest");
       return refuse(403, "A vault key (nkv_) works only on /api/v1/vault/* and the vault MCP tools.", "KEY_POLICY");
     }
-    // A streaming run answers at once and gives its slot back; a plain run holds it (at most the instance's run slots).
+    // From inside an agent run (a tool server calling back with the header), no run starts (review M1, T318).
+    if (matched.route.name === "run" && fromAgentRun(c.req.raw)) {
+      countKeyUsage(auth.id, "denied", "rest");
+      return refuse(409, RECURSION_MESSAGE, "AGENT_RECURSION");
+    }
+    // A streaming run answers at once and gives its slot back; a plain run holds it (at most half the slots, review L2).
     return withRestSlot(() => handleAgentRest(c.req.raw, matched.route, auth, clientIp(c)));
   }
   const toolMatch = /^\/api\/v1\/tools\/([a-z_]{1,64})$/.exec(path);
@@ -245,14 +257,18 @@ async function handle(c: Context<AppEnv>): Promise<Response> {
     const spec = mcpToolSpecs.find((item) => item.name === toolMatch![1]);
     // A tool this key cannot see looks the same as one that does not exist (as in MCP tools/list).
     if (!spec || !toolVisible(spec, key)) return refuse(404, "No such tool for this API key", "NOT_FOUND");
+    if (spec.name === "run_agent" && fromAgentRun(c.req.raw)) {
+      countKeyUsage(auth.id, "denied", "rest");
+      return refuse(409, RECURSION_MESSAGE, "AGENT_RECURSION");
+    }
     const body = await readJsonObject(c.req.raw);
     if (body instanceof Response) return body;
     const result = await runTool(spec, body, auth.id, "rest");
     const value = JSON.parse(result.content[0]!.text) as Record<string, unknown>;
     if (!result.isError) return json(200, value);
     const code = value.code as McpErrorCode;
-    const status = REST_STATUS[code] ?? 400;
-    const retry = code === "RATE_LIMITED" && typeof value.retryAfterSeconds === "number" ? { "Retry-After": String(value.retryAfterSeconds) } : undefined;
+    const status = code === "AGENT_BUSY" && value.scope === "instance" ? 503 : REST_STATUS[code] ?? 400;
+    const retry = typeof value.retryAfterSeconds === "number" ? { "Retry-After": String(value.retryAfterSeconds) } : undefined;
     return json(status, value, retry);
   });
 }

@@ -24,6 +24,16 @@ export type ChatTurn =
 export type ModelTool = { name: string; description: string; parameters: Record<string, unknown> };
 export type CompletionRequest = { messages: ChatTurn[]; model?: string; temperature?: number | null; maxOutputTokens?: number; tools?: ModelTool[] };
 export type CompletionResult = { content: string; finishReason: string | null; usage: TokenUsage; model: string | null; toolCalls: ModelToolCall[] };
+/**
+ * What a streaming call has produced so far (Wave 42 QA M2): whether the provider answered (a 2xx
+ * and its stream began), the text kept, and the usage it reported, if any. A call that ends early
+ * (Stop, the wall clock, a lost right, a failure mid-stream) is charged from this.
+ */
+export type StreamProgress = { started: boolean; content: string; usage: TokenUsage | null; model: string | null; promptChars: number };
+export const newProgress = (messages: readonly ChatTurn[]): StreamProgress => ({ started: false, content: "", usage: null, model: null, promptChars: messages.reduce((sum, turn) => sum + (turn.content?.length ?? 0), 0) });
+
+/** The usage of a call that ended early: the provider's when it reported one, else prompt and kept text ÷ 4. */
+export const partialUsage = (progress: StreamProgress): TokenUsage => progress.usage ?? { promptTokens: Math.ceil(progress.promptChars / 4), completionTokens: estimateTokens(progress.content), estimated: true };
 
 export class ProviderError extends Error {
   /** The fuller excerpt for admin surfaces (Test, the models list); `message` is what a chat's owner sees (review L3). */
@@ -136,7 +146,7 @@ type StreamChunk = {
  * One streamed Chat Completions call. `onDelta` receives content as it arrives. Tool calls are
  * accumulated by index (for AC-B) and returned; the request itself sends no `tools` in AC-A.
  */
-export async function completeStreaming(connection: ProviderConnection, request: CompletionRequest, signal: AbortSignal, onDelta: (text: string) => void): Promise<CompletionResult> {
+export async function completeStreaming(connection: ProviderConnection, request: CompletionRequest, signal: AbortSignal, onDelta: (text: string) => void, progress: StreamProgress = newProgress(request.messages)): Promise<CompletionResult> {
   const body: Record<string, unknown> = {
     model: request.model ?? connection.model,
     messages: request.messages,
@@ -157,6 +167,7 @@ export async function completeStreaming(connection: ProviderConnection, request:
     rethrow(error);
   }
   if (response.status < 200 || response.status >= 300) await failedResponse(response);
+  progress.started = true;
 
   const decoder = new TextDecoder();
   let buffer = "";
@@ -166,12 +177,13 @@ export async function completeStreaming(connection: ProviderConnection, request:
   let usage: TokenUsage | null = null;
   const calls = new Map<number, { id: string; name: string; arguments: string }>();
   const handleChunk = (chunk: StreamChunk) => {
-    if (typeof chunk.model === "string" && !model) model = chunk.model.slice(0, 128);
+    if (typeof chunk.model === "string" && !model) progress.model = model = chunk.model.slice(0, 128);
     const choice = chunk.choices?.[0];
     if (choice?.delta?.content) {
       // Kept up to the stored bound plus one character (so the caller sees the overflow); the rest is
       // read and dropped, and an estimated usage counts what was kept (QA Q4, review L5/L11).
       if (content.length <= AGENT_BOUNDS.assistantMessageChars) content += choice.delta.content.slice(0, AGENT_BOUNDS.assistantMessageChars + 1 - content.length);
+      progress.content = content;
       onDelta(choice.delta.content);
     }
     for (const call of choice?.delta?.tool_calls ?? []) {
@@ -185,6 +197,7 @@ export async function completeStreaming(connection: ProviderConnection, request:
     if (choice?.finish_reason) finishReason = choice.finish_reason;
     if (chunk.usage && typeof chunk.usage.prompt_tokens === "number") {
       usage = { promptTokens: chunk.usage.prompt_tokens, completionTokens: chunk.usage.completion_tokens ?? 0, estimated: false, ...(typeof chunk.usage.prompt_tokens_details?.cached_tokens === "number" ? { cachedTokens: chunk.usage.prompt_tokens_details.cached_tokens } : {}) };
+      progress.usage = usage;
     }
   };
   const handleEvent = (event: string) => {
@@ -228,6 +241,12 @@ export type LoopSink = {
   usage: (usage: TokenUsage, model: string | null) => void;
   /** AC-C: after every model call, before its tool calls run (the Audit log's model steps). */
   step?: (step: LoopStep) => void;
+  /**
+   * A model call that ended early, once the provider had answered (Wave 42 QA M1, M2): Stop, the
+   * wall clock, a lost right, or a failure mid-stream. Its usage is the provider's when reported,
+   * else estimated from the prompt and the kept text; the caller charges it and keeps the text.
+   */
+  interrupted?: (step: LoopStep) => void;
 };
 /** What a tool call produced: the text the model sees (already capped and marked by the executor). */
 export type ToolExecution = { content: string };
@@ -250,6 +269,11 @@ export type LoopInput = {
   execute?: (call: ModelToolCall, step: number) => Promise<ToolExecution>;
   /** AC-C (plan §7.1, T319): before every model call, the last one included; throws to end the run (a revoked key). */
   beforeStep?: (step: number) => void;
+  /**
+   * Re-checked while a model call streams (Wave 42 QA M1), every `runWatch.intervalMs`: throws when
+   * the run's right is gone; the provider call is then aborted and the run ends with that error.
+   */
+  watch?: () => void;
   /** Why no tools were offered, when the run knows (a linked key that died, QA Q4); the answer then ends with it. */
   noToolsReason?: () => string | null;
   /** Calls run per step and per run (defaults: AGENT_BOUNDS); calls past either are dropped, not executed. */
@@ -271,6 +295,41 @@ export function windowToolResults(messages: ChatTurn[], keep: number) {
     if (turn.role !== "tool") continue;
     seen += 1;
     if (seen > keep && turn.content !== OMITTED_TOOL_RESULT) turn.content = OMITTED_TOOL_RESULT;
+  }
+}
+
+/** How often a streaming model call re-checks the run's right (Wave 42 QA M1), on an object so tests can shorten it. */
+export const runWatch = { intervalMs: 2000 };
+
+/**
+ * One model call of the loop: aborted when the run's signal is, or when `watch` throws while it
+ * streams (the error is then the run's). A call that ends early after the provider answered is
+ * reported to `sink.interrupted` with what it streamed and its usage (Wave 42 QA M1, M2).
+ */
+async function watchedCall(input: LoopInput, step: number, stepStarted: number, tools: ModelTool[]): Promise<CompletionResult> {
+  const progress = newProgress(input.messages);
+  const controller = new AbortController();
+  const forward = () => controller.abort(input.signal.reason);
+  if (input.signal.aborted) forward();
+  else input.signal.addEventListener("abort", forward, { once: true });
+  let lost: { error: unknown } | null = null;
+  const watcher = input.watch ? setInterval(() => {
+    if (lost) return;
+    try {
+      input.watch!();
+    } catch (error) {
+      lost = { error };
+      controller.abort("lost");
+    }
+  }, runWatch.intervalMs) : null;
+  try {
+    return await completeStreaming(input.connection, { messages: input.messages, temperature: input.temperature, maxOutputTokens: input.maxOutputTokens ?? undefined, tools }, controller.signal, input.sink.delta, progress);
+  } catch (error) {
+    if (progress.started) input.sink.interrupted?.({ step, content: progress.content, toolCalls: [], usage: partialUsage(progress), model: progress.model, durationMs: Date.now() - stepStarted });
+    throw lost ? (lost as { error: unknown }).error : error;
+  } finally {
+    if (watcher) clearInterval(watcher);
+    input.signal.removeEventListener("abort", forward);
   }
 }
 
@@ -296,14 +355,13 @@ export async function runLoop(input: LoopInput): Promise<LoopResult> {
     offeredAny ||= tools.length > 0;
     windowToolResults(input.messages, AGENT_BOUNDS.toolResultsWindow);
     const stepStarted = Date.now();
-    const reply = await completeStreaming(input.connection, { messages: input.messages, temperature: input.temperature, maxOutputTokens: input.maxOutputTokens ?? undefined, tools }, input.signal, input.sink.delta);
+    const reply = await watchedCall(input, step, stepStarted, tools);
     input.sink.step?.({ step, content: reply.content, toolCalls: reply.toolCalls, usage: reply.usage, model: reply.model, durationMs: Date.now() - stepStarted });
     total.promptTokens += reply.usage.promptTokens;
     total.completionTokens += reply.usage.completionTokens;
     total.estimated = total.estimated || reply.usage.estimated;
     model = reply.model ?? model;
     if (reply.content) content += (content && reply.toolCalls.length === 0 && !content.endsWith("\n") ? "\n\n" : "") + reply.content;
-    input.sink.usage(reply.usage, reply.model);
     const execute = input.execute;
     const wantedCalls = tools.length > 0 && execute ? reply.toolCalls.filter((call) => call.name) : [];
     // Per step and per run (review L4): calls past either cap are dropped here, never executed, with
@@ -313,22 +371,25 @@ export async function runLoop(input: LoopInput): Promise<LoopResult> {
     const calls = wantedCalls.slice(0, room).map((call, index) => ({ ...call, id: `call_${step}_${index}` }));
     const dropped = wantedCalls.length - calls.length;
     droppedToolCalls += dropped;
+    const ending = calls.length === 0 || !execute;
+    // On the last step the model got no tools (D342); still wanting one after earlier steps had them is the step limit.
+    const wanted = ending && last && offeredAny && reply.toolCalls.length > 0;
+    // A tool call nothing could run (none offered at this step) ends the answer with a reason, never an empty reply (Wave 41 QA L9).
+    // The note is streamed before the step's usage, so a stream reads run, delta…, usage, done (Wave 42 QA L6).
+    if (ending && reply.toolCalls.some((call) => call.name)) {
+      const reason = wanted ? null : input.noToolsReason?.() ?? null;
+      const note = wanted
+        ? "[The answer reached its step limit while the model still wanted to use a tool.]"
+        : `[The model tried to use a tool, but no tools were available to it here, so the answer stops.${reason ? ` ${reason}` : ""}]`;
+      const lead = content ? "\n\n" : "";
+      content += lead + note;
+      input.sink.delta(lead + note);
+    }
+    input.sink.usage(reply.usage, reply.model);
     // Charged after every step; with more steps ahead a used-up budget ends the run here (plan §2.2).
     input.charge(reply.usage, calls.length > 0);
-    if (calls.length === 0 || !execute) {
+    if (ending) {
       input.messages.push({ role: "assistant", content: reply.content });
-      // On the last step the model got no tools (D342); still wanting one after earlier steps had them is the step limit.
-      const wanted = last && offeredAny && reply.toolCalls.length > 0;
-      // A tool call nothing could run (none offered at this step) ends the answer with a reason, never an empty reply (Wave 41 QA L9).
-      if (reply.toolCalls.some((call) => call.name)) {
-        const reason = wanted ? null : input.noToolsReason?.() ?? null;
-        const note = wanted
-          ? "[The answer reached its step limit while the model still wanted to use a tool.]"
-          : `[The model tried to use a tool, but no tools were available to it here, so the answer stops.${reason ? ` ${reason}` : ""}]`;
-        const lead = content ? "\n\n" : "";
-        content += lead + note;
-        input.sink.delta(lead + note);
-      }
       return { status: wanted ? "step_limit" : "stop", content, steps: step, usage: total, model, toolCalls, droppedToolCalls };
     }
     input.messages.push({ role: "assistant", content: reply.content, tool_calls: calls.map((call) => ({ id: call.id, type: "function", function: { name: call.name, arguments: call.arguments } })) });

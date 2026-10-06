@@ -1,9 +1,10 @@
 import { audit, db, now } from "../db";
-import { listApiKeys, ownApiKey } from "../apiKeys";
+import { keyHoldsAgentRun, listApiKeys, ownApiKey } from "../apiKeys";
+import { hasScope } from "../mcpScopes";
 import { loadLiveKey, type McpKeyContext } from "../mcpTools";
 import type { AgentToolPolicy, AgentToolRef, LinkableKey, LinkState, NookLink, ToolCatalog, ToolPolicy } from "../../shared/agents";
 import type { AgentRow } from "./agentsService";
-import { nookCatalogFor, nookToolSpec, nookToolsFor, type NookResolved } from "./nookBridge";
+import { missingNookScope, nookCatalogFor, nookToolSpec, nookToolsFor, type NookResolved } from "./nookBridge";
 import { roleMayChat } from "./settings";
 import { AgentError } from "./status";
 import { defaultPolicy, parseTools, serverAvailableTo, serverPolicies, serverRowOrNull, serversAvailableTo, type ToolServerRow } from "./toolServers";
@@ -83,6 +84,9 @@ function linkableKey(userId: string, keyId: string) {
   return key;
 }
 
+/** A key that can run agents is never an agent's Nook key (Wave 42 review M1, T318): its tools could start runs. */
+const runsAgents = (key: { id: string; grants: ReadonlyArray<{ module: string; permission: string }> }) => key.grants.some((grant) => grant.module === "agents" && grant.permission === "run");
+
 const linkable = (key: ReturnType<typeof listApiKeys>["keys"][number]): LinkableKey => ({
   id: key.id, name: key.name, prefix: key.prefix, state: key.state, expiresAt: key.expiresAt,
   grants: key.grants.map((grant) => ({ module: grant.module, permission: grant.permission, resource: grant.resource ? { kind: grant.resource.kind, name: grant.resource.name } : null, active: grant.active }))
@@ -90,7 +94,7 @@ const linkable = (key: ReturnType<typeof listApiKeys>["keys"][number]): Linkable
 
 /** The keys the Link Nook key sheet lists: the caller's own live general keys with the MCP surface. */
 export function linkableKeys(userId: string): LinkableKey[] {
-  return listApiKeys(userId).keys.filter((key) => key.kind === "general" && key.surfaces !== "rest" && (key.state === "active" || key.state === "grace")).map(linkable);
+  return listApiKeys(userId).keys.filter((key) => key.kind === "general" && key.surfaces !== "rest" && (key.state === "active" || key.state === "grace") && !runsAgents(key)).map(linkable);
 }
 
 export function currentLink(agentId: string, userId: string): NookLink {
@@ -104,6 +108,7 @@ export function currentLink(agentId: string, userId: string): NookLink {
 /** Sets or clears the caller's link on an agent they may use. A key that is not theirs or not live is the same 404. */
 export function setLink(userId: string, agentId: string, keyId: string | null): NookLink {
   if (keyId !== null && !linkableKey(userId, keyId)) throw new AgentError(404, "NOT_FOUND", "Not found");
+  if (keyId !== null && keyHoldsAgentRun(keyId)) throw new AgentError(409, "KEY_RUNS_AGENTS", "This key can run agents (“Run agents”), so it cannot be an agent's Nook key: the agent's tools could start other runs. Link a key without it.");
   db.query(`INSERT INTO agent_user_links (agent_id, user_id, nook_key_id) VALUES (?, ?, ?)
     ON CONFLICT(agent_id, user_id) DO UPDATE SET nook_key_id = excluded.nook_key_id`).run(agentId, userId, keyId);
   audit(userId, null, keyId ? "agents.link.set" : "agents.link.clear", { agentId, keyId });
@@ -119,6 +124,8 @@ export function liveLinkedKey(agentId: string, userId: string): McpKeyContext | 
   if (!row?.nook_key_id) return null;
   const key = loadLiveKey(row.nook_key_id, "mcp");
   if (!key || key.userId !== userId || key.kind !== "general") return null;
+  // Never a key that can run agents (review M1), whatever was linked before the rule.
+  if (hasScope(key.scopes, "agents:run")) return null;
   return key;
 }
 
@@ -214,6 +221,26 @@ export function liveToolFor(agentId: string, userId: string, identity: ToolIdent
     ? tool.kind === "server" && tool.serverId === identity.serverId && tool.toolName === identity.toolName && tool.serverRow!.revision === identity.revision
     : tool.kind === "nook" && tool.toolName === identity.toolName && tool.nook!.mode === identity.mode && tool.nook!.keyId === identity.keyId);
   return match ?? null;
+}
+
+/**
+ * Why a call's live re-check found no tool (AC-B verification M2), so the card says why: the
+ * key is no longer live (`KEY_INACTIVE`), it lost a scope the tool needs in its mode
+ * (`SCOPE_REQUIRED`, naming the scope), or anything else changed (`TOOL_UNAVAILABLE`: the server
+ * was disabled, removed, or edited, a policy or the agent's picks changed, another key was linked).
+ */
+export function liveToolFailure(agentId: string, userId: string, identity: ToolIdentity, external: ExternalToolOptions | null = null): { code: "KEY_INACTIVE" | "SCOPE_REQUIRED" | "TOOL_UNAVAILABLE"; message: string; scope?: string } {
+  const unavailable = { code: "TOOL_UNAVAILABLE" as const, message: "This tool is no longer available to this agent (it was disabled, removed, changed, or the rights changed); the call was not run" };
+  if (identity.kind !== "nook") return unavailable;
+  const key = external ? external.nookKey : liveLinkedKey(agentId, userId);
+  if (!key) {
+    const dead = external ? null : inactiveLinkMessage(agentId, userId);
+    return { code: "KEY_INACTIVE", message: dead ?? "The Nook key this tool runs with is no longer active; the call was not run" };
+  }
+  if (key.keyId !== identity.keyId) return unavailable;
+  const scope = missingNookScope(key, identity.toolName, identity.mode);
+  if (scope) return { code: "SCOPE_REQUIRED", scope, message: `The ${external ? "calling" : "linked"} Nook key no longer has the ${scope} permission this tool needs${identity.mode === "proposal" ? " to file a proposal" : ""}; the call was not run` };
+  return unavailable;
 }
 
 /** The agent's remote and Nook tools the runner may call at this step; disabled, `off`, and unreachable rights drop silently. */
