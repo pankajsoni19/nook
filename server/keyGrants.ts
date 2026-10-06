@@ -14,7 +14,7 @@ import { MCP_SCOPES, normalizeScopes, type McpScope } from "./mcpScopes";
 export const GRANT_MODULES = ["notes", "files", "tasks", "today", "calendar", "collections", "team", "inbox", "bin", "whiteboards", "vault", "agents"] as const;
 export type GrantModule = typeof GRANT_MODULES[number];
 
-// `run` (agent chat, D364) has no scope until AC-C ships `agents:run`; the table accepts it already (039).
+// `run` (agent chat, D364): the `agents:run` scope since Wave 42 (AC-C); the table accepts it since 039.
 export const KEY_PERMISSIONS = ["read", "comment", "write", "draft", "publish", "create", "run"] as const;
 export type KeyPermission = typeof KEY_PERMISSIONS[number];
 
@@ -59,7 +59,8 @@ export const SCOPE_GRANTS: Record<McpScope, { module: GrantModule; permission: K
   "inbox:write": { module: "inbox", permission: "write" },
   "whiteboards:read": { module: "whiteboards", permission: "read" },
   "whiteboards:write": { module: "whiteboards", permission: "write" },
-  "agents:read": { module: "agents", permission: "read" }
+  "agents:read": { module: "agents", permission: "read" },
+  "agents:run": { module: "agents", permission: "run" }
 };
 
 export const scopeToGrant = (scope: McpScope) => SCOPE_GRANTS[scope];
@@ -95,8 +96,16 @@ export const SELECTOR_KINDS: Partial<Record<GrantModule, readonly ResourceKind[]
   collections: ["collection"],
   calendar: ["calendar"],
   inbox: ["routine"],
-  whiteboards: ["whiteboard"]
+  whiteboards: ["whiteboard"],
+  // Wave 42 (AC-C, D364): running chosen agents. Reading always covers every agent (ALL_ONLY).
+  agents: ["agent"]
 };
+
+/**
+ * Permissions that always cover every item and never name chosen ones (Wave 42): `agents:read`
+ * lists the owner's agents and reads their own chats, which a grant on one agent could not narrow.
+ */
+export const ALL_ONLY: ReadonlySet<string> = new Set(["agents:read"]);
 
 /**
  * Permissions that only create something new and act on no existing item (review Q7): chosen items

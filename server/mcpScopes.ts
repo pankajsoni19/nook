@@ -24,9 +24,12 @@ export const MCP_SCOPES = [
   "inbox:read", "inbox:write",
   // Whiteboards (Wave 23, D205): list and read boards as bounded JSON; write only creates an empty board.
   "whiteboards:read", "whiteboards:write",
-  // Agent chat (Wave 40, plan §7.1): list agents and read the key owner's own chats. `agents:run`
-  // (external runs, the Audit log) arrives with AC-C.
-  "agents:read"
+  // Agent chat (Wave 40, plan §7.1): list agents and read the key owner's own chats.
+  "agents:read",
+  // Agent chat (Wave 42 "AC-C", plan §7.1, D364): run the key owner's agents over REST and MCP
+  // (`run_agent`), every run in the Audit log. Member-only (server/team/roles.ts MEMBER_ONLY_SCOPES).
+  // It implies no read scope: a run key never reads the owner's chats.
+  "agents:run"
 ] as const;
 export type McpScope = typeof MCP_SCOPES[number];
 

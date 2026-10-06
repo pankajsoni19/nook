@@ -90,7 +90,7 @@ function toolFits(spec: McpToolSpec, reach: ToolReach) {
 
 const ITEM_LABELS: Record<ItemKind, string> = {
   note: "Note", folder: "Folder", document: "File", whiteboard: "Whiteboard", board: "Board", card: "Card", column: "Column", sprint: "Sprint",
-  task_view: "View", collection: "Collection", row: "Row", calendar: "Calendar", event: "Event", routine: "Routine", run: "Run", vault: "Vault"
+  task_view: "View", collection: "Collection", row: "Row", calendar: "Calendar", event: "Event", routine: "Routine", run: "Run", vault: "Vault", agent: "Agent"
 };
 
 /**

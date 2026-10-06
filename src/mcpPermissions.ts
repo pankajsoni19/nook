@@ -5,7 +5,7 @@
  */
 export type McpScope = "notes:read" | "notes:write-draft" | "notes:publish" | "files:read" | "files:write" | "tasks:read" | "tasks:write" | "today:read"
   | "calendar:read" | "calendar:write" | "collections:read" | "collections:write" | "bin:write" | "team:read"
-  | "inbox:read" | "inbox:write" | "whiteboards:read" | "whiteboards:write" | "agents:read";
+  | "inbox:read" | "inbox:write" | "whiteboards:read" | "whiteboards:write" | "agents:read" | "agents:run";
 
 /** `warning` is an extra line Settings shows under the help, for permissions with a wider reach. */
 export type McpPermission = { scope: McpScope; label: string; help: string; implies?: McpScope; warning?: string };
@@ -30,7 +30,9 @@ export const MCP_PERMISSIONS: readonly McpPermission[] = [
   { scope: "inbox:write", label: "Suggest changes", help: "Suggest changes for you to approve in the Inbox. Never applies anything; each suggestion also needs that module's read permission.", implies: "inbox:read" },
   { scope: "whiteboards:read", label: "Read whiteboards", help: "Whiteboards you can open: their names and text, and on request a summary of their shapes." },
   { scope: "whiteboards:write", label: "Create whiteboards", help: "Create empty, private whiteboards in your folders; never draws, shares, or deletes.", implies: "whiteboards:read" },
-  { scope: "agents:read", label: "Read agents and chats", help: "Your agents (name, description, model; never the prompt) and the chats you own, read-only. Running an agent over MCP comes later." }
+  { scope: "agents:read", label: "Read agents and chats", help: "Your agents (name, description, model; never the prompt) and the chats you own, read-only." },
+  { scope: "agents:run", label: "Run agents", help: "Run your agents over the REST API (POST /api/v1/agents/:id/runs) and MCP (run_agent). Only tools that need no confirmation run; Nook changes become Inbox proposals. Every run is in your Audit log; none creates a chat.",
+    warning: "Each run spends this Nook's model budget and may call the agent's tools; set it to chosen agents where you can." }
 ];
 
 /** The permissions offered when creating a key: every scope that has tools. */
@@ -40,7 +42,7 @@ export const OFFERED_MCP_PERMISSIONS = MCP_PERMISSIONS;
 export const ADMIN_ONLY_MCP_SCOPES: readonly McpScope[] = ["team:read"];
 
 /** Scopes only members and admins may hold (mirrors server/team/roles.ts MEMBER_ONLY_SCOPES). */
-export const MEMBER_ONLY_MCP_SCOPES: readonly McpScope[] = ["inbox:read", "inbox:write"];
+export const MEMBER_ONLY_MCP_SCOPES: readonly McpScope[] = ["inbox:read", "inbox:write", "agents:run"];
 
 /**
  * The permissions Settings offers to someone with `role` (mirrors server mcpScopesForRole): admins

@@ -6,7 +6,7 @@ import { addressBucket } from "./clientAddress";
 import { recordAccessEvent, type AccessVia } from "./access/events";
 import { notifyAccess } from "./access/notices";
 import {
-  CREATE_ONLY, dedupeGrants, GENERAL_KEY_MODULES, grantKey, grantsToScopes, isNarrowing, permissionsForModule, READ_ONLY_KINDS, RESOURCE_KINDS, SCOPE_GRANTS, scopeFor, SELECTOR_KINDS,
+  ALL_ONLY, CREATE_ONLY, dedupeGrants, GENERAL_KEY_MODULES, grantKey, grantsToScopes, isNarrowing, permissionsForModule, READ_ONLY_KINDS, RESOURCE_KINDS, SCOPE_GRANTS, scopeFor, SELECTOR_KINDS,
   type Grant, type GrantModule, type KeyKind, type KeyPermission, type KeySurfaces, type ResourceKind
 } from "./keyGrants";
 import type { McpScope } from "./mcpScopes";
@@ -61,7 +61,8 @@ export const hashKeyToken = (token: string) => createHash("sha256").update(token
 const uuid = z.string().uuid().transform((value) => value.toLowerCase());
 export const grantInput = z.object({
   module: z.enum(GENERAL_KEY_MODULES as [GrantModule, ...GrantModule[]]),
-  permission: z.enum(["read", "comment", "write", "draft", "publish", "create"]),
+  // `run` (Wave 42, D364): agents only; validateGrants refuses it elsewhere (permissionsForModule).
+  permission: z.enum(["read", "comment", "write", "draft", "publish", "create", "run"]),
   /** Omitted or null (with no `resources`): every resource in the module. Ids of the module's main kind (SELECTOR_KINDS[module][0]). */
   resourceIds: z.array(uuid).min(1).max(MAX_RESOURCE_IDS).nullish(),
   /** Chosen items of any kind the module offers (Wave 34: notes in folders and single notes, boards and views). */
@@ -415,6 +416,9 @@ export function resourceReachable(userId: string, kind: ResourceKind, id: string
     case "task_view": return !write && ownedView(userId, id);
     // Routines are private to their owner.
     case "routine": return Boolean(db.query("SELECT 1 FROM routines WHERE id = ? AND owner_id = ?").get(id, userId));
+    // Wave 42 (AC-C, D364): an agent the holder can view now. Agents are owner-private until AC-D
+    // shares them, so that is their own live agent (not in the Bin); server/agents/agentsService.ts usableAgent.
+    case "agent": return Boolean(db.query("SELECT 1 FROM agents WHERE id = ? AND owner_id = ? AND deleted_at IS NULL").get(id, userId));
     default: return false;
   }
 }
@@ -434,6 +438,7 @@ function resourceName(userId: string, kind: ResourceKind, id: string): string | 
     case "document": return (db.query(`SELECT d.name FROM documents d WHERE d.id = $id AND d.purpose = 'file' AND ${readableDocumentPredicate}`).get({ id, userId }) as { name: string } | null)?.name ?? null;
     case "task_view": return (db.query(`SELECT v.name FROM task_views v JOIN users u ON u.id = v.owner_id WHERE v.id = $id AND ${readableViewPredicate}`).get({ id, userId }) as { name: string } | null)?.name ?? null;
     case "routine": return (db.query("SELECT name FROM routines WHERE id = ? AND owner_id = ?").get(id, userId) as { name: string } | null)?.name ?? null;
+    case "agent": return (db.query("SELECT name FROM agents WHERE id = ? AND owner_id = ? AND deleted_at IS NULL").get(id, userId) as { name: string } | null)?.name ?? null;
     default: return null;
   }
 }
@@ -456,6 +461,7 @@ export function chosenResources(input: GrantInput): Array<{ kind: ResourceKind; 
   const kinds = SELECTOR_KINDS[input.module];
   if (!kinds) throw new KeyError(400, "INVALID_GRANT", `Keys for ${input.module} cover every item`);
   if (CREATE_ONLY.has(`${input.module}:${input.permission}`)) throw new KeyError(400, "INVALID_GRANT", `${input.module}: ${input.permission} only creates new items, so it cannot name chosen ones`);
+  if (ALL_ONLY.has(`${input.module}:${input.permission}`)) throw new KeyError(400, "INVALID_GRANT", `${input.module}: ${input.permission} covers every item, so it cannot name chosen ones`);
   const items = input.resources ?? input.resourceIds!.map((id) => ({ kind: kinds[0]!, id }));
   const seen = new Set<string>();
   const out: Array<{ kind: ResourceKind; id: string }> = [];
