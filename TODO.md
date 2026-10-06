@@ -32,6 +32,7 @@ Plans of record: [WAVES_18-20_SMALL.md](docs/plan/WAVES_18-20_SMALL.md) · [agen
 
 - [ ] Standing rule for agent briefs (2026-09-29): never stop processes by name or pattern; the production and QA containers run `bun server/index.ts` as the same host user (an agent's `pkill` matched both; the kills were refused). Agents stop only their own processes by recorded pid.
 
+- [ ] Reliability: `tests/agentsReview.test.ts:351` ("the started run's messages come back in the contract's camelCase shape") returned 409 instead of 201 once in a full-suite run on 2026-10-06 (passed 3× alone and on the next full run): likely a chat slot/run left active by an earlier test in the shared DB; watch and give it its own agent/chat if it recurs.
 - [ ] Reliability: `tests/calendarFeeds` "with TOTP required, a token created from a gated session still works without a session" hit its 5 s timeout once inside a Docker verify build under load (passed on rerun in 0.5 s): watch on release builds. The two older flakes (`teamMcp` list_invites ordering, `reactions` aggregate query) were fixed by tie-breaks on 2026-09-28 and ran 25 times clean.
 
 ## Research queue — after Waves 18–22 ship (operator, 2026-09-28): research, then drive development
