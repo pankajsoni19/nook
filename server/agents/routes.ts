@@ -6,7 +6,7 @@ import { db } from "../db";
 import { parseJson, uuid } from "../validation";
 import { AGENT_BOUNDS, AGENT_ROLE_OPTIONS, DEFAULT_MODEL, SERVER_AUTH_KINDS, SERVER_AVAILABILITIES, TOOL_POLICIES } from "../../shared/agents";
 import { createAgent, deleteAgent, agentDetail, listUsableAgents, manageableAgent, updateAgent, usableAgent } from "./agentsService";
-import { chatDetail, createChat, deleteChat, listChats, updateChat } from "./chats";
+import { chatDetail, createChat, deleteChat, listChats, messageOf, updateChat } from "./chats";
 import { createProvider, deleteProvider, listProviders, providerModels, providerRow, providerSummary, testProvider, updateProvider } from "./providers";
 import { activeRunForChat, cancelChatRuns, cancelRun, confirmRun, dailyUsage, pendingConfirmationFor, runOwnedBy, runSnapshot, startChatRun } from "./runs";
 import { readAgentSettings, roleMayChat, roleMayCreate, writeAgentSettings } from "./settings";
@@ -268,14 +268,15 @@ export function registerAgentRoutes(app: Hono<AppEnv>) {
     const chatId = id(c, "chatId");
     const body = await parseJson(c.req.raw, messageSchema);
     const started = startChatRun(actorOf(c), chatId, { kind: "send", content: body.content, parentId: body.parentId });
-    return c.json({ runId: started.runId, userMessage: started.userMessage, assistantMessage: started.assistantMessage }, 201);
+    // The documented ChatMessage shape (AC-B adds `toolCalls`), not the raw rows.
+    return c.json({ runId: started.runId, userMessage: started.userMessage ? messageOf(started.userMessage) : null, assistantMessage: messageOf(started.assistantMessage) }, 201);
   })));
   app.post("/api/chats/:chatId/messages/:messageId/regenerate", handle(chatter(async (c) => {
     const chatId = id(c, "chatId");
     const messageId = id(c, "messageId");
     await parseJson(c.req.raw, emptySchema);
     const started = startChatRun(actorOf(c), chatId, { kind: "regenerate", messageId });
-    return c.json({ runId: started.runId, userMessage: null, assistantMessage: started.assistantMessage }, 201);
+    return c.json({ runId: started.runId, userMessage: null, assistantMessage: messageOf(started.assistantMessage) }, 201);
   })));
   app.get("/api/chats/:chatId/run", handle(chatter((c) => {
     const chatId = id(c, "chatId");

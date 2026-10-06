@@ -33,8 +33,10 @@ export function AgentsSettings({ agentId, navigate, flash, onOpenChat }: { agent
       setError(messageOf(reason, "Could not load agents"));
     }
   }, []);
-  // Reloaded whenever the list comes back on screen (after the editor created, saved, or binned one).
-  useEffect(() => { if (!agentId) void load(); }, [agentId, load]);
+  // Reloaded whenever the list comes back on screen (after the editor created, saved, or binned one), and
+  // once for a deep link to the editor (Wave 41): `canCreate` comes from the status, so /settings/agents/new
+  // opened directly must load it too.
+  useEffect(() => { void load(); }, [agentId, load]);
   useEffect(() => { if (!agentId) document.title = hubDocumentTitle("Agents"); }, [agentId]);
 
   if (agentId) return <AgentEditor agentId={agentId} navigate={navigate} flash={flash} canCreate={status?.canCreate ?? false} onOpenChat={onOpenChat} />;

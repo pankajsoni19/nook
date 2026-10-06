@@ -42,7 +42,7 @@ export function callOutcome(call: ToolCallView): string {
 
 export const callLabel = (call: ToolCallView) => `Called ${call.server}/${call.tool}`;
 
-export function ToolCallsDisclosure({ calls, running }: { calls: ToolCallView[]; running: boolean }) {
+export function ToolCallsDisclosure({ calls = [], running }: { calls?: ToolCallView[]; running: boolean }) {
   const [open, setOpen] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   if (calls.length === 0) return null;

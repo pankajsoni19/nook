@@ -294,7 +294,7 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
   const messages = useMemo<ChatMessage[]>(() => {
     if (!detail) return [];
     if (!live) return detail.messages;
-    return detail.messages.map((message) => message.id === live.messageId ? { ...message, content: live.text || message.content, usage: live.usage ?? message.usage, status: live.status ? (live.status === "ok" ? "complete" : live.status === "cancelled" || live.status === "timeout" ? "cancelled" : live.status === "step_limit" ? "step_limit" : "error") : "streaming", errorCode: live.error?.code ?? message.errorCode, toolCalls: live.toolCalls.length ? live.toolCalls : message.toolCalls } : message);
+    return detail.messages.map((message) => message.id === live.messageId ? { ...message, content: live.text || message.content, usage: live.usage ?? message.usage, status: live.status ? (live.status === "ok" ? "complete" : live.status === "cancelled" || live.status === "timeout" ? "cancelled" : live.status === "step_limit" ? "step_limit" : "error") : "streaming", errorCode: live.error?.code ?? message.errorCode, toolCalls: live.toolCalls.length ? live.toolCalls : message.toolCalls ?? [] } : message);
   }, [detail, live]);
 
   async function decide(decision: "once" | "deny") {
@@ -512,6 +512,7 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
           <div className="chat-agent-pick">
             <Select<string> label="Agent" value={newAgentId} onChange={(value) => setNewAgentId(value)} options={agentOptions} placeholder="Choose an agent" variant="chip" />
             {newAgent && <span className="chat-model-chip">{newAgent.model ?? status?.defaultModel ?? ""}</span>}
+            {newAgent?.trifecta && <TrifectaBadge compact />}
           </div>
         </header>
         <div className="chat-empty">
