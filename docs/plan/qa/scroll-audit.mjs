@@ -348,8 +348,11 @@ const targetInView = (page, key) => page.evaluate((key) => {
   const box = region && region !== document.scrollingElement ? region.getBoundingClientRect() : { top: 0, bottom: innerHeight };
   const top = Math.max(0, box.top);
   const bottom = Math.min(innerHeight, box.bottom);
-  // A control taller than its region (a long editor) counts once its end is in view.
-  return rect.height > 0 && rect.bottom <= bottom + 1 && (rect.top >= top - 1 || rect.height > bottom - top);
+  // A control taller than its region (a long editor) counts once its end is in view. So does one
+  // taller than half of it (the Vault access grid, 681 px in a 724 px page at 1280 × 800): its whole
+  // box is in view only within a ~40 px band of scroll positions, which wheel steps jump over, and
+  // with its end in view it is plainly reached (2026-10-06, a false failure, not a page defect).
+  return rect.height > 0 && rect.bottom <= bottom + 1 && (rect.top >= top - 1 || rect.height > (bottom - top) / 2);
 }, key);
 
 /** A point inside the region's visible box that is not a control (where a person would wheel or swipe). */
