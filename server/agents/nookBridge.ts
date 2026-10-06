@@ -73,7 +73,11 @@ function proposalReach(spec: McpToolSpec, key: McpKeyContext) {
 }
 
 export type NookMode = "read" | "proposal" | "direct";
-export type NookResolved = { toolName: string; description: string; parameters: Record<string, unknown>; policy: "auto" | "confirm"; mode: NookMode; keyId: string; spec?: McpToolSpec };
+/**
+ * `surface` (AC-C): the surface the key's calls are made and counted on: `mcp` for a chat's linked
+ * key (it must have MCP), and the calling key's own surface for an API or MCP run.
+ */
+export type NookResolved = { toolName: string; description: string; parameters: Record<string, unknown>; policy: "auto" | "confirm"; mode: NookMode; keyId: string; spec?: McpToolSpec; surface?: "mcp" | "rest" };
 
 /** The agent's picked Nook tools this key may run now, each in the mode the rights allow (D353, D359). */
 export function nookToolsFor(key: McpKeyContext, agent: Pick<AgentRow, "nook_direct_writes">, picked: readonly string[]): Omit<NookResolved, "spec">[] {
@@ -110,26 +114,27 @@ function proposalPayload(name: string, args: Record<string, unknown>): Record<st
  * Runs one Nook tool for the runner's key inside the run's audit context. A proposal-mode call
  * files an inbox proposal instead of writing (the result says so and names the proposal).
  */
-export async function runNookTool(resolved: NookResolved, args: Record<string, unknown>, context: { runId: string; agentId: string; agentName: string }): Promise<NookOutcome> {
+export async function runNookTool(resolved: NookResolved, args: Record<string, unknown>, context: { runId: string; agentId: string; agentName: string; via?: "chat" | "api" | "mcp" }): Promise<NookOutcome> {
   const spec = resolved.spec ?? nookToolSpec(resolved.toolName);
   if (!spec) return { text: JSON.stringify({ error: "Unknown tool", code: "NOT_FOUND" }), ok: false, proposalId: null };
+  const surface = resolved.surface ?? "mcp";
   return withAuditContext({ via: "agent", runId: context.runId, agentId: context.agentId }, async () => {
     if (resolved.mode === "proposal") {
       const kind = TOOL_KIND[spec.name];
       if (!kind) return { text: JSON.stringify({ error: "This change cannot be proposed through the Inbox, and the agent may not make it directly", code: "KIND_NOT_ALLOWED" }), ok: false, proposalId: null };
-      const key = loadLiveKey(resolved.keyId, "mcp");
+      const key = loadLiveKey(resolved.keyId, surface);
       if (!key) return { text: JSON.stringify({ error: "The linked Nook key is no longer active", code: "KEY_INACTIVE" }), ok: false, proposalId: null };
       try {
         const parsed = spec.inputSchema.safeParse(args);
         if (!parsed.success) return { text: JSON.stringify({ error: "Invalid arguments", code: "INVALID", details: parsed.error.issues.map((issue) => `${issue.path.join(".") || "body"}: ${issue.message}`) }), ok: false, proposalId: null };
-        const result = await submitProposal(key, { kind, title: titleOf(spec, args), rationale: `Suggested by the agent ${context.agentName} in a chat.`, payload: proposalPayload(spec.name, parsed.data as Record<string, unknown>) });
+        const result = await submitProposal(key, { kind, title: titleOf(spec, args), rationale: `Suggested by the agent ${context.agentName} ${context.via === "api" ? "in an API run" : context.via === "mcp" ? "in an MCP run" : "in a chat"}.`, payload: proposalPayload(spec.name, parsed.data as Record<string, unknown>) });
         return { text: JSON.stringify({ proposed: true, proposalId: result.proposalId, status: result.status, expiresAt: result.expiresAt, note: "Nothing was changed. The person reviews this proposal in their Nook Inbox." }), ok: true, proposalId: result.proposalId };
       } catch (error) {
         if (error instanceof McpToolError) return { text: JSON.stringify({ error: error.message, code: error.code, ...(error.details ?? {}) }), ok: false, proposalId: null };
         throw error;
       }
     }
-    const result = await runTool(spec, args, resolved.keyId, "mcp");
+    const result = await runTool(spec, args, resolved.keyId, surface);
     return { text: result.content.map((part) => part.text).join("\n"), ok: result.isError !== true, proposalId: null };
   });
 }

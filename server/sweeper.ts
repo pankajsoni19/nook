@@ -15,6 +15,8 @@ import { sweepGoogleFlows } from "./google/flows";
 import { sweepVaultEvents } from "./vault/service";
 import { resumeRotations } from "./vault/rotation";
 import { vaultStatus } from "./vault/status";
+import { sweepAgentAudit } from "./agents/audit";
+import { sweepAgentRateLimits } from "./agents/limits";
 
 const SWEEP_INTERVAL_MS = 3_600_000;
 export type SweepResult = SweepCounts & { bin: BinSweepCounts };
@@ -135,6 +137,14 @@ export function runSweep(options: { boot?: boolean; nowMs?: number } = {}) {
         if (events) console.info(`Vault event sweep: ${events} old events removed`);
       } catch (error) {
         console.error("Vault event sweep failed", error instanceof Error ? error.name : "Unknown error");
+      }
+      try {
+        // The agent Audit log (Wave 42, D366): API and MCP runs past AGENT_AUDIT_RETENTION_DAYS (or the admin's policy), 500 at a time; old per-key run windows.
+        const runs = sweepAgentAudit(options.nowMs);
+        const windows = sweepAgentRateLimits(options.nowMs);
+        if (runs) console.info(`Agent audit sweep: ${runs} old runs removed${windows ? `, ${windows} rate windows` : ""}`);
+      } catch (error) {
+        console.error("Agent audit sweep failed", error instanceof Error ? error.name : "Unknown error");
       }
       try {
         // Vault data-key rotation (Wave 26): finish re-encrypting and retire old generations.

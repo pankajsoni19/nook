@@ -486,7 +486,8 @@ describe("MCP tools (agents:read, D281)", () => {
     // Every agent tool declares its access and is read-only (D281).
     for (const spec of mcpToolSpecs.filter((item) => ["list_agents", "list_chats", "get_chat"].includes(item.name))) {
       expect(spec.write).toBe(false);
-      expect(spec.access.mode).toBe("own");
+      // Wave 42: list_agents also answers run-only keys, narrowed to the agents their grant names (a list tool).
+      expect(spec.access.mode).toBe(spec.name === "list_agents" ? "list" : "own");
     }
     const grantKey = createApiKey(owner.userId, { name: "Grant", surfaces: "mcp", grants: [{ module: "agents", permission: "read", resourceKind: null, resourceId: null }], expiresInDays: 30 });
     const live = loadLiveKey(grantKey.id)!;

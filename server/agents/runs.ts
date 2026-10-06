@@ -13,6 +13,7 @@ import { AgentError } from "./status";
 import { channelOf, openChannel, type RunChannel } from "./stream";
 import { resolveTools, type ResolvedTool } from "./tools";
 import { sessionFor } from "./toolServers";
+import { withinAgentRun } from "./depth";
 
 /**
  * Runs (plan §2.2, §2.3, §2.4, D344, D345): every run is an `agent_runs` row and an in-memory
@@ -28,17 +29,25 @@ import { sessionFor } from "./toolServers";
 
 /** A confirmation the run waits on (plan §5.4, D352, T324): bound to the call id and the arguments' hash, single use. */
 type PendingState = { confirmation: PendingConfirmation; argsHash: string; resolve: (decision: "allowed" | "denied") => void };
-export type ActiveRun = { runId: string; chatId: string; userId: string; messageId: string; controller: AbortController; startedAt: number; pending: PendingState | null; toolCalls: ToolCallView[] };
+/**
+ * A live run. Chat runs carry their chat and assistant message; API and MCP runs (AC-C,
+ * server/agents/external.ts) carry no chat and their key instead. All of them share the slots.
+ */
+export type ActiveRun = { runId: string; chatId: string | null; keyId: string | null; userId: string; messageId: string; controller: AbortController; startedAt: number; pending: PendingState | null; toolCalls: ToolCallView[] };
 const active = new Map<string, ActiveRun>();
 
 export const activeRuns = () => [...active.values()];
 export const activeRunForChat = (chatId: string) => [...active.values()].find((run) => run.chatId === chatId) ?? null;
+/** AC-C: an API or MCP run takes its slots here and gives them back when it ends. */
+export const registerActiveRun = (run: ActiveRun) => { active.set(run.runId, run); };
+export const releaseActiveRun = (runId: string) => { active.delete(runId); };
+export const activeRun = (runId: string) => active.get(runId) ?? null;
 
 export const dayOf = (time = Date.now()) => new Date(time).toISOString().slice(0, 10);
 
-/** Tokens the person used today, every agent included (`agent_usage_daily`). */
+/** Tokens the person used today, every agent included (`agent_usage_daily`), their chats and their keys' API and MCP runs (AC-C) alike. */
 export function dailyUsage(userId: string, day = dayOf()): DailyUsage {
-  const row = db.query("SELECT COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens, COALESCE(SUM(completion_tokens), 0) AS completion_tokens, COALESCE(SUM(runs), 0) AS runs FROM agent_usage_daily WHERE day = ? AND user_id = ? AND key_id = ''").get(day, userId) as { prompt_tokens: number; completion_tokens: number; runs: number };
+  const row = db.query("SELECT COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens, COALESCE(SUM(completion_tokens), 0) AS completion_tokens, COALESCE(SUM(runs), 0) AS runs FROM agent_usage_daily WHERE day = ? AND user_id = ?").get(day, userId) as { prompt_tokens: number; completion_tokens: number; runs: number };
   return { day, promptTokens: row.prompt_tokens, completionTokens: row.completion_tokens, runs: row.runs, budget: readAgentSettings().dailyTokensUser };
 }
 
@@ -59,12 +68,24 @@ export function assertBudget(userId: string) {
   }
 }
 
-const secondsToMidnight = () => Math.max(1, Math.ceil((Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate() + 1) - Date.now()) / 1000));
+export const secondsToMidnight = () => Math.max(1, Math.ceil((Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate() + 1) - Date.now()) / 1000));
 
-function chargeUsage(userId: string, agentId: string, usage: TokenUsage, runs: number) {
-  db.query(`INSERT INTO agent_usage_daily (day, user_id, key_id, agent_id, runs, prompt_tokens, completion_tokens) VALUES (?, ?, '', ?, ?, ?, ?)
+/** Adds a step's tokens (or a finished run) to today's row; `keyId` is '' for chats and the calling key for API and MCP runs (AC-C). */
+export function chargeUsage(userId: string, agentId: string, usage: TokenUsage, runs: number, keyId = "") {
+  db.query(`INSERT INTO agent_usage_daily (day, user_id, key_id, agent_id, runs, prompt_tokens, completion_tokens) VALUES (?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(day, user_id, key_id, agent_id) DO UPDATE SET runs = runs + excluded.runs, prompt_tokens = prompt_tokens + excluded.prompt_tokens, completion_tokens = completion_tokens + excluded.completion_tokens`)
-    .run(dayOf(), userId, agentId, runs, usage.promptTokens, usage.completionTokens);
+    .run(dayOf(), userId, keyId, agentId, runs, usage.promptTokens, usage.completionTokens);
+}
+
+/**
+ * Concurrency for an API or MCP run (plan §2.2, §7.2; AC-C): 2 per key and 2 per person (429
+ * `AGENT_BUSY`, shared with the person's chats), and the instance's slots (503).
+ */
+export function assertKeySlots(userId: string, keyId: string) {
+  const runs = [...active.values()];
+  if (runs.filter((run) => run.keyId === keyId).length >= RUN_SLOTS.key) throw new AgentError(429, "AGENT_BUSY", `This API key can run ${RUN_SLOTS.key} agents at once; wait for one to finish`, { retryAfterSeconds: 5 });
+  if (runs.filter((run) => run.userId === userId).length >= RUN_SLOTS.user) throw new AgentError(429, "AGENT_BUSY", `The key's owner already has ${RUN_SLOTS.user} runs going; wait for one to finish`, { retryAfterSeconds: 5 });
+  if (runs.length >= config.agents.maxConcurrentRuns) throw new AgentError(503, "AGENT_BUSY", "This Nook is running as many agents as it can; try again in a moment", { retryAfterSeconds: 5 });
 }
 
 /** Concurrency slots (plan §2.2): 503 for the instance, 429 per user, 409 per chat. */
@@ -137,12 +158,13 @@ export function startChatRun(actor: { userId: string; role: string; displayName:
   })();
 
   const controller = new AbortController();
-  const run: ActiveRun = { runId, chatId: chat.id, userId: actor.userId, messageId: assistantMessage.id, controller, startedAt: Date.now(), pending: null, toolCalls: [] };
+  const run: ActiveRun = { runId, chatId: chat.id, keyId: null, userId: actor.userId, messageId: assistantMessage.id, controller, startedAt: Date.now(), pending: null, toolCalls: [] };
   active.set(runId, run);
   const channel = openChannel(runId);
   channel.emit({ type: "run", data: { runId, chatId: chat.id, messageId: assistantMessage.id, userMessageId: userMessage?.id ?? null } });
   audit(actor.userId, null, "agents.run.start", { runId, chatId: chat.id, agentId: agent.id });
-  void execute(run, channel, agent, actor, chat, assistantMessage.id, parentId, connection);
+  // Inside the depth guard's frame (AC-C, T318): nothing this run does can start another run.
+  void withinAgentRun({ runId, via: "chat" }, () => execute(run, channel, agent, actor, chat, assistantMessage.id, parentId, connection));
   return { runId, userMessage, assistantMessage };
 }
 
@@ -245,7 +267,7 @@ function toolExecutor(run: ActiveRun, channel: RunChannel, agent: AgentRow, acto
   return { tools, execute };
 }
 
-function withTimeout<T>(promise: Promise<T>, ms: number, signal: AbortSignal): Promise<T> {
+export function withTimeout<T>(promise: Promise<T>, ms: number, signal: AbortSignal): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => reject(new McpClientError("MCP_TIMEOUT", "The tool did not answer in time")), ms);
     const onAbort = () => { clearTimeout(timer); reject(new Error("cancelled")); };

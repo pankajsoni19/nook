@@ -221,7 +221,14 @@ export async function completeStreaming(connection: ProviderConnection, request:
   return { content, finishReason, usage, model, toolCalls: [...calls.entries()].sort((a, b) => a[0] - b[0]).map(([, call]) => call) };
 }
 
-export type LoopSink = { delta: (text: string) => void; usage: (usage: TokenUsage, model: string | null) => void };
+/** One model call as the Audit log records it (AC-C): its own text, the calls it asked for, tokens, and time. */
+export type LoopStep = { step: number; content: string; toolCalls: ModelToolCall[]; usage: TokenUsage; model: string | null; durationMs: number };
+export type LoopSink = {
+  delta: (text: string) => void;
+  usage: (usage: TokenUsage, model: string | null) => void;
+  /** AC-C: after every model call, before its tool calls run (the Audit log's model steps). */
+  step?: (step: LoopStep) => void;
+};
 /** What a tool call produced: the text the model sees (already capped and marked by the executor). */
 export type ToolExecution = { content: string };
 export type LoopInput = {
@@ -241,6 +248,8 @@ export type LoopInput = {
   tools?: (step: number) => Promise<ModelTool[]> | ModelTool[];
   /** Runs one call (gate, confirmation, timeout, cap, and marker are the executor's); returns the tool turn's content. */
   execute?: (call: ModelToolCall, step: number) => Promise<ToolExecution>;
+  /** AC-C (plan §7.1, T319): before every model call, the last one included; throws to end the run (a revoked key). */
+  beforeStep?: (step: number) => void;
 };
 export type LoopResult = { status: "stop" | "step_limit"; content: string; steps: number; usage: TokenUsage; model: string | null; toolCalls: number };
 
@@ -258,9 +267,12 @@ export async function runLoop(input: LoopInput): Promise<LoopResult> {
   let offeredAny = false;
   for (let step = 1; step <= input.maxSteps; step += 1) {
     const last = step === input.maxSteps;
+    input.beforeStep?.(step);
     const tools = last || !input.tools || !input.connection.compat.supportsTools ? [] : await input.tools(step);
     offeredAny ||= tools.length > 0;
+    const stepStarted = Date.now();
     const reply = await completeStreaming(input.connection, { messages: input.messages, temperature: input.temperature, maxOutputTokens: input.maxOutputTokens ?? undefined, tools }, input.signal, input.sink.delta);
+    input.sink.step?.({ step, content: reply.content, toolCalls: reply.toolCalls, usage: reply.usage, model: reply.model, durationMs: Date.now() - stepStarted });
     total.promptTokens += reply.usage.promptTokens;
     total.completionTokens += reply.usage.completionTokens;
     total.estimated = total.estimated || reply.usage.estimated;

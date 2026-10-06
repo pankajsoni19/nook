@@ -150,8 +150,16 @@ function uniqueName(base: string, taken: Set<string>) {
   return name;
 }
 
+/**
+ * How an API or MCP run resolves tools (AC-C, plan §2, §5.4, D352): Nook's tools run with the
+ * calling key (on its surface) instead of a linked key, and only tools that run on their own are
+ * offered: remote tools whose policy is `auto`, Nook read tools, and Nook writes in proposal mode
+ * (they file inbox proposals and change nothing). A `confirm` tool and a direct Nook write never are.
+ */
+export type ExternalToolOptions = { nookKey: McpKeyContext | null; surface: "mcp" | "rest" };
+
 /** The agent's remote and Nook tools the runner may call at this step; disabled, `off`, and unreachable rights drop silently. */
-export function resolveTools(agent: AgentRow, runner: { userId: string; role: string }): ResolvedTool[] {
+export function resolveTools(agent: AgentRow, runner: { userId: string; role: string }, external: ExternalToolOptions | null = null): ResolvedTool[] {
   const refs = agentToolRefs(agent.id);
   const taken = new Set<string>();
   const resolved: ResolvedTool[] = [];
@@ -169,6 +177,7 @@ export function resolveTools(agent: AgentRow, runner: { userId: string; role: st
     // The agent can only be stricter (D358): off wins, then confirm, then the admin's policy.
     const policy: ToolPolicy = admin === "off" || ref.policy === "off" ? "off" : ref.policy === "confirm" ? "confirm" : admin;
     if (policy === "off") continue;
+    if (external && policy !== "auto") continue;
     resolved.push({
       modelName: uniqueName(`${server.row.slug}__${tool.name}`, taken), kind: "server", serverId: server.row.id, server: server.row.slug, serverName: server.row.name, toolName: tool.name,
       description: tool.description, parameters: tool.inputSchema, policy, openWorld: tool.openWorld, resultCapBytes: server.row.result_cap_bytes, timeoutMs: server.row.timeout_ms, serverRow: server.row, nook: null
@@ -176,14 +185,17 @@ export function resolveTools(agent: AgentRow, runner: { userId: string; role: st
   }
   const nookRefs = refs.filter((ref): ref is Extract<AgentToolRef, { source: "nook" }> => ref.source === "nook");
   if (nookRefs.length > 0) {
-    const key = liveLinkedKey(agent.id, runner.userId);
+    const key = external ? external.nookKey : liveLinkedKey(agent.id, runner.userId);
     if (key) {
       for (const item of nookToolsFor(key, agent, nookRefs.map((ref) => ref.toolName))) {
+        if (external && item.mode === "direct") continue;
         const spec = nookToolSpec(item.toolName)!;
+        // Over the API a proposal runs on its own: it changes nothing until the key's owner approves it in the Inbox.
+        const policy = external ? "auto" as const : item.policy;
         resolved.push({
           modelName: uniqueName(`nook__${item.toolName}`, taken), kind: "nook", serverId: null, server: "nook", serverName: "Nook", toolName: item.toolName,
-          description: item.description, parameters: item.parameters, policy: item.policy, openWorld: false, resultCapBytes: 16_384, timeoutMs: 30_000, serverRow: null,
-          nook: { ...item, spec }
+          description: item.description, parameters: item.parameters, policy, openWorld: false, resultCapBytes: 16_384, timeoutMs: 30_000, serverRow: null,
+          nook: { ...item, policy, spec, surface: external?.surface ?? "mcp" }
         });
       }
     }

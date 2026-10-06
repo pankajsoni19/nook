@@ -11,6 +11,7 @@ import { mcpToolSpecs, runTool, toolVisible, visibleTools } from "./mcpTools";
 import type { McpErrorCode, McpKeyContext } from "./mcpToolKit";
 import { readBoundedBody } from "./validation";
 import { handleVaultRest, matchVaultRoute } from "./vault/rest";
+import { handleAgentRest, matchAgentRoute } from "./agents/api";
 
 /**
  * The REST surface `/api/v1` (Wave 34, access plan D280, O-A12, T210): the MCP tools over plain
@@ -18,6 +19,8 @@ import { handleVaultRest, matchVaultRoute } from "./vault/rest";
  *
  * - `GET /api/v1/me`: the key and its owner (display name and role), its effective grants, surfaces,
  *   limits, and expiry. Never the token, its hash, or the addresses of its allowlist.
+ * - `/api/v1/agents/*` (Wave 42, agent chat plan §7.2): run the key owner's agents with an
+ *   `agents:run` grant, plain or streamed, every run in the Audit log (server/agents/api.ts).
  * - `GET /api/v1/tools`: the tools this key may call now, with their JSON input schemas.
  * - `POST /api/v1/tools/:name`: runs the SAME tool definition through the same `runTool` as MCP:
  *   the same validation, grants and chosen items, rate limits (per surface), audit (`via: "rest"`),
@@ -78,6 +81,8 @@ export const REST_STATUS: Partial<Record<McpErrorCode, number>> = {
   QUOTA_EXCEEDED: 409,
   RUN_ACTIVE: 409,
   RATE_LIMITED: 429,
+  AGENT_RECURSION: 403,
+  AGENTS_DISABLED: 503,
   INTERNAL: 500
 };
 
@@ -197,6 +202,21 @@ async function handle(c: Context<AppEnv>): Promise<Response> {
       return refuse(403, "This API key cannot use the vault API. Create a vault key (nkv_) in Settings → API keys.", "KEY_POLICY");
     }
     return withRestSlot(() => handleVaultRest(c.req.raw, url, subpath, auth));
+  }
+  // The agents (Wave 42 "AC-C", agent chat plan §7.2): general keys with an `agents:run` grant.
+  if (path === "/api/v1/agents" || path.startsWith("/api/v1/agents/")) {
+    const matched = matchAgentRoute(path.slice("/api/v1/agents".length));
+    if (!matched) return refuse(404, "Not found", "NOT_FOUND");
+    const allowedMethods = matched.methods.includes("GET") ? [...matched.methods, "HEAD"] : matched.methods;
+    if (!allowedMethods.includes(method)) return refuse(405, "Method not allowed", "METHOD_NOT_ALLOWED", {}, { Allow: matched.methods.join(", ") });
+    const auth = authenticateKeyRequest(c.req.raw, { surface: "rest", clientIp: clientIp(c) });
+    if (auth instanceof Response) return auth;
+    if (auth.actor.kind === "vault") {
+      countKeyUsage(auth.id, "denied", "rest");
+      return refuse(403, "A vault key (nkv_) works only on /api/v1/vault/* and the vault MCP tools.", "KEY_POLICY");
+    }
+    // A streaming run answers at once and gives its slot back; a plain run holds it (at most the instance's run slots).
+    return withRestSlot(() => handleAgentRest(c.req.raw, matched.route, auth, clientIp(c)));
   }
   const toolMatch = /^\/api\/v1\/tools\/([a-z_]{1,64})$/.exec(path);
   const route = path === "/api/v1/me" ? "me" : path === "/api/v1/tools" ? "tools" : toolMatch ? "tool" : null;

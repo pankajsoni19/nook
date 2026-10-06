@@ -16,6 +16,7 @@ import { channelOf, sseFrame, type SequencedEvent } from "./stream";
 import { catalogFor, currentLink, linkableKeys, setLink } from "./tools";
 import { createServer, deleteServer, listServers, serverRow, serverSummary, setPolicies, syncServer, updateServer } from "./toolServers";
 import { ProviderError } from "./loop";
+import { agentApiUsage, auditRunDetail, auditVisibleTo, exportAuditRuns, listAuditRuns } from "./audit";
 import "./bin";
 
 /**
@@ -187,7 +188,11 @@ export function registerAgentRoutes(app: Hono<AppEnv>) {
   app.get("/api/agents/status", (c) => {
     const status = agentsStatus();
     const role = c.get("user").role;
-    return c.json({ enabled: status.enabled, reason: role === "admin" ? status.reason : null, canChat: status.enabled && roleMayChat(role), canCreate: status.enabled && roleMayCreate(role), defaultModel: DEFAULT_MODEL });
+    return c.json({
+      enabled: status.enabled, reason: role === "admin" ? status.reason : null, canChat: status.enabled && roleMayChat(role), canCreate: status.enabled && roleMayCreate(role), defaultModel: DEFAULT_MODEL,
+      // AC-C: whether the Audit log link shows (admins, and people with `agents:run` keys or runs).
+      auditVisible: status.enabled && auditVisibleTo({ userId: c.get("user").id, role })
+    });
   });
 
   // --- Admin: providers and policy (plan §4.1) ---
@@ -257,6 +262,34 @@ export function registerAgentRoutes(app: Hono<AppEnv>) {
     if (agentId && !agentId.success) throw new AgentError(404, "NOT_FOUND", "Not found");
     if (agentId) usableAgent(agentId.data, c.get("user").id);
     return { catalog: catalogFor(c.get("user").role, agentId ? agentId.data : null, c.get("user").id) };
+  })));
+  // --- The Audit log (AC-C, plan §7.3, D366): the key's owner in full, admins metadata only ---
+  const auditFilter = (c: Context<AppEnv>) => {
+    const optionalId = (name: string) => {
+      const raw = c.req.query(name);
+      if (!raw) return null;
+      const parsed = uuid.safeParse(raw.toLowerCase());
+      if (!parsed.success) throw new AgentError(400, "INVALID", `${name} must be an id`, { field: name });
+      return parsed.data;
+    };
+    return { keyId: optionalId("key"), agentId: optionalId("agent"), ownerId: optionalId("owner"), status: c.req.query("status")?.slice(0, 20) || null, from: c.req.query("from") || null, to: c.req.query("to") || null, cursor: c.req.query("cursor")?.slice(0, 120) || null };
+  };
+  const viewerOf = (c: Context<AppEnv>) => ({ userId: c.get("user").id, role: c.get("user").role });
+  app.get("/api/agents/audit", handle((c) => listAuditRuns(viewerOf(c), auditFilter(c))));
+  app.get("/api/agents/audit/export", handle((c) => {
+    const raw = c.req.query("runId");
+    const runId = raw ? uuid.safeParse(raw.toLowerCase()) : null;
+    if (runId && !runId.success) throw new AgentError(404, "NOT_FOUND", "Not found");
+    const exported = exportAuditRuns(viewerOf(c), { ...auditFilter(c), runId: runId ? runId.data : null });
+    const name = runId ? `nook-agent-run-${runId.data}.json` : `nook-agent-audit-${new Date().toISOString().slice(0, 10)}.json`;
+    return new Response(JSON.stringify(exported, null, 2), { status: 200, headers: { "Content-Type": "application/json; charset=utf-8", "Content-Disposition": `attachment; filename="${name}"`, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
+  }));
+  app.get("/api/agents/audit/:runId", handle((c) => ({ run: auditRunDetail(viewerOf(c), id(c, "runId")) })));
+  // An agent's API and MCP runs per day, for the people who manage it (counts only, D366).
+  app.get("/api/agents/:agentId/api-usage", handle(chatter((c) => {
+    const agentId = id(c, "agentId");
+    manageableAgent(agentId, c.get("user").id);
+    return { usage: agentApiUsage(agentId) };
   })));
   // Link Nook key (plan §5.3, D359): the caller's own live general key with the MCP surface, a pointer never a token.
   app.get("/api/agents/:agentId/link", handle(chatter((c) => {
