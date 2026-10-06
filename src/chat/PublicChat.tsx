@@ -20,10 +20,12 @@ export type PublicLoad = { state: "loading" } | { state: "ready"; snapshot: Publ
 export async function loadPublicSnapshot(token: string, fetcher: typeof fetch = fetch): Promise<PublicLoad> {
   try {
     const response = await fetcher(`/api/public/chat-shares/${encodeURIComponent(token)}`, { credentials: "omit", headers: { Accept: "application/json" } });
+    // The body is always read to its end, so no request is left open (an error page too).
+    const raw = await response.text();
     if (response.status === 404) return { state: "missing" };
     if (response.status === 429) return { state: "limited" };
     if (!response.ok) return { state: "error" };
-    const body = await response.json() as { snapshot?: PublicChatSnapshot };
+    const body = JSON.parse(raw) as { snapshot?: PublicChatSnapshot };
     return body.snapshot && Array.isArray(body.snapshot.messages) ? { state: "ready", snapshot: body.snapshot } : { state: "error" };
   } catch {
     return { state: "error" };
