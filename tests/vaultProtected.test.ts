@@ -4,14 +4,15 @@ import { call, newSecret, newVault, resetVaultLimits, setRole, share, unlock } f
 
 /**
  * Protected environments and the 15-minute re-authentication window (D226, V-O2, T186; Wave 26):
- * server-enforced for reveal, edit, clear, restore, delete, import, export, and unprotecting; not
- * for metadata. The window belongs to one session and ends after 15 minutes.
+ * server-enforced for reading values (a value, reveal, a version, export) and for unprotecting; not
+ * for metadata, and not for writes (2026-10-06 operator: no re-auth for writes; the matrix is in
+ * tests/vaultProtectedWrites.test.ts). The window belongs to one session and ends after 15 minutes.
  */
 
 beforeEach(() => resetVaultLimits());
 
 describe("the protected-environment window", () => {
-  test("every value path on prod needs the window; metadata does not; the window opens with the password and ends after 15 minutes", async () => {
+  test("every value read on prod needs the window; writes and metadata do not; the window opens with the password and ends after 15 minutes", async () => {
     const owner = await createUser("Protected owner");
     const reader = await createUser("Protected reader");
     const vault = await newVault(owner);
@@ -24,19 +25,19 @@ describe("the protected-environment window", () => {
     expect(status.body).toEqual({ reauthUntil: null, method: "password", twoFactor: false });
     const locked = [
       await call(reader, "GET", value),
-      await call(reader, "PUT", value, { value: "x", expectedVersion: 1 }),
-      await call(reader, "DELETE", `${value}?expectedVersion=1`),
       await call(reader, "GET", `${value}/versions/1`),
-      await call(reader, "POST", `${value}/versions/1/restore`, { expectedVersion: 1 }),
       await call(reader, "POST", `/vaults/${vault.id}/reveal`, { cells: [{ secretId: secret.id, envId: vault.envs.dev }, { secretId: secret.id, envId: prod }] }),
-      await call(reader, "GET", `/vaults/${vault.id}/environments/${prod}/export?format=dotenv`),
-      await call(reader, "POST", `/vaults/${vault.id}/environments/${prod}/import`, { entries: [{ name: "NEW", value: "v" }], dryRun: true })
+      await call(reader, "GET", `/vaults/${vault.id}/environments/${prod}/export?format=dotenv`)
     ];
     for (const response of locked) {
       expect(response.status).toBe(403);
       expect(response.body).toMatchObject({ code: "REAUTH_REQUIRED", envIds: [prod] });
       expect(response.text).not.toContain("prod-db");
     }
+    // Writes need write access but no window (2026-10-06 operator), and never answer with a value.
+    const written = await call(reader, "POST", `/vaults/${vault.id}/environments/${prod}/import`, { entries: [{ name: "NEW", value: "v" }], dryRun: true });
+    expect(written.status).toBe(200);
+    expect(written.text).not.toContain("prod-db");
     // Metadata and unprotected environments need nothing.
     expect((await call(reader, "GET", `${value}/versions`)).status).toBe(200);
     expect((await call(reader, "GET", `/vaults/${vault.id}/secrets`)).status).toBe(200);
@@ -65,7 +66,7 @@ describe("the protected-environment window", () => {
     expect(db.query("SELECT COUNT(*) AS count FROM audit_log WHERE actor_id = ? AND event_type = 'vault.reauth'").get(reader.userId)).toEqual({ count: 1 });
   });
 
-  test("owners too; unprotecting needs the window, protecting does not; deleting a secret with a prod value needs it", async () => {
+  test("owners too; unprotecting needs the window, protecting does not; deleting a secret with a protected value does not", async () => {
     const owner = await createUser("Protect toggler");
     const vault = await newVault(owner, undefined, { unlock: false });
     const secret = await newSecret(owner, vault, "TOGGLE", { dev: "d" });
@@ -73,12 +74,12 @@ describe("the protected-environment window", () => {
     expect((await call(owner, "PATCH", `/vaults/${vault.id}/environments/${prod}`, { protected: false })).body.code).toBe("REAUTH_REQUIRED");
     expect((await call(owner, "PATCH", `/vaults/${vault.id}/environments/${prod}`, { name: "Live" })).status).toBe(200);
     expect((await call(owner, "PATCH", `/vaults/${vault.id}/environments/${vault.envs.dev}`, { protected: true })).status).toBe(200);
-    // Dev is protected now: its value needs the window, and so does deleting the secret that holds it.
+    // Dev is protected now: reading its value needs the window; deleting the secret that holds it
+    // is a write and does not (2026-10-06 operator).
     expect((await call(owner, "GET", `/vaults/${vault.id}/secrets/${secret.id}/values/${vault.envs.dev}`)).body.code).toBe("REAUTH_REQUIRED");
-    expect((await call(owner, "DELETE", `/vaults/${vault.id}/secrets/${secret.id}`)).body.code).toBe("REAUTH_REQUIRED");
+    expect((await call(owner, "DELETE", `/vaults/${vault.id}/secrets/${secret.id}`)).status).toBe(200);
     await unlock(owner);
     expect((await call(owner, "PATCH", `/vaults/${vault.id}/environments/${prod}`, { protected: false })).status).toBe(200);
-    expect((await call(owner, "DELETE", `/vaults/${vault.id}/secrets/${secret.id}`)).status).toBe(200);
     const events = (db.query("SELECT event FROM vault_events WHERE vault_id = ? AND event LIKE 'env.%protect'").all(vault.id) as Array<{ event: string }>).map((row) => row.event);
     expect(events.sort()).toEqual(["env.protect", "env.unprotect"]);
   });

@@ -14,7 +14,9 @@ import { exportEnvironment, importEntries, type ImportResult, type ImportStatus,
  * first. Import reads the file in this browser (it is never uploaded), shows what would be created,
  * updated, left the same, skipped, or refused (the server's dry run, which compares with the current
  * values), then writes on Import. Export decrypts on the server and downloads a plaintext file; the
- * sheet says so. A protected environment asks to confirm it's you first (D226).
+ * sheet says so. Exporting a protected environment asks to confirm it's you first (D226); importing
+ * into one does not (2026-10-06 operator: no re-auth for writes), so without the window its preview
+ * does not compare with the current values.
  */
 
 export const FORMAT_OPTIONS: Array<{ value: TransferFormat; label: string; description: string }> = [
@@ -34,7 +36,6 @@ export const countLabel = (status: ImportStatus, count: number) => `${count} ${C
 type Parsed = { fileName: string; format: TransferFormat; entries: Array<{ name: string; value: string; comment?: string | null }>; problems: ParseProblem[] };
 
 export function ImportDialog({ vault, initialEnvId, onClose, onImported }: { vault: VaultSummary; initialEnvId: string | null; onClose: () => void; onImported: (message: string) => void }) {
-  const run = useVaultReauth();
   const writable = vault.environments.filter(canWriteEnv);
   const [envId, setEnvId] = useState<string | null>(writable.find((env) => env.id === initialEnvId)?.id ?? writable[0]?.id ?? null);
   const [format, setFormat] = useState<TransferFormat>("dotenv");
@@ -80,7 +81,7 @@ export function ImportDialog({ vault, initialEnvId, onClose, onImported }: { vau
     setBusy(true);
     setError(null);
     try {
-      const result = await run(() => importEntries(vault.id, envId, { entries: parsed.entries, mode, dryRun }));
+      const result = await importEntries(vault.id, envId, { entries: parsed.entries, mode, dryRun });
       if (dryRun) setPreview(result);
       else {
         const written = result.counts.create + result.counts.set + result.counts.update;
@@ -126,7 +127,7 @@ export function ImportDialog({ vault, initialEnvId, onClose, onImported }: { vau
           </ul>
         </section>}
       </>}
-      {env?.protected && <p className="file-dialog-hint"><TriangleAlert className="vault-hint-icon" aria-hidden="true" />{env.name} is protected: you will be asked to confirm it's you.</p>}
+      {env?.protected && <p className="file-dialog-hint"><TriangleAlert className="vault-hint-icon" aria-hidden="true" />{env.name} is protected. Importing does not ask you to confirm it's you, so unless you did in the last 15 minutes the preview does not compare with the current values: a name that already has a value is replaced or kept as chosen above.</p>}
       {error && <p className="form-error" role="alert">{error}</p>}
       <footer className="file-dialog-actions">
         <button type="button" className="secondary-button" onClick={onClose} disabled={busy}>Cancel</button>
