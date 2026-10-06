@@ -102,7 +102,7 @@ You need Git, Docker Engine, and Docker Compose.
 git clone https://github.com/pankajsoni19/nook.git && cd nook
 cp .env.example .env            # set ALLOWED_EMAILS, TOTP_POLICY, APP_ORIGINS as needed
 sudo mkdir -p /srv/mynotes && sudo chown 1000:1000 /srv/mynotes   # or set MYNOTES_DATA_DIR
-APP_VERSION=0.27.0 GIT_SHA=$(git rev-parse --short HEAD) docker compose up -d --build
+APP_VERSION=0.28.0 GIT_SHA=$(git rev-parse --short HEAD) docker compose up -d --build
 curl http://localhost:2026/api/health   # then open http://localhost:2026 and create the first account (the admin)
 ```
 
@@ -114,11 +114,11 @@ Back up first (`./scripts/backup.sh --force`), pull, rebuild, and let migrations
 
 ## What's new
 
-Release notes for every version are in [CHANGELOG.md](CHANGELOG.md). Latest (v0.27.0):
+Release notes for every version are in [CHANGELOG.md](CHANGELOG.md). Latest (v0.28.0):
 
-- **Tools for agents**: MCP tool servers an admin adds in Settings → AI, and Nook's own tools through an API key you link to the agent.
-- **You stay in charge**: anything that can change something asks first with an Allow once / Deny card, and Nook writes become Inbox proposals.
-- **No migration**; local stdio tool programs stay off unless the host turns them on, which grants them full trust.
+- **Run agents from scripts and CI** with `POST /api/v1/agents/<id>/runs` and a key holding Chat → Run agents; MCP clients get `run_agent`.
+- **Audit log** of every API and MCP run, full for the key's owner, metadata only for admins.
+- **Migration 040** runs on the first boot, so back up first.
 
 ## Documentation
 
