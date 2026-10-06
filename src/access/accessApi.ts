@@ -28,6 +28,8 @@ export type ItemAccess = {
   inheritable: boolean;
   /** Owner only (Wave 33, §C.5): how many of your own usable API keys reach this item. */
   keysWithAccess?: number;
+  /** Wave 43 (agents and chats): guests never reach Chat, so none is offered by name. */
+  guestsExcluded?: boolean;
 };
 
 /** "2 of your API keys can reach this" (§E), pointing at where keys are managed. */
@@ -51,7 +53,9 @@ const BASES: Record<AccessKind, string> = {
   board: "/tasks/boards",
   task_view: "/tasks/views",
   collection: "/collections",
-  calendar: "/calendars"
+  calendar: "/calendars",
+  agent: "/agents",
+  chat: "/chats"
 };
 
 export const accessPath = (kind: AccessKind, id: string) => `${BASES[kind]}/${encodeURIComponent(id)}/access`;

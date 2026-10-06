@@ -50,6 +50,8 @@ export type AccessSummary = {
   kinds: KindCount[];
   /** Wave 26: vault memberships (older servers omit it). */
   vaults?: VaultAccessRow[];
+  /** Wave 43: agents and chats shared with the person by name or through a group (older servers omit it). */
+  chat?: AccessRow[];
   resetCounts: ResetCounts;
   pageSize: number;
 };
@@ -70,7 +72,8 @@ export type AccessSource = {
  * a keyed hash of the id, never by the id.
  */
 export type AccessRow = {
-  kind: AccessKind;
+  /** Wave 43: also an agent or a chat (the Chat section). */
+  kind: AccessKind | "agent" | "chat";
   title: string;
   titleHidden: boolean;
   owner: { id: string; displayName: string };

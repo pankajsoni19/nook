@@ -1,9 +1,9 @@
 import { api, ApiError, getCsrfToken, noteRequestOutcome } from "../api";
-import type { AgentApiUsage, AuditFacets, AuditRunDetail, AuditRunSummary, AgentDetail, AgentSettings, AgentSummary, AgentToolRef, ChatDetail, ChatMessage, ChatSummary, DailyUsage, DeclaredStdioServer, LinkableKey, NookLink, ProviderCompat, ProviderSummary, RunEvent, ServerAuthKind, ServerAvailability, ToolCatalog, ToolPolicy, ToolServerSummary } from "../../shared/agents";
+import type { AgentApiUsage, AuditFacets, AuditRunDetail, AuditRunSummary, AgentDetail, AgentSettings, AgentSummary, AgentToolRef, ChatDetail, ChatMessage, ChatSummary, DailyUsage, DeclaredStdioServer, LinkableKey, NookLink, ProviderCompat, ProviderSummary, PublicLinkState, RunEvent, ServerAuthKind, ServerAvailability, ToolCatalog, ToolPolicy, ToolServerSummary } from "../../shared/agents";
 
 /** The agent chat API (docs/plan/API_CONTRACTS.md § Agent chat), plus the SSE reader for runs. */
 
-export type AgentsStatus = { enabled: boolean; reason: "unset" | "key_mismatch" | null; canChat: boolean; canCreate: boolean; defaultModel: string; auditVisible?: boolean };
+export type AgentsStatus = { enabled: boolean; reason: "unset" | "key_mismatch" | null; canChat: boolean; canCreate: boolean; defaultModel: string; auditVisible?: boolean; /** Wave 43: the public-links policy is on and the role may create them. */ publicChatLinks?: boolean };
 
 // The Audit log (AC-C, plan §7.3): the key's owner in full, admins metadata only.
 export type AuditFilter = { key?: string | null; agent?: string | null; status?: string | null; from?: string | null; to?: string | null };
@@ -30,7 +30,15 @@ export const deleteAgent = (id: string) => api<{ ok: true }>(`/agents/${id}`, { 
 export const myUsage = () => api<{ usage: DailyUsage }>("/agents/usage");
 
 export const listChats = (q?: string) => api<{ chats: ChatSummary[] }>(`/chats${q ? `?q=${encodeURIComponent(q)}` : ""}`);
-export const getChat = (id: string) => api<ChatDetail>(`/chats/${id}`);
+/** Wave 43 (AC-D): the owner also gets the public link's state (null without one, or with the policy off). */
+export const getChat = (id: string) => api<ChatDetail & { publicLink?: PublicLinkState | null }>(`/chats/${id}`);
+export const listSharedChats = (q?: string) => api<{ chats: ChatSummary[] }>(`/chats?shared=1${q ? `&q=${encodeURIComponent(q)}` : ""}`);
+/** Continue as a copy (D361): your own chat holding the branch up to `messageId`. */
+export const forkChat = (chatId: string, messageId: string) => api<{ chat: ChatSummary }>(`/chats/${chatId}/fork`, { method: "POST", body: JSON.stringify({ messageId }) });
+export const getPublicLink = (chatId: string) => api<{ link: PublicLinkState | null }>(`/chats/${chatId}/public`);
+/** Create (answers the URL once), Update (re-snapshot, no URL), or New link (a new token and URL; the old link stops working). */
+export const putPublicLink = (chatId: string, body: { includeToolResults: boolean; newLink?: boolean }) => api<{ link: PublicLinkState; url: string | null }>(`/chats/${chatId}/public`, { method: "PUT", body: JSON.stringify(body) });
+export const revokePublicLink = (chatId: string) => api<{ ok: true }>(`/chats/${chatId}/public`, { method: "DELETE", body: "{}" });
 export const createChat = (agentId: string) => api<{ chat: ChatSummary }>("/chats", { method: "POST", body: JSON.stringify({ agentId }) });
 export const updateChat = (id: string, input: { title?: string; pinned?: boolean; activeLeafId?: string | null; expectedRevision: number }) => api<{ chat: ChatSummary }>(`/chats/${id}`, { method: "PATCH", body: JSON.stringify(input) });
 export const deleteChat = (id: string) => api<{ ok: true }>(`/chats/${id}`, { method: "DELETE", body: "{}" });

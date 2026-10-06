@@ -26,6 +26,11 @@ export function safeNotificationPath(href: string) {
   // "Shared the vault … with you" (Wave 26) opens that vault.
   const vault = /^\/vault\/([^/?#]+)$/.exec(href);
   if (vault && idPattern.test(vault[1]!)) return `/vault/${vault[1]!.toLowerCase()}`;
+  // Wave 43 (AC-D): "shared the chat … with you" opens it read-only; "shared the agent …" starts a chat with it.
+  const chat = /^\/chat\/([^/?#]+)$/.exec(href);
+  if (chat && idPattern.test(chat[1]!)) return `/chat/${chat[1]!.toLowerCase()}`;
+  const agent = /^\/chat\/new\?agent=([^/?#&]+)$/.exec(href);
+  if (agent && idPattern.test(agent[1]!)) return `/chat/new?agent=${agent[1]!.toLowerCase()}`;
   const match = /^\/calendar\/event\/([^/?#]+)$/.exec(href);
   return match && idPattern.test(match[1]!) ? `/calendar/event/${match[1]!.toLowerCase()}` : "/notifications";
 }

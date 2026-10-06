@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { Bot, Check, ChevronLeft, ChevronRight, Copy, Ellipsis, House, KeyRound, MessagesSquare, Pencil, Pin, Plus, RotateCcw, Search, Send, Sparkles, Square, Trash2, X } from "lucide-react";
+import { Bot, Check, ChevronLeft, ChevronRight, Copy, CopyPlus, Ellipsis, Globe, House, KeyRound, MessagesSquare, Pencil, Pin, Plus, RotateCcw, Search, Send, Share2, Sparkles, Square, Trash2, UsersRound, X } from "lucide-react";
+import { AccessSheet } from "../access/AccessSheet";
 import { AccountActions, AppPageName } from "../AppShell";
 import { appName } from "../appName";
 import { readHistoryDepth } from "../appShellNavigation";
@@ -12,8 +13,9 @@ import { auditRoute, chatBackAction, chatGroup, chatRoute, type ChatRoute } from
 import { Select } from "../ui/Select";
 import { useConfirm } from "../ui/useConfirm";
 import { useHistoryDialogGuard } from "../ui/useHistoryDialogGuard";
-import { AGENT_BOUNDS, type AgentSummary, type ChatDetail, type ChatMessage, type ChatSummary, type DailyUsage, type PendingConfirmation, type RunStatus, type TokenUsage, type ToolCallView } from "../../shared/agents";
-import { agentsStatus, cancelRun, confirmRun, createChat, deleteChat, errorCode, followRun, getChat, listAgents, listChats, messageOf, myUsage, regenerate, sendMessage, updateChat, type AgentsStatus, type SequencedRunEvent, type StartedRun } from "./chatApi";
+import { AGENT_BOUNDS, type AgentSummary, type ChatDetail, type ChatMessage, type ChatSummary, type DailyUsage, type PendingConfirmation, type PublicLinkState, type RunStatus, type TokenUsage, type ToolCallView } from "../../shared/agents";
+import { agentsStatus, cancelRun, confirmRun, createChat, deleteChat, errorCode, followRun, forkChat, getChat, listAgents, listChats, listSharedChats, messageOf, myUsage, regenerate, sendMessage, updateChat, type AgentsStatus, type SequencedRunEvent, type StartedRun } from "./chatApi";
+import { PublicLinkSheet } from "./PublicLinkSheet";
 import { leafForSibling, shownBranch, type Shown } from "./chatTree";
 import { LinkNookKeySheet } from "./LinkNookKeySheet";
 import { Markdown, type RenderContext } from "./markdown/render";
@@ -52,6 +54,7 @@ const ERROR_TEXT: Record<string, string> = {
   EGRESS_REFUSED: "The provider's address is not allowed",
   TOO_LARGE: "The reply was too large",
   ACCESS_REVOKED: "You can no longer chat with this agent; the answer stopped",
+  AGENT_GONE: "This chat's agent is in the Bin, deleted, or no longer shared with you",
   INTERNAL: "Something went wrong while answering"
 };
 
@@ -90,6 +93,11 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
   const [busy, setBusy] = useState(false);
   const [deciding, setDeciding] = useState(false);
   const [linking, setLinking] = useState(false);
+  // Wave 43 (AC-D): chats shared with me, the chat's Access sheet, and its Public link sheet.
+  const [sharedChats, setSharedChats] = useState<ChatSummary[] | null>(null);
+  const [sharing, setSharing] = useState(false);
+  const [publishing, setPublishing] = useState(false);
+  const [publicLink, setPublicLink] = useState<PublicLinkState | null>(null);
   const confirm = useConfirm();
   const paneRef = useRef<HTMLElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
@@ -125,7 +133,9 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
   }, []);
   const loadChats = useCallback(async (q = "") => {
     try {
-      setChats((await listChats(q)).chats);
+      const [own, shared] = await Promise.all([listChats(q), listSharedChats(q).catch(() => ({ chats: [] as ChatSummary[] }))]);
+      setChats(own.chats);
+      setSharedChats(shared.chats);
     } catch (reason) {
       if (!(reason instanceof ApiError && reason.status === 503)) flash(messageOf(reason, "Could not load chats"));
     }
@@ -227,6 +237,7 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
       const next = await getChat(chatId);
       if (generation !== detailGeneration.current) return;
       setDetail(next);
+      setPublicLink(next.publicLink ?? null);
       setDetailError(null);
       if (!keepLive) {
         if (next.activeRunId) {
@@ -253,6 +264,8 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
   useEffect(() => {
     setMenuOpen(false);
     setEditing(null);
+    setSharing(false);
+    setPublishing(false);
     stopFollowing();
     setLive(null);
     if (!route.chatId) {
@@ -423,6 +436,23 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
       flash(messageOf(reason, "Could not pin"));
     }
   }
+  // Continue as a copy (D361): your own chat with the branch up to `messageId`; the agent then runs as you.
+  async function continueFrom(messageId: string) {
+    if (!detail || busy) return;
+    setBusy(true);
+    try {
+      const { chat } = await forkChat(detail.chat.id, messageId);
+      flash("Copied to your chats");
+      void loadChats(query);
+      go(chatRoute(chat.id));
+    } catch (reason) {
+      const code = errorCode(reason);
+      flash(code === "AGENT_NOT_SHARED" ? "Its agent is not shared with you, so you cannot continue this chat" : code === "AGENT_GONE" ? ERROR_TEXT.AGENT_GONE! : messageOf(reason, "Could not copy the chat"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function remove() {
     if (!detail) return;
     setMenuOpen(false);
@@ -443,6 +473,8 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
   const agentOptions = useMemo(() => (agents ?? []).map((agent) => ({ value: agent.id, label: `${agent.icon ? `${agent.icon} ` : ""}${agent.name}`, description: agent.description || (agent.model ?? status?.defaultModel ?? "") })), [agents, status?.defaultModel]);
   const newAgent = agents?.find((agent) => agent.id === newAgentId) ?? null;
   const chatAgent = detail ? agents?.find((agent) => agent.id === detail.chat.agentId) ?? null : null;
+  // Wave 43 (AC-D): a chat shared with me is read-only; I continue in my own copy.
+  const readOnly = detail?.chat.yourLevel === "view";
   const account = <AccountActions displayName={displayName} onSettings={onSettings} onSignOut={onSignOut} />;
 
   // --- Screens the module shows instead of chats ---
@@ -475,6 +507,13 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
         <span className="chat-row-meta">{chat.agentIcon ? `${chat.agentIcon} ` : ""}{chat.agentName ?? "(agent deleted)"}{chat.running && <span className="chat-running-dot" aria-label="Answering" />}</span>
       </button></li>)}</ul>
     </div>)}
+    {sharedChats && sharedChats.length > 0 && <div className="chat-group chat-group-shared">
+      <h3>Shared with me</h3>
+      <ul>{sharedChats.map((chat) => <li key={chat.id}><button type="button" className={`chat-row${route.chatId === chat.id ? " active" : ""}`} aria-current={route.chatId === chat.id ? "page" : undefined} onClick={() => go(chatRoute(chat.id))}>
+        <span className="chat-row-title">{chat.title}</span>
+        <span className="chat-row-meta">{chat.ownerName} · {chat.agentIcon ? `${chat.agentIcon} ` : ""}{chat.agentName ?? "(agent deleted)"}{chat.running && <span className="chat-running-dot" aria-label="Answering" />}</span>
+      </button></li>)}</ul>
+    </div>}
     <div className="chat-list-foot">
       <button type="button" className="chat-link" onClick={() => onOpenAgents(null)}>Agents</button>
       {status?.auditVisible && <button type="button" className="chat-link" onClick={() => go(auditRoute())}>Audit log</button>}
@@ -536,13 +575,22 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
           <span className="chat-model-chip">{chatAgent?.model ?? status?.defaultModel ?? ""}</span>
           {chatAgent?.trifecta && <TrifectaBadge compact />}
           <h2 className="chat-title">{detail.chat.title}</h2>
-          <div className="chat-menu-anchor">
-            <button type="button" className="icon-button" aria-label="More" aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)}><Ellipsis /></button>
-            {menuOpen && <ChatMenu onClose={() => setMenuOpen(false)} pinned={detail.chat.pinned} linked={chatAgent?.linked ?? false} canLink={chatAgent !== null} onRename={() => { setMenuOpen(false); setRenaming(true); }} onPin={() => { void togglePin(); }} onLink={() => { setMenuOpen(false); setLinking(true); }} onDelete={() => { void remove(); }} />}
-          </div>
+          {readOnly && <span className="chat-shared-chip" title={`Shared with you by ${detail.chat.ownerName}`}><UsersRound aria-hidden="true" />{detail.chat.ownerName} · read-only</span>}
+          {!readOnly && detail.chat.audience && detail.chat.audience !== "private" && <span className="chat-shared-chip" title="Others can read this chat"><UsersRound aria-hidden="true" />Shared</span>}
+          {!readOnly && publicLink && <span className="chat-shared-chip" title="A public link shows a snapshot of this chat"><Globe aria-hidden="true" />Public link</span>}
+          {readOnly ? <button type="button" className="secondary-button chat-continue" onClick={() => { const last = branch.at(-1); if (last) void continueFrom(last.message.id); }} disabled={busy || branch.length === 0}><CopyPlus />Continue as a copy</button>
+            : <div className="chat-menu-anchor">
+              <button type="button" className="icon-button" aria-label="More" aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)}><Ellipsis /></button>
+              {menuOpen && <ChatMenu onClose={() => setMenuOpen(false)} pinned={detail.chat.pinned} linked={chatAgent?.linked ?? false} canLink={chatAgent !== null} canShare={role === "admin" || role === "member"} canPublish={status?.publicChatLinks === true}
+                onRename={() => { setMenuOpen(false); setRenaming(true); }} onPin={() => { void togglePin(); }} onLink={() => { setMenuOpen(false); setLinking(true); }}
+                onShare={() => { setMenuOpen(false); setSharing(true); }} onPublish={() => { setMenuOpen(false); setPublishing(true); }} onDelete={() => { void remove(); }} />}
+            </div>}
         </header>
+        {detail.chat.copiedFrom && <p className="chat-copied-note"><CopyPlus aria-hidden="true" />Copied from {detail.chat.copiedFrom}'s chat. Replies here are yours alone and run as you.</p>}
+        {readOnly && <p className="chat-copied-note" role="note"><UsersRound aria-hidden="true" />{detail.chat.ownerName} shared this chat with you, read-only. Tool calls and results show as the agent made them. To reply, continue in your own copy.</p>}
         <ol className="chat-messages" aria-live="polite" aria-relevant="additions text">
           {branch.map((shown) => <MessageView key={shown.message.id} shown={shown} context={renderContext} streaming={live?.messageId === shown.message.id && running} live={live?.messageId === shown.message.id ? live : null} busy={busy || running} deciding={deciding} onDecide={(decision, card) => { void decide(decision, card); }}
+            readOnly={readOnly} onContinue={() => { void continueFrom(shown.message.id); }}
             editing={editing?.id === shown.message.id ? editing.text : null}
             onEdit={(text) => setEditing({ id: shown.message.id, text })}
             onCancelEdit={() => setEditing(null)}
@@ -551,7 +599,7 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
             onSwitch={(direction) => { void switchBranch(shown, direction); }}
             onCopied={() => flash("Copied")} />)}
         </ol>
-        {composer}
+        {!readOnly && composer}
       </div>}
   </section>;
 
@@ -565,9 +613,15 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
     {renaming && detail && <RenameDialog title={detail.chat.title} onCancel={() => setRenaming(false)} onSave={(title) => { void rename(title); }} />}
     {externalLink && <ExternalLinkSheet href={externalLink} onClose={() => setExternalLink(null)} />}
     {linking && chatAgent && <LinkNookKeySheet agentId={chatAgent.id} agentName={chatAgent.name} onClose={() => setLinking(false)} onChanged={() => { void loadAgents(); }} />}
+    {sharing && detail && !readOnly && <AccessSheet kind="chat" id={detail.chat.id} title={detail.chat.title} guardHistory note={CHAT_SHARE_WARNING}
+      onClose={() => setSharing(false)} onSaved={() => { setSharing(false); flash("Access updated"); void refreshDetail(detail.chat.id, true); }} />}
+    {publishing && detail && !readOnly && <PublicLinkSheet chatId={detail.chat.id} title={detail.chat.title} onClose={() => setPublishing(false)} onChanged={setPublicLink} />}
     {confirm.confirmElement}
   </main>;
 }
+
+/** The share sheet's warning (plan §6.2, T315). */
+export const CHAT_SHARE_WARNING = "People you share with see tool calls and results, including anything the agent read from your Nook.";
 
 function failureText(reason: unknown, fallback: string) {
   const code = errorCode(reason);
@@ -586,13 +640,16 @@ function autoGrow(element: HTMLTextAreaElement) {
 
 type MessageViewProps = {
   shown: Shown; context: RenderContext; streaming: boolean; live: LiveRun | null; busy: boolean; editing: string | null; deciding: boolean;
+  /** Wave 43: a shared chat's reader sees the turns and "Continue from here", never Edit, Regenerate, or the card. */
+  readOnly?: boolean; onContinue?: () => void;
   onEdit: (text: string) => void; onCancelEdit: () => void; onSubmitEdit: (text: string) => void; onRegenerate: () => void; onSwitch: (direction: 1 | -1) => void; onCopied: () => void; onDecide: (decision: "once" | "deny", card: PendingConfirmation) => void;
 };
 
-function MessageView({ shown, context, streaming, live, busy, editing, deciding, onEdit, onCancelEdit, onSubmitEdit, onRegenerate, onSwitch, onCopied, onDecide }: MessageViewProps) {
+function MessageView({ shown, context, streaming, live, busy, editing, deciding, readOnly = false, onContinue, onEdit, onCancelEdit, onSubmitEdit, onRegenerate, onSwitch, onCopied, onDecide }: MessageViewProps) {
   const { message, index, count } = shown;
   const user = message.role === "user";
-  const switcher = count > 1 && <span className="chat-switcher" aria-label={`Version ${index + 1} of ${count}`}>
+  const continueAction = readOnly && onContinue && !streaming && <button type="button" className="chat-action" onClick={onContinue} disabled={busy}><CopyPlus />Continue from here</button>;
+  const switcher = !readOnly && count > 1 && <span className="chat-switcher" aria-label={`Version ${index + 1} of ${count}`}>
     <button type="button" className="icon-button" aria-label="Previous version" disabled={index === 0 || busy} onClick={() => onSwitch(-1)}><ChevronLeft /></button>
     <span>{index + 1} / {count}</span>
     <button type="button" className="icon-button" aria-label="Next version" disabled={index === count - 1 || busy} onClick={() => onSwitch(1)}><ChevronRight /></button>
@@ -608,7 +665,8 @@ function MessageView({ shown, context, streaming, live, busy, editing, deciding,
       </form> : <div className="chat-bubble"><p className="chat-user-text">{message.content}</p></div>}
       <div className="chat-message-actions">
         {switcher}
-        {editing === null && <button type="button" className="chat-action" onClick={() => onEdit(message.content)} disabled={busy}><Pencil />Edit</button>}
+        {editing === null && !readOnly && <button type="button" className="chat-action" onClick={() => onEdit(message.content)} disabled={busy}><Pencil />Edit</button>}
+        {continueAction}
       </div>
     </li>;
   }
@@ -616,7 +674,7 @@ function MessageView({ shown, context, streaming, live, busy, editing, deciding,
   const footer = message.status === "cancelled" ? "Stopped" : message.status === "interrupted" ? "Stopped: server restarted" : message.status === "step_limit" ? "Stopped at the step limit" : message.status === "error" ? (live?.error?.message ?? ERROR_TEXT[message.errorCode ?? ""] ?? "The run did not finish") : null;
   return <li className={`chat-message chat-assistant${failed ? " chat-failed" : ""}`}>
     <ToolCallsDisclosure calls={message.toolCalls} running={streaming} />
-    {live?.pending && streaming && <ConfirmationCard key={live.pending.confirmationId} confirmation={live.pending} busy={deciding} onDecide={onDecide} />}
+    {live?.pending && streaming && !readOnly && <ConfirmationCard key={live.pending.confirmationId} confirmation={live.pending} busy={deciding} onDecide={onDecide} />}
     <div className="chat-bubble">
       {message.content ? <Markdown text={message.content} context={context} streaming={streaming} /> : streaming ? <span className="chat-thinking" aria-label={live?.pending ? "Waiting for your answer" : "Answering"}>…</span> : null}
       {footer && <p className={`chat-footer${failed ? " chat-footer-error" : ""}`} role={failed ? "alert" : undefined}>{footer}</p>}
@@ -624,13 +682,14 @@ function MessageView({ shown, context, streaming, live, busy, editing, deciding,
     {!streaming && <div className="chat-message-actions">
       {switcher}
       {message.content && <button type="button" className="chat-action" onClick={() => { void copy(); }}><Copy />Copy</button>}
-      <button type="button" className="chat-action" onClick={onRegenerate} disabled={busy}><RotateCcw />{failed || message.status === "cancelled" ? "Retry" : "Regenerate"}</button>
+      {!readOnly && <button type="button" className="chat-action" onClick={onRegenerate} disabled={busy}><RotateCcw />{failed || message.status === "cancelled" ? "Retry" : "Regenerate"}</button>}
+      {continueAction}
       {tokens(message.usage) && <span className="chat-tokens">{tokens(message.usage)}</span>}
     </div>}
   </li>;
 }
 
-function ChatMenu({ onClose, pinned, linked, canLink, onRename, onPin, onLink, onDelete }: { onClose: () => void; pinned: boolean; linked: boolean; canLink: boolean; onRename: () => void; onPin: () => void; onLink: () => void; onDelete: () => void }) {
+function ChatMenu({ onClose, pinned, linked, canLink, canShare, canPublish, onRename, onPin, onLink, onShare, onPublish, onDelete }: { onClose: () => void; pinned: boolean; linked: boolean; canLink: boolean; canShare: boolean; canPublish: boolean; onRename: () => void; onPin: () => void; onLink: () => void; onShare: () => void; onPublish: () => void; onDelete: () => void }) {
   useHistoryDialogGuard(true, onClose);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") { event.preventDefault(); onClose(); } };
@@ -643,6 +702,8 @@ function ChatMenu({ onClose, pinned, linked, canLink, onRename, onPin, onLink, o
     <button type="button" role="menuitem" onClick={onRename}><Pencil />Rename</button>
     <button type="button" role="menuitem" onClick={onPin}><Pin />{pinned ? "Unpin" : "Pin"}</button>
     {canLink && <button type="button" role="menuitem" onClick={onLink}><KeyRound />{linked ? "Linked Nook key…" : "Link Nook key…"}</button>}
+    {canShare && <button type="button" role="menuitem" onClick={onShare}><Share2 />Share…</button>}
+    {canPublish && <button type="button" role="menuitem" onClick={onPublish}><Globe />Public link…</button>}
     <button type="button" role="menuitem" className="danger" onClick={onDelete}><Trash2 />Move to Bin</button>
   </div>;
 }

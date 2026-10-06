@@ -19,7 +19,7 @@ export const draftFrom = (access: ItemAccess): Draft => ({
   groups: access.groups.map(({ id, name, memberCount, guestCount, selfAddedCount, level }) => ({ id, name, memberCount, guestCount, selfAddedCount, level }))
 });
 
-const KIND_NOUN: Record<AccessKind, string> = { note: "note", folder: "folder", document: "file", board: "board", task_view: "view", collection: "collection", calendar: "calendar" };
+const KIND_NOUN: Record<AccessKind, string> = { note: "note", folder: "folder", document: "file", board: "board", task_view: "view", collection: "collection", calendar: "calendar", agent: "agent", chat: "chat" };
 
 /** The audience radios (§E). Managers never see them (D273); notes and files can inherit their folder. */
 export function audienceOptions(access: Pick<ItemAccess, "kind" | "inheritable">): Array<{ value: Audience; label: string; hint: string }> {
@@ -67,15 +67,17 @@ export const INTEGRATION_KEYS_NOTE = "Admins hold its keys and can read what you
  * their Team role), leaving out the owner and everyone already on the list. With sharing with guests
  * off, groups that include guests are shown disabled with the reason (T213).
  */
-export function pickerOptions(draft: Draft, access: Pick<ItemAccess, "owner" | "shareWithGuests">, people: readonly PickerPerson[], groups: readonly PickerGroup[]): Option[] {
+export function pickerOptions(draft: Draft, access: Pick<ItemAccess, "owner" | "shareWithGuests" | "guestsExcluded">, people: readonly PickerPerson[], groups: readonly PickerGroup[]): Option[] {
   const chosenPeople = new Set(draft.people.map((person) => person.id));
   const chosenGroups = new Set(draft.groups.map((group) => group.id));
   const groupOptions: Option[] = groups.filter((group) => !chosenGroups.has(group.id)).map((group) => {
     const blocked = !access.shareWithGuests && group.guestCount > 0;
-    return { value: groupValue(group.id), label: group.name, group: "Groups", description: blocked ? `${groupSummary(group)} · sharing with guests is off` : groupSummary(group), disabled: blocked };
+    const note = access.guestsExcluded && group.guestCount > 0 ? " · its guests get nothing" : "";
+    return { value: groupValue(group.id), label: group.name, group: "Groups", description: blocked ? `${groupSummary(group)} · sharing with guests is off` : `${groupSummary(group)}${note}`, disabled: blocked };
   });
   // With sharing with guests off (as loaded, or learned from a refusal: Q3), guests are not offered.
-  const personOptions: Option[] = people.filter((person) => person.id !== access.owner.id && !chosenPeople.has(person.id) && (access.shareWithGuests || person.role !== "guest")).map((person) => ({
+  // Agents and chats (Wave 43): guests never reach Chat, so they are never offered by name.
+  const personOptions: Option[] = people.filter((person) => person.id !== access.owner.id && !chosenPeople.has(person.id) && ((access.shareWithGuests && !access.guestsExcluded) || person.role !== "guest")).map((person) => ({
     value: personValue(person.id),
     label: person.displayName,
     // Wave 36 (D287): integrations are offered like people, marked, and after them.

@@ -133,7 +133,7 @@ function PolicyForm({ settings, providers, flash, onSaved }: { settings: AgentSe
     event.preventDefault();
     setBusy(true);
     try {
-      const { settings: next } = await writeSettings({ createRoles: draft.createRoles, chatRoles: draft.chatRoles, dailyTokensUser: draft.dailyTokensUser, dailyTokensInstance: draft.dailyTokensInstance, agentsPerUser: draft.agentsPerUser, defaultProviderId: draft.defaultProviderId, expectedRevision: settings.revision });
+      const { settings: next } = await writeSettings({ createRoles: draft.createRoles, chatRoles: draft.chatRoles, dailyTokensUser: draft.dailyTokensUser, dailyTokensInstance: draft.dailyTokensInstance, agentsPerUser: draft.agentsPerUser, defaultProviderId: draft.defaultProviderId, publicChatLinks: draft.publicChatLinks, expectedRevision: settings.revision });
       onSaved(next);
       flash("Policy saved");
     } catch (reason) {
@@ -154,10 +154,14 @@ function PolicyForm({ settings, providers, flash, onSaved }: { settings: AgentSe
       <label>Agents per person<input type="number" min={1} max={500} value={draft.agentsPerUser} onChange={(event) => setDraft({ ...draft, agentsPerUser: Math.min(500, Math.max(1, Math.floor(Number(event.target.value) || 1))) })} /></label>
       <div><span className="ai-label" id="ai-default-provider">Default provider</span><Select<string> labelledBy="ai-default-provider" label="Default provider" value={draft.defaultProviderId ?? providers.find((provider) => provider.isDefault)?.id ?? null} onChange={(value) => setDraft({ ...draft, defaultProviderId: value })} options={providers.map((provider) => ({ value: provider.id, label: provider.name, description: provider.defaultModel }))} placeholder="The provider marked default" disabled={providers.length === 0} /></div>
     </div>
-    <p className="chat-muted">Public chat links stay off in this release (AC-O1). Sharing and the Audit log come in later releases.</p>
+    <label className="ai-check"><input type="checkbox" checked={draft.publicChatLinks} onChange={(event) => setDraft({ ...draft, publicChatLinks: event.target.checked })} />Allow public chat links</label>
+    <p className="chat-muted">{PUBLIC_LINKS_POLICY_TEXT}</p>
     <footer className="file-dialog-actions"><button type="submit" className="primary-button" disabled={busy}>{busy ? "Saving…" : "Save policy"}</button></footer>
   </form>;
 }
+
+/** What the public-links policy does (Wave 43, AC-O1, D362), under its checkbox. */
+export const PUBLIC_LINKS_POLICY_TEXT = "Members and admins can then publish a frozen snapshot of one of their chats at a link anyone can open without signing in; tool results stay hidden unless they include them. Turning this off makes every link answer “not found” at once; the links are kept, so they work again if you turn it back on.";
 
 function ProviderDialog({ provider, onCancel, onSaved }: { provider: ProviderSummary | null; onCancel: () => void; onSaved: () => void }) {
   const [name, setName] = useState(provider?.name ?? "");

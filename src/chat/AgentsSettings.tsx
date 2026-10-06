@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from "react";
-import { Bot, ChevronLeft, Plus } from "lucide-react";
+import { Bot, ChevronLeft, Plus, Share2, UsersRound } from "lucide-react";
 import { ApiError } from "../api";
+import { AccessSheet } from "../access/AccessSheet";
 import { hubDocumentTitle, NEW_AGENT, type Route } from "../router";
 import { Select } from "../ui/Select";
 import { useConfirm } from "../ui/useConfirm";
@@ -41,19 +42,24 @@ export function AgentsSettings({ agentId, navigate, flash, onOpenChat }: { agent
 
   if (agentId) return <AgentEditor agentId={agentId} navigate={navigate} flash={flash} canCreate={status?.canCreate ?? false} onOpenChat={onOpenChat} />;
   const toList = { app: "settings" as const, section: "agents" as const };
+  // Wave 43 (AC-D): your own agents, then those shared with you (with the owner and your level).
+  const own = agents?.filter((agent) => agent.yourLevel === "owner") ?? null;
+  const shared = agents?.filter((agent) => agent.yourLevel !== "owner") ?? [];
+  const row = (agent: AgentSummary) => <li key={agent.id}>
+    <button type="button" className="agents-row" onClick={() => navigate({ ...toList, agentId: agent.id })}>
+      <span className="agents-row-icon" aria-hidden="true">{agent.icon || "🤖"}</span>
+      <span className="agents-row-text"><strong>{agent.name}</strong><small>{agent.yourLevel !== "owner" ? `${agent.ownerName} · ${agent.yourLevel === "manage" ? "Manager" : "Can chat"} · ` : ""}{agent.description || "No description"} · {agent.model ?? status?.defaultModel ?? "default model"} · {agent.maxSteps} steps</small></span>
+    </button>
+    <button type="button" className="secondary-button" onClick={() => onOpenChat(agent.id)}>Chat</button>
+  </li>;
   return <section className="settings-content agents-settings" aria-labelledby="agents-heading">
     <div className="settings-section-heading"><span className="settings-icon"><Bot /></span><div><h3 id="agents-heading">Agents</h3><p>An agent is a prompt, a model, a step limit, and the tools it may call. Your prompts are not secret: anyone you later share an agent with can read what it says through the model.</p></div></div>
     {error && <p className="form-error" role="alert">{error}</p>}
     {status && !status.enabled && <p className="settings-warning">Chat is not configured on this server{status.reason ? " (see Settings → AI)" : ""}.</p>}
     {status?.enabled && !status.canChat && <p className="settings-warning">Chat is off for your role.</p>}
-    {agents && agents.length > 0 && <ul className="agents-list">{agents.map((agent) => <li key={agent.id}>
-      <button type="button" className="agents-row" onClick={() => navigate({ ...toList, agentId: agent.id })}>
-        <span className="agents-row-icon" aria-hidden="true">{agent.icon || "🤖"}</span>
-        <span className="agents-row-text"><strong>{agent.name}</strong><small>{agent.description || "No description"} · {agent.model ?? status?.defaultModel ?? "default model"} · {agent.maxSteps} steps</small></span>
-      </button>
-      <button type="button" className="secondary-button" onClick={() => onOpenChat(agent.id)}>Chat</button>
-    </li>)}</ul>}
+    {own && own.length > 0 && <ul className="agents-list" aria-label="Your agents">{own.map(row)}</ul>}
     {agents && agents.length === 0 && status?.enabled && status.canChat && <p className="chat-muted">No agents yet.</p>}
+    {shared.length > 0 && <><h4 className="agents-shared-heading"><UsersRound aria-hidden="true" />Shared with you</h4><ul className="agents-list" aria-label="Agents shared with you">{shared.map(row)}</ul></>}
     {status?.enabled && status.canCreate && <button type="button" className="secondary-button agents-add" onClick={() => navigate({ ...toList, agentId: NEW_AGENT })}><Plus />New agent</button>}
   </section>;
 }
@@ -62,7 +68,7 @@ export type EditorForm = { name: string; description: string; icon: string; syst
 
 /** Whether the editor's fields differ from the agent as loaded (Wave 41 QA Q2): such a form is never refilled by a background load. */
 export function editorDiffers(agent: AgentDetail, form: EditorForm) {
-  return form.name !== agent.name || form.description !== agent.description || form.icon !== (agent.icon ?? "") || form.systemPrompt !== agent.systemPrompt
+  return form.name !== agent.name || form.description !== agent.description || form.icon !== (agent.icon ?? "") || form.systemPrompt !== (agent.systemPrompt ?? "")
     || form.model !== (agent.model ?? "") || form.maxSteps !== agent.maxSteps || form.temperature !== (agent.temperature === null ? "" : String(agent.temperature))
     || form.starters !== agent.starters.join("\n") || form.directWrites !== agent.nookDirectWrites || JSON.stringify(form.tools) !== JSON.stringify(agent.tools);
 }
@@ -82,6 +88,7 @@ function AgentEditor({ agentId, navigate, flash, canCreate, onOpenChat }: { agen
   const [directWrites, setDirectWrites] = useState(false);
   const [catalog, setCatalog] = useState<ToolCatalog | null>(null);
   const [linking, setLinking] = useState(false);
+  const [sharing, setSharing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [stale, setStale] = useState(false);
@@ -94,7 +101,7 @@ function AgentEditor({ agentId, navigate, flash, canCreate, onOpenChat }: { agen
     setName(detail.name);
     setDescription(detail.description);
     setIcon(detail.icon ?? "");
-    setSystemPrompt(detail.systemPrompt);
+    setSystemPrompt(detail.systemPrompt ?? "");
     setModel(detail.model ?? "");
     setMaxSteps(detail.maxSteps);
     setTemperature(detail.temperature === null ? "" : String(detail.temperature));
@@ -175,9 +182,12 @@ function AgentEditor({ agentId, navigate, flash, canCreate, onOpenChat }: { agen
   }
 
   if (creating && !canCreate) return <div className="settings-content settings-team-content"><button type="button" className="team-back team-back-visible" onClick={() => navigate(toList)}><ChevronLeft />Agents</button><p className="settings-warning">Your role cannot create agents.</p></div>;
+  // Wave 43 (D356): someone who may only chat with a shared agent sees what it is, never its prompt or tools.
+  if (agent && agent.yourLevel === "view") return <AgentInfo agent={agent} onBack={() => navigate(toList)} onOpenChat={onOpenChat} onLink={() => setLinking(true)} linking={linking} onCloseLink={() => setLinking(false)} onLinkChanged={onLinkChanged} onOpenKeys={() => { setLinking(false); navigate({ app: "settings", section: "mcp" }); }} />;
+  const canShareAgent = agent !== null && !creating && (agent.yourLevel === "owner" || agent.yourLevel === "manage");
   return <div className="settings-content settings-team-content agents-editor">
     <button type="button" className="team-back team-back-visible" onClick={() => navigate(toList)}><ChevronLeft />Agents</button>
-    <div className="settings-section-heading"><span className="settings-icon"><Bot /></span><div><h3>{creating ? "New agent" : agent?.name ?? "Agent"}</h3><p>Basics, instructions, the model, and the tools it may call.</p></div></div>
+    <div className="settings-section-heading"><span className="settings-icon"><Bot /></span><div><h3>{creating ? "New agent" : agent?.name ?? "Agent"}</h3><p>{agent && agent.yourLevel === "manage" ? `${agent.ownerName} owns this agent; you manage it. You can edit and share it; only ${agent.ownerName} can move it to the Bin.` : "Basics, instructions, the model, and the tools it may call."}</p></div></div>
     {error && <p className="form-error" role="alert">{error}</p>}
     {stale && <p className="settings-warning">Changed elsewhere. <button type="button" className="chat-link" onClick={() => { void load(true); }}>Reload</button></p>}
     {(creating || agent) && <form className="file-dialog-form agents-form" onSubmit={save}>
@@ -210,13 +220,44 @@ function AgentEditor({ agentId, navigate, flash, canCreate, onOpenChat }: { agen
       <textarea id={ids.starters} value={starters} rows={3} onChange={(event) => setStarters(event.target.value)} />
       <footer className="file-dialog-actions agents-actions">
         {agent && <button type="button" className="secondary-button" onClick={() => onOpenChat(agent.id)}>Chat with it</button>}
-        {agent && <button type="button" className="secondary-button" onClick={() => { void remove(); }}>Move to Bin</button>}
+        {canShareAgent && <button type="button" className="secondary-button" onClick={() => setSharing(true)}><Share2 />Share…</button>}
+        {agent && agent.yourLevel === "owner" && <button type="button" className="secondary-button" onClick={() => { void remove(); }}>Move to Bin</button>}
         <button type="submit" className="primary-button" disabled={busy || stale}>{busy ? "Saving…" : creating ? "Create agent" : "Save"}</button>
       </footer>
     </form>}
     {agent && !creating && <AgentApiRuns agentId={agent.id} />}
     {linking && agent && <LinkNookKeySheet agentId={agent.id} agentName={agent.name} onClose={() => setLinking(false)} onChanged={onLinkChanged} onOpenKeys={() => { setLinking(false); navigate({ app: "settings", section: "mcp" }); }} />}
+    {sharing && agent && <AccessSheet kind="agent" id={agent.id} title={agent.name} guardHistory note={AGENT_SHARE_NOTE} onClose={() => setSharing(false)} onSaved={() => { setSharing(false); flash("Access updated"); }} />}
     {confirm.confirmElement}
+  </div>;
+}
+
+/** What sharing an agent means (D356, D359, T311, T322), under the Access sheet. */
+export const AGENT_SHARE_NOTE = "Can view: they chat with it and never see its prompt or tools (prompts are not secret: the model can repeat them). Manager: they also edit and share it. Its Nook tools always run through each person's own linked key, never yours.";
+
+/**
+ * A shared agent for someone who may only chat with it (Wave 43, D356): name, description, owner,
+ * model, and starters; never the prompt or the tools. Their own Nook key is linked here (D359): the
+ * agent's Nook tools run through it, never through the owner's.
+ */
+function AgentInfo({ agent, onBack, onOpenChat, onLink, linking, onCloseLink, onLinkChanged, onOpenKeys }: {
+  agent: AgentDetail; onBack: () => void; onOpenChat: (agentId: string) => void; onLink: () => void; linking: boolean; onCloseLink: () => void; onLinkChanged: (link: NookLink) => void; onOpenKeys: () => void;
+}) {
+  return <div className="settings-content settings-team-content agents-editor agents-info">
+    <button type="button" className="team-back team-back-visible" onClick={onBack}><ChevronLeft />Agents</button>
+    <div className="settings-section-heading"><span className="settings-icon" aria-hidden="true">{agent.icon || <Bot />}</span><div><h3>{agent.name}</h3><p>Shared with you by {agent.ownerName}. You can chat with it; its prompt and tools stay with its owner.</p></div></div>
+    {agent.trifecta && <TrifectaBadge />}
+    <dl className="agents-info-list">
+      <dt>Description</dt><dd>{agent.description || "No description"}</dd>
+      <dt>Model</dt><dd>{agent.model ?? "The provider's default model"} · up to {agent.maxSteps} steps</dd>
+      {agent.starters.length > 0 && <><dt>Starters</dt><dd><ul>{agent.starters.map((starter) => <li key={starter}>{starter}</li>)}</ul></dd></>}
+      <dt>Nook tools</dt><dd>{agent.usesNook ? agent.linked ? "They run through your linked Nook key." : agent.linkState !== "none" ? `${LINK_DEAD_SENTENCE[agent.linkState]}: link another to give it Nook's tools.` : "This agent can use Nook's tools through a key of yours. Without one it answers without them." : "This agent uses none of Nook's tools."}</dd>
+    </dl>
+    <footer className="file-dialog-actions agents-actions">
+      {agent.usesNook && <button type="button" className="secondary-button" onClick={onLink}>{agent.linked ? "Change linked key" : "Link Nook key"}</button>}
+      <button type="button" className="primary-button" onClick={() => onOpenChat(agent.id)}>Chat with it</button>
+    </footer>
+    {linking && <LinkNookKeySheet agentId={agent.id} agentName={agent.name} onClose={onCloseLink} onChanged={onLinkChanged} onOpenKeys={onOpenKeys} />}
   </div>;
 }
 
