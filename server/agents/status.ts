@@ -29,12 +29,13 @@ export function initAgentsStatus(log: (line: string) => void = (line) => console
   const checked = verifySecrets(key);
   if (checked.failed > 0) {
     status = { enabled: false, reason: "key_mismatch" };
-    log(`Agents: AGENT_SECRETS_KEY does not open ${checked.failed} of ${checked.total} stored provider secrets, so the Chat module is off. Restore the key these providers were saved with, or remove and re-enter their API keys.`);
+    log(`Agents: AGENT_SECRETS_KEY does not open ${checked.failed} of ${checked.total} stored provider and tool-server secrets, so the Chat module is off. Restore the key they were saved with, or remove and re-enter their credentials.`);
     return status;
   }
   const providers = (db.query("SELECT COUNT(*) AS count FROM agent_providers").get() as { count: number }).count;
+  const servers = (db.query("SELECT COUNT(*) AS count FROM agent_tool_servers").get() as { count: number }).count;
   status = { enabled: true, reason: null };
-  log(`Agents: on (${providers} ${providers === 1 ? "provider" : "providers"}; the key comes from ${config.agents.source === "file" ? "AGENT_SECRETS_KEY_FILE" : "AGENT_SECRETS_KEY"}; outbound calls go only to configured provider endpoints).`);
+  log(`Agents: on (${providers} ${providers === 1 ? "provider" : "providers"}, ${servers} tool ${servers === 1 ? "server" : "servers"}; the key comes from ${config.agents.source === "file" ? "AGENT_SECRETS_KEY_FILE" : "AGENT_SECRETS_KEY"}; outbound calls go only to configured provider endpoints and tool servers).`);
   return status;
 }
 

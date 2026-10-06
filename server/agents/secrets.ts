@@ -66,13 +66,16 @@ export function secretHint(plaintext: string) {
   return `${text.slice(0, 3)}…${text.slice(-4)}`;
 }
 
-/** Startup check: whether every stored provider secret opens under `key`. Counts only. */
+/** Startup check: whether every stored provider and tool-server secret opens under `key`. Counts only. */
 export function verifySecrets(key: Buffer): { total: number; failed: number } {
-  const rows = db.query("SELECT id, api_key_ct FROM agent_providers WHERE api_key_ct IS NOT NULL").all() as Array<{ id: string; api_key_ct: string }>;
+  const rows = [
+    ...(db.query("SELECT id, api_key_ct AS ct FROM agent_providers WHERE api_key_ct IS NOT NULL").all() as Array<{ id: string; ct: string }>).map((row) => ({ owner: "provider" as const, ...row })),
+    ...(db.query("SELECT id, secret_ct AS ct FROM agent_tool_servers WHERE secret_ct IS NOT NULL").all() as Array<{ id: string; ct: string }>).map((row) => ({ owner: "server" as const, ...row }))
+  ];
   let failed = 0;
   for (const row of rows) {
     try {
-      openSecret("provider", row.id, row.api_key_ct, key);
+      openSecret(row.owner, row.id, row.ct, key);
     } catch {
       failed += 1;
     }

@@ -108,7 +108,7 @@ export type EgressResponse = { status: number; headers: Headers; body: AsyncIter
  * the first-byte and total timeouts abort the request. `init.headers` must carry only what the
  * provider needs.
  */
-export async function egressFetch(value: string, init: { method: "GET" | "POST"; headers?: Record<string, string>; body?: string; signal?: AbortSignal }, caps: EgressCaps): Promise<EgressResponse> {
+export async function egressFetch(value: string, init: { method: "GET" | "POST" | "DELETE"; headers?: Record<string, string>; body?: string; signal?: AbortSignal }, caps: EgressCaps): Promise<EgressResponse> {
   const url = await assertEgressAllowed(value);
   const controller = new AbortController();
   const abort = (reason: EgressError) => controller.abort(reason);

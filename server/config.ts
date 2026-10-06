@@ -131,6 +131,16 @@ const agentAllowedPrivateHosts = parseAllowedPrivateHosts(process.env.AGENT_ALLO
 if (agentAllowedPrivateHosts.length > 50) throw new Error("AGENT_ALLOWED_PRIVATE_HOSTS takes at most 50 entries");
 const agentMaxConcurrentRuns = integerEnv("AGENT_MAX_CONCURRENT_RUNS", 4, 1, 32);
 const agentRunTimeoutS = integerEnv("AGENT_RUN_TIMEOUT_S", 600, 30, 3600);
+/**
+ * stdio MCP servers (Wave 41, plan §3.3, D348): never from the UI. Only with `AGENT_MCP_STDIO=on`
+ * does Nook read the host's declaration file (`AGENT_MCP_STDIO_FILE`, an absolute path), at startup.
+ * With the flag off the file is ignored, whatever it holds. server/agents/stdio.ts reads it.
+ */
+const agentMcpStdioRaw = (process.env.AGENT_MCP_STDIO ?? "off").trim().toLowerCase();
+if (!["on", "off"].includes(agentMcpStdioRaw)) throw new Error("AGENT_MCP_STDIO must be on or off");
+const agentMcpStdioFile = (process.env.AGENT_MCP_STDIO_FILE ?? "").trim() || null;
+if (agentMcpStdioRaw === "on" && !agentMcpStdioFile) throw new Error("AGENT_MCP_STDIO=on needs AGENT_MCP_STDIO_FILE (an absolute path to the declaration file)");
+if (agentMcpStdioFile && !agentMcpStdioFile.startsWith("/")) throw new Error("AGENT_MCP_STDIO_FILE must be an absolute path");
 
 // Web Push (WAVES_10-12.md D65). auto: on only when APP_ORIGIN is https (browsers need a secure origin).
 const pushEnabledValue = process.env.PUSH_ENABLED?.trim() || "auto";
@@ -308,7 +318,7 @@ export const config = {
    * Agent chat (Wave 40): the secrets key (null = module off), the private hosts the server may
    * call, and the run caps. Tests switch these in process.
    */
-  agents: { key: agentSecretsKey.key, source: agentSecretsKey.source, allowedPrivateHosts: agentAllowedPrivateHosts, maxConcurrentRuns: agentMaxConcurrentRuns, runTimeoutS: agentRunTimeoutS },
+  agents: { key: agentSecretsKey.key, source: agentSecretsKey.source, allowedPrivateHosts: agentAllowedPrivateHosts, maxConcurrentRuns: agentMaxConcurrentRuns, runTimeoutS: agentRunTimeoutS, stdio: agentMcpStdioRaw === "on", stdioFile: agentMcpStdioFile },
   signupRole,
   sessionDays: Math.max(1, Number(process.env.SESSION_DAYS ?? 14)),
   maxMarkdownBytes: Math.max(1024, Number(process.env.MAX_MARKDOWN_BYTES ?? 2_000_000)),

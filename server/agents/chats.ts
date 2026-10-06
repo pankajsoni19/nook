@@ -1,6 +1,6 @@
 import { audit, db, now } from "../db";
 import { purgeAfterFrom } from "../bin";
-import { AGENT_BOUNDS, type ChatDetail, type ChatMessage, type ChatSummary, type TokenUsage } from "../../shared/agents";
+import { AGENT_BOUNDS, type ChatDetail, type ChatMessage, type ChatSummary, type TokenUsage, type ToolCallView } from "../../shared/agents";
 import { usableAgent, type AgentRow } from "./agentsService";
 import { AgentError } from "./status";
 
@@ -31,9 +31,20 @@ const parseUsage = (json: string | null): TokenUsage | null => {
   }
 };
 
+/** The tool calls stored on an assistant row (AC-B): excerpts only, never whole results. */
+export function parseToolCalls(json: string | null): ToolCallView[] {
+  if (!json) return [];
+  try {
+    const value: unknown = JSON.parse(json);
+    return Array.isArray(value) ? value.filter((item): item is ToolCallView => !!item && typeof item === "object" && typeof (item as ToolCallView).id === "string" && typeof (item as ToolCallView).tool === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 export const messageOf = (row: MessageRow): ChatMessage => ({
   id: row.id, parentId: row.parent_id, role: row.role, content: row.content, status: row.status, errorCode: row.error_code, model: row.model,
-  usage: parseUsage(row.usage_json), runId: row.run_id, createdAt: row.created_at, finishedAt: row.finished_at
+  usage: parseUsage(row.usage_json), runId: row.run_id, createdAt: row.created_at, finishedAt: row.finished_at, toolCalls: parseToolCalls(row.tool_calls_json)
 });
 
 const LIVE_RUN = "SELECT 1 FROM agent_runs r WHERE r.chat_id = c.id AND r.status IN ('queued','running','awaiting_confirmation')";
@@ -72,7 +83,8 @@ export function chatDetail(id: string, userId: string): ChatDetail {
   if (!chat) throw new AgentError(404, "NOT_FOUND", "Not found");
   const rows = db.query("SELECT * FROM chat_messages WHERE chat_id = ? ORDER BY created_at, rowid").all(id) as MessageRow[];
   const run = db.query("SELECT id FROM agent_runs WHERE chat_id = ? AND status IN ('queued','running','awaiting_confirmation') ORDER BY queued_at DESC LIMIT 1").get(id) as { id: string } | null;
-  return { chat, messages: rows.map(messageOf), activeRunId: run?.id ?? null };
+  // `pendingConfirmation` is filled by the route from the live run (runs.ts owns it).
+  return { chat, messages: rows.map(messageOf), activeRunId: run?.id ?? null, pendingConfirmation: null };
 }
 
 export function createChat(userId: string, agentId: string): ChatSummary {
@@ -183,8 +195,24 @@ export function flushAssistantText(messageId: string, content: string) {
   db.query("UPDATE chat_messages SET content = ? WHERE id = ? AND status = 'streaming'").run(content.slice(0, AGENT_BOUNDS.assistantMessageChars), messageId);
 }
 
-export function finishAssistantMessage(messageId: string, result: { status: ChatMessage["status"]; content: string; errorCode?: string | null; usage: TokenUsage | null; model: string | null }) {
+/** The stored tool-call list, bounded (AC-B): the newest calls are kept when the list would be too long. */
+const toolCallsJson = (calls: readonly ToolCallView[]) => {
+  let list = [...calls];
+  let json = JSON.stringify(list);
+  while (json.length > AGENT_BOUNDS.toolCallsJsonChars && list.length > 1) {
+    list = list.slice(1);
+    json = JSON.stringify(list);
+  }
+  return list.length ? json : null;
+};
+
+/** Flushes the tool calls made so far (after every call), so a reload shows them. */
+export function flushToolCalls(messageId: string, calls: readonly ToolCallView[]) {
+  db.query("UPDATE chat_messages SET tool_calls_json = ? WHERE id = ? AND status IN ('streaming','awaiting_confirmation')").run(toolCallsJson(calls), messageId);
+}
+
+export function finishAssistantMessage(messageId: string, result: { status: ChatMessage["status"]; content: string; errorCode?: string | null; usage: TokenUsage | null; model: string | null; toolCalls?: readonly ToolCallView[] }) {
   const cut = result.content.length > AGENT_BOUNDS.assistantMessageChars ? `${result.content.slice(0, AGENT_BOUNDS.assistantMessageChars - 40)}\n\n[truncated: the reply was longer than allowed]` : result.content;
-  db.query("UPDATE chat_messages SET content = ?, status = ?, error_code = ?, usage_json = ?, model = COALESCE(?, model), finished_at = ? WHERE id = ?")
-    .run(cut, result.status, result.errorCode ?? null, result.usage ? JSON.stringify(result.usage) : null, result.model, now(), messageId);
+  db.query("UPDATE chat_messages SET content = ?, status = ?, error_code = ?, usage_json = ?, model = COALESCE(?, model), tool_calls_json = COALESCE(?, tool_calls_json), finished_at = ? WHERE id = ?")
+    .run(cut, result.status, result.errorCode ?? null, result.usage ? JSON.stringify(result.usage) : null, result.model, result.toolCalls ? toolCallsJson(result.toolCalls) : null, now(), messageId);
 }

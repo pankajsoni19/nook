@@ -12,7 +12,9 @@
  *   `stall:`           send one chunk, then nothing (the idle timeout)
  *   `redirect:`        answer 302 to itself
  *   `huge:<kb>`        stream `<kb>` KiB of text (the byte cap)
- *   `tool:`            stream a tool call (AC-B's shape; AC-A must ignore it and stop)
+ *   `tool:<name>:<json>` stream a call to `<name>` with those arguments (default `lookup({"q":"x"})`);
+ *                      once a `tool` turn has come back, answer "Done: <excerpt of the result>"
+ *   `loop:<name>:<json>` stream the call at every step, whatever came back (the step cap)
  */
 
 export type ProviderCall = { method: string; path: string; headers: Record<string, string>; body: unknown };
@@ -43,10 +45,15 @@ export function startFakeProvider(port: number, options: { models?: string[] } =
         return Response.json({ object: "list", data: models.map((id) => ({ id, object: "model" })) });
       }
       if (request.method === "POST" && url.pathname === "/v1/chat/completions") {
-        const payload = body as { model?: string; messages?: Array<{ role: string; content: string }>; stream?: boolean } | null;
+        const payload = body as { model?: string; messages?: Array<{ role: string; content: string | null; tool_calls?: unknown[] }>; stream?: boolean; tools?: Array<{ function: { name: string } }> } | null;
         const model = payload?.model ?? "gpt-6-luna";
         const last = [...(payload?.messages ?? [])].reverse().find((turn) => turn.role === "user")?.content ?? "";
-        const match = /^(echo|slow|status|nousage|stall|redirect|huge|tool):(.*)$/s.exec(last);
+        const lastTurn = payload?.messages?.at(-1);
+        let match = /^(echo|slow|status|nousage|stall|redirect|huge|tool|loop):(.*)$/s.exec(last);
+        // AC-B: after a tool result came back (`tool:` mode), the model answers with an excerpt of it;
+        // `loop:` keeps calling the tool every step (the step cap). The call names a tool offered to it
+        // (`tool:<name>:<json args>`; a name not offered is sent as given, to test "unknown tool").
+        if (match?.[1] === "tool" && lastTurn?.role === "tool") match = ["", "echo", `Done: ${(lastTurn.content ?? "").slice(0, 120)}`] as unknown as RegExpExecArray;
         const mode = match?.[1] ?? "echo";
         const rest = match ? match[2]! : `You said: ${last}`;
         if (mode === "status") return Response.json({ error: { message: `Simulated failure sk-secret-should-not-echo-123456789012345 (${rest})`, type: "server_error" } }, { status: Number(rest) || 500 });
@@ -60,13 +67,19 @@ export function startFakeProvider(port: number, options: { models?: string[] } =
         }
         if (mode === "huge") text = "x".repeat(Math.max(1, Number(rest) || 1) * 1024);
         const words = mode === "huge" ? text.match(/.{1,4096}/g) ?? [] : text.split(/(?<=\s)/);
-        const promptTokens = Math.ceil((payload?.messages ?? []).reduce((sum, turn) => sum + turn.content.length, 0) / 4);
+        const promptTokens = Math.ceil((payload?.messages ?? []).reduce((sum, turn) => sum + (turn.content?.length ?? 0), 0) / 4);
         const stream = new ReadableStream<Uint8Array>({
           async start(controller) {
             try {
-              if (mode === "tool") {
-                controller.enqueue(chunk({ id: "chatcmpl-fake", object: "chat.completion.chunk", model, choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: "call_1", type: "function", function: { name: "lookup", arguments: "{\"q\":" } }] }, finish_reason: null }] }));
-                controller.enqueue(chunk({ id: "chatcmpl-fake", object: "chat.completion.chunk", model, choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: "\"x\"}" } }] }, finish_reason: "tool_calls" }] }));
+              if (mode === "tool" || mode === "loop") {
+                // `<name>:<json>`; the default is AC-A's `lookup({"q":"x"})`. Arguments are split across two chunks.
+                const colon = rest.indexOf(":");
+                const name = (colon >= 0 ? rest.slice(0, colon) : rest).trim() || "lookup";
+                const args = colon >= 0 ? rest.slice(colon + 1) : "{\"q\":\"x\"}";
+                const half = Math.ceil(args.length / 2);
+                const callId = `call_${(payload?.messages ?? []).length}`;
+                controller.enqueue(chunk({ id: "chatcmpl-fake", object: "chat.completion.chunk", model, choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: callId, type: "function", function: { name, arguments: args.slice(0, half) } }] }, finish_reason: null }] }));
+                controller.enqueue(chunk({ id: "chatcmpl-fake", object: "chat.completion.chunk", model, choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: args.slice(half) } }] }, finish_reason: "tool_calls" }] }));
                 controller.enqueue(chunk({ id: "chatcmpl-fake", object: "chat.completion.chunk", model, choices: [], usage: { prompt_tokens: promptTokens, completion_tokens: 8 } }));
                 controller.enqueue(encoder.encode("data: [DONE]\n\n"));
                 controller.close();
