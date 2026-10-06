@@ -41,6 +41,8 @@ import { registerAgentRoutes } from "./agents/routes";
 import { publicShareHeaders, registerPublicChatShareApi } from "./agents/publicRoutes";
 import { agentsFeature, initAgentsStatus } from "./agents/status";
 import { markInterruptedRuns } from "./agents/runs";
+import { registerKnowledgeRoutes } from "./knowledge/routes";
+import { resumeKnowledgeIndexing } from "./knowledge/index";
 import { initStdioDeclarations } from "./agents/stdio";
 import { initVaultStatus, vaultFeature } from "./vault/status";
 import { scheduleRotationRun } from "./vault/rotation";
@@ -906,6 +908,8 @@ registerWhiteboardRoutes(app);
 registerVaultRoutes(app);
 // Agent chat (Wave 40): providers and policy (admin), agents, chats, and runs with SSE.
 registerAgentRoutes(app);
+// Knowledge bases (Wave 44, AC-E): CRUD, sources, Re-index, Try it, and the Access sheet.
+registerKnowledgeRoutes(app);
 registerCalendarRoutes(app);
 registerPreferenceRoutes(app);
 registerMailRoutes(app);
@@ -980,6 +984,12 @@ try {
   markInterruptedRuns();
 } catch (error) {
   console.error("Agent run sweep failed", errorClass(error));
+}
+// Wave 44 (AC-E): knowledge sources a restart interrupted go back to the queue, and indexing resumes.
+try {
+  resumeKnowledgeIndexing();
+} catch (error) {
+  console.error("Knowledge resume failed", errorClass(error));
 }
 // Migrations ran when ./db loaded: say so loudly when the team has nobody who can manage it.
 warnIfNoActiveAdmin();

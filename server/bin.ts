@@ -11,10 +11,10 @@ export const BIN_RETENTION_MS = 30 * 86_400_000;
 /** Types stored in the core tables below. */
 export type CoreBinType = "note" | "document";
 /** Types whose module registers a BinProvider (Collections and Calendar, WAVES_10-12.md D68; the Vault, D225). */
-export type ProvidedBinType = "collection" | "collection_row" | "calendar" | "event" | "vault" | "vault_environment" | "vault_secret" | "chat" | "agent";
+export type ProvidedBinType = "collection" | "collection_row" | "calendar" | "event" | "vault" | "vault_environment" | "vault_secret" | "chat" | "agent" | "knowledge_base";
 export type BinType = CoreBinType | ProvidedBinType;
 const CORE_BIN_TYPES: readonly CoreBinType[] = ["note", "document"];
-const PROVIDED_BIN_TYPES: readonly ProvidedBinType[] = ["collection", "collection_row", "calendar", "event", "vault", "vault_environment", "vault_secret", "chat", "agent"];
+const PROVIDED_BIN_TYPES: readonly ProvidedBinType[] = ["collection", "collection_row", "calendar", "event", "vault", "vault_environment", "vault_secret", "chat", "agent", "knowledge_base"];
 /**
  * Why an item was purged, as recorded in the audit metadata. "resumed" marks a
  * purge the sweeper finished after it was interrupted: the original reason

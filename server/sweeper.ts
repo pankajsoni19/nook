@@ -18,6 +18,7 @@ import { vaultStatus } from "./vault/status";
 import { sweepAgentAudit } from "./agents/audit";
 import { sweepAgentRateLimits } from "./agents/limits";
 import { sweepSessions } from "./agents/toolServers";
+import { sweepKnowledge } from "./knowledge/index";
 
 const SWEEP_INTERVAL_MS = 3_600_000;
 export type SweepResult = SweepCounts & { bin: BinSweepCounts };
@@ -130,6 +131,13 @@ export function runSweep(options: { boot?: boolean; nowMs?: number } = {}) {
         await sweepSessions(options.nowMs);
       } catch (error) {
         console.error("Tool server session sweep failed", error instanceof Error ? error.name : "Unknown error");
+      }
+      try {
+        // Knowledge bases (Wave 44, AC-E): sources the owner can no longer read become unavailable; changed ones are indexed again.
+        const knowledge = sweepKnowledge();
+        if (knowledge.unavailable || knowledge.changed) console.info(`Knowledge sweep: ${knowledge.unavailable} sources unavailable, ${knowledge.changed} changed, ${knowledge.queued} bases queued`);
+      } catch (error) {
+        console.error("Knowledge sweep failed", error instanceof Error ? error.name : "Unknown error");
       }
       try {
         // Mail history (outbound email §B.3): delivered rows after 30 days, failures after 90.

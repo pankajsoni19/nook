@@ -29,7 +29,8 @@ import { publishChatUpdate } from "./chatUpdates";
  * runner's own linked key (server/agents/tools.ts), whoever owns the agent.
  */
 
-export type ShareKind = "agent" | "chat";
+/** Wave 44 (AC-E): knowledge bases share the same way as agents (view = search and attach, manage = edit sources, D367). */
+export type ShareKind = "agent" | "chat" | "knowledge_base";
 export type ShareLevel = "none" | "view" | "manage" | "owner";
 export const SHARE_RANK: Record<ShareLevel, number> = { none: 0, view: 1, manage: 2, owner: 3 };
 export const atLeastShare = (level: ShareLevel, needed: ShareLevel) => SHARE_RANK[level] >= SHARE_RANK[needed];
@@ -60,8 +61,8 @@ export function shareLevel(kind: ShareKind, item: Shareable, userId: string): Sh
   return best;
 }
 
-const TABLE: Record<ShareKind, "agents" | "chats"> = { agent: "agents", chat: "chats" };
-const NAME: Record<ShareKind, "name" | "title"> = { agent: "name", chat: "title" };
+const TABLE: Record<ShareKind, "agents" | "chats" | "knowledge_bases"> = { agent: "agents", chat: "chats", knowledge_base: "knowledge_bases" };
+const NAME: Record<ShareKind, "name" | "title"> = { agent: "name", chat: "title", knowledge_base: "name" };
 
 /** The live level on an agent or chat by id ("none" when it is missing or binned). */
 export function shareLevelById(kind: ShareKind, id: string, userId: string): ShareLevel {
@@ -90,7 +91,7 @@ export function sharedTitleFor(kind: ShareKind, id: string, viewerId: string): s
 
 // ------------------------------------------------------------------------------ the Access sheet
 
-export const SHARE_LEVELS: Record<ShareKind, readonly ("view" | "manage")[]> = { agent: ["view", "manage"], chat: ["view"] };
+export const SHARE_LEVELS: Record<ShareKind, readonly ("view" | "manage")[]> = { agent: ["view", "manage"], chat: ["view"], knowledge_base: ["view", "manage"] };
 export const MAX_SHARE_PEOPLE = 100;
 export const MAX_SHARE_GROUPS = 20;
 
@@ -135,7 +136,7 @@ function authorizeSheet(kind: ShareKind, id: string, userId: string) {
   if (!state) throw new AgentError(404, "NOT_FOUND", "Not found");
   const level = shareLevelById(kind, id, userId);
   if (level === "none") throw new AgentError(404, "NOT_FOUND", "Not found");
-  if (level !== "owner" && !(kind === "agent" && level === "manage")) throw new AgentError(403, "OWNER_ONLY", kind === "chat" ? "Only the chat's owner shares it" : "Only the owner or a manager can change who has access");
+  if (level !== "owner" && !(kind !== "chat" && level === "manage")) throw new AgentError(403, "OWNER_ONLY", kind === "chat" ? "Only the chat's owner shares it" : "Only the owner or a manager can change who has access");
   return { state, yourLevel: level as "owner" | "manage" };
 }
 
@@ -204,6 +205,7 @@ export function writeShareAccess(kind: ShareKind, id: string, actor: { userId: s
       for (const group of groups) insert.run(kind, id, null, group.id, group.level, actor.userId, timestamp);
     }
     if (kind === "agent") db.query("UPDATE agents SET visibility = ?, all_users_level = 'view', updated_at = ? WHERE id = ?").run(body.audience, timestamp, id);
+    else if (kind === "knowledge_base") db.query("UPDATE knowledge_bases SET visibility = ?, updated_at = ? WHERE id = ?").run(body.audience, timestamp, id);
     else db.query("UPDATE chats SET visibility = ?, updated_at = ? WHERE id = ?").run(body.audience, timestamp, id);
     // "Shared with you" (§C.11): a bell line for everyone newly reaching it by name or through a new
     // group, and mail for people added by name (the existing share mail; groups are not mailed).
@@ -216,9 +218,10 @@ export function writeShareAccess(kind: ShareKind, id: string, actor: { userId: s
       }
       for (const userId of reached) {
         if (userId === current.owner.id || shareLevelById(kind, id, userId) === "none") continue;
-        notifyAccess({ userId, kind: kind === "agent" ? "agent_shared" : "chat_shared", actorId: actor.userId, resource: { kind, id } }, timestamp);
+        notifyAccess({ userId, kind: kind === "agent" ? "agent_shared" : kind === "knowledge_base" ? "knowledge_base_shared" : "chat_shared", actorId: actor.userId, resource: { kind, id } }, timestamp);
       }
-      mailAgentShared(actor.userId, kind, id, addedPeople.filter((userId) => userId !== current.owner.id && shareLevelById(kind, id, userId) !== "none"));
+      // Knowledge bases (AC-E) get the bell line only; the share mail's template names agents and chats.
+      if (kind !== "knowledge_base") mailAgentShared(actor.userId, kind, id, addedPeople.filter((userId) => userId !== current.owner.id && shareLevelById(kind, id, userId) !== "none"));
     }
     const counts = { kind, audience: body.audience, peopleCount: selected ? people.length : 0, groupCount: selected ? groups.length : 0 };
     const asManager = current.yourLevel === "manage" ? { asManager: true } : {};
@@ -232,8 +235,8 @@ export function writeShareAccess(kind: ShareKind, id: string, actor: { userId: s
 
 function validateShare(kind: ShareKind, current: ShareAccess, body: ShareAccessPut, people: Principal[], groups: Principal[]) {
   const invalid = (message: string, code = "INVALID", details: Record<string, unknown> = {}) => new AgentError(400, code, message, details);
-  if (body.audience === "inherit") throw invalid("Agents and chats have no folder to inherit from");
-  if (body.audienceLevel !== undefined) throw invalid("Everyone signed in can only view agents and chats", "LEVEL_NOT_OFFERED");
+  if (body.audience === "inherit") throw invalid("Agents, chats, and knowledge bases have no folder to inherit from");
+  if (body.audienceLevel !== undefined) throw invalid("Everyone signed in can only view agents, chats, and knowledge bases", "LEVEL_NOT_OFFERED");
   const offered = SHARE_LEVELS[kind] as readonly string[];
   for (const entry of [...people, ...groups]) if (!offered.includes(entry.level)) throw invalid(`${entry.level} is not offered here`, "LEVEL_NOT_OFFERED");
   if (body.audience !== "selected" && (people.length || groups.length)) throw invalid("People and groups apply only to “People and groups I choose”");
@@ -247,7 +250,7 @@ function validateShare(kind: ShareKind, current: ShareAccess, body: ShareAccessP
     const active = new Set((db.query(`SELECT id FROM users WHERE disabled_at IS NULL AND id IN (${people.map(() => "?").join(",")})`).all(...people.map((entry) => entry.id)) as Array<{ id: string }>).map((row) => row.id));
     if (found.length !== people.length || people.some((entry) => !known.has(entry.id) && !active.has(entry.id))) throw invalid("One or more people were not found");
     const guests = found.filter((row) => row.role === "guest" && !known.has(row.id)).map((row) => row.id);
-    if (guests.length) throw invalid("Guests cannot use Chat, so an agent or chat cannot be shared with them by name", "GUEST_NOT_ALLOWED", { guests: { people: guests, groups: [] } });
+    if (guests.length) throw invalid(`Guests cannot use Chat, so ${kind === "knowledge_base" ? "a knowledge base" : "an agent or chat"} cannot be shared with them by name`, "GUEST_NOT_ALLOWED", { guests: { people: guests, groups: [] } });
   }
   if (groups.length) {
     const found = db.query(`SELECT id FROM user_groups WHERE id IN (${groups.map(() => "?").join(",")})`).all(...groups.map((group) => group.id)) as Array<{ id: string }>;
@@ -275,10 +278,10 @@ export type SharedAccessRow = {
  */
 export function memberSharedRows(viewerId: string, userId: string): SharedAccessRow[] {
   const rows = db.query(`SELECT x.via, x.resource_kind, x.resource_id, x.level, x.group_id, x.group_name FROM (
-      SELECT 'direct' AS via, a.resource_kind, a.resource_id, a.level, '' AS group_id, NULL AS group_name FROM agent_access a WHERE a.user_id = $userId AND a.resource_kind IN ('agent','chat')
+      SELECT 'direct' AS via, a.resource_kind, a.resource_id, a.level, '' AS group_id, NULL AS group_name FROM agent_access a WHERE a.user_id = $userId AND a.resource_kind IN ('agent','chat','knowledge_base')
       UNION ALL
       SELECT 'group', a.resource_kind, a.resource_id, a.level, a.group_id, g.name FROM group_members gm JOIN agent_access a ON a.group_id = gm.group_id JOIN user_groups g ON g.id = a.group_id
-        WHERE gm.user_id = $userId AND a.resource_kind IN ('agent','chat')) x LIMIT 2000`).all({ userId }) as Array<{ via: "direct" | "group"; resource_kind: ShareKind; resource_id: string; level: string; group_id: string; group_name: string | null }>;
+        WHERE gm.user_id = $userId AND a.resource_kind IN ('agent','chat','knowledge_base')) x LIMIT 2000`).all({ userId }) as Array<{ via: "direct" | "group"; resource_kind: ShareKind; resource_id: string; level: string; group_id: string; group_name: string | null }>;
   const byItem = new Map<string, typeof rows>();
   for (const row of rows) byItem.set(`${row.resource_kind}:${row.resource_id}`, [...(byItem.get(`${row.resource_kind}:${row.resource_id}`) ?? []), row]);
   const items: Array<SharedAccessRow & { sort: string }> = [];
@@ -289,7 +292,7 @@ export function memberSharedRows(viewerId: string, userId: string): SharedAccess
       .get(first.resource_id) as (Shareable & { title: string; owner_name: string }) | null;
     if (!item) continue;
     const readable = shareLevel(kind, item, viewerId) !== "none";
-    const label = kind === "agent" ? "Agent" : "Chat";
+    const label = kind === "agent" ? "Agent" : kind === "knowledge_base" ? "Knowledge base" : "Chat";
     const sources = grants.sort((left, right) => left.via === right.via ? (left.group_name ?? "").localeCompare(right.group_name ?? "") : left.via === "direct" ? -1 : 1).map((grant) => {
       const level: "view" | "manage" = grant.level === "manage" ? "manage" : "view";
       return { via: grant.via, level, group: grant.via === "group" ? { id: grant.group_id, name: grant.group_name ?? "" } : null, lowerTo: grant.via === "direct" && level === "manage" ? ["view" as const] : [], handleItem: { kind, id: item.id, via: grant.via, groupId: grant.via === "group" ? grant.group_id : null } };
@@ -321,16 +324,16 @@ export function lowerSharedDirect(kind: ShareKind, id: string, userId: string): 
 
 /** Direct agent and chat rows Reset access removes, counted with the other direct shares. */
 export const sharedDirectCount = (userId: string) =>
-  (db.query("SELECT COUNT(*) AS count FROM agent_access WHERE user_id = ? AND resource_kind IN ('agent','chat')").get(userId) as { count: number }).count;
+  (db.query("SELECT COUNT(*) AS count FROM agent_access WHERE user_id = ? AND resource_kind IN ('agent','chat','knowledge_base')").get(userId) as { count: number }).count;
 
 /** Reset access: deletes the person's direct agent and chat rows; returns each owner's count for their notice. */
 export function resetSharedDirect(userId: string): Map<string, number> {
-  const rows = db.query("SELECT resource_kind, resource_id FROM agent_access WHERE user_id = ? AND resource_kind IN ('agent','chat')").all(userId) as Array<{ resource_kind: ShareKind; resource_id: string }>;
+  const rows = db.query("SELECT resource_kind, resource_id FROM agent_access WHERE user_id = ? AND resource_kind IN ('agent','chat','knowledge_base')").all(userId) as Array<{ resource_kind: ShareKind; resource_id: string }>;
   const perOwner = new Map<string, number>();
   for (const row of rows) {
     const ownerId = ownerOfShared(row.resource_kind, row.resource_id);
     if (ownerId) perOwner.set(ownerId, (perOwner.get(ownerId) ?? 0) + 1);
   }
-  db.query("DELETE FROM agent_access WHERE user_id = ? AND resource_kind IN ('agent','chat')").run(userId);
+  db.query("DELETE FROM agent_access WHERE user_id = ? AND resource_kind IN ('agent','chat','knowledge_base')").run(userId);
   return perOwner;
 }

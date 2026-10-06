@@ -199,10 +199,14 @@ export type ProviderSummary = {
   id: string; name: string; baseUrl: string; defaultModel: string; embeddingModel: string | null; embeddingDims: number | null;
   compat: ProviderCompat; isDefault: boolean; hasSecret: boolean; hint: string | null; revision: number; createdAt: string; updatedAt: string;
 };
-/** A tool an agent picked (AC-B, plan §5.2): a remote server's tool, or one of Nook's own tools. */
+/**
+ * A tool an agent picked (AC-B, plan §5.2): a remote server's tool, or one of Nook's own tools;
+ * AC-E (Wave 44): a knowledge base (all of an agent's bases become one `search_knowledge` tool).
+ */
 export type AgentToolRef =
   | { source: "server"; serverId: string; toolName: string; policy: AgentToolPolicy }
-  | { source: "nook"; toolName: string };
+  | { source: "nook"; toolName: string }
+  | { source: "knowledge"; kbId: string };
 export type AgentSummary = {
   id: string; ownerId: string; name: string; description: string; icon: string | null; color: string | null;
   providerId: string | null; model: string | null; maxSteps: number; temperature: number | null; maxOutputTokens: number | null;
@@ -238,9 +242,13 @@ export type ToolServerSummary = {
 export type DeclaredStdioServer = { id: string; name: string; command: string; args: string[]; envNames: string[]; adopted: boolean };
 /** What the tool picker lists (plan §5.2, `GET /api/agents/catalog`). */
 export type NookCatalogTool = { name: string; title: string; module: string; write: boolean; /** A write the Inbox can carry as a proposal (D353). */ proposable: boolean; scope: string; /** The module scope a proposal of it needs besides inbox:write (QA L7); null when not proposable. */ proposalScope: string | null };
+/** A knowledge base the picker offers (AC-E): one the editor can open. */
+export type KnowledgeCatalogBase = { id: string; name: string; description: string; ownerName: string; yours: boolean; status: "empty" | "indexing" | "ready" | "error"; chunkCount: number };
 export type ToolCatalog = {
   servers: Array<{ id: string; slug: string; name: string; enabled: boolean; status: ServerStatus; availability: ServerAvailability; tools: Array<Pick<CatalogTool, "name" | "title" | "description" | "readOnly" | "openWorld" | "policy">> }>;
   nook: { linked: boolean; linkState: LinkState; tools: NookCatalogTool[] };
+  /** AC-E: the knowledge bases the editor can attach (older servers omit it). */
+  knowledge?: KnowledgeCatalogBase[];
 };
 /** A key the person may link to an agent (plan §5.3): their own live general key with the MCP surface. */
 export type LinkableKey = { id: string; name: string; prefix: string; state: string; expiresAt: string | null; grants: Array<{ module: string; permission: string; resource: { kind: string; name: string | null } | null; active: boolean }> };

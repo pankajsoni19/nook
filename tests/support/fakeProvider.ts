@@ -25,7 +25,24 @@ const encoder = new TextEncoder();
 const chunk = (data: unknown) => encoder.encode(`data: ${JSON.stringify(data)}\n\n`);
 const delta = (text: string, model: string) => ({ id: "chatcmpl-fake", object: "chat.completion.chunk", model, choices: [{ index: 0, delta: { content: text }, finish_reason: null }] });
 
-export function startFakeProvider(port: number, options: { models?: string[] } = {}): FakeProvider {
+/**
+ * The fake embedding of a text (AC-E): deterministic and bag-of-words shaped, so tests can reason
+ * about similarity. Every lower-case word adds ±1 to one dimension chosen by a hash of the word (FNV-1a);
+ * texts sharing words point the same way. Unnormalized on purpose: Nook must normalize.
+ */
+export function fakeEmbedding(text: string, dims: number): number[] {
+  const vector = new Array<number>(dims).fill(0);
+  const words = text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  for (const word of words) {
+    let hash = 0x811c9dc5;
+    for (let index = 0; index < word.length; index += 1) hash = Math.imul(hash ^ word.charCodeAt(index), 0x01000193) >>> 0;
+    vector[hash % dims]! += (hash >>> 31) === 1 ? -2 : 2;
+  }
+  if (words.length === 0) vector[0] = 1;
+  return vector;
+}
+
+export function startFakeProvider(port: number, options: { models?: string[]; nativeDims?: number } = {}): FakeProvider {
   const calls: ProviderCall[] = [];
   const models = options.models ?? ["gpt-6-luna", "gpt-6-mini", "text-embedding-3-small"];
   const server = Bun.serve({
@@ -43,6 +60,18 @@ export function startFakeProvider(port: number, options: { models?: string[] } =
       calls.push({ method: request.method, path: url.pathname, headers, body });
       if (request.method === "GET" && url.pathname === "/v1/models") {
         return Response.json({ object: "list", data: models.map((id) => ({ id, object: "model" })) });
+      }
+      if (request.method === "POST" && url.pathname === "/v1/embeddings") {
+        // AC-E: deterministic vectors (fakeEmbedding below); an input containing `fail:embed` answers 500.
+        const payload = body as { model?: string; input?: string | string[]; dimensions?: number } | null;
+        const inputs = typeof payload?.input === "string" ? [payload.input] : Array.isArray(payload?.input) ? payload!.input : [];
+        if (inputs.some((text) => text.includes("fail:embed"))) return Response.json({ error: { message: "Simulated embedding failure sk-secret-should-not-echo-123456789012345", type: "server_error" } }, { status: 500 });
+        const dims = typeof payload?.dimensions === "number" ? payload.dimensions : options.nativeDims ?? 1536;
+        return Response.json({
+          object: "list", model: payload?.model ?? "text-embedding-3-small",
+          data: inputs.map((text, index) => ({ object: "embedding", index, embedding: fakeEmbedding(text, dims) })),
+          usage: { prompt_tokens: inputs.reduce((sum, text) => sum + Math.ceil(text.length / 4), 0), total_tokens: inputs.reduce((sum, text) => sum + Math.ceil(text.length / 4), 0) }
+        });
       }
       if (request.method === "POST" && url.pathname === "/v1/chat/completions") {
         const payload = body as { model?: string; messages?: Array<{ role: string; content: string | null; tool_calls?: unknown[] }>; stream?: boolean; tools?: Array<{ function: { name: string } }> } | null;

@@ -25,7 +25,9 @@ export type ItemKind =
   // Wave 27: a vault (its tools run only for `nkv_` vault keys; server/vault/mcpTools.ts).
   | "vault"
   // Wave 42 (AC-C): an agent (`run_agent`, the REST runs).
-  | "agent";
+  | "agent"
+  // Wave 44 (AC-E): a knowledge base (`search_knowledge`).
+  | "knowledge_base";
 
 export type Anchor = { kind: ResourceKind; id: string };
 
@@ -54,6 +56,7 @@ const LOOKUPS: Record<ItemKind, Lookup | ((id: string) => Anchor[])> = {
   routine: direct("routine"),
   vault: direct("vault"),
   agent: direct("agent"),
+  knowledge_base: direct("knowledge_base"),
   run:{ sql: "SELECT routine_id FROM routine_runs WHERE id = ?", anchors: (row) => [{ kind: "routine", id: row.routine_id! }] }
 };
 
@@ -62,7 +65,7 @@ export const ANCHOR_KINDS: Record<ItemKind, readonly ResourceKind[]> = {
   note: ["note", "folder"], folder: ["folder"], document: ["document", "folder", "whiteboard"], whiteboard: ["whiteboard"],
   board: ["board"], card: ["board"], column: ["board"], sprint: ["board"], task_view: ["task_view"],
   collection: ["collection"], row: ["collection"], calendar: ["calendar"], event: ["calendar"], routine: ["routine"], run: ["routine"],
-  vault: ["vault"], agent: ["agent"]
+  vault: ["vault"], agent: ["agent"], knowledge_base: ["knowledge_base"]
 };
 
 /** The anchors of one item, or null when it does not exist. Ids compare in lower case. */

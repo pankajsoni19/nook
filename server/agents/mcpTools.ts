@@ -122,7 +122,8 @@ export const agentTools: McpToolSpec[] = [
     title: "List chats",
     description: `List the key owner's chats, pinned first then newest, optionally filtered by a search over titles and the owner's messages, then the chats others shared with them (\`shared: true\`, read-only, with the owner's name; the search matches their titles). ${UNTRUSTED}`,
     scopes: ["agents:read"],
-    access: { mode: "own" },
+    // Wave 44 (AC-E): `global`, so a key whose agents:read names only chosen knowledge bases never sees it.
+    access: { mode: "global" },
     write: false,
     inputSchema: z.object({
       query: z.string().min(1).max(200).optional().describe("Search chat titles and your messages"),
@@ -141,7 +142,7 @@ export const agentTools: McpToolSpec[] = [
     title: "Read a chat",
     description: `Read one of the key owner's chats, or a chat shared with them (read-only): the branch on screen (user and assistant turns, oldest first), each with its status and the names of the tools it called. At most 200 turns and 256 KiB of text; longer chats say so. ${UNTRUSTED}`,
     scopes: ["agents:read"],
-    access: { mode: "own", related: ["chatId"] },
+    access: { mode: "global", related: ["chatId"] },
     write: false,
     inputSchema: z.object({ chatId: uuid.describe("The chat id") }),
     handler: ({ chatId }, key) => {

@@ -19,6 +19,7 @@ import { AgentError, agentsStatus } from "./status";
 import { identityOf, liveToolFailure, liveToolFor, resolveTools, type ExternalToolOptions, type ResolvedTool } from "./tools";
 import { sessionFor } from "./toolServers";
 import { shareLevel, shareReadableSql } from "./sharing";
+import { runKnowledgeTool } from "../knowledge/tool";
 
 /**
  * API and MCP runs (Wave 42 "AC-C", plan §7.1, §7.2, D364, D365): the agent loop for a general
@@ -258,6 +259,11 @@ async function execute(state: LiveExternal, active: ActiveRun, caller: ExternalC
       if (live.nook) {
         // The same per-call timeout as a server's (AC-B review L9); the result of a late call is discarded.
         const outcome = await withTimeout(runNookTool(live.nook, args, { runId, agentId: agent.id, agentName: agent.name, via: caller.via }), live.timeoutMs, active.controller.signal);
+        text = outcome.text;
+        ok = outcome.ok;
+      } else if (live.knowledge) {
+        // AC-E: read-only, so it runs over the API too; source ids only for what the key's owner can open (T320).
+        const outcome = await withTimeout(runKnowledgeTool(live.knowledge, args, { agent: right.agent, runner: { userId: active.userId, keyId: caller.keyId }, runId, signal: active.controller.signal }), live.timeoutMs, active.controller.signal);
         text = outcome.text;
         ok = outcome.ok;
       } else {

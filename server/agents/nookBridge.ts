@@ -52,7 +52,9 @@ export const NOOK_AGENT_TOOLS: ReadonlySet<string> = new Set([
 /** Classified as never offered (T318): proposal and routine machinery, uploads, the agent module's own tools, Bin. */
 export const NOOK_NEVER_TOOLS: ReadonlySet<string> = new Set([
   "submit_proposals", "list_my_proposals", "withdraw_proposal", "list_routines", "list_due_routines", "start_run", "finish_run",
-  "begin_upload", "finish_upload", "list_agents", "list_chats", "get_chat", "run_agent"
+  "begin_upload", "finish_upload", "list_agents", "list_chats", "get_chat", "run_agent",
+  // AC-E: an agent searches knowledge bases through its own Knowledge picks, never through a key.
+  "search_knowledge"
 ]);
 export const isBinTool = (name: string) => name.startsWith("bin_") || name.startsWith("restore_");
 const agentMayUse = (name: string) => NOOK_AGENT_TOOLS.has(name) && !NOOK_NEVER_TOOLS.has(name) && !isBinTool(name);

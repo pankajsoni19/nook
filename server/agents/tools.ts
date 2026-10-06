@@ -9,6 +9,9 @@ import { roleMayChat } from "./settings";
 import { shareLevel } from "./sharing";
 import { AgentError } from "./status";
 import { defaultPolicy, parseTools, serverAvailableTo, serverPolicies, serverRowOrNull, serversAvailableTo, type ToolServerRow } from "./toolServers";
+import { KNOWLEDGE_TOOL } from "../../shared/knowledge";
+import { knowledgeToolDescription, knowledgeToolParameters, liveAttachedBases, type KnowledgeToolSpec } from "../knowledge/tool";
+import { listKnowledge, viewableKbIds } from "../knowledge/service";
 
 /**
  * An agent's tools (plan §5.2, §5.3, D358, D359; Wave 41 AC-B): the picks in `agent_tools`, the
@@ -22,7 +25,8 @@ import { defaultPolicy, parseTools, serverAvailableTo, serverPolicies, serverRow
 
 export type ResolvedTool = {
   modelName: string;
-  kind: "server" | "nook";
+  /** AC-E: `knowledge` is the one `search_knowledge` tool over the agent's attached bases. */
+  kind: "server" | "nook" | "knowledge";
   serverId: string | null;
   /** The slug (servers) or "nook". */
   server: string;
@@ -36,6 +40,7 @@ export type ResolvedTool = {
   timeoutMs: number;
   serverRow: ToolServerRow | null;
   nook: NookResolved | null;
+  knowledge: KnowledgeToolSpec | null;
 };
 
 type ToolRow = { agent_id: string; source: "server" | "nook" | "knowledge"; server_id: string | null; tool_name: string | null; kb_id: string | null; policy: AgentToolPolicy };
@@ -46,34 +51,57 @@ export function agentToolRefs(agentId: string): AgentToolRef[] {
   for (const row of rows) {
     if (row.source === "server" && row.server_id && row.tool_name) refs.push({ source: "server", serverId: row.server_id, toolName: row.tool_name, policy: row.policy });
     else if (row.source === "nook" && row.tool_name) refs.push({ source: "nook", toolName: row.tool_name });
+    else if (row.source === "knowledge" && row.kb_id) refs.push({ source: "knowledge", kbId: row.kb_id });
   }
   return refs;
 }
 
-/** Replaces the agent's picks (PATCH `tools`): every server tool must exist in a catalog the editor may see; every Nook tool must be offered. */
-export function setAgentTools(agentId: string, role: string, submitted: AgentToolRef[], options: { keepHidden?: boolean } = {}) {
+export const refKeyOf = (ref: AgentToolRef) => ref.source === "server" ? `server:${ref.serverId}:${ref.toolName}` : ref.source === "nook" ? `nook:${ref.toolName}` : `knowledge:${ref.kbId}`;
+
+/**
+ * Replaces the agent's picks (PATCH `tools`): every server tool must exist in a catalog the editor may
+ * see; every Nook tool must be offered; every knowledge base (AC-E) must be one both the editor and
+ * the agent's owner can open (the tool searches what the owner may attach, D367).
+ */
+export function setAgentTools(agentId: string, role: string, submitted: AgentToolRef[], options: { keepHidden?: boolean; userId?: string } = {}) {
   const visible = new Map(serversAvailableTo(role).map((row) => [row.id, new Set(parseTools(row.tools_json).map((tool) => tool.name))]));
   const nook = new Set(nookCatalogFor(null).map((tool) => tool.name));
   // Wave 43 (AC-D): a manager may not see every server the owner picked from; picks already on the
   // agent stay valid as they are (only new picks must come from the editor's own catalog).
-  const current = agentToolRefs(agentId).filter((ref): ref is Extract<AgentToolRef, { source: "server" }> => ref.source === "server");
-  const kept = new Set(current.map((ref) => `server:${ref.serverId}:${ref.toolName}`));
-  // Review L2: a manager's view withholds picks from servers they cannot use, so their save re-merges them.
-  const submittedKeys = new Set(submitted.map((ref) => ref.source === "server" ? `server:${ref.serverId}:${ref.toolName}` : `nook:${ref.toolName}`));
-  const refs = options.keepHidden ? [...submitted, ...current.filter((ref) => !visible.has(ref.serverId) && !submittedKeys.has(`server:${ref.serverId}:${ref.toolName}`))] : submitted;
+  const all = agentToolRefs(agentId);
+  const current = all.filter((ref): ref is Extract<AgentToolRef, { source: "server" }> => ref.source === "server");
+  const currentKbs = all.filter((ref): ref is Extract<AgentToolRef, { source: "knowledge" }> => ref.source === "knowledge");
+  const kept = new Set([...current, ...currentKbs].map(refKeyOf));
+  // AC-E: the editor's and the owner's open bases among those named (new picks need both; a manager's hidden ones stay).
+  const ownerId = (db.query("SELECT owner_id FROM agents WHERE id = ?").get(agentId) as { owner_id: string } | null)?.owner_id ?? null;
+  const named = [...new Set([...submitted, ...currentKbs].flatMap((ref) => ref.source === "knowledge" ? [ref.kbId] : []))];
+  const editorKbs = options.userId ? viewableKbIds(options.userId, named) : new Set(named);
+  const ownerKbs = ownerId ? viewableKbIds(ownerId, named) : new Set<string>();
+  // Review L2: a manager's view withholds picks from servers they cannot use, so their save re-merges them (AC-E: and bases they cannot open).
+  const submittedKeys = new Set(submitted.map(refKeyOf));
+  const hidden = options.keepHidden ? [
+    ...current.filter((ref) => !visible.has(ref.serverId) && !submittedKeys.has(refKeyOf(ref))),
+    ...currentKbs.filter((ref) => !editorKbs.has(ref.kbId) && !submittedKeys.has(refKeyOf(ref)))
+  ] : [];
+  const refs = [...submitted, ...hidden];
   const seen = new Set<string>();
   for (const ref of refs) {
-    const key = ref.source === "server" ? `server:${ref.serverId}:${ref.toolName}` : `nook:${ref.toolName}`;
+    const key = refKeyOf(ref);
     if (seen.has(key)) throw new AgentError(400, "INVALID", "A tool is listed twice", { field: "tools" });
     seen.add(key);
     if (ref.source === "server" && !kept.has(key) && !visible.get(ref.serverId)?.has(ref.toolName)) throw new AgentError(400, "INVALID", "A picked tool is not in a server you can use", { field: "tools" });
     if (ref.source === "nook" && !nook.has(ref.toolName)) throw new AgentError(400, "INVALID", "A picked Nook tool is not offered to agents", { field: "tools" });
+    if (ref.source === "knowledge" && !kept.has(key)) {
+      if (!editorKbs.has(ref.kbId)) throw new AgentError(400, "INVALID", "A picked knowledge base is not one you can open", { field: "tools" });
+      if (!ownerKbs.has(ref.kbId)) throw new AgentError(400, "INVALID", "The agent's owner cannot open a picked knowledge base; share it with them first", { field: "tools" });
+    }
   }
   db.query("DELETE FROM agent_tools WHERE agent_id = ?").run(agentId);
-  const insert = db.query("INSERT INTO agent_tools (agent_id, source, server_id, tool_name, kb_id, policy) VALUES (?, ?, ?, ?, NULL, ?)");
+  const insert = db.query("INSERT INTO agent_tools (agent_id, source, server_id, tool_name, kb_id, policy) VALUES (?, ?, ?, ?, ?, ?)");
   for (const ref of refs) {
-    if (ref.source === "server") insert.run(agentId, "server", ref.serverId, ref.toolName, ref.policy);
-    else insert.run(agentId, "nook", null, ref.toolName, null);
+    if (ref.source === "server") insert.run(agentId, "server", ref.serverId, ref.toolName, null, ref.policy);
+    else if (ref.source === "nook") insert.run(agentId, "nook", null, ref.toolName, null, null);
+    else insert.run(agentId, "knowledge", null, null, ref.kbId, null);
   }
 }
 
@@ -170,8 +198,10 @@ export function catalogFor(role: string, agentId: string | null, userId: string)
     };
   });
   const key = agentId ? liveLinkedKey(agentId, userId) : null;
+  // AC-E: the knowledge bases the editor can open (attaching one also needs the agent's owner to open it).
+  const knowledge = listKnowledge(userId).map((kb) => ({ id: kb.id, name: kb.name, description: kb.description, ownerName: kb.ownerName, yours: kb.yourLevel === "owner", status: kb.status, chunkCount: kb.chunkCount }));
   // Without a live key the picker lists none of Nook's tools (QA Q4): what runs is bounded by the key.
-  return { servers, nook: { linked: key !== null, linkState: agentId ? linkStateOf(agentId, userId).state : "none", tools: key ? nookCatalogFor(key) : [] } };
+  return { servers, nook: { linked: key !== null, linkState: agentId ? linkStateOf(agentId, userId).state : "none", tools: key ? nookCatalogFor(key) : [] }, knowledge };
 }
 
 // --- Per-step resolution (plan §2.1 `toolCatalog`, D358) ---------------------------------------------
@@ -200,10 +230,14 @@ export type ExternalToolOptions = { nookKey: McpKeyContext | null; surface: "mcp
 /** What a resolved tool was at offer time, to compare against live rows before a call runs (review M3). */
 export type ToolIdentity =
   | { kind: "server"; serverId: string; toolName: string; revision: number }
-  | { kind: "nook"; toolName: string; mode: NookResolved["mode"]; keyId: string };
+  | { kind: "nook"; toolName: string; mode: NookResolved["mode"]; keyId: string }
+  | { kind: "knowledge"; kbIds: string };
+
+const kbIdsOf = (spec: KnowledgeToolSpec) => spec.kbs.map((kb) => kb.id).sort().join(",");
 
 export const identityOf = (tool: ResolvedTool): ToolIdentity => tool.kind === "server"
   ? { kind: "server", serverId: tool.serverId!, toolName: tool.toolName, revision: tool.serverRow!.revision }
+  : tool.kind === "knowledge" ? { kind: "knowledge", kbIds: kbIdsOf(tool.knowledge!) }
   : { kind: "nook", toolName: tool.toolName, mode: tool.nook!.mode, keyId: tool.nook!.keyId };
 
 /** The agent row and the runner's role as they stand now (the agent not in the Bin, the account active, the role allowed to chat). */
@@ -230,6 +264,7 @@ export function liveToolFor(agentId: string, userId: string, identity: ToolIdent
   if (!live) return null;
   const match = resolveTools(live.agent, { userId, role: live.role }, external, identity).find((tool) => identity.kind === "server"
     ? tool.kind === "server" && tool.serverId === identity.serverId && tool.toolName === identity.toolName && tool.serverRow!.revision === identity.revision
+    : identity.kind === "knowledge" ? tool.kind === "knowledge" && kbIdsOf(tool.knowledge!) === identity.kbIds
     : tool.kind === "nook" && tool.toolName === identity.toolName && tool.nook!.mode === identity.mode && tool.nook!.keyId === identity.keyId);
   return match ?? null;
 }
@@ -257,9 +292,10 @@ export function liveToolFailure(agentId: string, userId: string, identity: ToolI
 /** The agent's remote and Nook tools the runner may call at this step; disabled, `off`, and unreachable rights drop silently. */
 export function resolveTools(agent: AgentRow, runner: { userId: string; role: string }, external: ExternalToolOptions | null = null, only?: ToolIdentity): ResolvedTool[] {
   const all = agentToolRefs(agent.id);
-  const refs = all.filter((ref) => !only || (only.kind === "server" ? ref.source === "server" && ref.serverId === only.serverId && ref.toolName === only.toolName : ref.source === "nook" && ref.toolName === only.toolName));
-  // The trifecta (plan §5.2 [14], review L10): with Nook tools picked, an open-world remote tool asks first.
-  const hasNook = all.some((ref) => ref.source === "nook");
+  const refs = all.filter((ref) => !only || (only.kind === "server" ? ref.source === "server" && ref.serverId === only.serverId && ref.toolName === only.toolName
+    : only.kind === "knowledge" ? ref.source === "knowledge" : ref.source === "nook" && ref.toolName === only.toolName));
+  // The trifecta (plan §5.2 [14], review L10): with Nook tools (AC-E: or knowledge bases) picked, an open-world remote tool asks first.
+  const hasNook = all.some((ref) => ref.source === "nook" || ref.source === "knowledge");
   const taken = new Set<string>();
   const resolved: ResolvedTool[] = [];
   const servers = new Map<string, { row: ToolServerRow; tools: Map<string, ReturnType<typeof parseTools>[number]>; policies: Map<string, ToolPolicy> } | null>();
@@ -281,7 +317,7 @@ export function resolveTools(agent: AgentRow, runner: { userId: string; role: st
     if (external && policy !== "auto") continue;
     resolved.push({
       modelName: uniqueName(`${server.row.slug}__${tool.name}`, taken), kind: "server", serverId: server.row.id, server: server.row.slug, serverName: server.row.name, toolName: tool.name,
-      description: tool.description, parameters: tool.inputSchema, policy, openWorld: tool.openWorld, resultCapBytes: server.row.result_cap_bytes, timeoutMs: server.row.timeout_ms, serverRow: server.row, nook: null
+      description: tool.description, parameters: tool.inputSchema, policy, openWorld: tool.openWorld, resultCapBytes: server.row.result_cap_bytes, timeoutMs: server.row.timeout_ms, serverRow: server.row, nook: null, knowledge: null
     });
   }
   const nookRefs = refs.filter((ref): ref is Extract<AgentToolRef, { source: "nook" }> => ref.source === "nook");
@@ -296,9 +332,22 @@ export function resolveTools(agent: AgentRow, runner: { userId: string; role: st
         resolved.push({
           modelName: uniqueName(`nook__${item.toolName}`, taken), kind: "nook", serverId: null, server: "nook", serverName: "Nook", toolName: item.toolName,
           description: item.description, parameters: item.parameters, policy, openWorld: false, resultCapBytes: 16_384, timeoutMs: 30_000, serverRow: null,
-          nook: { ...item, policy, spec, surface: external?.surface ?? "mcp" }
+          nook: { ...item, policy, spec, surface: external?.surface ?? "mcp" }, knowledge: null
         });
       }
+    }
+  }
+  // AC-E (plan §5.2, §9): one read-only tool over the attached bases that are live and still open to
+  // the agent's owner; `auto` in chats, offered over the API and MCP too.
+  if (refs.some((ref) => ref.source === "knowledge")) {
+    const picked = new Set(refs.flatMap((ref) => ref.source === "knowledge" ? [ref.kbId] : []));
+    const bases = liveAttachedBases(agent).filter((kb) => picked.has(kb.id));
+    if (bases.length > 0) {
+      const spec: KnowledgeToolSpec = { kbs: bases.map((kb) => ({ id: kb.id, name: kb.name, description: kb.description })) };
+      resolved.push({
+        modelName: uniqueName(KNOWLEDGE_TOOL.modelName, taken), kind: "knowledge", serverId: null, server: KNOWLEDGE_TOOL.server, serverName: "Knowledge", toolName: KNOWLEDGE_TOOL.tool,
+        description: knowledgeToolDescription(spec), parameters: knowledgeToolParameters(spec), policy: "auto", openWorld: false, resultCapBytes: 16_384, timeoutMs: 30_000, serverRow: null, nook: null, knowledge: spec
+      });
     }
   }
   return resolved;
@@ -306,7 +355,8 @@ export function resolveTools(agent: AgentRow, runner: { userId: string; role: st
 
 /** The trifecta (plan §5.2 [14]): private data (Nook tools) plus an open-world remote tool. */
 export function trifectaOf(refs: AgentToolRef[]): boolean {
-  const hasNook = refs.some((ref) => ref.source === "nook");
+  // AC-E: an attached knowledge base is private data too.
+  const hasNook = refs.some((ref) => ref.source === "nook" || ref.source === "knowledge");
   if (!hasNook) return false;
   const servers = new Map<string, Map<string, boolean>>();
   for (const ref of refs) {

@@ -271,7 +271,7 @@ function openHandle(actorId: string, userId: string, token: string) {
 /** An agent or chat row's handle (Wave 43), or null when the handle is about something else. */
 function sharedHandle(actorId: string, userId: string, token: string) {
   const handle = openItemHandle(token, actorId, userId);
-  return handle && (handle.kind === "agent" || handle.kind === "chat") ? { ...handle, kind: handle.kind as ShareKind } : null;
+  return handle && (handle.kind === "agent" || handle.kind === "chat" || handle.kind === "knowledge_base") ? { ...handle, kind: handle.kind as ShareKind } : null;
 }
 
 /** A vault row's handle (Wave 26), or null when the handle is about something else. */

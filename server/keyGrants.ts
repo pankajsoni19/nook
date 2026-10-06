@@ -97,15 +97,32 @@ export const SELECTOR_KINDS: Partial<Record<GrantModule, readonly ResourceKind[]
   calendar: ["calendar"],
   inbox: ["routine"],
   whiteboards: ["whiteboard"],
-  // Wave 42 (AC-C, D364): running chosen agents. Reading always covers every agent (ALL_ONLY).
-  agents: ["agent"]
+  // Wave 42 (AC-C, D364): running chosen agents. Wave 44 (AC-E): reading may name chosen knowledge
+  // bases (PERMISSION_KINDS); reading agents and chats always covers every one.
+  agents: ["agent", "knowledge_base"]
 };
 
 /**
- * Permissions that always cover every item and never name chosen ones (Wave 42): `agents:read`
- * lists the owner's agents and reads their own chats, which a grant on one agent could not narrow.
+ * Where one permission of a module names other kinds than the module's list (Wave 44, AC-E):
+ * `agents:run` names agents; `agents:read` names knowledge bases only (`search_knowledge` for keys,
+ * plan §9). A key whose `agents:read` names chosen bases reaches no agent and no chat: the tools that
+ * list or read those cover every item and are hidden from it (`global`).
  */
-export const ALL_ONLY: ReadonlySet<string> = new Set(["agents:read"]);
+export const PERMISSION_KINDS: Readonly<Record<string, readonly ResourceKind[]>> = {
+  "agents:run": ["agent"],
+  "agents:read": ["knowledge_base"]
+};
+
+/** The kinds a grant of `module`/`permission` may name, or undefined when it covers every item. */
+export const selectorKindsFor = (module: GrantModule, permission: KeyPermission): readonly ResourceKind[] | undefined =>
+  PERMISSION_KINDS[`${module}:${permission}`] ?? SELECTOR_KINDS[module];
+
+/**
+ * Permissions that always cover every item and never name chosen ones. Wave 42 listed `agents:read`
+ * here; Wave 44 (AC-E) lets it name chosen knowledge bases (PERMISSION_KINDS), so the set is empty
+ * for now and kept for the next permission that needs it.
+ */
+export const ALL_ONLY: ReadonlySet<string> = new Set<string>();
 
 /**
  * Permissions that only create something new and act on no existing item (review Q7): chosen items
