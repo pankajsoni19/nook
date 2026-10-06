@@ -147,9 +147,8 @@
 .ai-provider-head small { color: #8d8d94; font-size: .8rem; overflow-wrap: anywhere; }
 .ai-badge { display: inline-block; margin-left: 8px; border-radius: 999px; padding: 1px 8px; background: #1f1d16; color: #f3ce79; font-size: .7rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
 .ai-provider-actions { display: flex; flex-wrap: wrap; gap: 6px; }
-.ai-provider-actions .secondary-button, .ai-add, .agents-add, .agents-list .secondary-button { min-height: 38px; padding: 0 12px; font-size: .84rem; }
-.ai-add, .agents-add { display: inline-flex; align-items: center; gap: 6px; justify-self: start; }
-.ai-add svg, .agents-add svg { width: 16px; }
+.ai-provider-actions .secondary-button, .agents-list .secondary-button { min-height: 38px; padding: 0 12px; font-size: .84rem; }
+.ai-add, .agents-add { justify-self: start; }
 .ai-provider-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px 16px; margin: 0; }
 .ai-provider-facts div { display: grid; gap: 2px; }
 .ai-provider-facts dt { color: #8d8d94; font-size: .72rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
@@ -161,7 +160,7 @@
 .ai-policy p { margin: 0; color: #8d8d94; font-size: .86rem; line-height: 1.5; }
 .ai-policy-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
 .ai-policy-grid label, .ai-policy-grid > div { display: grid; gap: 6px; color: #c9c9ce; font-size: .84rem; }
-.ai-policy-grid input[type="number"], .ai-provider-form input[type="number"] { min-height: 42px; border: 1px solid #333338; border-radius: 10px; padding: 0 12px; background: #0b0b0d; color: #ededee; font-size: .92rem; outline: 0; }
+.ai-policy-grid input[type="number"], .ai-provider-form input[type="number"] { min-height: 44px; border: 1px solid var(--field-border); border-radius: var(--field-radius); padding: 0 12px; background: var(--field-bg); color: #ededee; font-size: var(--field-font-size); outline: 0; }
 .ai-policy-grid small { color: #7c7c83; }
 .ai-label { color: #8d8d94; font-size: .72rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .ai-roles { display: flex; flex-wrap: wrap; gap: 10px; }
@@ -178,7 +177,8 @@
 .agents-form { padding: 0; }
 .agents-form h4 { margin: 12px 0 0; color: #fafafa; font-size: .95rem; }
 .agents-form label small { font-weight: 500; letter-spacing: normal; text-transform: none; }
-.agents-prompt { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .86rem; }
+/* Beats `.agents-form textarea { font: inherit }` above, which used to win and drop the monospace. */
+.agents-form .agents-prompt { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .agents-icon-input { width: 90px; }
 .agents-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 8px; }
 .agents-actions .secondary-button { min-height: 44px; padding: 0 14px; }

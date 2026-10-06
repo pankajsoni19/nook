@@ -123,7 +123,7 @@ export function ToolServersSection({ flash }: { flash: (message: string) => void
       </li>)}
     </ul>
     <p className="policy-copy">{SECRET_HONESTY} A tool marked read-only by its server runs on its own by default; every other tool asks first, and annotations never loosen a policy you set.</p>
-    <button type="button" className="secondary-button ai-add" onClick={() => setEditing("new")} disabled={!list || list.servers.length >= AGENT_BOUNDS.toolServers}><Plus />Add tool server</button>
+    <button type="button" className="action-button secondary ai-add" onClick={() => setEditing("new")} disabled={!list || list.servers.length >= AGENT_BOUNDS.toolServers}><Plus />Add tool server</button>
     {list?.stdio.enabled && <div className="security-card ai-stdio">
       <strong>Declared by the host (AGENT_MCP_STDIO)</strong>
       <p className="chat-muted">stdio servers come only from the host's declaration file. Adopt one only if you trust it as much as Nook itself.</p>

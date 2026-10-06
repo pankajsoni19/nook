@@ -201,7 +201,7 @@ function VaultList({ onOpen, onReady, flash }: { onOpen: (vault: VaultSummary) =
   return <>
     <div className="vault-toolbar">
       <h1 className="vault-title">Vaults{vaults && <span className="vault-count"> · {vaults.length}</span>}</h1>
-      {canWrite && <button type="button" className="primary-button vault-primary" onClick={() => setCreating(true)}><Plus />New vault</button>}
+      {canWrite && <button type="button" className="action-button" onClick={() => setCreating(true)}><Plus />New vault</button>}
     </div>
     <p className="vault-honest"><ShieldAlert aria-hidden="true" />{HONEST_LABEL} Names and tags are not encrypted.</p>
     {error && <div className="vault-state" role="alert"><h2>Could not load your vaults</h2><p>{error}</p><button className="secondary-button" onClick={() => { void load(); }}><RotateCcw />Try again</button></div>}
@@ -210,7 +210,7 @@ function VaultList({ onOpen, onReady, flash }: { onOpen: (vault: VaultSummary) =
       <span className="vault-state-icon"><KeyRound /></span>
       <h2>No vaults yet</h2>
       <p>Keep a team's API keys, database URLs, and passwords per environment: dev, staging, and prod.</p>
-      {canWrite && <button className="primary-button vault-primary" onClick={() => setCreating(true)}><Plus />New vault</button>}
+      {canWrite && <button className="action-button" onClick={() => setCreating(true)}><Plus />New vault</button>}
     </div>}
     {vaults && vaults.length > 0 && ([["Your vaults", vaults.filter((vault) => vault.role === "owner")], ["Shared with me", vaults.filter((vault) => vault.role !== "owner")]] as const).map(([heading, list]) => list.length > 0 && <section key={heading} className="vault-list-section" aria-labelledby={`vault-list-${heading === "Your vaults" ? "own" : "shared"}`}>
       <h2 id={`vault-list-${heading === "Your vaults" ? "own" : "shared"}`} className="vault-list-heading">{heading}<span className="vault-count"> · {list.length}</span></h2>
@@ -360,7 +360,7 @@ function VaultPage({ vaultId, envId, cache, onBack, onReady, flash, ask, onEnvir
         <label className="vault-search"><Search aria-hidden="true" /><span className="sr-only">Search names and tags</span>
           <input type="search" value={query} placeholder="Search names and tags" autoComplete="off" spellCheck={false} onChange={(event) => setQuery(event.target.value)} />
         </label>
-        {canCreate && <button type="button" className="primary-button vault-primary" onClick={() => setDialog({ kind: "newSecret" })}><Plus />New secret</button>}
+        {canCreate && <button type="button" className="action-button" onClick={() => setDialog({ kind: "newSecret" })}><Plus />New secret</button>}
       </div>
     </div>
     {vault.description && <p className="vault-description">{vault.description}</p>}
@@ -384,7 +384,7 @@ function VaultPage({ vaultId, envId, cache, onBack, onReady, flash, ask, onEnvir
       <span className="vault-state-icon"><KeyRound /></span>
       <h2>{query || tag ? "No secrets match" : "No secrets yet"}</h2>
       {!query && !tag && <p>Add a secret, then give it a value in each environment, or import a .env file.</p>}
-      {canCreate && !query && !tag && <button className="primary-button vault-primary" onClick={() => setDialog({ kind: "newSecret" })}><Plus />New secret</button>}
+      {canCreate && !query && !tag && <button className="action-button" onClick={() => setDialog({ kind: "newSecret" })}><Plus />New secret</button>}
     </div>}
 
     {data.secrets.length > 0 && !phone && <div className="vault-grid-scroll" role="region" aria-label={`${vault.name} secrets by environment`} tabIndex={0}>

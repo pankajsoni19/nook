@@ -115,7 +115,7 @@ export function AiSettings({ flash }: { flash: (message: string) => void }) {
     </ul>
     {providers && providers.length === 0 && <p className="chat-muted">No provider yet. Chats need one.</p>}
     <p className="policy-copy">{SECRET_HONESTY}</p>
-    <button type="button" className="secondary-button ai-add" onClick={() => setEditing("new")} disabled={(providers?.length ?? 0) >= AGENT_BOUNDS.providers}><Plus />Add provider</button>
+    <button type="button" className="action-button secondary ai-add" onClick={() => setEditing("new")} disabled={(providers?.length ?? 0) >= AGENT_BOUNDS.providers}><Plus />Add provider</button>
 
     <ToolServersSection flash={flash} />
     {settings && <PolicyForm settings={settings} providers={providers ?? []} flash={flash} onSaved={(next) => setSettings(next)} />}

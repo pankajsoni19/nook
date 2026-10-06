@@ -45,7 +45,7 @@ export function TeamIntegrations({ onBack, onOpen, flash }: { onBack: () => void
         <h2 id="team-integrations-title">Integrations</h2>
         <p className="team-muted">{INTEGRATIONS_HELP}</p>
       </div>
-      <button type="button" className="primary-button team-groups-new" onClick={() => setCreating(true)} aria-haspopup="dialog"><Plus />New integration</button>
+      <button type="button" className="action-button" onClick={() => setCreating(true)} aria-haspopup="dialog"><Plus />New integration</button>
     </header>
     {error && <div className="team-state team-error" role="alert">
       <span className="team-state-icon"><TriangleAlert /></span>
