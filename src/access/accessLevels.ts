@@ -5,7 +5,7 @@
 export type Level = "view" | "comment" | "edit" | "manage";
 export type ItemLevel = "none" | Level | "owner";
 /** Wave 43 (AC-D): agents (view, manage) and chats (view) use the same sheet. */
-export type AccessKind = "note" | "folder" | "document" | "board" | "task_view" | "collection" | "calendar" | "agent" | "chat";
+export type AccessKind = "note" | "folder" | "document" | "board" | "task_view" | "collection" | "calendar" | "agent" | "chat" | "knowledge_base";
 
 const RANK: Record<ItemLevel, number> = { none: 0, view: 1, comment: 2, edit: 3, manage: 4, owner: 5 };
 
@@ -37,6 +37,8 @@ export function levelDescription(kind: AccessKind, level: Level): string {
       return level === "manage" ? "Also edit its prompt, model, tools, and starters, and share it at Can view; never delete it" : "Chat with it; never see its prompt or tools";
     case "chat":
       return "Read the conversation, tool calls and results included, and continue in their own copy";
+    case "knowledge_base":
+      return level === "manage" ? "Also add and remove sources, re-index, attach it to agents, and share it at Can view; never delete it" : "Search it (Try it); attaching it to agents needs Manage";
   }
 }
 

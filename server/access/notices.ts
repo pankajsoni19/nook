@@ -32,6 +32,8 @@ export type AccessNoticeKind = "share_removed" | "share_lowered" | "access_reset
   // Wave 43 (AC-D): an agent or a chat was shared with you, by name or through a group. The line names
   // it only while you can open it (the agent's name or the chat's title), never a prompt or a message.
   | "agent_shared" | "chat_shared"
+  // Wave 44 (AC-E): a knowledge base was shared with you; named only while you can open it.
+  | "knowledge_base_shared"
   // Wave 43 fixes (review L4): a manager changed the agent's system prompt, tools, or direct Nook writes,
   // or the change turned on the trifecta. To the agent's owner; `count` carries AGENT_CHANGE_PARTS bits.
   | "agent_changed";
@@ -41,7 +43,7 @@ export type AccessNotice = {
   kind: AccessNoticeKind;
   actorId: string | null;
   targetUserId?: string | null;
-  resource?: { kind: AccessKind | "vault" | "agent" | "chat"; id: string } | null;
+  resource?: { kind: AccessKind | "vault" | "agent" | "chat" | "knowledge_base"; id: string } | null;
   groupId?: string | null;
   keyId?: string | null;
   count?: number | null;
@@ -87,6 +89,10 @@ function line(row: NoticeRow, recipientId: string) {
       const people = row.count === 1 ? "someone" : `${row.count ?? 0} people`;
       return `${actor}'s change in Team took ${people} off ${title ? `the vault “${title}”` : "a vault"}. Its data key is being rotated; rotate the real credentials they could read where they are issued.`;
     }
+  }
+  if (row.resource_kind === "knowledge_base" && row.resource_id && row.kind === "knowledge_base_shared") {
+    const title = sharedTitleFor("knowledge_base", row.resource_id, recipientId);
+    return title ? `${row.actor_name ?? "Someone"} shared the knowledge base “${title}” with you` : "A knowledge base shared with you is no longer available to you";
   }
   if ((row.resource_kind === "agent" || row.resource_kind === "chat") && row.resource_id) {
     const title = sharedTitleFor(row.resource_kind, row.resource_id, recipientId);
@@ -208,6 +214,8 @@ export function listAccessNotices(userId: string, options: { unread: boolean; li
       : row.kind === "chat_shared" && row.resource_id && sharedTitleFor("chat", row.resource_id, userId) !== null ? `/chat/${row.resource_id}`
       // Wave 43 fixes (review L4): the owner opens the agent's editor.
       : row.kind === "agent_changed" && row.resource_id && sharedTitleFor("agent", row.resource_id, userId) !== null ? `/settings/agents/${row.resource_id}`
+      // Wave 44 (AC-E): a knowledge base opens its page in Settings → Knowledge.
+      : row.kind === "knowledge_base_shared" && row.resource_id && sharedTitleFor("knowledge_base", row.resource_id, userId) !== null ? `/settings/knowledge/${row.resource_id}`
       : ACCESS_NOTICE_HREF,
     late: false, read: row.read_at !== null, createdAt: row.created_at, occurrenceStart: null
   }));

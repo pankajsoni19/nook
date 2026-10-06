@@ -104,6 +104,10 @@ describe("role write gate (T87)", () => {
     expect((await send(guest, "POST", `/team/${target}/block`, {})).status).toBe(404);
     expect((await send(viewer, "POST", `/team/${target}/block`, {})).body.code).toBe("ADMIN_ONLY");
     expect(SELF_GATED_WRITE_PREFIXES).toEqual(["/api/team/"]);
+    // Knowledge bases answer guests 404 on writes too (Wave 44 fixes, QA LOW-1); viewers stay gated.
+    expect((await send(guest, "POST", "/knowledge", { name: "Nope" })).status).toBe(404);
+    expect((await send(guest, "PATCH", `/knowledge/${target}`, { name: "Nope" })).status).toBe(404);
+    expect((await send(viewer, "PATCH", `/knowledge/${target}`, { name: "Nope" })).body.code).toBe("ROLE_READ_ONLY");
     // Sign out is allowed (last, since it ends the session).
     expect((await send(viewer, "POST", "/auth/logout", {})).status).toBe(200);
     expect((await send(guest, "POST", "/auth/logout", {})).status).toBe(200);

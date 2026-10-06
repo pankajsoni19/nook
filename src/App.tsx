@@ -49,6 +49,7 @@ const VaultApp = lazy(() => import("./vault/VaultApp").then((module) => ({ defau
 const ChatApp = lazy(() => import("./chat/ChatApp").then((module) => ({ default: module.ChatApp })));
 const AiSettings = lazy(() => import("./chat/AiSettings").then((module) => ({ default: module.AiSettings })));
 const AgentsSettings = lazy(() => import("./chat/AgentsSettings").then((module) => ({ default: module.AgentsSettings })));
+const KnowledgeSettings = lazy(() => import("./chat/KnowledgeSettings").then((module) => ({ default: module.KnowledgeSettings })));
 import { lineDiff } from "./diff/lineDiff";
 import { TeamSection } from "./team/TeamApp";
 import { useBlockedCount } from "./team/blockedCount";
@@ -673,6 +674,7 @@ function SettingsPage({ session, modules, googleResult = null, navigate, flash, 
     : section === "access" ? <MyAccess />
     : section === "notifications" ? <NotificationSettings />
     : section === "agents" ? <Suspense fallback={<section className="settings-content" aria-busy="true"><p className="sr-only" role="status">Loading agents…</p></section>}><AgentsSettings agentId={route.app === "settings" ? route.agentId ?? null : null} navigate={go} flash={flash} onOpenChat={(agentId) => navigate({ app: "chat", chatId: null, newChat: true, agentId })} /></Suspense>
+    : section === "knowledge" ? <Suspense fallback={<section className="settings-content" aria-busy="true"><p className="sr-only" role="status">Loading knowledge bases…</p></section>}><KnowledgeSettings kbId={route.app === "settings" ? route.kbId ?? null : null} navigate={go} flash={flash} /></Suspense>
     : section === "ai" ? (session.user.role === "admin" ? <Suspense fallback={<section className="settings-content" aria-busy="true"><p className="sr-only" role="status">Loading AI settings…</p></section>}><AiSettings flash={flash} tabs={aiTabs} tab={aiTab} onSelectTab={(tab) => go({ app: "settings", section: "ai", aiTab: tab })} /></Suspense> : <section className="settings-content"><p className="settings-warning">That section is for admins.</p></section>)
     : section === "about" ? <section className="settings-content about-settings" aria-labelledby="about-heading"><div className="settings-section-heading"><span className="settings-icon"><Info /></span><div><h3 id="about-heading">About {appName()}</h3><p>A private, self-hosted workspace for notes, files, and ideas.</p></div></div><div className="about-card"><div className="brand-mark"><Sparkles /></div><div><h4>{appName()}</h4><p>{appName() === "Nook" ? "Built by Pankaj" : "Built on Nook by Pankaj"}</p></div><dl><div><dt>Version</dt><dd>{appInfo.version}</dd></div><div><dt>Git SHA</dt><dd><code>{appInfo.gitSha}</code></dd></div></dl><a href="https://github.com/pankajsoni19" target="_blank" rel="noopener noreferrer">github.com/pankajsoni19</a></div></section>
     : securitySection;

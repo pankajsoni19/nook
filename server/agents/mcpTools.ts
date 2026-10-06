@@ -71,12 +71,15 @@ export const agentTools: McpToolSpec[] = [
     description: `List the agents the key's owner can chat with: id, name, description, model override, and max steps. A key that may only run agents lists the agents its grant covers. The system prompt is never returned. ${UNTRUSTED}`,
     // AC-C: a run-only key lists what it may run (its grant may name chosen agents).
     scopes: ["agents:read", "agents:run"],
-    access: { mode: "list", lists: ["agent"] },
+    // QA LOW-6: hidden from a key whose grants name only knowledge bases (it would list nothing).
+    access: { mode: "list", lists: ["agent"], listsNeedReach: true },
     write: false,
     inputSchema: z.object({}),
     handler: (_args, key) => {
       requireOn(key.userId);
-      const reach = hasScope(key.scopes, "agents:read") ? "all" as const : keyReach(key, "agents:run");
+      // Review: every agent only when agents:read reaches everything (a grant over chosen knowledge
+      // bases reads no agents), whatever the key's scopes say; otherwise the agents it may run.
+      const reach = keyReach(key, "agents:read") === "all" ? "all" as const : keyReach(key, "agents:run");
       return { agents: listUsableAgents(key.userId).filter((agent) => reachCovers(reach, [{ kind: "agent", id: agent.id }])).map((agent) => ({ id: agent.id, name: agent.name, description: agent.description, model: agent.model, maxSteps: agent.maxSteps, updatedAt: agent.updatedAt })) };
     }
   }),
@@ -122,7 +125,8 @@ export const agentTools: McpToolSpec[] = [
     title: "List chats",
     description: `List the key owner's chats, pinned first then newest, optionally filtered by a search over titles and the owner's messages, then the chats others shared with them (\`shared: true\`, read-only, with the owner's name; the search matches their titles). ${UNTRUSTED}`,
     scopes: ["agents:read"],
-    access: { mode: "own" },
+    // Wave 44 (AC-E): `global`, so a key whose agents:read names only chosen knowledge bases never sees it.
+    access: { mode: "global" },
     write: false,
     inputSchema: z.object({
       query: z.string().min(1).max(200).optional().describe("Search chat titles and your messages"),
@@ -141,7 +145,7 @@ export const agentTools: McpToolSpec[] = [
     title: "Read a chat",
     description: `Read one of the key owner's chats, or a chat shared with them (read-only): the branch on screen (user and assistant turns, oldest first), each with its status and the names of the tools it called. At most 200 turns and 256 KiB of text; longer chats say so. ${UNTRUSTED}`,
     scopes: ["agents:read"],
-    access: { mode: "own", related: ["chatId"] },
+    access: { mode: "global", related: ["chatId"] },
     write: false,
     inputSchema: z.object({ chatId: uuid.describe("The chat id") }),
     handler: ({ chatId }, key) => {

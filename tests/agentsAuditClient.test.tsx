@@ -102,15 +102,16 @@ describe("cards, status, and filters", () => {
 describe("the key builder's Agents section (D364)", () => {
   const row = (patch: Partial<GrantRow>): GrantRow => ({ key: "r", module: "agents", permission: "run", applies: "all", resourceIds: [], ...patch });
 
-  test("Run offers all agents or chosen ones; Read always covers all", () => {
-    expect(SELECTOR_KINDS.agents).toEqual({ kinds: ["agent"], one: "agent", many: "agents" });
+  test("Run offers all agents or chosen ones; Read covers everything or (Wave 44) chosen knowledge bases", () => {
+    expect(SELECTOR_KINDS.agents).toEqual({ kinds: ["agent", "knowledge_base"], one: "agent or knowledge base", many: "agents and knowledge bases" });
     expect(selectorFor("agents", "run")?.many).toBe("agents");
-    expect(selectorFor("agents", "read")).toBeUndefined();
+    expect(selectorFor("agents", "read")).toEqual({ kinds: ["knowledge_base"], one: "knowledge base", many: "knowledge bases" });
     expect(rowsToGrants([row({ applies: "chosen", resourceIds: [`agent:${agentId}`] })])).toEqual({ grants: [{ module: "agents", permission: "run", resources: [{ kind: "agent", id: agentId }] }], error: null });
     expect(rowsToGrants([row({ applies: "chosen" })]).error).toBe("Choose at least one agent for Chat, or pick All agents.");
-    expect(rowsToGrants([row({ permission: "read", applies: "chosen", resourceIds: [`agent:${agentId}`] })]).grants).toEqual([{ module: "agents", permission: "read" }]);
+    expect(rowsToGrants([row({ permission: "read", applies: "chosen", resourceIds: [`knowledge_base:${agentId}`] })]).grants).toEqual([{ module: "agents", permission: "read", resources: [{ kind: "knowledge_base", id: agentId }] }]);
     expect(grantSummary([row({ applies: "chosen", resourceIds: [`agent:${agentId}`, `agent:${runId}`] })])).toBe("Chat: run agents on 2 agents. Never shares, never manages access or keys, and never deletes forever.");
-    expect(grantSummary([row({ permission: "read" })])).toBe("Chat: read agents and chats. Never shares, never manages access or keys, and never deletes forever.");
+    expect(grantSummary([row({ permission: "read" })])).toBe("Chat: read agents, chats, and knowledge. Never shares, never manages access or keys, and never deletes forever.");
+    expect(grantSummary([row({ permission: "read", applies: "chosen", resourceIds: [`knowledge_base:${agentId}`] })])).toBe("Chat: read agents, chats, and knowledge on 1 knowledge base. Never shares, never manages access or keys, and never deletes forever.");
   });
 
   test("members may run agents; viewers may not (member-only)", () => {

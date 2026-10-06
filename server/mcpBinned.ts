@@ -84,7 +84,7 @@ async function restoreOne(item: BinnedItem, userId: string) {
     return outcome.status === "restored" || outcome.status === "already_restored" ? null : outcome.status;
   }
   const outcome = await restoreItem(item.type, item.id, userId);
-  return outcome.status === "restored" || outcome.status === "already_restored" || outcome.status === "calendar_restored" ? null : outcome.status;
+  return outcome.status === "restored" || outcome.status === "already_restored" || outcome.status === "calendar_restored" || outcome.status === "knowledge_restored" ? null : outcome.status;
 }
 
 /** Restores everything the key binned in the window through the normal services; items no longer in the Bin are skipped. */

@@ -4,6 +4,7 @@ import { storage, withResourceLock } from "./storage";
 import { emptyTaskBin, listTaskBin, sweepTaskBin, type TaskBinType } from "./tasks/bin";
 import { readableBoardPredicate } from "./tasks/access";
 import { readableCollectionPredicate } from "./collections/access";
+import { sourceAccessChangedHook } from "./knowledge/hooks";
 
 /** Bin retention is a constant (D11), not configurable. */
 export const BIN_RETENTION_MS = 30 * 86_400_000;
@@ -11,10 +12,10 @@ export const BIN_RETENTION_MS = 30 * 86_400_000;
 /** Types stored in the core tables below. */
 export type CoreBinType = "note" | "document";
 /** Types whose module registers a BinProvider (Collections and Calendar, WAVES_10-12.md D68; the Vault, D225). */
-export type ProvidedBinType = "collection" | "collection_row" | "calendar" | "event" | "vault" | "vault_environment" | "vault_secret" | "chat" | "agent";
+export type ProvidedBinType = "collection" | "collection_row" | "calendar" | "event" | "vault" | "vault_environment" | "vault_secret" | "chat" | "agent" | "knowledge_base";
 export type BinType = CoreBinType | ProvidedBinType;
 const CORE_BIN_TYPES: readonly CoreBinType[] = ["note", "document"];
-const PROVIDED_BIN_TYPES: readonly ProvidedBinType[] = ["collection", "collection_row", "calendar", "event", "vault", "vault_environment", "vault_secret", "chat", "agent"];
+const PROVIDED_BIN_TYPES: readonly ProvidedBinType[] = ["collection", "collection_row", "calendar", "event", "vault", "vault_environment", "vault_secret", "chat", "agent", "knowledge_base"];
 /**
  * Why an item was purged, as recorded in the audit metadata. "resumed" marks a
  * purge the sweeper finished after it was interrupted: the original reason
@@ -84,6 +85,8 @@ export async function purgeLocked(type: CoreBinType, id: string, options: { reas
       audit(options.actorId, null, `${type}.purge`, type === "note" ? { noteId: id, reason: options.reason } : { documentId: id, reason: options.reason });
     }
   })();
+  // Wave 44 fixes (M1): no knowledge base keeps a purged note's or file's text, or its title.
+  sourceAccessChangedHook({ kind: type, ids: [id], purged: true });
   return "purged";
 }
 
@@ -107,6 +110,8 @@ export type RestoreOutcome =
   | { status: "already_restored"; folderId: string | null; folderName: string | null }
   /** A calendar or event (server/calendar/calendarBin.ts): the response names the calendar instead of a folder. */
   | { status: "calendar_restored"; alreadyRestored: boolean; calendarId: string; calendarName: string }
+  /** A knowledge base (Wave 44 fixes, QA LOW-6): the response names the base, not a folder. */
+  | { status: "knowledge_restored"; alreadyRestored: boolean; knowledgeBaseId: string; knowledgeBaseName: string }
   | { status: "purging" }
   | { status: "not_found" }
   /** A child (a row, an event) whose parent (its collection, calendar) is itself in the Bin: restore the parent first. */
@@ -169,7 +174,7 @@ const ownedFolder = (folderId: string | null, ownerId: string) => folderId === n
 export function restoreItem(type: BinType, id: string, ownerId: string): Promise<RestoreOutcome> {
   if (isProvided(type)) return requireProvider(type).restore(id, ownerId);
   const table = tables[type];
-  return withResourceLock(lockKey(type, id), async () => {
+  return withResourceLock(lockKey(type, id), async (): Promise<RestoreOutcome> => {
     const row = db.query(`SELECT folder_id, visibility, sharing_override, deleted_at, purge_started_at FROM ${table} WHERE id = ? AND owner_id = ?`)
       .get(id, ownerId) as RestorableRow | null;
     if (!row) return { status: "not_found" };
@@ -207,6 +212,10 @@ export function restoreItem(type: BinType, id: string, ownerId: string): Promise
       const visibility = row.sharing_override ? row.visibility : folder.visibility;
       return { status: "restored", folderId: folder.id, folderName: folder.name, visibility };
     })();
+  }).then((outcome) => {
+    // Wave 44 fixes (M1): a restored note or file its knowledge bases' owners can read again is indexed again.
+    if (outcome.status === "restored") sourceAccessChangedHook({ kind: type, ids: [id] });
+    return outcome;
   });
 }
 

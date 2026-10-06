@@ -18,6 +18,7 @@ import { mailShared, shareMembers } from "./mail/triggers";
 import { GUEST_SHARE_DISABLED, legacyGuestShareBlocked, writeDirectShares } from "./access/shares";
 import { whiteboardFileName } from "../shared/whiteboardScene";
 import { isWhiteboard, renameWhiteboardIndex } from "./whiteboards/search";
+import { sourceAccessChangedHook } from "./knowledge/hooks";
 
 const MAX_CONCURRENT_UPLOADS = 3;
 const MULTIPART_OVERHEAD_BYTES = 65_536;
@@ -613,6 +614,8 @@ export async function patchDocument(userId: string, id: string, input: { name?: 
       if (name !== null) renameWhiteboardIndex(id, name);
       if (moving) audit(userId, null, "document.move", { documentId: id, folderId: input.folderId ?? null });
     })();
+    // A file that uses its folder's access may change audience with the move (Wave 44 fixes, M1).
+    if (moving) sourceAccessChangedHook({ kind: "document", ids: [id] });
     return ownedDocumentSummary(id, userId)!;
   });
 }
@@ -683,6 +686,7 @@ export function registerDocumentRoutes(app: Hono<AppEnv>) {
           .run(visibility, body.visibility === "inherit" ? 0 : 1, now(), id, userId);
         audit(userId, null, "document.sharing_changed", { documentId: id, visibility: body.visibility, recipientCount: uniqueIds.length });
       })();
+      sourceAccessChangedHook({ kind: "document", ids: [id] });
       return c.json({ ok: true });
     });
   });
@@ -708,6 +712,8 @@ export function registerDocumentRoutes(app: Hono<AppEnv>) {
           .run(deletedAt.toISOString(), userId, purgeAfter, id, userId);
         audit(userId, null, "document.delete", { documentId: id });
       })();
+      // Wave 44 fixes (M1): a binned file's passages leave every knowledge base at once.
+      sourceAccessChangedHook({ kind: "document", ids: [id] });
       return c.json({ ok: true, purgeAfter });
     });
   });

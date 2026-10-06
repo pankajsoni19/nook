@@ -84,6 +84,10 @@ describe("which tab lists a key", () => {
     expect(keyTabOf(generalAndAgents, on)).toBe("general");
     expect(keyTabOf(agentsOnly, on)).toBe("agents");
     expect(keyTabOf(agentsAndKnowledge, on)).toBe("agents");
+    // Wave 44 fixes: a knowledge-only key (Chat → Read on chosen knowledge bases) is an Agents key.
+    const knowledgeOnly = apiKey({ grants: [{ module: "agents", permission: "read", resource: { kind: "knowledge_base", id: crypto.randomUUID(), name: "Support FAQ" }, active: true, inactiveReason: null } as unknown as KeyGrantView] });
+    expect(keyTabOf(knowledgeOnly, on)).toBe("agents");
+    expect(keyTabOf(knowledgeOnly, { vault: true, agents: false })).toBe("general");
     expect(keyTabOf(vaultKey, on)).toBe("vault");
     // A key with no grants left is a General key.
     expect(keyTabOf(apiKey({ grants: [] }), on)).toBe("general");

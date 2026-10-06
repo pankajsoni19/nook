@@ -17,6 +17,7 @@ import { pauseRoutinesOf } from "../inbox/routineHooks";
 import { mailAccountEvent, mailRoleChanged } from "../mail/triggers";
 import { avatarUrlFor } from "../avatars";
 import { rotateOnLostReach, snapshotVaultReach } from "../vault/members";
+import { userUnblockedHook } from "../knowledge/hooks";
 
 export type TeamVia = "web" | "cli" | "mcp";
 /** Who is acting: a signed-in admin (web or MCP), or the host CLI (no actor). */
@@ -310,7 +311,7 @@ export function blockUser(actor: TeamActor, targetId: string, reason: string | n
 /** Lifts a block. Old sessions stay deleted; keys and feeds resume; the role is unchanged (§4.2). */
 export function unblockUser(actor: TeamActor, targetId: string, options: { via: TeamVia; kind?: AccountKind }) {
   requireManager(actor);
-  return write(() => {
+  const result = write(() => {
     const target = loadTarget(targetId, options.kind);
     if (!target) throw notFound();
     if (target.disabled_at === null) throw new TeamError(409, "NOT_BLOCKED", "This account is not blocked");
@@ -319,8 +320,11 @@ export function unblockUser(actor: TeamActor, targetId: string, options: { via: 
     recordEvent(target.id, actor, options.via, "unblock");
     audit(actor?.id ?? null, null, "team.user_unblocked", auditMeta(options.via, { targetId: target.id }));
     mailAccountEvent(target.id, "unblocked", actor?.id ?? null);
-    return { ok: true as const };
+    return { ok: true as const, userId: target.id };
   });
+  // Wave 44 fixes (M2): their knowledge bases resume indexing.
+  userUnblockedHook(result.userId);
+  return { ok: result.ok };
 }
 
 /** Signs an account out everywhere without blocking it. Admins sign themselves out from Settings. */

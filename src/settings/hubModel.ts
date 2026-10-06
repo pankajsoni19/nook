@@ -19,8 +19,8 @@ const BIN_ENTRY: HubEntry = { id: "bin", group: "workspace", label: "Bin", route
 type TeamRoute = Extract<Route, { app: "team" }>;
 const team = (flags: Partial<TeamRoute> = {}): TeamRoute => ({ app: "team", userId: null, ...flags });
 
-/** Account entries, in nav order. My access and Agents are for every role but guest; AI is for admins. */
-const ACCOUNT_ORDER: readonly SettingsSection[] = ["security", "notifications", "access", "mcp", "agents", "ai", "modules", "about"];
+/** Account entries, in nav order. My access, Agents, and Knowledge are for every role but guest; AI is for admins. */
+const ACCOUNT_ORDER: readonly SettingsSection[] = ["security", "notifications", "access", "mcp", "agents", "knowledge", "ai", "modules", "about"];
 const ADMIN_ONLY_SECTIONS: readonly SettingsSection[] = ["ai"];
 
 /** Team entries, in nav order. Only Members is for every role that sees Team; the rest are admins only. */
@@ -62,7 +62,7 @@ export function binEntryShown(role: Role | undefined, binModuleEnabled: boolean)
 export function hubEntries(role: Role | undefined, options: { teamModuleEnabled: boolean; binModuleEnabled?: boolean; setupRequired?: boolean; binCount?: number; blockedCount?: number }): HubEntry[] {
   if (options.setupRequired) return [{ id: "security", group: "account", label: SETTINGS_SECTION_NAMES.security, route: { app: "settings", section: "security" } }];
   const account: HubEntry[] = ACCOUNT_ORDER
-    .filter((section) => (section !== "access" && section !== "agents") || role !== "guest")
+    .filter((section) => (section !== "access" && section !== "agents" && section !== "knowledge") || role !== "guest")
     .filter((section) => !ADMIN_ONLY_SECTIONS.includes(section) || role === "admin")
     .map((section) => ({ id: section, group: "account", label: SETTINGS_SECTION_NAMES[section], route: { app: "settings", section } }));
   const workspace: HubEntry[] = !binEntryShown(role, options.binModuleEnabled !== false) ? [] : [options.binCount ? { ...BIN_ENTRY, badge: options.binCount } : BIN_ENTRY];
@@ -115,7 +115,7 @@ export function hubEntryLabel(id: HubEntryId): string {
  * back button to the section, so the hub's phone back arrow (to the list) is not shown over it.
  */
 export function isNestedHubRoute(route: Route) {
-  if (route.app === "settings") return route.section === "agents" && Boolean(route.agentId);
+  if (route.app === "settings") return (route.section === "agents" && Boolean(route.agentId)) || (route.section === "knowledge" && Boolean(route.kbId));
   return route.app === "team" && Boolean(route.userId || route.groupId || route.integrationId);
 }
 

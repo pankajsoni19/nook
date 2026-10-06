@@ -53,6 +53,8 @@ export function registerBinRoutes(app: Hono<AppEnv>) {
         return c.json({ ok: true, folderId: outcome.folderId, folderName: outcome.folderName, visibility: outcome.visibility });
       case "already_restored":
         return c.json({ ok: true, alreadyRestored: true, folderId: outcome.folderId, folderName: outcome.folderName });
+      case "knowledge_restored":
+        return c.json({ ok: true, ...(outcome.alreadyRestored ? { alreadyRestored: true } : {}), knowledgeBaseId: outcome.knowledgeBaseId, knowledgeBaseName: outcome.knowledgeBaseName });
       case "calendar_restored":
         return c.json({ ok: true, ...(outcome.alreadyRestored ? { alreadyRestored: true } : {}), calendarId: outcome.calendarId, calendarName: outcome.calendarName });
       case "parent_in_bin":

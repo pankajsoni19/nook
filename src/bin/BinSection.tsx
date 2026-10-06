@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArchiveRestore, Bot, CalendarClock, CalendarDays, Ellipsis, File as FileIcon, KanbanSquare, KeyRound, KeySquare, Layers, MessagesSquare, NotebookText, Package, PenTool, RotateCcw, Rows3, SquareCheck, Table2, Trash2, TriangleAlert, X, type LucideIcon } from "lucide-react";
+import { ArchiveRestore, BookOpen, Bot, CalendarClock, CalendarDays, Ellipsis, File as FileIcon, KanbanSquare, KeyRound, KeySquare, Layers, MessagesSquare, NotebookText, Package, PenTool, RotateCcw, Rows3, SquareCheck, Table2, Trash2, TriangleAlert, X, type LucideIcon } from "lucide-react";
 import { ApiError } from "../api";
 import { formatBytes } from "../files/filesApi";
 import { useConfirm } from "../ui/useConfirm";
@@ -41,10 +41,11 @@ const filters: Array<{ value: BinFilter; label: string }> = [
   { value: "calendar", label: "Calendar" },
   { value: "vault", label: "Vault" },
   { value: "chat", label: "Chats" },
-  { value: "agent", label: "Agents" }
+  { value: "agent", label: "Agents" },
+  { value: "knowledge_base", label: "Knowledge" }
 ];
 
-const itemIcons: Partial<Record<BinItem["type"], LucideIcon>> = { note: NotebookText, document: FileIcon, card: SquareCheck, board: KanbanSquare, collection: Table2, collection_row: Rows3, calendar: CalendarDays, event: CalendarClock, vault: KeyRound, vault_environment: Layers, vault_secret: KeySquare, chat: MessagesSquare, agent: Bot };
+const itemIcons: Partial<Record<BinItem["type"], LucideIcon>> = { note: NotebookText, document: FileIcon, card: SquareCheck, board: KanbanSquare, collection: Table2, collection_row: Rows3, calendar: CalendarDays, event: CalendarClock, vault: KeyRound, vault_environment: Layers, vault_secret: KeySquare, chat: MessagesSquare, agent: Bot, knowledge_base: BookOpen };
 /** The icon of a Bin row; a kind this build does not know (a newer server) gets a generic one instead of crashing the page (Wave 40 QA Q1). */
 export const binItemIcon = (item: Pick<BinItem, "type"> & Partial<Pick<BinItem, "kind">>): LucideIcon => item.type === "document" && item.kind === "whiteboard" ? PenTool : itemIcons[item.type] ?? Package;
 
@@ -206,7 +207,7 @@ export function BinSection({ flash, onRestored }: BinSectionProps) {
     setSheetKey(itemKey(item));
   }
 
-  const emptyCopy = filter === "note" ? "No notes in the Bin." : filter === "document" ? "No files in the Bin." : filter === "tasks" ? "No cards or boards in the Bin." : filter === "collections" ? "No collections or rows in the Bin." : filter === "calendar" ? "No calendars or events in the Bin." : filter === "vault" ? "No vaults, environments, or secrets in the Bin." : filter === "chat" ? "No chats in the Bin." : filter === "agent" ? "No agents in the Bin." : "Nothing in the Bin.";
+  const emptyCopy = filter === "note" ? "No notes in the Bin." : filter === "document" ? "No files in the Bin." : filter === "tasks" ? "No cards or boards in the Bin." : filter === "collections" ? "No collections or rows in the Bin." : filter === "calendar" ? "No calendars or events in the Bin." : filter === "vault" ? "No vaults, environments, or secrets in the Bin." : filter === "chat" ? "No chats in the Bin." : filter === "agent" ? "No agents in the Bin." : filter === "knowledge_base" ? "No knowledge bases in the Bin." : "Nothing in the Bin.";
 
   // The hub's header is the section's title ("Bin"); the retention line and Empty Bin stay here.
   return <section className="settings-content bin-section" aria-labelledby="settings-hub-title">
@@ -214,7 +215,7 @@ export function BinSection({ flash, onRestored }: BinSectionProps) {
     <div className="bin-content">
       <div className="bin-intro">
         <div>
-          <p>Deleted notes, files, cards, boards, collections, rows, calendars, events, chats, and agents stay here for 30 days, then they are deleted forever. Restoring brings back their sharing.</p>
+          <p>Deleted notes, files, cards, boards, collections, rows, calendars, events, chats, agents, and knowledge bases stay here for 30 days, then they are deleted forever. Restoring brings back their sharing.</p>
         </div>
         {canWrite && <button className="bin-empty-button" onClick={() => { void emptyAll(); }} disabled={!all.length || busy}><Trash2 />{emptying ? "Emptying…" : "Empty Bin"}</button>}
       </div>

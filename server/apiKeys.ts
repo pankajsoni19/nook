@@ -6,7 +6,7 @@ import { addressBucket } from "./clientAddress";
 import { recordAccessEvent, type AccessVia } from "./access/events";
 import { notifyAccess } from "./access/notices";
 import {
-  ALL_ONLY, CREATE_ONLY, dedupeGrants, GENERAL_KEY_MODULES, grantKey, grantsToScopes, isNarrowing, permissionsForModule, READ_ONLY_KINDS, RESOURCE_KINDS, SCOPE_GRANTS, scopeFor, SELECTOR_KINDS,
+  ALL_ONLY, CREATE_ONLY, dedupeGrants, GENERAL_KEY_MODULES, grantKey, grantsToScopes, isNarrowing, permissionsForModule, READ_ONLY_KINDS, RESOURCE_KINDS, SCOPE_GRANTS, scopeFor, SELECTOR_KINDS, selectorKindsFor,
   type Grant, type GrantModule, type KeyKind, type KeyPermission, type KeySurfaces, type ResourceKind
 } from "./keyGrants";
 import type { McpScope } from "./mcpScopes";
@@ -420,6 +420,8 @@ export function resourceReachable(userId: string, kind: ResourceKind, id: string
     // Wave 42 (AC-C, D364): an agent the holder can view now; Wave 43 (AC-D): their own or one shared
     // with them (server/agents/sharing.ts), live, not in the Bin. Re-checked on every run and step.
     case "agent": return Boolean(db.query(`SELECT 1 FROM agents a WHERE a.id = $id AND ${shareReadableSql("agent", "a")}`).get({ id, userId }));
+    // Wave 44 (AC-E): a knowledge base the holder can open now (`search_knowledge` reads it, never writes).
+    case "knowledge_base": return !write && Boolean(db.query(`SELECT 1 FROM knowledge_bases k WHERE k.id = $id AND ${shareReadableSql("knowledge_base", "k")}`).get({ id, userId }));
     default: return false;
   }
 }
@@ -440,6 +442,7 @@ function resourceName(userId: string, kind: ResourceKind, id: string): string | 
     case "task_view": return (db.query(`SELECT v.name FROM task_views v JOIN users u ON u.id = v.owner_id WHERE v.id = $id AND ${readableViewPredicate}`).get({ id, userId }) as { name: string } | null)?.name ?? null;
     case "routine": return (db.query("SELECT name FROM routines WHERE id = ? AND owner_id = ?").get(id, userId) as { name: string } | null)?.name ?? null;
     case "agent": return (db.query(`SELECT a.name FROM agents a WHERE a.id = $id AND ${shareReadableSql("agent", "a")}`).get({ id, userId }) as { name: string } | null)?.name ?? null;
+    case "knowledge_base": return (db.query(`SELECT k.name FROM knowledge_bases k WHERE k.id = $id AND ${shareReadableSql("knowledge_base", "k")}`).get({ id, userId }) as { name: string } | null)?.name ?? null;
     default: return null;
   }
 }
@@ -459,7 +462,8 @@ export class KeyError extends Error {
  */
 export function chosenResources(input: GrantInput): Array<{ kind: ResourceKind; id: string }> | null {
   if (!input.resourceIds && !input.resources) return null;
-  const kinds = SELECTOR_KINDS[input.module];
+  // Wave 44 (AC-E): a permission may name other kinds than its module's list (agents:read → knowledge bases).
+  const kinds = selectorKindsFor(input.module, input.permission);
   if (!kinds) throw new KeyError(400, "INVALID_GRANT", `Keys for ${input.module} cover every item`);
   if (CREATE_ONLY.has(`${input.module}:${input.permission}`)) throw new KeyError(400, "INVALID_GRANT", `${input.module}: ${input.permission} only creates new items, so it cannot name chosen ones`);
   if (ALL_ONLY.has(`${input.module}:${input.permission}`)) throw new KeyError(400, "INVALID_GRANT", `${input.module}: ${input.permission} covers every item, so it cannot name chosen ones`);

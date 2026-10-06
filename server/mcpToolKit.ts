@@ -63,6 +63,11 @@ export type ToolAccess = {
   mode: "items" | "list" | "derived" | "own" | "global";
   items?: readonly ToolItem[];
   lists?: readonly ResourceKind[];
+  /**
+   * A list tool hidden from a key whose chosen items include none of `lists` (Wave 44 fixes, QA
+   * LOW-6: a key over chosen knowledge bases is never offered `list_agents`, which would list nothing).
+   */
+  listsNeedReach?: boolean;
   related?: readonly string[];
 };
 
@@ -161,6 +166,7 @@ export function restoreResult(outcome: RestoreOutcome, what: string) {
     case "restored": return { restored: true, folderId: outcome.folderId, folderName: outcome.folderName, visibility: outcome.visibility };
     case "already_restored": return { restored: true, alreadyRestored: true };
     case "calendar_restored": return { restored: true, ...(outcome.alreadyRestored ? { alreadyRestored: true } : {}), calendarId: outcome.calendarId, calendarName: outcome.calendarName };
+    case "knowledge_restored": return { restored: true, ...(outcome.alreadyRestored ? { alreadyRestored: true } : {}), knowledgeBaseId: outcome.knowledgeBaseId, knowledgeBaseName: outcome.knowledgeBaseName };
     case "purging": throw new McpToolError("PURGING", `This ${what.toLowerCase()} is being permanently deleted`);
     case "parent_in_bin": throw new McpToolError("PARENT_IN_BIN", outcome.message ?? "Restore its parent from the Bin first");
     case "limit_reached": throw new McpToolError("LIMIT_REACHED", outcome.message);

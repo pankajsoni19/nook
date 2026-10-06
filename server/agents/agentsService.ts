@@ -4,7 +4,8 @@ import { AGENT_BOUNDS, type AgentDetail, type AgentSummary, type AgentToolRef } 
 import { readAgentSettings, roleMayCreate } from "./settings";
 import { shareLevel, shareReadableSql, type ShareLevel } from "./sharing";
 import { AgentError } from "./status";
-import { agentToolRefs, linkStateOf, setAgentTools, trifectaOf } from "./tools";
+import { agentToolRefs, linkStateOf, refKeyOf, setAgentTools, trifectaOf } from "./tools";
+import { manageableKbIds } from "../knowledge/service";
 import { serversAvailableTo } from "./toolServers";
 import { agentChangeMask, notifyAccess } from "../access/notices";
 
@@ -40,11 +41,14 @@ const roleQuery = db.query("SELECT role FROM users WHERE id = ?");
  * Review L2: the picks a manager may see. Picks from servers outside `serversAvailableTo(manager's
  * role)` (an admins-only or disabled server) are withheld, and counted; `setAgentTools` keeps them on save.
  */
-export function toolsVisibleTo(tools: AgentToolRef[], role: string): { shown: AgentToolRef[]; hidden: AgentToolRef[] } {
+export function toolsVisibleTo(tools: AgentToolRef[], role: string, userId?: string): { shown: AgentToolRef[]; hidden: AgentToolRef[] } {
   const usable = new Set(serversAvailableTo(role).map((server) => server.id));
+  // AC-E: a manager is not shown a knowledge base they cannot manage either (its name stays private, and
+  // they could not attach it: M4); like a server they cannot use, it stays on save.
+  const kbs = userId ? manageableKbIds(userId, tools.flatMap((tool) => tool.source === "knowledge" ? [tool.kbId] : [])) : null;
   const shown: AgentToolRef[] = [];
   const hidden: AgentToolRef[] = [];
-  for (const tool of tools) (tool.source === "server" && !usable.has(tool.serverId) ? hidden : shown).push(tool);
+  for (const tool of tools) ((tool.source === "server" && !usable.has(tool.serverId)) || (tool.source === "knowledge" && kbs !== null && !kbs.has(tool.kbId)) ? hidden : shown).push(tool);
   return { shown, hidden };
 }
 
@@ -53,7 +57,7 @@ export const agentSummary = (row: AgentRow, userId: string, level: ShareLevel = 
   const link = linkStateOf(row.id, userId).state;
   // D356: below manage, no tools configuration leaves the server; the trifecta warning and "uses Nook" do.
   const configVisible = level === "owner" || level === "manage";
-  const managerView = level === "manage" ? toolsVisibleTo(tools, (roleQuery.get(userId) as { role: string } | null)?.role ?? "viewer") : null;
+  const managerView = level === "manage" ? toolsVisibleTo(tools, (roleQuery.get(userId) as { role: string } | null)?.role ?? "viewer", userId) : null;
   return {
     id: row.id, ownerId: row.owner_id, name: row.name, description: row.description, icon: row.icon, color: row.color,
     providerId: row.provider_id, model: row.model, maxSteps: row.max_steps, temperature: row.temperature, maxOutputTokens: row.max_output_tokens,
@@ -128,7 +132,7 @@ export function createAgent(actor: { userId: string; role: string }, input: Agen
       JSON.stringify((input.starters ?? []).slice(0, AGENT_BOUNDS.starters)), providerExists(input.providerId), input.model?.trim() || null,
       input.maxSteps ?? AGENT_BOUNDS.maxSteps.default, input.temperature ?? null, input.maxOutputTokens ?? null, input.nookDirectWrites ? 1 : 0, timestamp, timestamp
     );
-    if (input.tools) setAgentTools(id, actor.role, input.tools);
+    if (input.tools) setAgentTools(id, actor.role, input.tools, { userId: actor.userId });
     audit(actor.userId, null, "agents.agent.create", { agentId: id, tools: input.tools?.length ?? 0 });
     return agentDetail(usableAgent(id, actor.userId), actor.userId);
   })();
@@ -154,11 +158,11 @@ export function updateAgent(actor: { userId: string; role: string }, id: string,
     );
     const manager = row.owner_id !== actor.userId;
     const toolsBefore = manager ? agentToolRefs(id) : [];
-    if (input.tools) setAgentTools(id, actor.role, input.tools, { keepHidden: manager });
+    if (input.tools) setAgentTools(id, actor.role, input.tools, { keepHidden: manager, userId: actor.userId });
     // Review L4: the owner hears when a manager changes what the agent is told, what it can call, or what it may write.
     if (manager) {
       const toolsAfter = agentToolRefs(id);
-      const keyOf = (refs: AgentToolRef[]) => refs.map((ref) => ref.source === "server" ? `server:${ref.serverId}:${ref.toolName}:${ref.policy ?? ""}` : `nook:${ref.toolName}`).sort().join("\n");
+      const keyOf = (refs: AgentToolRef[]) => refs.map((ref) => ref.source === "server" ? `${refKeyOf(ref)}:${ref.policy ?? ""}` : refKeyOf(ref)).sort().join("\n");
       const mask = agentChangeMask({
         systemPrompt: input.systemPrompt !== undefined && input.systemPrompt !== row.system_prompt,
         tools: input.tools !== undefined && keyOf(toolsBefore) !== keyOf(toolsAfter),

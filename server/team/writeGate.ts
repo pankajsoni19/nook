@@ -80,7 +80,9 @@ export const ROLE_READ_ONLY_ALLOWED_WRITES: readonly AllowedWrite[] = [
   { method: "POST", path: "/api/chats/:chatId/messages/:messageId/regenerate", roles: ["viewer"], why: "regenerate in an own chat" },
   { method: "POST", path: "/api/runs/:runId/cancel", roles: ["viewer"], why: "stop an own run" },
   // Wave 43 (AC-D, D361): a viewer reading a shared chat continues it in their own copy (they must be able to use its agent).
-  { method: "POST", path: "/api/chats/:chatId/fork", roles: ["viewer"], why: "an own copy of a chat shared with them" }
+  { method: "POST", path: "/api/chats/:chatId/fork", roles: ["viewer"], why: "an own copy of a chat shared with them" },
+  // Wave 44 (AC-E): Try it on a knowledge base shared with them (view); a read sent as POST.
+  { method: "POST", path: "/api/knowledge/:kbId/search", roles: ["viewer"], why: "a read sent as POST (Try it on a readable knowledge base)" }
 ];
 
 /**
@@ -88,6 +90,13 @@ export const ROLE_READ_ONLY_ALLOWED_WRITES: readonly AllowedWrite[] = [
  * 403 `ADMIN_ONLY` (§5.2 item 3), which the gate must not turn into `ROLE_READ_ONLY`.
  */
 export const SELF_GATED_WRITE_PREFIXES: readonly string[] = ["/api/team/"];
+
+/**
+ * Knowledge bases (Wave 44 fixes, QA LOW-1): guests never reach them (AC-O2), and the module answers
+ * a guest 404 on every route, writes included, so the gate lets a guest's write through to that 404
+ * instead of answering ROLE_READ_ONLY. Viewers are still gated (only Try it is allowlisted above).
+ */
+const GUEST_SELF_GATED = (path: string) => path === "/api/knowledge" || path.startsWith("/api/knowledge/");
 
 const compiled = ROLE_READ_ONLY_ALLOWED_WRITES.map((entry) => ({
   ...entry,
@@ -97,6 +106,7 @@ const compiled = ROLE_READ_ONLY_ALLOWED_WRITES.map((entry) => ({
 /** Whether `role` may send this write although it cannot write content. */
 export function isAllowedReadOnlyWrite(role: Role, method: string, path: string) {
   if (SELF_GATED_WRITE_PREFIXES.some((prefix) => path.startsWith(prefix))) return true;
+  if (role === "guest" && GUEST_SELF_GATED(path)) return true;
   return compiled.some((entry) => entry.method === method && entry.regex.test(path) && (!entry.roles || entry.roles.includes(role)));
 }
 

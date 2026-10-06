@@ -82,8 +82,8 @@ export function AccessOverview({ summary, loadPage, actions, reloadKey = 0, busy
 function ChatSection({ rows, actions, busy }: { rows: AccessRow[]; actions?: AccessRowActions; busy: boolean }) {
   return <section className="team-card ma-module" aria-labelledby="ma-module-chat">
     <h3 id="ma-module-chat">Chat</h3>
-    <ul className="group-item-list" aria-label="Agent and chat access">
-      {rows.map((row, index) => <AccessRowItem key={row.sources[0]?.handle ?? `${row.kind}-${row.id ?? index}`} row={{ ...row, title: `${row.kind === "agent" && !row.titleHidden ? "Agent: " : row.kind === "chat" && !row.titleHidden ? "Chat: " : ""}${row.title}` }} actions={actions} busy={busy} />)}
+    <ul className="group-item-list" aria-label="Agent, chat, and knowledge base access">
+      {rows.map((row, index) => <AccessRowItem key={row.sources[0]?.handle ?? `${row.kind}-${row.id ?? index}`} row={{ ...row, title: `${row.kind === "agent" && !row.titleHidden ? "Agent: " : row.kind === "chat" && !row.titleHidden ? "Chat: " : row.kind === "knowledge_base" && !row.titleHidden ? "Knowledge base: " : ""}${row.title}` }} actions={actions} busy={busy} />)}
     </ul>
   </section>;
 }

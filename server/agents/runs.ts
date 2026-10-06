@@ -16,6 +16,7 @@ import { sessionFor } from "./toolServers";
 import { withinAgentRun } from "./depth";
 import { shareLevel } from "./sharing";
 import { publishChatUpdate } from "./chatUpdates";
+import { runKnowledgeTool } from "../knowledge/tool";
 
 /**
  * Runs (plan §2.2, §2.3, §2.4, D344, D345): every run is an `agent_runs` row and an in-memory
@@ -291,6 +292,11 @@ function toolExecutor(run: ActiveRun, channel: RunChannel, agent: AgentRow, mess
         text = outcome.text;
         ok = outcome.ok;
         proposalId = outcome.proposalId;
+      } else if (tool.knowledge) {
+        // AC-E: the system searches the bases; source ids only for what the runner can open (T320).
+        const outcome = await withTimeout(runKnowledgeTool(tool.knowledge, args, { agent, runner: { userId: run.userId }, runId: run.runId, signal: run.controller.signal }), tool.timeoutMs, run.controller.signal);
+        text = outcome.text;
+        ok = outcome.ok;
       } else {
         const outcome = await withTimeout(sessionFor(tool.serverRow!).callTool(tool.toolName, args, run.controller.signal), tool.timeoutMs, run.controller.signal);
         text = outcome.text;

@@ -27,6 +27,7 @@ import { teamTools } from "./team/mcpTools";
 import { inboxTools } from "./inbox/mcpTools";
 import { whiteboardTools } from "./whiteboards/mcpTools";
 import { agentTools } from "./agents/mcpTools";
+import { knowledgeTools } from "./knowledge/mcpTools";
 import { neutralizeWhiteboardEmbeds } from "../shared/whiteboardEmbed";
 import { countRunToolCall } from "./inbox/routineHooks";
 import { canWriteContent } from "./team/userRole";
@@ -83,6 +84,10 @@ const coversEverything = (reach: ToolReach) => reach.reach === "all" && reach.al
 function toolFits(spec: McpToolSpec, reach: ToolReach) {
   if (coversEverything(reach)) return true;
   if (spec.access.mode === "global") return false;
+  if (spec.access.mode === "list" && spec.access.listsNeedReach) {
+    const { reach: scope } = reach;
+    return scope !== null && (spec.access.lists ?? []).some((kind) => scope === "all" || (scope.kinds.get(kind)?.size ?? 0) > 0);
+  }
   if (spec.access.mode !== "items") return true;
   return (spec.access.items ?? []).filter((item) => item.ifAbsent !== "allow")
     .every((item) => [reach.reach, ...reach.also].every((each) => reachCanCover(each, item.kind)));
@@ -90,7 +95,7 @@ function toolFits(spec: McpToolSpec, reach: ToolReach) {
 
 const ITEM_LABELS: Record<ItemKind, string> = {
   note: "Note", folder: "Folder", document: "File", whiteboard: "Whiteboard", board: "Board", card: "Card", column: "Column", sprint: "Sprint",
-  task_view: "View", collection: "Collection", row: "Row", calendar: "Calendar", event: "Event", routine: "Routine", run: "Run", vault: "Vault", agent: "Agent"
+  task_view: "View", collection: "Collection", row: "Row", calendar: "Calendar", event: "Event", routine: "Routine", run: "Run", vault: "Vault", agent: "Agent", knowledge_base: "Knowledge base"
 };
 
 /**
@@ -461,7 +466,8 @@ export const mcpToolSpecs: readonly McpToolSpec[] = [
   ...teamTools,
   ...inboxTools,
   ...whiteboardTools,
-  ...agentTools
+  ...agentTools,
+  ...knowledgeTools
 ];
 
 /** Whether a key holding `scopes` may see and call `spec`: any one of its scopes and all of alsoRequires (D172). */

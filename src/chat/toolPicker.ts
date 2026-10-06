@@ -6,7 +6,10 @@ import type { AgentToolPolicy, AgentToolRef, NookCatalogTool, ToolCatalog, ToolP
  * (one per server; Nook's tools by module), and counts for the section headings.
  */
 
-export const refKey = (ref: AgentToolRef) => ref.source === "server" ? `server:${ref.serverId}:${ref.toolName}` : `nook:${ref.toolName}`;
+export const refKey = (ref: AgentToolRef) => ref.source === "server" ? `server:${ref.serverId}:${ref.toolName}` : ref.source === "nook" ? `nook:${ref.toolName}` : `knowledge:${ref.kbId}`;
+
+/** What a pick is called in the picker's "No longer available" group. */
+export const refName = (ref: AgentToolRef) => ref.source === "knowledge" ? "A knowledge base" : ref.toolName;
 
 export const hasRef = (refs: readonly AgentToolRef[], ref: AgentToolRef) => refs.some((item) => refKey(item) === refKey(ref));
 
@@ -45,7 +48,9 @@ export function nookGroups(tools: readonly NookCatalogTool[]): Array<{ module: s
 export function pickCounts(refs: readonly AgentToolRef[], catalog: ToolCatalog) {
   const perServer = new Map(catalog.servers.map((server) => [server.id, refs.filter((ref) => ref.source === "server" && ref.serverId === server.id).length]));
   const nook = refs.filter((ref) => ref.source === "nook").length;
-  return { perServer, nook, total: refs.length };
+  // AC-E: attached knowledge bases (one search_knowledge tool between them).
+  const knowledge = refs.filter((ref) => ref.source === "knowledge").length;
+  return { perServer, nook, knowledge, total: refs.length };
 }
 
 /** Picks that no longer exist in the catalog (a removed server or tool): shown so the person can clear them. */
@@ -53,8 +58,10 @@ export function orphanRefs(refs: readonly AgentToolRef[], catalog: ToolCatalog):
   const known = new Set<string>();
   for (const server of catalog.servers) for (const tool of server.tools) known.add(`server:${server.id}:${tool.name}`);
   for (const tool of catalog.nook.tools) known.add(`nook:${tool.name}`);
+  for (const kb of catalog.knowledge ?? []) known.add(`knowledge:${kb.id}`);
   // Without a live key the catalog lists no Nook tools (QA Q4): those picks are inactive, not orphans.
-  return refs.filter((ref) => !known.has(refKey(ref)) && (ref.source !== "nook" || catalog.nook.linked));
+  // An older server sends no knowledge list: its picks are left alone.
+  return refs.filter((ref) => !known.has(refKey(ref)) && (ref.source !== "nook" || catalog.nook.linked) && (ref.source !== "knowledge" || catalog.knowledge !== undefined));
 }
 
 /** What a Nook write tool does in a chat, from the catalog's flags and the agent's direct-writes setting. */
@@ -62,4 +69,14 @@ export function nookWriteMode(tool: NookCatalogTool, directWrites: boolean): "re
   if (!tool.write) return "read";
   if (directWrites) return "direct";
   return tool.proposable ? "proposal" : "needs-direct";
+}
+
+/**
+ * The Knowledge group's rows (Wave 44 fixes, M4): bases the editor owns or manages, plus any base
+ * already attached that they now only view (shown so it can be cleared). An older server sends no
+ * `manageable`: every base it lists can be attached.
+ */
+export function knowledgePickerBases<T extends { id: string; manageable?: boolean }>(bases: readonly T[], tools: readonly AgentToolRef[]): T[] {
+  const attached = new Set(tools.flatMap((ref) => ref.source === "knowledge" ? [ref.kbId] : []));
+  return bases.filter((kb) => kb.manageable !== false || attached.has(kb.id));
 }

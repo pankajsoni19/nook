@@ -67,7 +67,7 @@ export type DocumentSummary = {
   updated_at: string;
 };
 export type BinItem = {
-  type: "note" | "document" | "card" | "board" | "collection" | "collection_row" | "calendar" | "event" | "vault" | "vault_environment" | "vault_secret" | "chat" | "agent";
+  type: "note" | "document" | "card" | "board" | "collection" | "collection_row" | "calendar" | "event" | "vault" | "vault_environment" | "vault_secret" | "chat" | "agent" | "knowledge_base";
   id: string;
   title: string;
   folder_id: string | null;
@@ -109,4 +109,7 @@ export type BinRestoreResult = {
   /** Calendars and events. */
   calendarId?: string;
   calendarName?: string;
+  /** Knowledge bases (Wave 44 fixes): the base itself, not a folder. */
+  knowledgeBaseId?: string;
+  knowledgeBaseName?: string;
 };

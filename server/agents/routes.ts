@@ -84,7 +84,9 @@ const serverPatchSchema = serverCreateSchema.partial().extend({ expectedRevision
 const policiesSchema = z.object({ policies: z.record(toolName, z.enum(TOOL_POLICIES)).refine((value) => Object.keys(value).length <= 500, "too many tools") }).strict();
 const toolRefSchema = z.discriminatedUnion("source", [
   z.object({ source: z.literal("server"), serverId: uuid, toolName, policy: z.enum(["confirm", "off"]).nullable() }).strict(),
-  z.object({ source: z.literal("nook"), toolName }).strict()
+  z.object({ source: z.literal("nook"), toolName }).strict(),
+  // AC-E: a knowledge base (all of an agent's bases become one search_knowledge tool).
+  z.object({ source: z.literal("knowledge"), kbId: uuid }).strict()
 ]);
 const linkSchema = z.object({ nookKeyId: uuid.nullable() }).strict();
 // Review M1: the card is named by the server's nonce and the arguments' hash, never the model's call id.
@@ -272,7 +274,8 @@ export function registerAgentRoutes(app: Hono<AppEnv>) {
     const rows = group === "user"
       ? db.query(`SELECT u.day, u.user_id AS id, p.display_name AS name, SUM(u.runs) AS runs, SUM(u.prompt_tokens) AS prompt_tokens, SUM(u.completion_tokens) AS completion_tokens
           FROM agent_usage_daily u LEFT JOIN users p ON p.id = u.user_id WHERE u.day BETWEEN ? AND ? GROUP BY u.day, u.user_id ORDER BY u.day DESC, name LIMIT 2000`).all(from, to)
-      : db.query(`SELECT u.day, u.agent_id AS id, a.name AS name, SUM(u.runs) AS runs, SUM(u.prompt_tokens) AS prompt_tokens, SUM(u.completion_tokens) AS completion_tokens
+      // AC-E: embedding tokens are charged under `kb:<id>`; they show as "Knowledge · <name>".
+      : db.query(`SELECT u.day, u.agent_id AS id, COALESCE(a.name, (SELECT 'Knowledge · ' || k.name FROM knowledge_bases k WHERE 'kb:' || k.id = u.agent_id)) AS name, SUM(u.runs) AS runs, SUM(u.prompt_tokens) AS prompt_tokens, SUM(u.completion_tokens) AS completion_tokens
           FROM agent_usage_daily u LEFT JOIN agents a ON a.id = u.agent_id WHERE u.day BETWEEN ? AND ? GROUP BY u.day, u.agent_id ORDER BY u.day DESC, name LIMIT 2000`).all(from, to);
     return { from, to, group, rows: (rows as Array<{ day: string; id: string; name: string | null; runs: number; prompt_tokens: number; completion_tokens: number }>).map((row) => ({ day: row.day, id: row.id, name: row.name ?? "(removed)", runs: row.runs, promptTokens: row.prompt_tokens, completionTokens: row.completion_tokens })) };
   })));

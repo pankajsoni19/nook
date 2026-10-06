@@ -19,7 +19,7 @@ export const draftFrom = (access: ItemAccess): Draft => ({
   groups: access.groups.map(({ id, name, memberCount, guestCount, selfAddedCount, level }) => ({ id, name, memberCount, guestCount, selfAddedCount, level }))
 });
 
-const KIND_NOUN: Record<AccessKind, string> = { note: "note", folder: "folder", document: "file", board: "board", task_view: "view", collection: "collection", calendar: "calendar", agent: "agent", chat: "chat" };
+const KIND_NOUN: Record<AccessKind, string> = { note: "note", folder: "folder", document: "file", board: "board", task_view: "view", collection: "collection", calendar: "calendar", agent: "agent", chat: "chat", knowledge_base: "knowledge base" };
 
 /** The audience radios (§E). Managers never see them (D273); notes and files can inherit their folder. */
 export function audienceOptions(access: Pick<ItemAccess, "kind" | "inheritable">): Array<{ value: Audience; label: string; hint: string }> {
