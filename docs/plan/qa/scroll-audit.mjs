@@ -652,7 +652,7 @@ const ROUTES = (s) => [
   // provider dialog was taller than the window and cut off its Save button, with nothing to scroll.
   ...(s.agents ? [
     ["Settings · AI: Add provider", "/settings/ai", async (page) => { await tapText(page, "button", "Add provider"); await page.waitForSelector(".chat-dialog"); }, { scope: ".chat-dialog" }],
-    ["Settings · AI: Add tool server", "/settings/ai", async (page) => { await tapText(page, "button", "Add tool server"); await page.waitForSelector(".chat-dialog"); }, { scope: ".chat-dialog" }]
+    ["Settings · AI: Add tool server", "/settings/ai/tools", async (page) => { await tapText(page, "button", "Add tool server"); await page.waitForSelector(".chat-dialog"); }, { scope: ".chat-dialog" }]
   ] : []),
   ["Notifications", "/notifications"],
   // The Settings hub (Wave 37): a page with its nav beside the section on a computer; on a phone the
