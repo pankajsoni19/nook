@@ -2,6 +2,16 @@
 
 Release notes for Nook, newest first. Upgrade steps for each release are in [docs/OPERATIONS.md](docs/OPERATIONS.md#upgrades).
 
+## v0.27.0 — 2026-10-06
+
+- **Tools for agents**: an admin adds MCP tool servers in **Settings → AI → Tool servers** (a Streamable HTTP URL and an optional credential stored encrypted), syncs their tools, and sets each tool's policy: runs on its own, asks first, or off. Anyone allowed picks tools for their agents in **Settings → Agents**.
+- **Nook's own tools, through your key**: link one of your own API keys to an agent and pick Nook tools (notes, tasks, collections, calendar…). They run only with that key's permissions, never your full account, and stop at once if the key is revoked, expires, or loses a permission.
+- **You stay in charge**: any tool that can change something shows a card in the chat (**Allow once** or **Deny**); unanswered cards expire after 15 minutes. Nook writes become **Inbox proposals** by default, so nothing changes until you approve. Each card is tied to the exact call you saw, and a server or policy that changes while a card waits stops the call.
+- **Tool results are treated as untrusted**: fenced and cut to a size cap before the model sees them; the chat shows what was called and what came back.
+- **Safe connections to tool servers**: the same rules as model providers (https, private addresses refused unless listed, no redirects, size and time limits, the address pinned), checked when a server is saved and on every call.
+- **Local tool programs (stdio)** stay off unless the host sets `AGENT_MCP_STDIO=on` with `AGENT_MCP_STDIO_FILE`; turning them on gives those programs full trust (they can read Nook's keys and data). A separate HTTP bridge container is the recommended way.
+- No migration. New optional settings: `AGENT_MCP_STDIO`, `AGENT_MCP_STDIO_FILE`. See [docs/OPERATIONS.md](docs/OPERATIONS.md#upgrades).
+
 ## v0.26.0 — 2026-10-06
 
 - **Chat (first slice)**: chat with your own agents through any OpenAI-compatible model provider. An admin adds a provider in **Settings → AI** (base URL, API key, default model; the key is stored encrypted and never shown again, only its last characters) and sets who may chat and daily token budgets. Anyone allowed creates agents in **Settings → Agents** (a system prompt, an optional model, and a step limit) and chats with them in the new **Chat** app: replies stream in as they are written, **Stop** keeps what arrived, **Regenerate** and **Edit** keep every version with a 2 / 3 switcher, chats are searchable, pinnable, renamable, and go to the Bin. Two columns on a computer; list and chat screens with working Back on a phone.
