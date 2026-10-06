@@ -512,8 +512,9 @@ describe("review 4: tool-server egress", () => {
   test("a redirect is refused and not followed", async () => {
     hostileCalls.length = 0;
     hostileRoute = () => new Response(null, { status: 307, headers: { Location: "http://169.254.169.254/latest/meta-data/" } });
-    await expect(session(hostileUrl()).listTools()).rejects.toMatchObject({ code: "EGRESS_REFUSED" });
-    expect(hostileCalls.length).toBe(1);
+    // Its own path: the previous test's server deletion closes that session (a DELETE to /mcp) in the background.
+    await expect(session(hostileUrl("/redirect")).listTools()).rejects.toMatchObject({ code: "EGRESS_REFUSED" });
+    expect(hostileCalls.filter((item) => item.path === "/redirect")).toHaveLength(1);
   });
 
   test("the session-close DELETE goes through the guard (refused once the host is no longer allowed)", async () => {

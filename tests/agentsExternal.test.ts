@@ -4,6 +4,8 @@ import { api } from "./support/mcpClient";
 import { startFakeProvider } from "./support/fakeProvider";
 import { startFakeMcpServer } from "./support/fakeMcpServer";
 import { retireUsersAfterFile } from "./support/retireUsers";
+import { completionsWith, runMarker, settleAgentRunsAfterEach } from "./support/agentRuns";
+import { withinOneWindow } from "./support/clock";
 
 const { createApiKey, narrowApiKey, revokeOwnKey, validateGrants, KeyError } = await import("../server/apiKeys");
 const { readPolicies } = await import("../server/team/policies");
@@ -12,7 +14,7 @@ const { resetMcpLimits } = await import("../server/mcpRateLimit");
 const { deleteProvider } = await import("../server/agents/providers");
 const { deleteServer } = await import("../server/agents/toolServers");
 const { resetToolServersForTests } = await import("../server/agents/toolServers");
-const { resetAgentRateLimitsForTests, KEY_RUN_LIMITS } = await import("../server/agents/limits");
+const { resetAgentRateLimitsForTests, chargeKeyRun, KEY_RUN_LIMITS } = await import("../server/agents/limits");
 const { sweepAgentAudit } = await import("../server/agents/audit");
 const { withinAgentRun } = await import("../server/agents/depth");
 const { offeredSpecs } = await import("../server/agents/nookBridge");
@@ -27,9 +29,14 @@ type Grant = import("../server/keyGrants").Grant;
  * auto-only tools, the per-key limits that refuse before the provider is called, API runs that never
  * create chats, the append-only Audit log with its readers (owner in full, admins metadata), export,
  * retention, the depth guard, and a canary for provider and tool-server secrets.
+ *
+ * Every test gets its own owner and agents, ends only once its runs have ended
+ * (`settleAgentRunsAfterEach`), and finds its provider calls by a marker in its input, so a run of an
+ * earlier test cannot land in a later test's counts under load (the Docker `verify` stage).
  */
 
 retireUsersAfterFile();
+settleAgentRunsAfterEach();
 const fake = startFakeProvider(24506);
 const mcp = startFakeMcpServer(24504, { bearer: "srv-canary-w42-0001" });
 const PROVIDER_CANARY = "sk-canary-w42-provider-0000000001";
@@ -76,8 +83,8 @@ async function streamRun(token: string, agent: string, body: Record<string, unkn
   return events;
 }
 
-const completions = () => fake.calls.filter((call) => call.path === "/v1/chat/completions").length;
-const lastCompletion = () => fake.calls.filter((call) => call.path === "/v1/chat/completions").at(-1)!.body as { messages: Array<{ role: string; content: string | null }>; tools?: Array<{ function: { name: string } }> };
+type CompletionBody = { messages: Array<{ role: string; content: string | null }>; tools?: Array<{ function: { name: string } }> };
+const completionBodies = (marker: string) => completionsWith(fake.calls, marker).map((call) => call.body as CompletionBody);
 const chatCount = (userId: string) => (db.query("SELECT COUNT(*) AS count FROM chats WHERE owner_id = ?").get(userId) as { count: number }).count;
 const waitFor = async (check: () => boolean, ms = 10_000) => {
   const until = Date.now() + ms;
@@ -87,10 +94,23 @@ const waitFor = async (check: () => boolean, ms = 10_000) => {
   }
 };
 
+/** A fresh owner with the Runner and Second agents, per test: no test shares slots, budgets, or runs with another. */
+async function freshOwner() {
+  owner = await createUser("W42 owner");
+  const agent = await api(owner, "POST", "/agents", {
+    name: "Runner", systemPrompt: "SECRET-PROMPT-W42 Answer briefly.", providerId, maxSteps: 4,
+    tools: [{ source: "server", serverId, toolName: "echo", policy: null }, { source: "server", serverId, toolName: "slow", policy: null }, { source: "server", serverId, toolName: "write_thing", policy: null }, { source: "server", serverId, toolName: "fetch_page", policy: "confirm" }, { source: "nook", toolName: "list_notes" }]
+  });
+  expect(agent.status).toBe(201);
+  agentId = agent.body.agent.id;
+  const second = await api(owner, "POST", "/agents", { name: "Second", providerId });
+  expect(second.status).toBe(201);
+  secondAgentId = second.body.agent.id;
+}
+
 beforeAll(async () => {
   admin = await createUser("W42 admin");
   db.query("UPDATE users SET role = 'admin' WHERE id = ?").run(admin.userId);
-  owner = await createUser("W42 owner");
   other = await createUser("W42 other");
   viewer = await createUser("W42 viewer");
   db.query("UPDATE users SET role = 'viewer' WHERE id = ?").run(viewer.userId);
@@ -101,16 +121,13 @@ beforeAll(async () => {
   expect(server.status).toBe(201);
   serverId = server.body.server.id;
   expect((await api(admin, "POST", `/agents/admin/servers/${serverId}/sync`, {})).status).toBe(200);
-  const agent = await api(owner, "POST", "/agents", {
-    name: "Runner", systemPrompt: "SECRET-PROMPT-W42 Answer briefly.", providerId, maxSteps: 4,
-    tools: [{ source: "server", serverId, toolName: "echo", policy: null }, { source: "server", serverId, toolName: "slow", policy: null }, { source: "server", serverId, toolName: "write_thing", policy: null }, { source: "server", serverId, toolName: "fetch_page", policy: "confirm" }, { source: "nook", toolName: "list_notes" }]
-  });
-  expect(agent.status).toBe(201);
-  agentId = agent.body.agent.id;
-  secondAgentId = (await api(owner, "POST", "/agents", { name: "Second", providerId })).body.agent.id;
   othersAgentId = (await api(other, "POST", "/agents", { name: "Not yours", providerId })).body.agent.id;
 });
-beforeEach(() => { resetMcpLimits(); resetAgentRateLimitsForTests(); });
+beforeEach(async () => {
+  resetMcpLimits();
+  resetAgentRateLimitsForTests();
+  await freshOwner();
+});
 afterAll(async () => {
   deleteServer(admin.userId, serverId);
   deleteProvider(admin.userId, providerId);
@@ -202,23 +219,28 @@ describe("REST /api/v1/agents (§7.2, D280 rules)", () => {
   test("a plain run answers 200 with output, steps, toolCalls, usage, and timings; no chat is created; the run is audited", async () => {
     const key = runKey(owner, [agentGrant(agentId)]);
     const chatsBefore = chatCount(owner.userId);
-    const result = await rest(key.token, "POST", `/agents/${agentId}/runs`, { input: "echo:Hello from CI.", label: "nightly" });
+    const marker = runMarker();
+    const hello = `Hello from CI ${marker}.`;
+    const result = await rest(key.token, "POST", `/agents/${agentId}/runs`, { input: `echo:${hello}`, label: "nightly" });
     expect(result.status).toBe(200);
     expect(result.headers.get("cache-control")).toContain("no-store");
-    expect(result.body).toMatchObject({ agentId, status: "ok", output: "Hello from CI.", steps: 1, toolCalls: [], error: null, label: "nightly", usage: { promptTokens: expect.any(Number), completionTokens: expect.any(Number), estimated: false } });
+    expect(result.body).toMatchObject({ agentId, status: "ok", output: hello, steps: 1, toolCalls: [], error: null, label: "nightly", usage: { promptTokens: expect.any(Number), completionTokens: expect.any(Number), estimated: false } });
     expect(result.body.timings).toEqual({ queuedMs: expect.any(Number), firstTokenMs: expect.any(Number), totalMs: expect.any(Number) });
     expect(chatCount(owner.userId)).toBe(chatsBefore);
     const run = db.query("SELECT via, chat_id, key_id, user_id, status, label, client_address FROM agent_runs WHERE id = ?").get(result.body.runId) as Record<string, unknown>;
     expect(run).toMatchObject({ via: "api", chat_id: null, key_id: key.id, user_id: owner.userId, status: "ok", label: "nightly" });
-    expect(db.query("SELECT input_text, output_text FROM agent_audit_entries WHERE run_id = ?").get(result.body.runId)).toEqual({ input_text: "echo:Hello from CI.", output_text: "Hello from CI." });
-    expect(db.query("SELECT kind, text FROM agent_audit_steps WHERE run_id = ? ORDER BY seq").all(result.body.runId)).toEqual([{ kind: "model", text: "Hello from CI." }]);
+    expect(db.query("SELECT input_text, output_text FROM agent_audit_entries WHERE run_id = ?").get(result.body.runId)).toEqual({ input_text: `echo:${hello}`, output_text: hello });
+    expect(db.query("SELECT kind, text FROM agent_audit_steps WHERE run_id = ? ORDER BY seq").all(result.body.runId)).toEqual([{ kind: "model", text: hello }]);
     // Tokens are charged to the key's own usage row; the provider saw the preamble, the prompt, and the input.
     expect(db.query("SELECT runs FROM agent_usage_daily WHERE key_id = ? AND agent_id = ?").get(key.id, agentId)).toEqual({ runs: 1 });
-    expect(lastCompletion().messages[0]!.content).toContain("SECRET-PROMPT-W42");
+    expect(completionBodies(marker)).toHaveLength(1);
+    expect(completionBodies(marker)[0]!.messages[0]!.content).toContain("SECRET-PROMPT-W42");
     // Stateless multi-turn: the turns go to the model as given.
-    const multi = await rest(key.token, "POST", `/agents/${agentId}/runs`, { messages: [{ role: "user", content: "first" }, { role: "assistant", content: "ok" }, { role: "user", content: "echo:second" }] });
+    const multiMarker = runMarker();
+    const multi = await rest(key.token, "POST", `/agents/${agentId}/runs`, { messages: [{ role: "user", content: `first ${multiMarker}` }, { role: "assistant", content: "ok" }, { role: "user", content: "echo:second" }] });
     expect(multi.body.output).toBe("second");
-    expect(lastCompletion().messages.slice(1).map((turn) => [turn.role, turn.content])).toEqual([["user", "first"], ["assistant", "ok"], ["user", "echo:second"]]);
+    expect(completionBodies(multiMarker)).toHaveLength(1);
+    expect(completionBodies(multiMarker)[0]!.messages.slice(1).map((turn) => [turn.role, turn.content])).toEqual([["user", `first ${multiMarker}`], ["assistant", "ok"], ["user", "echo:second"]]);
   });
 
   test("a streaming run answers SSE: run, deltas, usage, and done with the same result shape", async () => {
@@ -259,14 +281,17 @@ describe("REST /api/v1/agents (§7.2, D280 rules)", () => {
 describe("tools over the API (§2, §5.4, D352): auto only", () => {
   test("only auto tools are offered; a confirm tool can never be called; results are audited in full", async () => {
     const key = runKey(owner, [agentGrant(agentId), all("notes", "read")]);
-    const ran = await rest(key.token, "POST", `/agents/${agentId}/runs`, { input: "tool:wfortytwo__echo:{\"text\":\"ping\"}" });
+    const marker = runMarker();
+    const ran = await rest(key.token, "POST", `/agents/${agentId}/runs`, { input: `tool:wfortytwo__echo:{"text":"ping ${marker}"}` });
     expect(ran.body).toMatchObject({ status: "ok", steps: 2, toolCalls: [{ name: "echo", server: "wfortytwo", ok: true }] });
-    const offered = fake.calls.filter((call) => call.path === "/v1/chat/completions").at(-2)!.body as { tools: Array<{ function: { name: string } }> };
+    // The run's first model call is the one the tools were offered to; the second answers the tool's result.
+    expect(completionBodies(marker)).toHaveLength(2);
+    const offered = completionBodies(marker)[0]! as { tools: Array<{ function: { name: string } }> };
     // The calling key is the Nook key (D359): its notes:read gives list_notes; nothing that asks first is offered.
     expect(offered.tools.map((tool) => tool.function.name).sort()).toEqual(["nook__list_notes", "wfortytwo__echo", "wfortytwo__slow"]);
     const steps = db.query("SELECT seq, kind, tool_name, args_json, result_text, ok FROM agent_audit_steps WHERE run_id = ? ORDER BY seq").all(ran.body.runId) as Array<Record<string, any>>;
     expect(steps.map((step) => [step.kind, step.tool_name])).toEqual([["model", null], ["tool", "echo"], ["model", null]]);
-    expect(steps[1]).toMatchObject({ args_json: "{\"text\":\"ping\"}", ok: 1 });
+    expect(steps[1]).toMatchObject({ args_json: `{"text":"ping ${marker}"}`, ok: 1 });
     expect(steps[1]!.result_text).toContain("ping");
     // The model asking for a confirm tool anyway gets "unknown tool": it was never offered, so it never runs.
     const writesBefore = mcp.calls.filter((call) => call.method === "tools/call" && (call.params as { name?: string })?.name === "write_thing").length;
@@ -283,8 +308,10 @@ describe("tools over the API (§2, §5.4, D352): auto only", () => {
   test("a key revoked or narrowed mid-run ends the run KEY_INACTIVE at its next step", async () => {
     for (const change of ["revoke", "narrow"] as const) {
       const key = runKey(owner, [all("agents", "run")]);
+      // Only this run's tool call counts (the first pass's call is already in the log).
+      const before = mcp.calls.length;
       const pending = rest(key.token, "POST", `/agents/${agentId}/runs`, { input: "tool:wfortytwo__slow:{\"ms\":600}" });
-      await waitFor(() => mcp.calls.some((call) => call.method === "tools/call" && (call.params as { name?: string })?.name === "slow" && db.query("SELECT 1 FROM agent_runs WHERE key_id = ? AND status = 'running'").get(key.id) !== null));
+      await waitFor(() => mcp.calls.slice(before).some((call) => call.method === "tools/call" && (call.params as { name?: string })?.name === "slow" && db.query("SELECT 1 FROM agent_runs WHERE key_id = ? AND status = 'running'").get(key.id) !== null));
       if (change === "revoke") revokeOwnKey(owner.userId, key.id);
       else narrowApiKey(owner.userId, key.id, { grants: [{ module: "agents", permission: "run", resources: [{ kind: "agent", id: secondAgentId }] }] });
       const result = (await pending).body;
@@ -302,39 +329,57 @@ describe("limits (§2.2, §7.2, T314): refused before the provider is called", (
     const first = rest(key.token, "POST", `/agents/${agentId}/runs`, { input: "slow:120:a b c d e f g h" });
     const second = rest(key.token, "POST", `/agents/${agentId}/runs`, { input: "slow:120:a b c d e f g h" });
     await waitFor(() => (db.query("SELECT COUNT(*) AS count FROM agent_runs WHERE key_id = ? AND status = 'running'").get(key.id) as { count: number }).count === 2);
-    const before = completions();
-    const third = await rest(key.token, "POST", `/agents/${agentId}/runs`, { input: "echo:third" });
+    // A run is marked running before its provider call goes out, so count only the refused run's own calls.
+    const marker = runMarker();
+    const third = await rest(key.token, "POST", `/agents/${agentId}/runs`, { input: `echo:third ${marker}` });
     expect(third).toMatchObject({ status: 429, body: { code: "AGENT_BUSY" } });
     expect(third.headers.get("retry-after")).toBe("5");
-    expect(completions()).toBe(before);
-    await Promise.all([first, second]);
+    expect(completionsWith(fake.calls, marker)).toHaveLength(0);
+    expect((await Promise.all([first, second])).map((answer) => answer.body.status)).toEqual(["ok", "ok"]);
   });
 
   test("20 runs a minute and 500 a day per key (persistent), the key's token budget, and the owner's budget", async () => {
-    const key = runKey(owner, [agentGrant(agentId)]);
-    const minute = Math.floor(Date.now() / KEY_RUN_LIMITS.minute.windowMs) * KEY_RUN_LIMITS.minute.windowMs;
-    db.query("INSERT INTO agent_rate_limits (bucket, window_start, count, previous_count) VALUES (?, ?, 20, 0)").run(`run_minute:${key.id}`, minute);
-    const before = completions();
-    const limited = await rest(key.token, "POST", `/agents/${agentId}/runs`, { input: "echo:limited" });
-    expect(limited).toMatchObject({ status: 429, body: { code: "RATE_LIMITED" } });
-    expect(Number(limited.headers.get("retry-after"))).toBeGreaterThan(0);
+    // The windows themselves, on a fixed clock: the 21st run in a minute and the 501st in a day are refused.
+    const unitKey = `unit-${runMarker()}`;
+    const at = Date.UTC(2030, 0, 15, 12, 0, 30);
+    for (let index = 0; index < KEY_RUN_LIMITS.minute.limit; index += 1) expect(chargeKeyRun(unitKey, at)).toBe(0);
+    expect(chargeKeyRun(unitKey, at)).toBe(30);
+    expect(chargeKeyRun(unitKey, at + KEY_RUN_LIMITS.minute.windowMs * 2)).toBe(0);
+    db.query("UPDATE agent_rate_limits SET count = ? WHERE bucket = ?").run(KEY_RUN_LIMITS.day.limit, `run_day:${unitKey}`);
+    expect(chargeKeyRun(unitKey, at + KEY_RUN_LIMITS.minute.windowMs * 4)).toBeGreaterThan(0);
+    expect(chargeKeyRun(unitKey, at + KEY_RUN_LIMITS.day.windowMs)).toBe(0);
     resetAgentRateLimitsForTests();
-    const day = Math.floor(Date.now() / KEY_RUN_LIMITS.day.windowMs) * KEY_RUN_LIMITS.day.windowMs;
-    db.query("INSERT INTO agent_rate_limits (bucket, window_start, count, previous_count) VALUES (?, ?, 500, 0)").run(`run_day:${key.id}`, day);
-    expect((await rest(key.token, "POST", `/agents/${agentId}/runs`, { input: "echo:limited" })).body.code).toBe("RATE_LIMITED");
+    // Over HTTP, inside one window each (a seeded row never sees its window roll over under it).
+    const marker = runMarker();
+    const key = runKey(owner, [agentGrant(agentId)]);
+    await withinOneWindow(KEY_RUN_LIMITS.minute.windowMs, async () => {
+      const minute = Math.floor(Date.now() / KEY_RUN_LIMITS.minute.windowMs) * KEY_RUN_LIMITS.minute.windowMs;
+      db.query("INSERT INTO agent_rate_limits (bucket, window_start, count, previous_count) VALUES (?, ?, 20, 0)").run(`run_minute:${key.id}`, minute);
+      const limited = await rest(key.token, "POST", `/agents/${agentId}/runs`, { input: `echo:limited ${marker}` });
+      expect(limited).toMatchObject({ status: 429, body: { code: "RATE_LIMITED" } });
+      expect(Number(limited.headers.get("retry-after"))).toBeGreaterThan(0);
+    });
+    resetAgentRateLimitsForTests();
+    await withinOneWindow(KEY_RUN_LIMITS.day.windowMs, async () => {
+      const day = Math.floor(Date.now() / KEY_RUN_LIMITS.day.windowMs) * KEY_RUN_LIMITS.day.windowMs;
+      db.query("INSERT INTO agent_rate_limits (bucket, window_start, count, previous_count) VALUES (?, ?, 500, 0)").run(`run_day:${key.id}`, day);
+      expect((await rest(key.token, "POST", `/agents/${agentId}/runs`, { input: `echo:limited ${marker}` })).body.code).toBe("RATE_LIMITED");
+    });
     resetAgentRateLimitsForTests();
     // The key's daily token budget (200k by default) and the owner's (500k) refuse before the provider too.
-    const today = new Date().toISOString().slice(0, 10);
-    db.query("INSERT INTO agent_usage_daily (day, user_id, key_id, agent_id, runs, prompt_tokens, completion_tokens) VALUES (?, ?, ?, ?, 0, 200000, 0)").run(today, owner.userId, key.id, agentId);
-    expect(await rest(key.token, "POST", `/agents/${agentId}/runs`, { input: "echo:budget" })).toMatchObject({ status: 429, body: { code: "BUDGET_EXCEEDED" } });
     const fresh = runKey(owner, [agentGrant(agentId)]);
-    db.query("INSERT INTO agent_usage_daily (day, user_id, key_id, agent_id, runs, prompt_tokens, completion_tokens) VALUES (?, ?, '', ?, 0, 400000, 0)").run(today, owner.userId, agentId);
-    expect(await rest(fresh.token, "POST", `/agents/${agentId}/runs`, { input: "echo:budget" })).toMatchObject({ status: 429, body: { code: "BUDGET_EXCEEDED" } });
-    expect(completions()).toBe(before);
-    db.query("DELETE FROM agent_usage_daily WHERE user_id = ? AND day = ?").run(owner.userId, today);
+    await withinOneWindow(KEY_RUN_LIMITS.day.windowMs, async () => {
+      const today = new Date().toISOString().slice(0, 10);
+      db.query("INSERT INTO agent_usage_daily (day, user_id, key_id, agent_id, runs, prompt_tokens, completion_tokens) VALUES (?, ?, ?, ?, 0, 200000, 0)").run(today, owner.userId, key.id, agentId);
+      expect(await rest(key.token, "POST", `/agents/${agentId}/runs`, { input: `echo:budget ${marker}` })).toMatchObject({ status: 429, body: { code: "BUDGET_EXCEEDED" } });
+      db.query("INSERT INTO agent_usage_daily (day, user_id, key_id, agent_id, runs, prompt_tokens, completion_tokens) VALUES (?, ?, '', ?, 0, 400000, 0)").run(today, owner.userId, agentId);
+      expect(await rest(fresh.token, "POST", `/agents/${agentId}/runs`, { input: `echo:budget ${marker}` })).toMatchObject({ status: 429, body: { code: "BUDGET_EXCEEDED" } });
+      db.query("DELETE FROM agent_usage_daily WHERE user_id = ? AND day = ?").run(owner.userId, today);
+    });
+    expect(completionsWith(fake.calls, marker)).toHaveLength(0);
     // A refused run left no Audit log row.
     expect((db.query("SELECT COUNT(*) AS count FROM agent_runs WHERE key_id IN (?, ?)").get(key.id, fresh.id) as { count: number }).count).toBe(0);
-  });
+  }, 60_000);
 });
 
 describe("MCP run_agent (§7.2, T318)", () => {
@@ -477,7 +522,8 @@ describe("the Audit log (§7.3, D365, D366, T317)", () => {
 
   test("canary: neither the provider key nor the tool server's credential reaches any Audit log row or answer", async () => {
     const key = runKey(owner, [agentGrant(agentId)]);
-    const ran = await rest(key.token, "POST", `/agents/${agentId}/runs`, { input: "tool:wfortytwo__echo:{\"text\":\"c\"}" });
+    const marker = runMarker();
+    const ran = await rest(key.token, "POST", `/agents/${agentId}/runs`, { input: `tool:wfortytwo__echo:{"text":"c ${marker}"}` });
     expect(ran.text).not.toContain("canary");
     const dump = JSON.stringify([
       db.query("SELECT * FROM agent_runs WHERE via <> 'chat'").all(),
@@ -488,7 +534,9 @@ describe("the Audit log (§7.3, D365, D366, T317)", () => {
     expect(dump).not.toContain(PROVIDER_CANARY);
     expect(dump).not.toContain("srv-canary-w42-0001");
     // The secrets did leave for their own endpoints only (proof the canary was live).
-    expect(fake.calls.at(-1)!.headers.authorization).toBe(`Bearer ${PROVIDER_CANARY}`);
+    const own = completionsWith(fake.calls, marker);
+    expect(own).toHaveLength(2);
+    for (const call of own) expect(call.headers.authorization).toBe(`Bearer ${PROVIDER_CANARY}`);
     const detail = await api(owner, "GET", `/agents/audit/${ran.body.runId}`);
     expect(JSON.stringify(detail.body)).not.toContain("canary");
   });
