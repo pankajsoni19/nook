@@ -256,6 +256,8 @@ type ToolPickerProps = { catalog: ToolCatalog | null; tools: AgentToolRef[]; dir
 /** The picker (plan §5.2): a section per server with a checkbox per tool and an optional stricter policy; Nook's tools by module once a key is linked. */
 /** A link whose key is no longer live (Wave 41 QA Q4). */
 const LINK_DEAD: Record<LinkState, string> = { none: "", live: "", revoked: "Key revoked", expired: "Key expired", inactive: "Key inactive" };
+/** The hint's sentence per state (AC-B verification L1): "The linked key was revoked", never "is key revoked". */
+export const LINK_DEAD_SENTENCE: Record<LinkState, string> = { none: "", live: "", revoked: "The linked key was revoked", expired: "The linked key has expired", inactive: "The linked key is inactive" };
 
 function ToolPicker({ catalog, tools, directWrites, linked, linkState, creating, onChange, onLink }: ToolPickerProps) {
   const dead = !linked && linkState !== "none" && linkState !== "live";
@@ -294,7 +296,7 @@ function ToolPicker({ catalog, tools, directWrites, linked, linkState, creating,
       <div className="agents-link-row">
         {creating ? <p className="chat-muted">Create the agent first, then link one of your Nook keys to give it Nook's tools.</p>
           : <><button type="button" className="secondary-button" onClick={onLink}>{linked ? "Change linked key" : dead ? "Link another key" : "Link Nook key"}</button>
-            <p className="chat-muted">{linked ? "Nook's tools run through your linked key; the list shows what that key reaches." : dead ? `The linked key is ${LINK_DEAD[linkState].toLowerCase()}: this agent gets none of Nook's tools until you link another key.` : "Without a key this agent gets none of Nook's tools. Link a key to see and pick the tools it reaches."}</p></>}
+            <p className="chat-muted">{linked ? "Nook's tools run through your linked key; the list shows what that key reaches." : dead ? `${LINK_DEAD_SENTENCE[linkState]}: this agent gets none of Nook's tools until you link another key.` : "Without a key this agent gets none of Nook's tools. Link a key to see and pick the tools it reaches."}</p></>}
       </div>
       {linked && nookGroups(catalog.nook.tools).map((group) => <div key={group.module}>
         <p className="agents-nook-module">{group.label}</p>

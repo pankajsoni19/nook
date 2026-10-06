@@ -1,4 +1,4 @@
-import type { Route } from "./router";
+import type { AuditQuery, Route } from "./router";
 
 export type ChatRoute = Extract<Route, { app: "chat" }>;
 
@@ -9,9 +9,11 @@ export function chatRoute(chatId: string | null = null, options: { newChat?: boo
   return { app: "chat", chatId: null };
 }
 
-/** The Audit log (Wave 42, plan §13.3): the list, or one run's timeline. */
-export function auditRoute(runId: string | null = null): ChatRoute {
-  return runId ? { app: "chat", chatId: null, audit: true, runId } : { app: "chat", chatId: null, audit: true };
+/** The Audit log (Wave 42, plan §13.3): the list, or one run's timeline; the list's filters ride along (QA L4). */
+export function auditRoute(runId: string | null = null, filter?: { [K in keyof AuditQuery]?: string | null } | null): ChatRoute {
+  const clean = filter ? Object.fromEntries(Object.entries(filter).filter(([, value]) => typeof value === "string" && value)) as AuditQuery : null;
+  const base: ChatRoute = clean && Object.keys(clean).length ? { app: "chat", chatId: null, audit: true, auditFilter: clean } : { app: "chat", chatId: null, audit: true };
+  return runId ? { ...base, runId } : base;
 }
 
 /**
@@ -23,7 +25,7 @@ export function auditRoute(runId: string | null = null): ChatRoute {
 export function chatBackAction(route: ChatRoute, depth: number): { kind: "history" } | { kind: "replace"; route: ChatRoute } | { kind: "home" } {
   if (!route.chatId && !route.newChat && !route.audit) return { kind: "home" };
   if (depth > 0) return { kind: "history" };
-  if (route.audit && route.runId) return { kind: "replace", route: auditRoute() };
+  if (route.audit && route.runId) return { kind: "replace", route: auditRoute(null, route.auditFilter) };
   return { kind: "replace", route: chatRoute() };
 }
 

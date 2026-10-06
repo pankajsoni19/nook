@@ -2,10 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
-import { formatRoute, parseRoute, type Route } from "../src/router";
+import { formatRoute, locationUrl, parseRoute, type Route } from "../src/router";
 import { auditRoute, chatBackAction, chatRoute } from "../src/chatRoute";
-import { activeFilterCount, auditCardMeta, auditStatus, filterChoices, formatDuration, STATUS_FILTERS } from "../src/chat/AuditLog";
-import { AgentApiRuns, apiRunsSummary } from "../src/chat/AgentsSettings";
+import { activeFilterCount, auditCardMeta, auditStatus, filterChoices, formatDay, formatDuration, formatWhen, STATUS_FILTERS } from "../src/chat/AuditLog";
+import { AgentApiRuns, apiRunsSummary, LINK_DEAD_SENTENCE } from "../src/chat/AgentsSettings";
 import { auditExportUrl } from "../src/chat/chatApi";
 import { grantChips, grantSummary, permissionChoices, rowsToGrants, selectorFor, SELECTOR_KINDS, type GrantRow } from "../src/keys/keyGrants";
 import { MEMBER_ONLY_MCP_SCOPES, offeredMcpPermissions } from "../src/mcpPermissions";
@@ -60,7 +60,7 @@ describe("routes and Back (§13.3)", () => {
   test("the filter sheet closes on Back first (the history guard); cards push; no native select", () => {
     const source = read("chat/AuditLog.tsx");
     expect(source).toMatch(/function AuditFilterSheet[\s\S]*useHistoryDialogGuard\(true, onClose\)/);
-    expect(source).toContain("go(auditRoute(run.id))");
+    expect(source).toContain("go(auditRoute(run.id, filter))");
     expect(source).not.toMatch(/<select/);
     const chat = read("chat/ChatApp.tsx");
     // The run screen is the "detail" screen on phones, so the list hides behind it (chat.css).
@@ -84,7 +84,7 @@ describe("cards, status, and filters", () => {
   });
 
   test("filter choices come from the loaded runs and keep the current choice; the export URL carries the filters", () => {
-    const choices = filterChoices([summary(), summary({ id: "x", agentId: "y", agentName: null, key: null })], { key: "other-key" });
+    const choices = filterChoices(null, [summary(), summary({ id: "x", agentId: "y", agentName: null, key: null })], { key: "other-key" });
     expect(choices.keys.map((option) => option.label)).toEqual(["Any key", "CI (mynotes_ab12…)", "The chosen key"]);
     expect(choices.agents.map((option) => option.label)).toEqual(["Any agent", "Runner", "(removed agent)"]);
     expect(activeFilterCount({ key: "k", status: "ok", from: null })).toBe(2);
@@ -125,5 +125,46 @@ describe("the key builder's Agents section (D364)", () => {
     expect(grantChips(grants)).toEqual([{ id: "agents:run:chosen", label: "Chat: run agents · 2 agents", active: true }]);
     expect(grantChips([{ ...grants[0]!, resource: { kind: "agent", id: agentId, name: "Runner" } }])[0]!.label).toBe("Chat: run agents · Runner");
     expect(grantChips([{ module: "agents", permission: "run", resource: null, active: true, inactiveReason: null }])[0]!.label).toBe("Chat: run agents");
+  });
+});
+
+describe("Wave 42 fixes on the client (QA M3, L4, L5; AC-B verification L1)", () => {
+  test("the filters ride in the URL on the list and on a run; malformed values drop; Back from a deep run keeps them", () => {
+    const filtered = `/chat/audit?key=${keyId}&agent=${agentId}&status=failed&from=2026-10-01&to=2026-10-06`;
+    const route = parseRoute("/chat/audit", `?key=${keyId}&agent=${agentId}&status=failed&from=2026-10-01&to=2026-10-06`);
+    expect(route).toEqual({ app: "chat", chatId: null, audit: true, auditFilter: { key: keyId, agent: agentId, status: "failed", from: "2026-10-01", to: "2026-10-06" } });
+    expect(formatRoute(route)).toBe(filtered);
+    const run = parseRoute(`/chat/audit/${runId}`, "?status=ok");
+    expect(run).toEqual({ app: "chat", chatId: null, audit: true, runId, auditFilter: { status: "ok" } });
+    expect(formatRoute(run)).toBe(`/chat/audit/${runId}?status=ok`);
+    expect(parseRoute("/chat/audit", "?key=nope&status=weird&from=yesterday")).toEqual({ app: "chat", chatId: null, audit: true });
+    expect(auditRoute(runId, { status: "ok", key: null })).toEqual({ app: "chat", chatId: null, audit: true, runId, auditFilter: { status: "ok" } });
+    expect(chatBackAction(auditRoute(runId, { status: "ok" }), 0)).toEqual({ kind: "replace", route: auditRoute(null, { status: "ok" }) });
+    expect(locationUrl({ pathname: "/chat/audit", search: "?status=ok" })).toBe("/chat/audit?status=ok");
+    const source = read("chat/AuditLog.tsx");
+    // Applying filters pushes an entry (Back restores the previous filters); they are never local state only.
+    expect(source).toContain("go(auditRoute(runId, next))");
+    expect(source).not.toContain("setFilter(");
+  });
+
+  test("filter choices come from the facets, so a key or agent with no loaded run can be chosen", () => {
+    const facets = { keys: [{ id: "k-idle", name: "Idle", prefix: "mynotes_zz", own: true, ownerName: null }, { id: "k-other", name: "Theirs", prefix: "mynotes_yy", own: false, ownerName: "Bo" }], agents: [{ id: "a-idle", name: "Quiet", own: true }] };
+    const choices = filterChoices(facets, [summary()], {});
+    expect(choices.keys.map((option) => option.label)).toEqual(["Any key", "Idle (mynotes_zz…)", "Theirs (mynotes_yy…) · Bo", "CI (mynotes_ab12…)"]);
+    expect(choices.agents.map((option) => option.label)).toEqual(["Any agent", "Quiet", "Runner"]);
+  });
+
+  test("the run and the cards format dates the same way, with the year", () => {
+    const source = read("chat/AuditLog.tsx");
+    expect(source).toContain("<dd>{formatWhen(run.queuedAt)}</dd>");
+    expect(source).toContain("{formatWhen(run.queuedAt)}{!run.full");
+    expect(source).not.toContain("new Date(run.queuedAt).toLocaleString()");
+    expect(formatWhen("2026-10-06T11:41:00.000Z")).toContain("2026");
+    expect(formatDay("2026-11-05T00:00:00.000Z")).toContain("2026");
+  });
+
+  test("a dead link's hint reads as a sentence", () => {
+    expect(LINK_DEAD_SENTENCE).toMatchObject({ revoked: "The linked key was revoked", expired: "The linked key has expired", inactive: "The linked key is inactive" });
+    expect(read("chat/AgentsSettings.tsx")).not.toContain("LINK_DEAD[linkState].toLowerCase()");
   });
 });

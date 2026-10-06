@@ -282,7 +282,8 @@
 .audit-chip-muted { background: #1d1d21; color: #b8b8bf; }
 .audit-more { min-height: 44px; margin-top: 12px; }
 .audit-run { display: grid; gap: 14px; min-width: 0; }
-.audit-run-header { flex-wrap: wrap; }
+/* The sticky band encloses its row evenly (QA L9): the Export button sits inside it, not on its top edge. */
+.audit-run-header { flex-wrap: wrap; margin: 0 -12px; padding: 10px 12px; border-radius: 12px; }
 .audit-agent { cursor: default; }
 .audit-export-one { margin-left: auto; }
 .audit-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); gap: 10px 18px; margin: 0; }

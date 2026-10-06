@@ -5,8 +5,8 @@ import { ModalDialog } from "../files/Dialog";
 import { Select, type Option } from "../ui/Select";
 import { useHistoryDialogGuard } from "../ui/useHistoryDialogGuard";
 import { auditRoute, chatRoute, type ChatRoute } from "../chatRoute";
-import type { AuditRunDetail, AuditRunSummary, AuditStepView, RunStatus } from "../../shared/agents";
-import { auditExportUrl, getAuditRun, listAudit, messageOf, type AuditFilter } from "./chatApi";
+import type { AuditFacets, AuditRunDetail, AuditRunSummary, AuditStepView, RunStatus } from "../../shared/agents";
+import { auditExportUrl, auditFacets, getAuditRun, listAudit, messageOf, type AuditFilter } from "./chatApi";
 import { Markdown, type RenderContext } from "./markdown/render";
 
 /**
@@ -62,15 +62,23 @@ export function auditCardMeta(run: AuditRunSummary) {
   ].filter(Boolean).join(" · ");
 }
 
-const when = (iso: string) => new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+/** One date format for the cards and the run (QA L5): "6 Oct 2026, 11:41" in the reader's locale. */
+export const formatWhen = (iso: string) => new Date(iso).toLocaleString(undefined, { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+export const formatDay = (iso: string) => new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
 
-/** Filter options from the runs loaded so far (an admin cannot list other people's keys), keeping the current choice. */
-export function filterChoices(runs: readonly AuditRunSummary[], filter: AuditFilter) {
+/**
+ * The filter sheet's options (QA M3): the reader's keys and agents from the server's facets, so a
+ * key or agent with no run on the loaded page can be chosen; the loaded runs fill in while the
+ * facets load; the current choice is always kept.
+ */
+export function filterChoices(facets: AuditFacets | null, runs: readonly AuditRunSummary[], filter: AuditFilter) {
   const keys = new Map<string, string>();
   const agents = new Map<string, string>();
+  for (const key of facets?.keys ?? []) keys.set(key.id, `${key.name} (${key.prefix}…)${key.own || !key.ownerName ? "" : ` · ${key.ownerName}`}`);
+  for (const agent of facets?.agents ?? []) agents.set(agent.id, agent.name ?? "(removed agent)");
   for (const run of runs) {
-    if (run.key) keys.set(run.key.id, `${run.key.name} (${run.key.prefix}…)`);
-    agents.set(run.agentId, run.agentName ?? "(removed agent)");
+    if (run.key && !keys.has(run.key.id)) keys.set(run.key.id, `${run.key.name} (${run.key.prefix}…)`);
+    if (!agents.has(run.agentId)) agents.set(run.agentId, run.agentName ?? "(removed agent)");
   }
   if (filter.key && !keys.has(filter.key)) keys.set(filter.key, "The chosen key");
   if (filter.agent && !agents.has(filter.agent)) agents.set(filter.agent, "The chosen agent");
@@ -92,7 +100,10 @@ type AuditLogProps = {
 };
 
 export function AuditLog({ route, role, phone, go, back, context }: AuditLogProps) {
-  const [filter, setFilter] = useState<AuditFilter>({});
+  // The filters live in the URL (QA L4): applying them pushes an entry, so Back restores the previous ones.
+  const filterKey = JSON.stringify(route.auditFilter ?? {});
+  const filter = useMemo<AuditFilter>(() => ({ ...(route.auditFilter ?? {}) }), [filterKey]);
+  const [facets, setFacets] = useState<AuditFacets | null>(null);
   const [runs, setRuns] = useState<AuditRunSummary[] | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [listError, setListError] = useState<string | null>(null);
@@ -112,7 +123,12 @@ export function AuditLog({ route, role, phone, go, back, context }: AuditLogProp
       setListError(messageOf(reason, "Could not load the Audit log"));
     }
   }, []);
-  useEffect(() => { void load(filter); }, [filter, load]);
+  useEffect(() => { setRuns(null); void load(filter); }, [filter, load]);
+  useEffect(() => {
+    let cancelled = false;
+    auditFacets().then((result) => { if (!cancelled) setFacets(result.facets); }, () => undefined);
+    return () => { cancelled = true; };
+  }, []);
 
   const more = async () => {
     if (!nextCursor || loadingMore) return;
@@ -140,7 +156,7 @@ export function AuditLog({ route, role, phone, go, back, context }: AuditLogProp
     return () => { cancelled = true; };
   }, [runId]);
 
-  const choices = useMemo(() => filterChoices(runs ?? [], filter), [filter, runs]);
+  const choices = useMemo(() => filterChoices(facets, runs ?? [], filter), [facets, filter, runs]);
   const count = activeFilterCount(filter);
   const admin = role === "admin";
 
@@ -160,10 +176,10 @@ export function AuditLog({ route, role, phone, go, back, context }: AuditLogProp
       : runs.length === 0 ? <p className="chat-muted">{count ? "No runs match these filters." : "No runs yet. Runs appear here when a key with “Run agents” calls one of your agents."}</p>
       : <ul className="audit-cards">{runs.map((run) => {
         const status = auditStatus(run);
-        return <li key={run.id}><button type="button" className={`audit-card${runId === run.id ? " active" : ""}`} aria-current={runId === run.id ? "page" : undefined} onClick={() => go(auditRoute(run.id))}>
+        return <li key={run.id}><button type="button" className={`audit-card${runId === run.id ? " active" : ""}`} aria-current={runId === run.id ? "page" : undefined} onClick={() => go(auditRoute(run.id, filter))}>
           <span className="audit-card-head"><span className="audit-card-agent">{run.agentName ?? "(removed agent)"}</span><span className={`audit-chip audit-chip-${status.tone}`}>{status.label}</span></span>
           <span className="audit-card-meta">{auditCardMeta(run)}</span>
-          <span className="audit-card-meta">{when(run.queuedAt)}{!run.full && run.owner.displayName ? ` · ${run.owner.displayName}` : ""}{run.full && run.label ? ` · ${run.label}` : ""}</span>
+          <span className="audit-card-meta">{formatWhen(run.queuedAt)}{!run.full && run.owner.displayName ? ` · ${run.owner.displayName}` : ""}{run.full && run.label ? ` · ${run.label}` : ""}</span>
         </button></li>;
       })}</ul>}
     {nextCursor && <button type="button" className="secondary-button audit-more" onClick={() => { void more(); }} disabled={loadingMore}>{loadingMore ? "Loading…" : "Show older runs"}</button>}
@@ -171,14 +187,14 @@ export function AuditLog({ route, role, phone, go, back, context }: AuditLogProp
 
   const pane = <section className="chat-pane split-pane audit-pane" aria-label="Run">
     {!runId ? <div className="chat-placeholder"><ScrollText /><p>Pick a run to see its steps.</p></div>
-      : detailError ? <div className="chat-state chat-error" role="alert"><p>{detailError}</p><button type="button" className="secondary-button" onClick={() => go(auditRoute(), true)}>Back to the Audit log</button></div>
+      : detailError ? <div className="chat-state chat-error" role="alert"><p>{detailError}</p><button type="button" className="secondary-button" onClick={() => go(auditRoute(null, filter), true)}>Back to the Audit log</button></div>
       : !detail ? <p className="chat-muted chat-loading" role="status">Loading…</p>
       : <AuditRunView run={detail} phone={phone} onBack={back} context={context} />}
   </section>;
 
   return <>
     <div className="chat-layout split-layout audit-layout">{list}{pane}</div>
-    {filtering && <AuditFilterSheet filter={filter} choices={choices} onClose={() => setFiltering(false)} onApply={(next) => { setFiltering(false); setRuns(null); setFilter(next); }} />}
+    {filtering && <AuditFilterSheet filter={filter} choices={choices} onClose={() => setFiltering(false)} onApply={(next) => { setFiltering(false); go(auditRoute(runId, next)); }} />}
   </>;
 }
 
@@ -194,14 +210,14 @@ function AuditRunView({ run, phone, onBack, context }: { run: AuditRunDetail; ph
     <dl className="audit-facts">
       <div><dt>Key</dt><dd><KeyRound aria-hidden="true" />{run.key ? `${run.key.name} (${run.key.prefix}…)` : "Key removed"} · {run.via === "mcp" ? "MCP" : "REST API"}</dd></div>
       {!run.full && <div><dt>Owner</dt><dd>{run.owner.displayName ?? "Removed account"}</dd></div>}
-      <div><dt>Started</dt><dd>{new Date(run.queuedAt).toLocaleString()}</dd></div>
+      <div><dt>Started</dt><dd>{formatWhen(run.queuedAt)}</dd></div>
       <div><dt>Model</dt><dd><code>{run.model}</code></dd></div>
       <div><dt>Tokens</dt><dd>{run.promptTokens.toLocaleString()} in · {run.completionTokens.toLocaleString()} out{run.estimated ? " (estimated)" : ""}</dd></div>
       <div><dt>Time</dt><dd>{formatDuration(run.durationMs)}{run.firstTokenAt ? ` · first token after ${formatDuration(Date.parse(run.firstTokenAt) - Date.parse(run.queuedAt))}` : ""}</dd></div>
       {run.errorCode && <div><dt>Error</dt><dd><code>{run.errorCode}</code></dd></div>}
       {run.full && run.label && <div><dt>Label</dt><dd>{run.label}</dd></div>}
       {run.full && run.clientAddress && <div><dt>From</dt><dd>{run.clientAddress}</dd></div>}
-      {run.purgeAfter && <div><dt>Kept until</dt><dd>{new Date(run.purgeAfter).toLocaleDateString()}</dd></div>}
+      {run.purgeAfter && <div><dt>Kept until</dt><dd>{formatDay(run.purgeAfter)}</dd></div>}
     </dl>
     {!run.full && <p className="audit-notice" role="note">Metadata only: the input, output, arguments, and results belong to the key's owner. Tools used: {run.toolNames.length ? run.toolNames.join(", ") : "none"}.</p>}
     {run.full && <section className="audit-block"><h3>Input</h3><pre className="audit-pre">{run.input ?? ""}</pre></section>}

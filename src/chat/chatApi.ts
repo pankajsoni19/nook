@@ -1,5 +1,5 @@
 import { api, ApiError, getCsrfToken, noteRequestOutcome } from "../api";
-import type { AgentApiUsage, AuditRunDetail, AuditRunSummary, AgentDetail, AgentSettings, AgentSummary, AgentToolRef, ChatDetail, ChatMessage, ChatSummary, DailyUsage, DeclaredStdioServer, LinkableKey, NookLink, ProviderCompat, ProviderSummary, RunEvent, ServerAuthKind, ServerAvailability, ToolCatalog, ToolPolicy, ToolServerSummary } from "../../shared/agents";
+import type { AgentApiUsage, AuditFacets, AuditRunDetail, AuditRunSummary, AgentDetail, AgentSettings, AgentSummary, AgentToolRef, ChatDetail, ChatMessage, ChatSummary, DailyUsage, DeclaredStdioServer, LinkableKey, NookLink, ProviderCompat, ProviderSummary, RunEvent, ServerAuthKind, ServerAvailability, ToolCatalog, ToolPolicy, ToolServerSummary } from "../../shared/agents";
 
 /** The agent chat API (docs/plan/API_CONTRACTS.md § Agent chat), plus the SSE reader for runs. */
 
@@ -14,6 +14,7 @@ const auditQuery = (filter: AuditFilter, extra: Record<string, string> = {}) => 
   return text ? `?${text}` : "";
 };
 export const listAudit = (filter: AuditFilter, cursor?: string | null) => api<{ runs: AuditRunSummary[]; nextCursor: string | null }>(`/agents/audit${auditQuery(filter, cursor ? { cursor } : {})}`);
+export const auditFacets = () => api<{ facets: AuditFacets }>("/agents/audit/facets");
 export const getAuditRun = (runId: string) => api<{ run: AuditRunDetail }>(`/agents/audit/${runId}`);
 /** The export's URL (a same-origin GET with the session; the browser saves the attachment). */
 export const auditExportUrl = (filter: AuditFilter, runId?: string | null) => `/api/agents/audit/export${auditQuery(filter, runId ? { runId } : {})}`;

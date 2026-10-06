@@ -51,6 +51,7 @@ const ERROR_TEXT: Record<string, string> = {
   NO_PROVIDER: "No model provider is configured",
   EGRESS_REFUSED: "The provider's address is not allowed",
   TOO_LARGE: "The reply was too large",
+  ACCESS_REVOKED: "You can no longer chat with this agent; the answer stopped",
   INTERNAL: "Something went wrong while answering"
 };
 
