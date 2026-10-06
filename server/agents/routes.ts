@@ -213,7 +213,9 @@ export function registerAgentRoutes(app: Hono<AppEnv>) {
       // AC-C: whether the Audit log link shows (admins, and people with `agents:run` keys or runs).
       auditVisible: status.enabled && auditVisibleTo({ userId: c.get("user").id, role }),
       // AC-D (AC-O1): whether this person may create public chat links now (the policy on, member and above).
-      publicChatLinks: status.enabled && roleMayPublish(role) && publicLinksOn()
+      publicChatLinks: status.enabled && roleMayPublish(role) && publicLinksOn(),
+      // Admins only: whether a model provider exists, for the empty Chat list's "add one" line.
+      ...(role === "admin" ? { hasProvider: db.query("SELECT 1 FROM agent_providers LIMIT 1").get() !== null } : {})
     });
   });
 

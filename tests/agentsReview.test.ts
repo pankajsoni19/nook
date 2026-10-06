@@ -134,7 +134,9 @@ describe("review: module off by key mismatch", () => {
       const reenter = await api(admin, "PATCH", `/agents/admin/providers/${secondId}`, { apiKey: "sk-test-review-second-0003", expectedRevision: 1 });
       expect(reenter.status).toBe(200);
       expect(agentsStatus()).toEqual({ enabled: true, reason: null });
-      expect((await api(admin, "GET", "/agents/status")).body).toMatchObject({ enabled: true, reason: null });
+      expect((await api(admin, "GET", "/agents/status")).body).toMatchObject({ enabled: true, reason: null, hasProvider: true });
+      // Only admins learn whether a provider exists (the empty Chat list's "add one" line).
+      expect((await api(owner, "GET", "/agents/status")).body.hasProvider).toBeUndefined();
       expect((await api(owner, "GET", "/chats")).status).toBe(200);
       // Back to the mismatch with one failing secret: DELETE recovers too.
       expect(setAgentsKeyForTests(Buffer.alloc(32, 124))).toEqual({ enabled: false, reason: "key_mismatch" });

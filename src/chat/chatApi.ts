@@ -3,7 +3,7 @@ import type { AgentApiUsage, AuditFacets, AuditRunDetail, AuditRunSummary, Agent
 
 /** The agent chat API (docs/plan/API_CONTRACTS.md § Agent chat), plus the SSE reader for runs. */
 
-export type AgentsStatus = { enabled: boolean; reason: "unset" | "key_mismatch" | null; canChat: boolean; canCreate: boolean; defaultModel: string; auditVisible?: boolean; /** Wave 43: the public-links policy is on and the role may create them. */ publicChatLinks?: boolean };
+export type AgentsStatus = { enabled: boolean; reason: "unset" | "key_mismatch" | null; canChat: boolean; canCreate: boolean; defaultModel: string; auditVisible?: boolean; /** Wave 43: the public-links policy is on and the role may create them. */ publicChatLinks?: boolean; hasProvider?: boolean };
 
 // The Audit log (AC-C, plan §7.3): the key's owner in full, admins metadata only.
 export type AuditFilter = { key?: string | null; agent?: string | null; status?: string | null; from?: string | null; to?: string | null };

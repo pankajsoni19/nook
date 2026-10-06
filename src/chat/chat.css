@@ -28,9 +28,13 @@
 .chat-row-meta { display: flex; align-items: center; gap: 6px; color: #8d8d94; font-size: .76rem; }
 .chat-running-dot { width: 8px; height: 8px; border-radius: 50%; background: #c9a85c; animation: chat-pulse 1.2s ease-in-out infinite; }
 @keyframes chat-pulse { 50% { opacity: .35; } }
-.chat-list-foot { display: flex; gap: 14px; margin-top: 22px; padding-top: 12px; border-top: 1px solid #26262a; }
-.chat-empty-agents { display: grid; gap: 8px; margin-bottom: 14px; justify-items: start; }
-.chat-empty-agents p { margin: 0; color: #c9c9ce; font-size: .9rem; }
+.chat-list-foot { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 22px; padding-top: 12px; border-top: 1px solid #26262a; }
+.chat-empty-agents { display: grid; gap: 10px; margin-bottom: 14px; }
+.chat-empty-agents p { margin: 0; color: #c9c9ce; font-size: .9rem; line-height: 1.45; }
+.chat-empty-agents p.chat-muted { color: var(--muted); font-size: .84rem; }
+.chat-empty-agents a { color: #c9a85c; text-underline-offset: 3px; }
+.chat-create-agent { width: 100%; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 0 14px; font-size: .9rem; font-weight: 650; white-space: nowrap; }
+.chat-create-agent svg { width: 18px; height: 18px; flex: none; }
 
 /* States */
 .chat-state, .chat-placeholder, .chat-empty { display: grid; justify-items: center; gap: 10px; padding: 48px 24px; text-align: center; color: #8d8d94; }
@@ -237,6 +241,9 @@
 .chat-link-grants { color: #c9c9ce !important; }
 .chat-link-keys .primary-button, .chat-link-current .secondary-button { min-height: 38px; margin: 0; padding: 0 14px; font-size: .84rem; }
 .chat-link-key .file-dialog-actions { padding: 4px 0 0; }
+/* Like every dialog body: it scrolls under the header and keeps Done in view (a long key list once ran off the sheet). */
+.chat-link-key-sheet .chat-link-key { min-height: 0; flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; }
+.chat-link-key-sheet .chat-link-key > .file-dialog-actions:last-child { position: sticky; bottom: 0; z-index: 1; margin: 0 -20px; padding: 12px 20px 0; background: #141416; }
 
 /* AC-B: tool disclosure, the confirmation card, and the trifecta badge in a chat */
 .chat-tools { margin: 0 0 8px; min-width: 0; }
