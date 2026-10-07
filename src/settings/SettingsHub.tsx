@@ -4,8 +4,9 @@ import { AppPageName } from "../AppShell";
 import { useAppName } from "../appName";
 import { isMobileViewport } from "../mobileNavigation";
 import { Avatar } from "../ui/Avatar";
+import { focusFromScript } from "../ui/scriptFocus";
 import { ROLE_LABELS, type Role } from "../team/teamRoles";
-import type { HubEntry, HubEntryId } from "./hubModel";
+import { HUB_TITLE_ID, type HubEntry, type HubEntryId } from "./hubModel";
 import "./settingsHub.css";
 
 const ICONS: Record<HubEntryId, LucideIcon> = {
@@ -66,7 +67,8 @@ export function SettingsHubShell({ displayName, avatarUrl, role, entries, select
     const active = document.activeElement;
     const lost = !active || active === document.body || !active.isConnected;
     const inSection = active instanceof Element && active.closest(".settings-hub-main") !== null;
-    if (lost || (isMobileViewport() && !inSection)) headingRef.current?.focus({ preventScroll: true });
+    // v0.31 follow-up: no focus ring on the heading unless the move followed a key press (scriptFocus).
+    if (lost || (isMobileViewport() && !inSection)) focusFromScript(headingRef.current, { preventScroll: true });
   }, [listScreen, screenKey]);
   const roleLabel = role ? ROLE_LABELS[role] : null;
   const groups = [
@@ -105,13 +107,13 @@ export function SettingsHubShell({ displayName, avatarUrl, role, entries, select
           </ul>
         </div>)}
       </nav>
-      <section className="settings-hub-main" aria-labelledby="settings-hub-title">
+      <section className="settings-hub-main" aria-labelledby={HUB_TITLE_ID}>
         <header className="settings-hub-header">
           {showBack && <button type="button" className="icon-button settings-hub-back" onClick={onBack} aria-label="Back to Settings"><ChevronLeft /></button>}
           <Avatar className="app-user-avatar settings-avatar" name={displayName} url={avatarUrl} />
           <div className="settings-hub-heading">
             <span className="eyebrow">{displayName}{roleLabel ? ` · ${roleLabel}` : ""}</span>
-            <h1 id="settings-hub-title" ref={headingRef} tabIndex={-1}>{title}</h1>
+            <h1 id={HUB_TITLE_ID} ref={headingRef} tabIndex={-1}>{title}</h1>
           </div>
         </header>
         {children}

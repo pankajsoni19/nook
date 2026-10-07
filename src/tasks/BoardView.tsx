@@ -25,6 +25,7 @@ import { copyCardLink } from "./cardLink";
 import { focusBoardCard } from "./cardFocus";
 import { afterCardIdAt, applyLocalMove, applyPositions, byPosition, cardPlace, columnCards, columnIndexFromScroll, columnMoveAnchor, isNoopMove, keyboardMoveTarget, mergeMovedCard, moveChangesBlockers, readCardDragPayload, sheetMoveAnchor, type MoveKey } from "./boardOrder";
 import { isMobileViewport } from "../mobileNavigation";
+import { useIsPhone } from "../ui/Listbox";
 import { formatRoute } from "../router";
 import { tasksRoute } from "../tasksRoute";
 import { columnIndexFor, createTasksHistoryState } from "../tasksNavigation";
@@ -250,6 +251,7 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
   const scopedTotal = data && sprints.term ? filterBoardCards(data, { terms: [sprints.term] }, viewContext).length : cards.length;
   const filtered = hasBoardFilter(query);
   const view = query.view;
+  const phone = useIsPhone();
   // The lanes show the matching cards; drag and keyboard moves anchor on the cards in view.
   const laneCards: CardSummary[] = (filtered || sprintScoped) && result ? result.cards : cards;
   const laneCardsRef = useRef(laneCards);
@@ -533,6 +535,12 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
     }
   }
 
+  // Phones (v0.31 follow-up): the view switch leads the filter row, which scrolls sideways, so the
+  // board's header is two rows (title and actions; views and filters), not three.
+  const viewSwitch = <BoardViewSwitch value={view} onChange={(next) => onQueryChange(withBoardQuery(query, { view: next }), { push: true })} />;
+  const filterBar = data && result ? <FilterBar board={data} context={viewContext} filter={query.filter} shown={result.cards.length} total={scopedTotal}
+    onChange={(filter) => onQueryChange(withBoardQuery(query, { filter }))} /> : null;
+
   return <section className="task-board" data-read-only={readOnly && !roleReadOnly ? "true" : undefined} aria-labelledby={cardPage ? undefined : "task-board-title"}>
     {!cardPage && <>
     <header className="task-board-header">
@@ -543,7 +551,7 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
       </div>
       {board && <span className="task-board-count">{cardCountLabel(board.card_count)}</span>}
       {detail && !readOnly && <button className="primary-button task-new-card" onClick={() => setComposer({ columnId: null })} aria-haspopup="dialog" aria-label="New card" title="New card"><Plus /><span>New card</span></button>}
-      {detail && <BoardViewSwitch value={view} onChange={(next) => onQueryChange(withBoardQuery(query, { view: next }), { push: true })} />}
+      {detail && !phone && viewSwitch}
       {board && <span className="task-board-actions">
         <button className="icon-button" onClick={(event) => openDialog({ kind: "settings" }, event.currentTarget)} aria-haspopup="dialog" aria-label="Board settings" title="Board settings"><Settings2 /></button>
       </span>}
@@ -563,8 +571,7 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
       <button className="primary-button" onClick={() => { void load(); }}><RotateCcw />Try again</button>
     </div>}
     {!loadError && !detail && <p className="bin-loading task-board-state" role="status">Loading the board…</p>}
-    {detail && data && result && <FilterBar board={data} context={viewContext} filter={query.filter} shown={result.cards.length} total={scopedTotal}
-      onChange={(filter) => onQueryChange(withBoardQuery(query, { filter }))} />}
+    {detail && (phone ? <div className="task-board-controls">{viewSwitch}{filterBar}</div> : filterBar)}
     {detail && sprintConflict && <p className="task-sprint-conflict" role="status">{sprintConflict}</p>}
     {detail && data && result && view === "table" && <div className="task-view-body">
       <BoardTable board={data} cards={result.cards} sort={query.sort} today={viewContext.today} filtered={filtered}

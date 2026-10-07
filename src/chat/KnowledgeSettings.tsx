@@ -9,6 +9,7 @@ import { useHistoryDialogGuard } from "../ui/useHistoryDialogGuard";
 import { KNOWLEDGE_BOUNDS, KNOWLEDGE_SHARE_NOTE, type KnowledgeCandidate, type KnowledgeDetail, type KnowledgeHit, type KnowledgeSource, type KnowledgeSummary } from "../../shared/knowledge";
 import { agentsStatus, messageOf, type AgentsStatus } from "./chatApi";
 import { addSource, createKnowledge, deleteKnowledge, getKnowledge, hitSource, knowledgeLine, knowledgePaused, listKnowledge, pollInterval, reindexKnowledge, removeSource, searchKnowledge, sourceCandidates, sourceLabel, sourceStatusLabel, SOURCE_STATUS_LABELS, updateKnowledge } from "./knowledgeApi";
+import { HUB_TITLE_ID } from "../settings/hubModel";
 import "./chat.css";
 import "./knowledge.css";
 
@@ -52,8 +53,8 @@ export function KnowledgeSettings({ kbId, navigate, flash }: { kbId: string | nu
       <StatusBadge status={kb.status === "indexing" ? (knowledgePaused(kb) ? "pending" : "indexing") : kb.counts.error > 0 || kb.status === "error" ? "error" : kb.status === "ready" ? "ready" : null} label={kb.status === "indexing" && knowledgePaused(kb) ? "Paused" : undefined} />
     </button>
   </li>;
-  return <section className="settings-content agents-settings knowledge-settings" aria-labelledby="knowledge-heading">
-    <div className="settings-section-heading"><span className="settings-icon"><BookOpen /></span><div><h3 id="knowledge-heading">Knowledge</h3><p>A knowledge base holds notes, text files, and pasted text that your agents can search. Its text is sent to the model provider to be indexed and whenever an agent quotes it.</p></div></div>
+  return <section className="settings-content agents-settings knowledge-settings" aria-labelledby={HUB_TITLE_ID}>
+    <div className="settings-section-heading"><span className="settings-icon"><BookOpen /></span><div><p>A knowledge base holds notes, text files, and pasted text that your agents can search. Its text is sent to the model provider to be indexed and whenever an agent quotes it.</p></div></div>
     {error && <p className="form-error" role="alert">{error}</p>}
     {status && !status.enabled && <p className="settings-warning">Chat is not configured on this server{status.reason ? " (see Settings → AI)" : ""}.</p>}
     {status?.enabled && !status.canChat && <p className="settings-warning">Chat is off for your role.</p>}

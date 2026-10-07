@@ -77,11 +77,21 @@
 .task-group-empty { margin: 4px 8px 0; color: #85858c; font-size: .78rem; }
 
 @media (max-width: 760px) {
-  .task-board-header { flex-wrap: wrap; }
-  /* The heading keeps room for the name; the switch wraps to its own row beside the owner actions. */
-  .task-board-header .task-board-heading { min-width: 120px; }
-  .task-view-switch { order: 5; }
+  /*
+   * v0.31 follow-up: two rows, not three. The title row (Back, the name, New card, Board settings)
+   * never wraps; the view switch leads the filter row (.task-board-controls, BoardView), which
+   * scrolls sideways while no filter is being edited.
+   */
+  .task-board-header { flex-wrap: nowrap; }
+  .task-board-header .task-board-heading { min-width: 0; }
   .task-view-switch .icon-button { width: 44px; height: 44px; }
+  .task-board-controls { flex: none; display: flex; align-items: center; gap: 6px; min-width: 0; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; padding: 0 16px 8px; scrollbar-width: none; }
+  .task-board-controls::-webkit-scrollbar { display: none; }
+  .task-board-controls > .task-filter-bar { flex: none; flex-wrap: nowrap; padding: 0; }
+  .task-board-controls .task-filter-text { flex: 0 0 180px; }
+  /* Editing a filter: the editor needs the width, so the row wraps instead of scrolling. */
+  .task-board-controls:has(.task-filter-editor) { flex-wrap: wrap; overflow-x: visible; }
+  .task-board-controls:has(.task-filter-editor) > .task-filter-bar { flex: 1 1 100%; flex-wrap: wrap; }
   .task-view-body { padding: 4px 16px calc(24px + env(safe-area-inset-bottom)); }
   .task-table { min-width: 760px; }
   .task-table .task-table-title { width: 190px; max-width: 190px; }

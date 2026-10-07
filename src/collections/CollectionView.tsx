@@ -260,6 +260,37 @@ export function CollectionView({ collectionId, viewId, rowId, go, onBack, onMiss
   const dialogRow = dialog && (dialog.kind === "picker" || dialog.kind === "actions") ? findRow(dialog.rowId) : null;
   const pickerField = dialog?.kind === "picker" ? collection.fields.find((field) => field.id === dialog.fieldId) ?? null : null;
 
+  // Phones (v0.31 follow-up): the collection's actions follow the toolbar's controls in one row under
+  // the title that scrolls sideways, so the header is two rows, not three; a computer keeps them in the header.
+  const headerActions = <>
+    <span className="collection-header-actions collection-data-actions">
+      {editable && <button className="icon-button" onClick={() => setDialog({ kind: "import" })} aria-haspopup="dialog" aria-label="Import CSV" title="Import CSV"><Upload /></button>}
+      <a className="icon-button" href={exportUrl(collectionId, viewId)} download aria-label="Export CSV" title="Export CSV"><Download /></a>
+    </span>
+    {canManage && <span className="collection-header-actions">
+      <button className="icon-button" onClick={() => setDialog({ kind: "rename" })} aria-haspopup="dialog" aria-label="Rename collection" title="Rename"><Pencil /></button>
+      <button className="secondary-button collection-action" onClick={() => setDialog({ kind: "fields" })} aria-haspopup="dialog" aria-label="Fields"><Columns3 /><span>Fields</span></button>
+      <button className="secondary-button collection-action" onClick={() => setDialog({ kind: "share" })} aria-haspopup="dialog" aria-label="Share collection"><Share2 /><span>Share</span></button>
+      {isOwner && <button className="icon-button" onClick={() => setDialog({ kind: "deleteCollection" })} aria-haspopup="dialog" aria-label="Move collection to the Bin" title="Move to Bin"><Trash2 /></button>}
+    </span>}
+  </>;
+
+  const toolbar = <div className="collection-toolbar" role="toolbar" aria-label="Rows">
+    {views.length > 0 && <>
+      <button className={`collection-chip collection-view-chip${viewId ? "" : " active"}`} aria-pressed={!viewId} onClick={() => { if (viewId) go(collectionsRoute(collectionId)); }}>All rows</button>
+      {views.map((item) => <button key={item.id} className={`collection-chip collection-view-chip${item.id === viewId ? " active" : ""}`} aria-pressed={item.id === viewId} title={item.name}
+        onClick={() => { if (item.id !== viewId) go(collectionsRoute(collectionId, { viewId: item.id })); }}><Bookmark />{item.name}</button>)}
+    </>}
+    {canManage && view && <>
+      <button className="icon-button" onClick={() => setDialog({ kind: "renameView" })} aria-haspopup="dialog" aria-label={`Rename view ${view.name}`} title="Rename view"><Pencil /></button>
+      <button className="icon-button" onClick={() => setDialog({ kind: "deleteView" })} aria-haspopup="dialog" aria-label={`Delete view ${view.name}`} title="Delete view"><Trash2 /></button>
+    </>}
+    <input className="collection-search" type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Find rows" aria-label="Find rows" maxLength={200} />
+    <button className={`collection-chip${activeCount ? " active" : ""}`} onClick={() => setDialog({ kind: "sortFilter" })} aria-haspopup="dialog"><SlidersHorizontal />{activeCount ? `Sort & filter · ${activeCount}` : "Sort & filter"}</button>
+    {local && canManage && view && <button className="collection-chip active" onClick={() => { void updateCurrentView(); }}><Save />Update view</button>}
+    {local && <button className="collection-chip" onClick={() => setLocal(null)}><X />{view ? `Reset to ${view.name}` : "Clear"}</button>}
+  </div>;
+
   return <section className="collection-view" aria-labelledby="collection-title">
     <header className="collection-header">
       <button className="icon-button" onClick={onBack} aria-label="Back"><ArrowLeft /></button>
@@ -271,33 +302,10 @@ export function CollectionView({ collectionId, viewId, rowId, go, onBack, onMiss
       <span className="collection-count">{rowCountLabel(rows.total)}</span>
       {!editable && <span className="collection-role role-viewer"><Eye aria-hidden="true" />{roleLabel(role)}</span>}
       {editable && role === "editor" && <span className="collection-role role-editor">{roleLabel(role, collection.level)}</span>}
-      <span className="collection-header-actions collection-data-actions">
-        {editable && <button className="icon-button" onClick={() => setDialog({ kind: "import" })} aria-haspopup="dialog" aria-label="Import CSV" title="Import CSV"><Upload /></button>}
-        <a className="icon-button" href={exportUrl(collectionId, viewId)} download aria-label="Export CSV" title="Export CSV"><Download /></a>
-      </span>
-      {canManage && <span className="collection-header-actions">
-        <button className="icon-button" onClick={() => setDialog({ kind: "rename" })} aria-haspopup="dialog" aria-label="Rename collection" title="Rename"><Pencil /></button>
-        <button className="secondary-button collection-action" onClick={() => setDialog({ kind: "fields" })} aria-haspopup="dialog" aria-label="Fields"><Columns3 /><span>Fields</span></button>
-        <button className="secondary-button collection-action" onClick={() => setDialog({ kind: "share" })} aria-haspopup="dialog" aria-label="Share collection"><Share2 /><span>Share</span></button>
-        {isOwner && <button className="icon-button" onClick={() => setDialog({ kind: "deleteCollection" })} aria-haspopup="dialog" aria-label="Move collection to the Bin" title="Move to Bin"><Trash2 /></button>}
-      </span>}
+      {!phone && headerActions}
     </header>
 
-    <div className="collection-toolbar" role="toolbar" aria-label="Rows">
-      {views.length > 0 && <>
-        <button className={`collection-chip collection-view-chip${viewId ? "" : " active"}`} aria-pressed={!viewId} onClick={() => { if (viewId) go(collectionsRoute(collectionId)); }}>All rows</button>
-        {views.map((item) => <button key={item.id} className={`collection-chip collection-view-chip${item.id === viewId ? " active" : ""}`} aria-pressed={item.id === viewId} title={item.name}
-          onClick={() => { if (item.id !== viewId) go(collectionsRoute(collectionId, { viewId: item.id })); }}><Bookmark />{item.name}</button>)}
-      </>}
-      {canManage && view && <>
-        <button className="icon-button" onClick={() => setDialog({ kind: "renameView" })} aria-haspopup="dialog" aria-label={`Rename view ${view.name}`} title="Rename view"><Pencil /></button>
-        <button className="icon-button" onClick={() => setDialog({ kind: "deleteView" })} aria-haspopup="dialog" aria-label={`Delete view ${view.name}`} title="Delete view"><Trash2 /></button>
-      </>}
-      <input className="collection-search" type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Find rows" aria-label="Find rows" maxLength={200} />
-      <button className={`collection-chip${activeCount ? " active" : ""}`} onClick={() => setDialog({ kind: "sortFilter" })} aria-haspopup="dialog"><SlidersHorizontal />{activeCount ? `Sort & filter · ${activeCount}` : "Sort & filter"}</button>
-      {local && canManage && view && <button className="collection-chip active" onClick={() => { void updateCurrentView(); }}><Save />Update view</button>}
-      {local && <button className="collection-chip" onClick={() => setLocal(null)}><X />{view ? `Reset to ${view.name}` : "Clear"}</button>}
-    </div>
+    {phone ? <div className="collection-controls">{toolbar}{headerActions}</div> : toolbar}
 
     <div className="collection-main">
       {rows.loadError && <div className="bin-state bin-error collection-state" role="alert">

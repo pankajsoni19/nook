@@ -265,10 +265,20 @@ label.row-field-label { cursor: pointer; }
 }
 
 @media (max-width: 760px) {
-  .collection-header { flex-wrap: wrap; }
-  .collection-heading { flex: 1 1 calc(100% - 120px); }
+  /*
+   * v0.31 follow-up: two rows, not three. The title row (Back, the name, a role chip) never wraps; the
+   * collection's actions follow the toolbar's controls in one row that scrolls sideways
+   * (.collection-controls, CollectionView), every control 44 px tall.
+   */
+  .collection-header { flex-wrap: nowrap; }
+  .collection-heading { flex: 1 1 auto; }
   .collection-header-actions { gap: 0; }
-  .collection-data-actions { margin-left: auto; }
+  .collection-controls { flex: none; display: flex; align-items: center; gap: 8px; min-width: 0; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; padding: 0 12px 8px; scrollbar-width: none; }
+  .collection-controls::-webkit-scrollbar { display: none; }
+  .collection-controls > .collection-toolbar { flex: none; overflow: visible; padding: 0; }
+  .collection-controls .collection-search { flex: 0 0 180px; }
+  .collection-controls .icon-button { width: 44px; height: 44px; }
+  .collections-row-open .collection-controls { display: none; }
   .import-mapping .ui-select, .import-recheck { min-height: 44px; font-size: 1rem; }
   .collections-content { padding: 28px 16px calc(40px + env(safe-area-inset-bottom)); }
   .collections-intro { flex-direction: column; align-items: stretch; }

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useState, type FormEvent } from "react";
 import { Cpu, Plus, ShieldAlert, SlidersHorizontal } from "lucide-react";
 import { ModalDialog } from "../files/Dialog";
-import { hubDocumentTitle, type AiTab } from "../router";
+import { settingsDocumentTitle, type AiTab } from "../router";
 import { AI_TAB_LABELS } from "../settings/hubModel";
 import { SettingsTabs, settingsTabIds, type SettingsTab } from "../settings/SettingsTabs";
 import { Select } from "../ui/Select";
@@ -10,6 +10,7 @@ import { useHistoryDialogGuard } from "../ui/useHistoryDialogGuard";
 import { AGENT_BOUNDS, AGENT_ROLE_OPTIONS, DEFAULT_BASE_URL, DEFAULT_MODEL, type AgentRole, type AgentSettings, type ProviderSummary } from "../../shared/agents";
 import { agentsStatus, createProvider, deleteProvider, listProviders, messageOf, readSettings, testProvider, updateProvider, writeSettings, errorCode, type AgentsStatus, type ProviderTest } from "./chatApi";
 import { ToolServersSection } from "./ToolServers";
+import { HUB_TITLE_ID } from "../settings/hubModel";
 import "./chat.css";
 
 /**
@@ -35,7 +36,8 @@ export function AiSettings({ flash, tabs, tab, onSelectTab }: { flash: (message:
   const [editing, setEditing] = useState<ProviderSummary | "new" | null>(null);
   const [tests, setTests] = useState<Record<string, ProviderTest | "running">>({});
   const confirm = useConfirm();
-  useEffect(() => { document.title = hubDocumentTitle("AI"); }, []);
+  // One title per tab, as API keys' tabs (v0.31 follow-up): "Settings · AI · Model providers · Nook". The page loads lazily, after App set it.
+  useEffect(() => { document.title = settingsDocumentTitle("ai", undefined, tab); }, [tab]);
 
   const load = useCallback(async () => {
     try {
@@ -81,11 +83,11 @@ export function AiSettings({ flash, tabs, tab, onSelectTab }: { flash: (message:
     }
   }
 
-  if (error) return <section className="settings-content" aria-labelledby="ai-heading"><h3 id="ai-heading" className="sr-only">AI</h3><p className="form-error" role="alert">{error}</p><button className="secondary-button" onClick={() => { void load(); }}>Retry</button></section>;
+  if (error) return <section className="settings-content" aria-labelledby={HUB_TITLE_ID}><p className="form-error" role="alert">{error}</p><button className="secondary-button" onClick={() => { void load(); }}>Retry</button></section>;
   if (!status) return <section className="settings-content" aria-busy="true"><p className="chat-muted">Loading…</p></section>;
   if (!status.enabled) {
-    return <section className="settings-content ai-settings" aria-labelledby="ai-heading">
-      <div className="settings-section-heading"><span className="settings-icon"><Cpu /></span><div><h3 id="ai-heading">AI</h3><p>Model providers and the chat policy.</p></div></div>
+    return <section className="settings-content ai-settings" aria-labelledby={HUB_TITLE_ID}>
+      <div className="settings-section-heading"><span className="settings-icon"><Cpu /></span><div><p>Model providers and the chat policy.</p></div></div>
       <div className="settings-warning"><ShieldAlert />{status.reason === "key_mismatch" ? "AGENT_SECRETS_KEY does not open the stored provider secrets." : "AGENT_SECRETS_KEY is not set, so Chat is off."}</div>
       <div className="security-card setup-intro">
         <strong>Not configured</strong>

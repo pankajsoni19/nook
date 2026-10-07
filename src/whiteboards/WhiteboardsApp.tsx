@@ -58,8 +58,8 @@ class CanvasLoadBoundary extends Component<{ children: ReactNode; onRetry: () =>
       <TriangleAlert aria-hidden="true" />
       <p>The whiteboard editor could not be loaded. Check your connection and try again.</p>
       <div className="whiteboard-load-actions">
-        <button type="button" className="primary-button" onClick={() => { this.setState({ failed: false }); this.props.onRetry(); }}><RotateCcw />Retry</button>
-        <button type="button" className="secondary-button" onClick={this.props.onBack}>Back to whiteboards</button>
+        <button type="button" className="action-button" onClick={() => { this.setState({ failed: false }); this.props.onRetry(); }}><RotateCcw />Retry</button>
+        <button type="button" className="action-button secondary" onClick={this.props.onBack}>Back to whiteboards</button>
       </div>
     </div>;
   }

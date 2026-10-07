@@ -485,7 +485,7 @@ function SettingsPage({ session, modules, googleResult = null, navigate, flash, 
   /** Phones: the section's back arrow. Back onto the list when this visit came from it, else the list replaces the section. */
   const backToList = useCallback(() => {
     if (hubBackAction(window.history.state) === "history") window.history.back();
-    // API keys' tabs are entries of their own: the arrow steps back over them to the list.
+    // API keys' and Settings → AI's tabs are entries of their own: the arrow steps back over them to the list.
     else if (hubBackSteps(window.history.state) > 0) window.history.go(-hubBackSteps(window.history.state));
     else go(settingsRoute(null), { replace: true });
   }, [go]);
@@ -520,8 +520,8 @@ function SettingsPage({ session, modules, googleResult = null, navigate, flash, 
   useEffect(() => {
     if (route.app === "bin") document.title = hubDocumentTitle(hubEntryLabel("bin"));
     if (route.app !== "settings") return;
-    document.title = listScreen && isMobileViewport() ? hubDocumentTitle(null) : settingsDocumentTitle(section ?? "security", keysTab);
-  }, [keysTab, listScreen, route.app, section]);
+    document.title = listScreen && isMobileViewport() ? hubDocumentTitle(null) : settingsDocumentTitle(section ?? "security", keysTab, section === "ai" && aiTabs.length ? aiTab : undefined);
+  }, [aiTab, aiTabs.length, keysTab, listScreen, route.app, section]);
 
   useEffect(() => {
     api<TotpState>("/auth/totp/status").then(setState).catch((reason) => setError(reason instanceof Error ? reason.message : "Could not load security settings"));

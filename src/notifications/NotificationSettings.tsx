@@ -4,6 +4,7 @@ import { getInboxSettings, setInboxPush } from "../inbox/inboxApi";
 import { useRole } from "../team/roleAccess";
 import { appName } from "../appName";
 import { EmailSettings } from "./EmailSettings";
+import { HUB_TITLE_ID } from "../settings/hubModel";
 import {
   currentEndpoint,
   enablePushOnThisDevice,
@@ -96,8 +97,8 @@ export function NotificationSettings() {
     }
   }
 
-  return <section className="settings-content notification-settings" aria-labelledby="notification-settings-heading">
-    <div className="settings-section-heading"><span className="settings-icon"><Bell /></span><div><h3 id="notification-settings-heading">Notifications</h3><p>Calendar reminders always appear under the bell in {appName()}. Push shows them on this device too, even when {appName()} is closed. Push messages carry no content; your device fetches the reminder from {appName()}.</p></div></div>
+  return <section className="settings-content notification-settings" aria-labelledby={HUB_TITLE_ID}>
+    <div className="settings-section-heading"><span className="settings-icon"><Bell /></span><div><p>Calendar reminders always appear under the bell in {appName()}. Push shows them on this device too, even when {appName()} is closed. Push messages carry no content; your device fetches the reminder from {appName()}.</p></div></div>
     {!config && !error && <p className="notification-empty" role="status">Loading…</p>}
     {availability && !availability.available && <p className="notification-settings-note" role="note">{unavailableMessage(availability.reason)}</p>}
     {availability?.available && <div className="notification-settings-row">

@@ -74,7 +74,7 @@ describe("the URLs", () => {
     expect(settingsDocumentTitle("mcp", "vault")).toMatch(/^Settings · API keys · Vault · /);
     expect(settingsDocumentTitle("mcp", "general")).toMatch(/^Settings · API keys · General · /);
     expect(settingsDocumentTitle("mcp")).toMatch(/^Settings · API keys · /);
-    expect(read("App.tsx")).toContain('settingsDocumentTitle(section ?? "security", keysTab)');
+    expect(read("App.tsx")).toContain('settingsDocumentTitle(section ?? "security", keysTab, section === "ai" && aiTabs.length ? aiTab : undefined)');
   });
 });
 

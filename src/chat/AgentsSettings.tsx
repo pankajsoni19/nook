@@ -12,6 +12,7 @@ import { agentApiUsage, agentProviders, agentsStatus, createAgent, deleteAgent, 
 import { LinkNookKeySheet } from "./LinkNookKeySheet";
 import { TrifectaBadge } from "./ToolDisclosure";
 import { hasRef, knowledgePickerBases, nookGroups, nookWriteMode, orphanRefs, pickCounts, POLICY_BADGES, policyOptions, refKey, refName, setRefPolicy, toggleRef } from "./toolPicker";
+import { HUB_TITLE_ID } from "../settings/hubModel";
 import "./chat.css";
 
 type Navigate = (route: Route, options?: { replace?: boolean }) => void;
@@ -63,8 +64,8 @@ export function AgentsSettings({ agentId, navigate, flash, onOpenChat }: { agent
     </button>
     <button type="button" className="secondary-button" onClick={() => onOpenChat(agent.id)}>Chat</button>
   </li>;
-  return <section className="settings-content agents-settings" aria-labelledby="agents-heading">
-    <div className="settings-section-heading"><span className="settings-icon"><Bot /></span><div><h3 id="agents-heading">Agents</h3><p>An agent is a prompt, a model, a step limit, and the tools it may call. Your prompts are not secret: anyone you later share an agent with can read what it says through the model.</p></div></div>
+  return <section className="settings-content agents-settings" aria-labelledby={HUB_TITLE_ID}>
+    <div className="settings-section-heading"><span className="settings-icon"><Bot /></span><div><p>An agent is a prompt, a model, a step limit, and the tools it may call. Your prompts are not secret: anyone you later share an agent with can read what it says through the model.</p></div></div>
     {error && <p className="form-error" role="alert">{error}</p>}
     {status && !status.enabled && <p className="settings-warning">Chat is not configured on this server{status.reason ? " (see Settings → AI)" : ""}.</p>}
     {status?.enabled && !status.canChat && <p className="settings-warning">Chat is off for your role.</p>}

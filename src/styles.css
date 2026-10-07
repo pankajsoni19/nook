@@ -24,6 +24,9 @@ body { min-width: 320px; overflow: hidden; }
 button, input { font: inherit; }
 button { color: inherit; }
 button:focus-visible, input:focus-visible, [contenteditable]:focus-visible { outline: 2px solid var(--yellow); outline-offset: 2px; }
+/* A heading a script focuses (tabindex -1, ui/scriptFocus.ts): the app's ring after a key press, none after a pointer or before any input. */
+:is(h1, h2, h3, h4)[tabindex="-1"]:focus-visible { outline: 2px solid var(--yellow); outline-offset: 2px; border-radius: 4px; }
+[data-script-focus]:focus, :is(h1, h2, h3, h4)[data-script-focus]:focus, :is(h1, h2, h3, h4)[tabindex="-1"]:focus:not(:focus-visible) { outline: none; }
 
 .loading-page, .auth-page { min-height: 100dvh; display: grid; place-items: center; background: radial-gradient(circle at 50% 0%, #242019 0, #0e0e10 34rem, #09090a 75%); }
 /* The body never scrolls: a tall sign-in form on a short (landscape) phone scrolls inside the page, and
