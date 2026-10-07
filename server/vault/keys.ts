@@ -252,11 +252,12 @@ export function recordKeyGrantEvents(keyId: string, userId: string, grants: read
 /**
  * The key's own recent vault activity for its owner (the key's "Recent activity"): what it did, in
  * which vault and environment (names only while the owner can read them), and when. Never a value
- * or a secret's name.
+ * or a secret's name. The limit and volume alerts are left out: the key's own events (the access log)
+ * list each of them already, so they showed twice.
  */
 export function vaultKeyEvents(ownerId: string, keyId: string, limit = 30) {
   const rows = db.query(`SELECT e.id, e.vault_id, e.event, e.via, e.env_id, e.count, e.created_at FROM vault_events e
-    WHERE e.key_id = ? ORDER BY e.created_at DESC, e.id DESC LIMIT ?`).all(keyId, limit) as Array<{ id: string; vault_id: string; event: string; via: string; env_id: string | null; count: number | null; created_at: string }>;
+    WHERE e.key_id = ? AND e.event NOT IN ('key.limited', 'key.volume') ORDER BY e.created_at DESC, e.id DESC LIMIT ?`).all(keyId, limit) as Array<{ id: string; vault_id: string; event: string; via: string; env_id: string | null; count: number | null; created_at: string }>;
   const names = new Map<string, { vault: string; envs: Map<string, string> } | null>();
   const namesOf = (vaultId: string) => {
     if (!names.has(vaultId)) {

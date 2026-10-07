@@ -532,6 +532,14 @@ describe("review 27: detection below the limits (T183, V-O6)", () => {
     expect((db.query("SELECT COUNT(*) AS count FROM access_events WHERE key_id = ? AND action = 'key.vault.volume'").get(key.id) as { count: number }).count).toBe(1);
     expect(db.query("SELECT count, secret_id, env_id FROM vault_events WHERE key_id = ? AND event = 'key.volume'").all(key.id)).toEqual([{ count: 501, secret_id: null, env_id: null }]);
     expect(db.query("SELECT COUNT(*) AS count FROM access_notices WHERE key_id = ? AND kind = 'key_vault_limited'").get(key.id)).toEqual({ count: 0 });
+    // The key's Recent activity lists the alert once (the access log's line, not the vault row too),
+    // and says how many values the key read today.
+    const detail = await request(`/keys/${key.id}`, {}, owner);
+    expect(detail.status).toBe(200);
+    const body = await detail.json() as { events: Array<{ action: string }>; vaultEvents: Array<{ event: string }>; valueReadsToday: number };
+    expect(body.events.filter((event) => event.action === "key.vault.volume")).toHaveLength(1);
+    expect(body.vaultEvents.some((event) => event.event === "key.volume" || event.event === "key.limited")).toBe(false);
+    expect(body.valueReadsToday).toBe(510);
     // 510 requests: over 5 s under load (the Docker verify stage).
   }, 60_000);
 });

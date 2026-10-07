@@ -7,6 +7,7 @@ import {
   revokeOwnKey, rotateApiKey, rotateKeySchema, validateGrants, type GrantInput
 } from "./apiKeys";
 import { keyEvents } from "./access/events";
+import { keyValueReadsToday } from "./vault/limits";
 import { recordKeyGrantEvents, validateVaultGrants, vaultKeyEvents, type VaultGrantInput } from "./vault/keys";
 import { vaultStatus } from "./vault/status";
 import { grantsForScopes } from "./keyGrants";
@@ -151,7 +152,7 @@ export function registerKeyRoutes(app: Hono<AppEnv>) {
   app.get("/api/keys/:id", (c) => {
     const id = keyId(c);
     const key = id ? ownApiKey(c.get("user").id, id) : null;
-    return key ? c.json({ key, events: keyEvents(key.id), ...(key.kind === "vault" ? { vaultEvents: vaultKeyEvents(c.get("user").id, key.id) } : {}) }) : notFound(c);
+    return key ? c.json({ key, events: keyEvents(key.id), ...(key.kind === "vault" ? { vaultEvents: vaultKeyEvents(c.get("user").id, key.id), valueReadsToday: keyValueReadsToday(key.id) } : {}) }) : notFound(c);
   });
 
   app.post("/api/keys", async (c) => {

@@ -46,13 +46,6 @@ Nothing. Waiting for the operator's next pick.
   - the chat 503 lacks `Retry-After`
   - provider-reported usage is charged in full when a reply is cut
   - an `?after` overflow sends a terminal snapshot without a separate `done`
-- [ ] **Vault:**
-  - `Retry-After` underestimates the sliding window (limits.ts)
-  - group grants are unnamed in Activity
-  - the key volume alert shows twice in a key's Recent activity, and its count isn't shown in the UI
-- [ ] **Whiteboards:**
-  - search rows indexed from older notes keep an embedded board's name until the note changes
-  - the dark-theme colour shift of pictures is accepted (Excalidraw filter)
 
 ## Standing rules for agent briefs
 

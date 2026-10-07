@@ -36,7 +36,8 @@ export type KeyEvent = { id: string; action: string; via: string; createdAt: str
 /** Wave 27: a vault key's own vault events (what it did, where), for its Recent activity. */
 export type VaultKeyEvent = { id: string; event: string; via: string; count: number | null; createdAt: string; vault: { id: string; name: string } | null; environment: { id: string; name: string } | null };
 export const keyEvents = (id: string) => api<{ events: KeyEvent[]; vaultEvents?: VaultKeyEvent[] }>(`/keys/${id}`).then((result) => result.events);
-export const keyDetailEvents = (id: string) => api<{ events: KeyEvent[]; vaultEvents?: VaultKeyEvent[] }>(`/keys/${id}`);
+/** A vault key's detail adds its vault events and its value reads so far today (UTC). */
+export const keyDetailEvents = (id: string) => api<{ events: KeyEvent[]; vaultEvents?: VaultKeyEvent[]; valueReadsToday?: number }>(`/keys/${id}`);
 
 export type VaultKeyFields = { kind?: "general" | "vault"; allowMcpValueReads?: boolean; protectedAccess?: boolean };
 
