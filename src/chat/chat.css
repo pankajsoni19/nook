@@ -392,3 +392,32 @@
 .public-chat-tools li > span { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 0 5px; min-width: 0; }
 .public-chat-tools li > span svg { flex: none; margin-right: 0; }
 .public-chat-tools li > span code { overflow-wrap: anywhere; }
+
+/* Chat layout fix (after v0.30.0).
+   1. A new chat with no messages had nothing that grew, so the composer sat right under the agent's
+      empty state, part way down the pane. The thread now fills the pane (on phones too, where the page
+      is the scroller), the empty state takes the free space with its content centred, and the composer
+      ends the pane. Short threads keep their rows at their own height (no stretched bubbles).
+   2. On a computer the pane stopped at the layout's right padding, so the header and composer bands
+      (and the pane's scrollbar) ended 40 px short of the window's edge, and both panes' -6 px margins
+      let the chat pane overlap the list's border. The pane now runs from the list's border to the
+      window's edge and keeps the same gutters as padding; the header and composer bands span it all. */
+.chat-app .chat-thread > .chat-empty { flex: 1 0 auto; align-content: center; }
+.chat-app .chat-messages { align-content: start; }
+@media (min-width: 761px) {
+  .chat-app .chat-layout { padding-right: 0; }
+  .chat-app .chat-layout > .chat-list-pane { margin-right: 0; padding-right: 12px; }
+  .chat-app .chat-layout > .chat-pane { --chat-gutter-start: 24px; --chat-gutter-end: clamp(16px, 4vw, 40px); margin-left: 0; margin-right: 0; padding-left: var(--chat-gutter-start); padding-right: var(--chat-gutter-end); }
+  /* The composer ends the pane: no pane padding under it (the read-only view keeps the messages' own). */
+  .chat-app .chat-layout > .chat-pane:has(> .chat-thread > .chat-composer) { padding-bottom: 0; }
+  .chat-app .chat-pane .chat-composer { padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
+  .chat-app .chat-pane .chat-thread-header, .chat-app .chat-pane .chat-composer { margin-left: calc(-1 * var(--chat-gutter-start)); margin-right: calc(-1 * var(--chat-gutter-end)); padding-left: var(--chat-gutter-start); padding-right: var(--chat-gutter-end); }
+}
+@media (max-width: 760px) {
+  /* The page (100dvh) is the scroller: the open chat fills what the page header leaves. */
+  .chat-app.chat-detail-open { display: flex; flex-direction: column; }
+  .chat-app.chat-detail-open > * { flex: none; }
+  .chat-app.chat-detail-open > .chat-layout { flex: 1 0 auto; display: flex; flex-direction: column; min-width: 0; }
+  .chat-app.chat-detail-open .chat-pane { flex: 1 0 auto; }
+  .chat-app .chat-pane .chat-thread-header, .chat-app .chat-pane .chat-composer { margin-left: -16px; margin-right: -16px; padding-left: 16px; padding-right: 16px; }
+}
