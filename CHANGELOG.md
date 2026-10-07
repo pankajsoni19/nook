@@ -2,6 +2,17 @@
 
 Release notes for Nook, newest first. Upgrade steps for each release are in [docs/OPERATIONS.md](docs/OPERATIONS.md#upgrades).
 
+## v0.31.0 — 2026-10-07
+
+- **Formatted agent replies**: headings, bullet and numbered lists (they show again), task lists, tables with a header row that scroll inside the bubble on phones, block quotes, code with Copy, strikethrough, footnotes, and links, in chats, shared chats, public links, and the Audit log. Your own messages stay plain text.
+- **Images in replies**: pictures from your Nook files and images embedded in the reply show in the bubble; tap one to view it larger. An outside picture shows as a card with its site and **Load image**: Nook fetches it for you only from a public https address, checks that it is a real image (PNG, JPEG, GIF, or WebP, up to 5 MiB, never SVG), and loading it sends its address to that site. Public chat links never load outside pictures.
+- **Pictures from tools**: images an MCP tool returns now show in the tool's details instead of being dropped; each is stored once and counts toward the chat owner's storage.
+- **Pick a provider per agent**: the agent editor has a **Provider** choice (Default, or any provider an admin added) and model suggestions from that provider; the agent list shows the provider and the model in use.
+- **New sign-in alerts**: an email and a bell notice when your account signs in from a browser it hasn't seen before, with the time, the browser, and how you signed in. **Settings → Security → Recognised devices** lists your browsers and lets you forget them. Nook stores a hashed browser cookie and a browser/OS label, never your IP address. Existing accounts quietly record their first browser after the upgrade.
+- **Welcome email** for new accounts, once, about a minute after their first sign-in, using your `APP_NAME`.
+- **Fixes**: in a new chat the message box sits at the bottom and the chat header spans the full width; vault rate limits report an exact `Retry-After`, group grants are named in vault Activity, and the daily volume alert shows once.
+- Migrations 043 and 044 run on the first boot, so back up first. No new settings. See [docs/OPERATIONS.md](docs/OPERATIONS.md#upgrades).
+
 ## v0.30.0 — 2026-10-07
 
 - **Knowledge bases**: in **Settings → Knowledge**, gather published notes, text, Markdown, or CSV files from Files, and pasted text into a base. Nook indexes them in the background and keeps them current when a note is republished. **Try it** shows the best passages with where they came from (for example "Billing › Refunds").
