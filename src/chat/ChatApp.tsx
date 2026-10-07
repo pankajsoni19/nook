@@ -15,7 +15,7 @@ import { useConfirm } from "../ui/useConfirm";
 import { useHistoryDialogGuard } from "../ui/useHistoryDialogGuard";
 import { dropSharedChat, forkFailureText, syncSharedChat } from "./sharedChatState";
 import { AGENT_BOUNDS, type AgentSummary, type ChatDetail, type ChatMessage, type ChatSummary, type DailyUsage, type PendingConfirmation, type PublicLinkState, type RunStatus, type TokenUsage, type ToolCallView } from "../../shared/agents";
-import { agentsStatus, cancelRun, confirmRun, createChat, deleteChat, errorCode, followChatUpdates, followRun, forkChat, getChat, listAgents, listChats, listSharedChats, messageOf, myUsage, regenerate, sendMessage, updateChat, type AgentsStatus, type SequencedRunEvent, type StartedRun } from "./chatApi";
+import { agentsStatus, cancelRun, confirmRun, LIVE_RUN_STATUSES, createChat, deleteChat, errorCode, followChatUpdates, followRun, forkChat, getChat, listAgents, listChats, listSharedChats, messageOf, myUsage, regenerate, sendMessage, updateChat, type AgentsStatus, type SequencedRunEvent, type StartedRun } from "./chatApi";
 import { PublicLinkSheet } from "./PublicLinkSheet";
 import { leafForSibling, shownBranch, type Shown } from "./chatTree";
 import { LinkNookKeySheet } from "./LinkNookKeySheet";
@@ -204,7 +204,8 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
       } else if (event.type === "snapshot") {
         next.text = event.data.content;
         next.usage = event.data.usage;
-        next.status = event.data.status;
+        // A snapshot of a run still going (a resume past the ring) is followed by its live events and `done`.
+        next.status = LIVE_RUN_STATUSES.has(event.data.status) ? null : event.data.status;
         next.toolCalls = event.data.toolCalls;
         next.pending = event.data.pendingConfirmation;
         next.error = event.data.errorCode ? { code: event.data.errorCode, message: ERROR_TEXT[event.data.errorCode] ?? "The run did not finish" } : null;

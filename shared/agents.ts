@@ -177,7 +177,8 @@ export type PendingConfirmation = { confirmationId: string; argsHash: string; ca
 
 /**
  * Stream events (plan §2.3), each with its `seq` as the SSE id. `snapshot` replaces a replay the
- * ring no longer holds (or an ended run): the client reloads the chat from it.
+ * ring no longer holds (or an ended run): the client reloads the chat from it. Every stream ends with
+ * `done`, after a snapshot too (the live events come between when the run is still going).
  */
 export type RunEvent =
   | { type: "run"; data: { runId: string; chatId: string; messageId: string; userMessageId: string | null } }

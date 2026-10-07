@@ -260,14 +260,39 @@ describe("the loop against the fake provider (§2.1–§2.4)", () => {
     expect(RING_SIZE).toBe(2000);
     (channel as unknown as { ring: unknown[] }).ring.splice(0, 2);
     const late = await readEvents(member, started.runId, { after: 1 });
-    expect(late.events).toHaveLength(1);
+    // The snapshot, then a proper `done`, as every stream ends (TODO "`?after` overflow").
+    expect(late.events).toHaveLength(2);
     expect(late.events[0]).toMatchObject({ type: "snapshot", data: { status: "ok", messageId: started.assistantMessage.id, content: "Snapshot me.", messageStatus: "complete" } });
+    expect(late.events[1]).toMatchObject({ type: "done", seq: channel.lastSeq, data: { status: "ok", messageId: started.assistantMessage.id } });
     // A run whose channel expired gives the same snapshot.
     const { started: second } = await sendAndWait(member, chat.id, "echo:Later.");
     channelOf(second.runId)!.dispose();
     (await import("../server/agents/stream")).resetChannelsForTests();
     const gone = await readEvents(member, second.runId, { after: 0 });
     expect(gone.events[0]).toMatchObject({ type: "snapshot", data: { content: "Later.", status: "ok" } });
+    expect(gone.events.slice(1)).toEqual([{ type: "done", seq: 0, data: { status: "ok", messageId: second.assistantMessage.id } }]);
+  });
+
+  test("a resume past the ring of a live run: the snapshot (still running), then the live events, then `done`", async () => {
+    const agent = await newAgent(member);
+    const chat = await newChat(member, agent.id);
+    const started = (await send(member, chat.id, "slow:80:alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu")).body as { runId: string; assistantMessage: { id: string } };
+    await readEvents(member, started.runId, { until: (events) => events.filter((event) => event.type === "delta").length >= 2 });
+    const channel = channelOf(started.runId)!;
+    expect(channel.closed).toBe(false);
+    (channel as unknown as { ring: unknown[] }).ring.splice(0, 2);
+    const resumed = await readEvents(member, started.runId, { after: 1, until: (events) => events.some((event) => event.type === "done") });
+    const types = resumed.events.map((event) => event.type);
+    expect(types[0]).toBe("snapshot");
+    expect(resumed.events[0]!.data.status).toBe("running");
+    expect(types.filter((type) => type === "snapshot")).toHaveLength(1);
+    expect(types.at(-1)).toBe("done");
+    expect(types.filter((type) => type === "done")).toHaveLength(1);
+    // Live events after the snapshot arrive in order with no repeats.
+    const seqs = resumed.events.slice(1).map((event) => event.seq);
+    expect(seqs).toEqual([...seqs].sort((a, b) => a - b));
+    expect(new Set(seqs).size).toBe(seqs.length);
+    expect(resumed.events.at(-1)!.data).toMatchObject({ status: "ok", messageId: started.assistantMessage.id });
   });
 
   test("provider 5xx, 401, a stall, and an oversized stream end the run as errors with a message and no key in it", async () => {

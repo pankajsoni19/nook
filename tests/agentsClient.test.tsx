@@ -6,7 +6,7 @@ import { formatRoute, locationUrl, NEW_AGENT, parseRoute, type Route } from "../
 import { chatBackAction, chatGroup, chatRoute } from "../src/chatRoute";
 import { childrenOf, leafForSibling, pathTo, shownBranch } from "../src/chat/chatTree";
 import { classifyLink, hostOf, Markdown, splitStreaming, type RenderContext } from "../src/chat/markdown/render";
-import { parseFrame } from "../src/chat/chatApi";
+import { endsStream, parseFrame, type SequencedRunEvent } from "../src/chat/chatApi";
 import { hubEntries, isNestedHubRoute } from "../src/settings/hubModel";
 import { MODULES, MODULE_IDS, unavailableModules } from "../src/modules";
 import { MODULE_IDS as SERVER_MODULE_IDS } from "../server/moduleIds";
@@ -69,6 +69,16 @@ describe("routes (§13.1)", () => {
     expect(chatGroup(new Date(2026, 9, 1, 9).toISOString(), false, now)).toBe("Previous 7 days");
     expect(chatGroup(new Date(2026, 7, 1, 9).toISOString(), false, now)).toBe(new Date(2026, 7, 1).toLocaleDateString(undefined, { month: "long" }));
     expect(chatGroup("not a date", false, now)).toBe("Older");
+  });
+});
+
+describe("the run stream's end (TODO `?after` overflow)", () => {
+  test("`done` ends it; a snapshot ends it only when the run has ended (a live one is followed by its events and `done`)", () => {
+    const snapshot = (status: string) => ({ seq: 0, type: "snapshot", data: { status, messageId: "m", content: "", messageStatus: "streaming", usage: null, errorCode: null, toolCalls: [], pendingConfirmation: null } }) as unknown as SequencedRunEvent;
+    expect(endsStream({ seq: 9, type: "done", data: { status: "ok", messageId: "m" } })).toBe(true);
+    expect(endsStream({ seq: 3, type: "delta", data: { messageId: "m", text: "x" } })).toBe(false);
+    for (const status of ["running", "queued", "awaiting_confirmation"]) expect({ status, ends: endsStream(snapshot(status)) }).toEqual({ status, ends: false });
+    for (const status of ["ok", "error", "cancelled", "interrupted", "timeout", "step_limit", "budget"]) expect({ status, ends: endsStream(snapshot(status)) }).toEqual({ status, ends: true });
   });
 });
 
