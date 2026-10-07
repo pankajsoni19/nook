@@ -1,5 +1,5 @@
 import { audit, db, now } from "../db";
-import { AGENT_BOUNDS, DEFAULT_BASE_URL, DEFAULT_COMPAT, DEFAULT_MODEL, type ProviderCompat, type ProviderSummary } from "../../shared/agents";
+import { AGENT_BOUNDS, DEFAULT_BASE_URL, DEFAULT_COMPAT, DEFAULT_MODEL, type AgentProviderChoice, type ProviderCompat, type ProviderSummary } from "../../shared/agents";
 import { checkSavedEndpoint, EgressError } from "./egress";
 import { completeStreaming, listModels, ProviderError, type ProviderConnection } from "./loop";
 import { openSecret, sealSecret, secretHint, shownHint } from "./secrets";
@@ -158,6 +158,32 @@ export function connectionFor(providerId: string | null, model: string | null): 
 
 const modelCache = new Map<string, { at: number; models: string[] }>();
 const MODEL_CACHE_MS = 10 * 60_000;
+
+/** Model ids that are not chat models (an embedding model in the same list), left out of the editor's suggestions. */
+const NOT_CHAT = /embed/i;
+
+/**
+ * The agent editor's provider list (`GET /api/agents/providers`): names, the default, and the models
+ * an admin's Test or model list last saw (kept in memory, so none after a restart). Never a base URL,
+ * a key, or a hint: anyone who may create agents calls it.
+ */
+export function providerChoices(): AgentProviderChoice[] {
+  const fallback = defaultProvider()?.id ?? null;
+  return (db.query("SELECT id, name, default_model FROM agent_providers ORDER BY is_default DESC, name COLLATE NOCASE, created_at").all() as Array<{ id: string; name: string; default_model: string }>).map((row) => {
+    const cached = modelCache.get(row.id)?.models.filter((model) => !NOT_CHAT.test(model)) ?? null;
+    return { id: row.id, name: row.name, isDefault: row.id === fallback, defaultModel: row.default_model, models: cached && cached.length ? cached.slice(0, 200) : null };
+  });
+}
+
+const providerNameQuery = db.query("SELECT name, default_model FROM agent_providers WHERE id = ?");
+/** The name of an agent's own provider, or null (none set, or it was deleted). */
+export const providerNameOf = (id: string | null) => id ? (providerNameQuery.get(id) as { name: string } | null)?.name ?? null : null;
+/** The model a run of an agent uses now (as `connectionFor` picks it), for display; null with no provider. */
+export function effectiveModelOf(providerId: string | null, model: string | null): string | null {
+  if (model?.trim()) return model.trim();
+  const own = providerId ? providerNameQuery.get(providerId) as { default_model: string } | null : null;
+  return own?.default_model ?? defaultProvider()?.default_model ?? null;
+}
 
 /** `GET /models` of a provider, cached for ten minutes (plan §4.1). */
 export async function providerModels(id: string, options: { fresh?: boolean } = {}): Promise<{ models: string[]; cachedAt: string }> {

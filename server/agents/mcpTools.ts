@@ -68,7 +68,7 @@ export const agentTools: McpToolSpec[] = [
   defineTool({
     name: "list_agents",
     title: "List agents",
-    description: `List the agents the key's owner can chat with: id, name, description, model override, and max steps. A key that may only run agents lists the agents its grant covers. The system prompt is never returned. ${UNTRUSTED}`,
+    description: `List the agents the key's owner can chat with: id, name, description, model override, provider name (null: the default provider), and max steps. A key that may only run agents lists the agents its grant covers. The system prompt is never returned. ${UNTRUSTED}`,
     // AC-C: a run-only key lists what it may run (its grant may name chosen agents).
     scopes: ["agents:read", "agents:run"],
     // QA LOW-6: hidden from a key whose grants name only knowledge bases (it would list nothing).
@@ -80,7 +80,7 @@ export const agentTools: McpToolSpec[] = [
       // Review: every agent only when agents:read reaches everything (a grant over chosen knowledge
       // bases reads no agents), whatever the key's scopes say; otherwise the agents it may run.
       const reach = keyReach(key, "agents:read") === "all" ? "all" as const : keyReach(key, "agents:run");
-      return { agents: listUsableAgents(key.userId).filter((agent) => reachCovers(reach, [{ kind: "agent", id: agent.id }])).map((agent) => ({ id: agent.id, name: agent.name, description: agent.description, model: agent.model, maxSteps: agent.maxSteps, updatedAt: agent.updatedAt })) };
+      return { agents: listUsableAgents(key.userId).filter((agent) => reachCovers(reach, [{ kind: "agent", id: agent.id }])).map((agent) => ({ id: agent.id, name: agent.name, description: agent.description, model: agent.model, providerName: agent.providerName, maxSteps: agent.maxSteps, updatedAt: agent.updatedAt })) };
     }
   }),
   defineTool({

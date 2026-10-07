@@ -1,5 +1,5 @@
 import { api, ApiError, getCsrfToken, noteRequestOutcome } from "../api";
-import type { AgentApiUsage, AuditFacets, AuditRunDetail, AuditRunSummary, AgentDetail, AgentSettings, AgentSummary, AgentToolRef, ChatDetail, ChatMessage, ChatUpdateEvent, ChatSummary, DailyUsage, DeclaredStdioServer, LinkableKey, NookLink, ProviderCompat, ProviderSummary, PublicLinkState, RunEvent, ServerAuthKind, ServerAvailability, ToolCatalog, ToolPolicy, ToolServerSummary } from "../../shared/agents";
+import type { AgentApiUsage, AgentProviderChoice, AuditFacets, AuditRunDetail, AuditRunSummary, AgentDetail, AgentSettings, AgentSummary, AgentToolRef, ChatDetail, ChatMessage, ChatUpdateEvent, ChatSummary, DailyUsage, DeclaredStdioServer, LinkableKey, NookLink, ProviderCompat, ProviderSummary, PublicLinkState, RunEvent, ServerAuthKind, ServerAvailability, ToolCatalog, ToolPolicy, ToolServerSummary } from "../../shared/agents";
 
 /** The agent chat API (docs/plan/API_CONTRACTS.md § Agent chat), plus the SSE reader for runs. */
 
@@ -50,6 +50,8 @@ export const cancelRun = (runId: string) => api<{ status: string }>(`/runs/${run
 // AC-B: confirmations, the tool catalog, and the Link Nook key sheet.
 /** Answers the card it was shown (review M1): the server's nonce and the arguments' hash, never the model's call id. */
 export const confirmRun = (runId: string, card: { confirmationId: string; argsHash: string }, decision: "once" | "deny") => api<{ ok: true; decision: "allowed" | "denied" }>(`/runs/${runId}/confirm`, { method: "POST", body: JSON.stringify({ confirmationId: card.confirmationId, argsHash: card.argsHash, decision }) });
+/** The agent editor's provider picker: names, the default, and known models (never addresses or keys). */
+export const agentProviders = () => api<{ providers: AgentProviderChoice[] }>("/agents/providers");
 export const toolCatalog = (agentId?: string | null) => api<{ catalog: ToolCatalog }>(`/agents/catalog${agentId ? `?agentId=${encodeURIComponent(agentId)}` : ""}`);
 export const agentLink = (agentId: string) => api<{ link: NookLink; keys: LinkableKey[] }>(`/agents/${agentId}/link`);
 export const setAgentLink = (agentId: string, nookKeyId: string | null) => api<{ link: NookLink }>(`/agents/${agentId}/link`, { method: "PUT", body: JSON.stringify({ nookKeyId }) });
