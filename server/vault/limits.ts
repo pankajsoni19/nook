@@ -7,7 +7,8 @@ import { VaultError, type VaultActor } from "./access";
  * re-authentication attempts 10 per 10 minutes per session (Wave 26). Counters live in SQLite (`vault_rate_limits`), so a restart
  * does not reset them. Each bucket is a sliding window estimated from the current and previous fixed
  * windows (the previous one weighted by how much of it still overlaps). A refused request costs
- * nothing and gets 429 `RATE_LIMITED` with `retryAfterSeconds`.
+ * nothing and gets 429 `RATE_LIMITED` with `retryAfterSeconds`: the time until the request would fit
+ * (`slidingWaitMs`), not just until the current window ends.
  *
  * Wave 27 adds per-key buckets for `nkv_` keys (T183, T191, T192), lower than a person's: reads 20 a
  * minute and 1,000 an hour, writes 10 a minute and 200 a day, and value reads over MCP 60 an hour
@@ -56,6 +57,26 @@ export class KeyLimitError extends VaultError {
 type Charge = { kind: VaultLimit; subject: string; cost: number };
 
 /**
+ * How long until `need` more fits in a sliding-window bucket: the first moment the estimate
+ * (`previous` weighted by its overlap, plus `count`) leaves room for it. Waiting only for the current
+ * window to end was too short: the current count then becomes the previous window, still counted
+ * almost in full, so a client that retried on time was refused again. When the current count alone
+ * leaves no room, the wait runs into the next window until enough of this one has slid out. A `need`
+ * larger than the limit never fits; it gets the longest wait (until both windows have slid out).
+ */
+export function slidingWaitMs(bucket: { limit: number; windowMs: number; windowStart: number; count: number; previous: number; need: number }, nowMs: number) {
+  const { limit, windowMs, windowStart, count, previous, need } = bucket;
+  const room = limit - need;
+  let fitsAt: number;
+  if (room < 0) fitsAt = windowStart + 2 * windowMs;
+  // previous × (1 − f) + count ≤ room, with f the share of the current window gone.
+  else if (count <= room) fitsAt = previous > 0 ? windowStart + (1 - (room - count) / previous) * windowMs : nowMs;
+  // In the next window this window's count is the previous one: count × (1 − f) ≤ room.
+  else fitsAt = windowStart + windowMs + (1 - room / count) * windowMs;
+  return Math.max(0, fitsAt - nowMs);
+}
+
+/**
  * Checks every charge first and applies them only when all fit, in one transaction, so a refused
  * request costs nothing in any bucket. Returns the first bucket that refused (with the wait) or null.
  */
@@ -78,8 +99,8 @@ function chargeAll(charges: readonly Charge[], nowMs: number): { kind: VaultLimi
       const overlap = 1 - (nowMs - windowStart) / windowMs;
       const estimate = previous * overlap + count;
       if (estimate + Math.max(cost, 1) > limit) {
-        // At worst the current window has to end before the estimate drops enough.
-        return { kind, retryAfterSeconds: Math.max(1, Math.ceil((windowStart + windowMs - nowMs) / 1000)) };
+        const waitMs = slidingWaitMs({ limit, windowMs, windowStart, count, previous, need: Math.max(cost, 1) }, nowMs);
+        return { kind, retryAfterSeconds: Math.max(1, Math.ceil(waitMs / 1000)) };
       }
       planned.push({ bucket, windowStart, count, previous, cost });
     }
@@ -134,6 +155,13 @@ export function countKeyValueReads(keyId: string, count = 1, nowMs = Date.now())
       ON CONFLICT(bucket) DO UPDATE SET window_start = excluded.window_start, count = excluded.count, previous_count = 0`).run(bucket, windowStart, total);
     return { total, crossed: before <= limit && total > limit };
   })();
+}
+
+/** A vault key's value reads so far in the current UTC day (its `keyReadDayAlert` bucket). */
+export function keyValueReadsToday(keyId: string, nowMs = Date.now()) {
+  const windowStart = Math.floor(nowMs / VAULT_LIMITS.keyReadDayAlert.windowMs) * VAULT_LIMITS.keyReadDayAlert.windowMs;
+  const row = db.query("SELECT window_start, count FROM vault_rate_limits WHERE bucket = ?").get(`keyReadDayAlert:${keyId}`) as { window_start: number; count: number } | null;
+  return row && row.window_start === windowStart ? row.count : 0;
 }
 
 /** Test hook. */
