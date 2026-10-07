@@ -105,34 +105,7 @@
 .chat-budget-high { color: #f3ce79; }
 .chat-budget-full { color: #fda4af; font-weight: 700; }
 
-/* Markdown (D370): scroll inside blocks, never the page. */
-.chat-md > :first-child { margin-top: 0; }
-.chat-md > :last-child { margin-bottom: 0; }
-.chat-md p, .chat-md ul, .chat-md ol, .chat-md blockquote { margin: 0 0 10px; }
-.chat-md ul, .chat-md ol { padding-left: 22px; }
-.chat-md li { margin: 3px 0; }
-.chat-md li > p { margin: 0 0 4px; }
-.chat-md-line { display: inline; }
-.chat-md-task { list-style: none; margin-left: -20px; display: flex; gap: 8px; align-items: flex-start; }
-.chat-md-task input { margin-top: 5px; }
-.chat-md-heading { margin: 14px 0 6px; color: #fafafa; font-size: 1rem; }
-.chat-md h2.chat-md-heading { font-size: 1.1rem; }
-.chat-md blockquote { border-left: 3px solid #4b3f22; padding: 2px 12px; color: #c9c9ce; }
-.chat-md hr { border: 0; border-top: 1px solid #2c2c31; margin: 12px 0; }
-.chat-md-code { border-radius: 5px; padding: 1px 5px; background: #0b0b0d; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .86em; }
-.chat-md-pre { min-width: 0; max-width: 100%; margin: 10px 0; border: 1px solid #2c2c31; border-radius: 10px; overflow: hidden; background: #0b0b0d; }
-.chat-md-pre-bar { display: flex; align-items: center; justify-content: space-between; padding: 4px 6px 4px 12px; border-bottom: 1px solid #2c2c31; color: #8d8d94; font-size: .74rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-.chat-md-copy { min-height: 30px; display: inline-flex; align-items: center; gap: 5px; border: 0; border-radius: 7px; padding: 0 8px; background: transparent; color: #9a9aa1; font-size: .76rem; cursor: pointer; }
-.chat-md-copy:hover { background: var(--panel-hover); color: #fafafa; }
-.chat-md-copy svg { width: 14px; }
-.chat-md-pre pre { margin: 0; padding: 12px; overflow-x: auto; font-size: .84rem; line-height: 1.5; overflow-wrap: normal; word-break: normal; }
-.chat-md-table { max-width: 100%; margin: 10px 0; overflow-x: auto; border: 1px solid #2c2c31; border-radius: 10px; }
-.chat-md-table table { border-collapse: collapse; min-width: 100%; font-size: .88rem; }
-.chat-md-table th, .chat-md-table td { padding: 7px 10px; border-bottom: 1px solid #2c2c31; text-align: left; white-space: nowrap; }
-.chat-md-table th { background: #141416; color: #fafafa; }
-.chat-md-link { color: #f3ce79; text-decoration: underline; text-underline-offset: 3px; }
-.chat-md-link-host { color: #9a9aa1; font-size: .8em; text-decoration: none; }
-.chat-md-image { display: inline-flex; align-items: center; gap: 4px; border: 1px dashed #4b3f22; border-radius: 8px; padding: 1px 8px; color: #c9c9ce; font-size: .84em; }
+/* Markdown inside bubbles (D370) lives in src/chat/markdown/markdown.css. */
 
 /* Dialogs and sheets */
 .chat-dialog .file-dialog-form { padding-bottom: 16px; }

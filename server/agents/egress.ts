@@ -147,8 +147,10 @@ export type EgressResponse = { status: number; headers: Headers; body: AsyncIter
  * the first-byte and total timeouts abort the request. `init.headers` must carry only what the
  * provider needs.
  */
-export async function egressFetch(value: string, init: { method: "GET" | "POST" | "DELETE"; headers?: Record<string, string>; body?: string; signal?: AbortSignal }, caps: EgressCaps): Promise<EgressResponse> {
-  const target = await resolveEgressTarget(value);
+export async function egressFetch(value: string, init: { method: "GET" | "POST" | "DELETE"; headers?: Record<string, string>; body?: string; signal?: AbortSignal }, caps: EgressCaps, options: { allowlist?: readonly string[] } = {}): Promise<EgressResponse> {
+  // `allowlist`: the private hosts this caller may reach; AGENT_ALLOWED_PRIVATE_HOSTS unless the caller
+  // says otherwise (the chat image proxy passes its own, empty outside tests: review M1).
+  const target = await resolveEgressTarget(value, options.allowlist ?? config.agents.allowedPrivateHosts);
   const { url } = target;
   const pinned = pinnedUrl(target);
   // Pinned (T307): the address the check saw, with the name in Host and in the TLS SNI, so the certificate

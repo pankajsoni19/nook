@@ -2,6 +2,8 @@ import { CallToolResultSchema, InitializeResultSchema, ListToolsResultSchema } f
 import { config } from "../config";
 import { AGENT_RUN_HEADER, currentAgentRun } from "./depth";
 import { EgressError, egressFetch, type EgressResponse } from "./egress";
+import { sniff, SNIFF_BYTES } from "../mimeSniff";
+import { TOOL_IMAGE_BOUNDS, type ToolImageRef } from "../../shared/agents";
 
 /**
  * The in-house MCP client (plan §3.1, D346; Wave 41 AC-B): Streamable HTTP, spec 2025-11-25, over
@@ -45,7 +47,26 @@ export type McpToolInfo = {
 };
 
 /** A tool's result as text only (D350): text parts joined; other parts become placeholders. */
-export type McpCallOutcome = { text: string; isError: boolean };
+/** A tool's image, checked by its bytes (PNG, JPEG, GIF, or WebP; never SVG) and within `TOOL_IMAGE_BOUNDS`. */
+export type McpImage = { mimeType: ToolImageRef["mimeType"]; bytes: Uint8Array };
+/** `images` only when the result carried at least one usable image (callers and tests compare the rest as before). */
+export type McpCallOutcome = { text: string; isError: boolean; images?: McpImage[] };
+
+const TOOL_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+
+/**
+ * An MCP image part as Nook keeps it, or null: base64 that decodes, at most `TOOL_IMAGE_BOUNDS.bytes`,
+ * and bytes that are PNG, JPEG, GIF, or WebP whatever `mimeType` claims (the sniffed type wins).
+ */
+export function toolImageOf(data: unknown): McpImage | null {
+  if (typeof data !== "string" || data.length === 0 || data.length > Math.ceil(TOOL_IMAGE_BOUNDS.bytes / 3) * 4 + 4096) return null;
+  const clean = data.replace(/\s+/g, "");
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(clean) || clean.length % 4 !== 0) return null;
+  const bytes = new Uint8Array(Buffer.from(clean, "base64"));
+  if (bytes.byteLength === 0 || bytes.byteLength > TOOL_IMAGE_BOUNDS.bytes) return null;
+  const sniffed = sniff(bytes.subarray(0, SNIFF_BYTES), "", bytes.byteLength).mimeType;
+  return TOOL_IMAGE_TYPES.has(sniffed) ? { mimeType: sniffed as McpImage["mimeType"], bytes } : null;
+}
 
 /** The transport under a session: HTTP here, stdio in server/agents/stdio.ts. */
 export interface McpTransport {
@@ -323,16 +344,25 @@ export class McpSession {
     const parsed = CallToolResultSchema.safeParse(result);
     if (!parsed.success) throw new McpClientError("MCP_PROTOCOL", "The tool server's result did not match the MCP schema");
     const parts: string[] = [];
+    const images: McpImage[] = [];
     for (const item of parsed.data.content ?? []) {
       if (item.type === "text") parts.push(item.text);
-      else if (item.type === "image") parts.push("[image omitted]");
+      else if (item.type === "image") {
+        // Shown to the person in the call's details; the model gets this line instead of the picture.
+        const image = images.length < TOOL_IMAGE_BOUNDS.perCall ? toolImageOf(item.data) : null;
+        if (image) {
+          images.push(image);
+          // Whether the person sees it is decided when it is stored (server/agents/runs.ts adds a line saying so).
+          parts.push(`[image: ${image.mimeType}, ${Math.max(1, Math.round(image.bytes.byteLength / 1024))} KiB]`);
+        } else parts.push("[image omitted]");
+      }
       else if (item.type === "audio") parts.push("[audio omitted]");
       else if (item.type === "resource_link") parts.push("[resource link omitted: Nook never fetches linked resources]");
       else if (item.type === "resource") parts.push("[embedded resource omitted]");
       else parts.push("[content omitted]");
     }
     if (parts.length === 0 && parsed.data.structuredContent !== undefined) parts.push(JSON.stringify(parsed.data.structuredContent));
-    return { text: parts.join("\n"), isError: parsed.data.isError === true };
+    return { text: parts.join("\n"), isError: parsed.data.isError === true, ...(images.length > 0 ? { images } : {}) };
   }
 
   async close() {

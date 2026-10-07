@@ -5,6 +5,7 @@ import { usableAgent, type AgentRow } from "./agentsService";
 import { shareLevel, shareReadableSql } from "./sharing";
 import { publishChatUpdate } from "./chatUpdates";
 import { AgentError } from "./status";
+import { copyToolImages } from "./images";
 
 /**
  * Chats and their message trees (plan §6.1, D360): a chat belongs to its owner and one agent; its
@@ -302,6 +303,8 @@ export function finishAssistantMessage(messageId: string, result: { status: Chat
  */
 export function forkChat(userId: string, chatId: string, messageId: string): ChatSummary {
   const source = readableChat(chatId, userId);
+  // Someone the chat is shared with sees the active branch only (review L5), so only it can be continued (security review L3).
+  if (source.owner_id !== userId && !pathTo(chatId, source.active_leaf_id).some((row) => row.id === messageId)) throw new AgentError(404, "NOT_FOUND", "Not found");
   if (source.agent_id === null) throw new AgentError(409, "AGENT_GONE", "This chat's agent was deleted; start a new chat with another agent");
   const agentRow = db.query("SELECT * FROM agents WHERE id = ? AND deleted_at IS NULL").get(source.agent_id) as AgentRow | null;
   if (!agentRow) throw new AgentError(409, "AGENT_GONE", agentGoneText(source.agent_id, userId, "This chat's agent is in the Bin; restore it to continue"));
@@ -324,14 +327,18 @@ export function forkChat(userId: string, chatId: string, messageId: string): Cha
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)`);
     const fts = db.query("INSERT INTO chat_fts (chat_id, owner_id, title, body) VALUES (?, ?, '', ?)");
     let parent: string | null = null;
+    const copies = new Map<string, string>();
     for (const row of path) {
       const copy = crypto.randomUUID();
+      copies.set(row.id, copy);
       const status = row.status === "streaming" || row.status === "awaiting_confirmation" ? "interrupted" : row.status;
       insert.run(copy, id, parent, row.role, row.content, row.tool_calls_json, status, row.error_code, row.model, row.usage_json, row.role === "user" ? userId : null, row.created_at, row.finished_at ?? timestamp);
       if (row.role === "user") fts.run(id, userId, row.content.slice(0, 4096));
       parent = copy;
     }
     db.query("UPDATE chats SET active_leaf_id = ? WHERE id = ?").run(parent, id);
+    // The copy's messages keep their tool-call lists, so they keep the pictures those calls returned (same ids).
+    copyToolImages(chatId, id, new Map([...copies].filter(([source]) => path.some((row) => row.id === source && row.role === "assistant"))));
     audit(userId, null, "agents.chat.fork", { chatId: id, messages: path.length, ...(source.owner_id !== userId ? { shared: true } : {}) });
     return summaryRows("c.id = $id", { id }, userId)[0]!;
   })();

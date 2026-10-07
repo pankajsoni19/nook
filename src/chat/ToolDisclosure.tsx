@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, ShieldAlert, Wrench } from "lucide-react";
 import { TRIFECTA_TEXT, type PendingConfirmation, type ToolCallView } from "../../shared/agents";
+import { ShownImage } from "./markdown/MarkdownImage";
 import "./chat.css";
 
 /**
@@ -48,16 +49,25 @@ export function callOutcome(call: ToolCallView): string {
 /** Wave 41 QA L7: a tool the model made up reads "Unknown tool <name>", never "?/<name>". AC-E: a knowledge search says so. */
 export const callLabel = (call: ToolCallView) => call.server === "knowledge" && call.tool === "search_knowledge" ? "Searched knowledge" : call.server ? `Called ${call.server}/${call.tool}` : `Unknown tool ${call.tool}`;
 
-export function ToolCallsDisclosure({ calls = [], running }: { calls?: ToolCallView[]; running: boolean }) {
+/** Where a tool image is served (access-checked with the reader's session), or null outside a chat (no images then). */
+export const toolImageUrl = (chatId: string, imageId: string) => `/api/chats/${encodeURIComponent(chatId)}/tool-images/${encodeURIComponent(imageId)}`;
+
+/**
+ * Tool images show inside the call's details, with the result they belong to: the model cannot
+ * point at them by URL, and they are tool output (untrusted) like the result text. The summary
+ * counts them so a reply with a picture is not missed.
+ */
+export function ToolCallsDisclosure({ calls = [], running, chatId }: { calls?: ToolCallView[]; running: boolean; chatId?: string }) {
   const [open, setOpen] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   if (calls.length === 0) return null;
   const summary = `${running && calls.some((call) => call.ok === null) ? "Using" : "Used"} ${calls.length} ${calls.length === 1 ? "tool" : "tools"}`;
   const total = calls.reduce((sum, call) => sum + (call.durationMs ?? 0), 0);
+  const imageCount = chatId ? calls.reduce((sum, call) => sum + (call.images?.length ?? 0), 0) : 0;
   return <div className="chat-tools">
     <button type="button" className="chat-tools-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
       {open ? <ChevronDown /> : <ChevronRight />}<Wrench />{summary}
-      <span className="chat-tools-names">({[...new Set(calls.map((call) => call.tool))].join(", ")}){total > 0 ? ` ${(total / 1000).toFixed(1)} s` : ""}</span>
+      <span className="chat-tools-names">({[...new Set(calls.map((call) => call.tool))].join(", ")}){total > 0 ? ` ${(total / 1000).toFixed(1)} s` : ""}{imageCount > 0 ? ` · ${imageCount} ${imageCount === 1 ? "image" : "images"}` : ""}</span>
     </button>
     {open && <ol className="chat-tool-list">
       {calls.map((call) => <li key={call.id} className={`chat-tool-row${call.ok === false ? " chat-tool-failed" : ""}`}>
@@ -69,6 +79,8 @@ export function ToolCallsDisclosure({ calls = [], running }: { calls?: ToolCallV
           <span className="ai-label">Arguments</span>
           <pre>{call.argsPreview || "{}"}</pre>
           {call.resultPreview !== null && <><span className="ai-label">Result excerpt (untrusted)</span><pre>{call.resultPreview}</pre></>}
+          {chatId && call.images && call.images.length > 0 && <><span className="ai-label">{call.images.length === 1 ? "Image" : "Images"} it returned (untrusted)</span>
+            <div className="chat-tool-images">{call.images.map((image, index) => <ShownImage key={image.id} src={toolImageUrl(chatId, image.id)} alt={`Image ${index + 1} from ${call.tool}`} />)}</div></>}
           {call.proposalId && <p className="chat-muted">Nothing was changed: the proposal waits in your Inbox.</p>}
         </div>}
       </li>)}

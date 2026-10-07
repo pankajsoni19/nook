@@ -1,0 +1,138 @@
+/*
+ * Agent Markdown inside chat bubbles, shared chats, the public chat page, and the Audit log output
+ * (src/chat/markdown/render.tsx, D370). Everything wide scrolls inside its own block (code, tables)
+ * or is fitted (images), so a reply never widens the page at 390 px. Nook has one (dark) theme; the
+ * colours are tokens here so a light theme only has to redefine them.
+ */
+.chat-md {
+  --md-text: #ececef;
+  --md-strong: #fafafa;
+  --md-muted: #a1a1a8;
+  --md-rule: #2c2c31;
+  --md-surface: #0b0b0d;
+  --md-surface-raised: #18181b;
+  --md-zebra: rgb(255 255 255 / 2.5%);
+  --md-accent: #f3ce79;
+  --md-quote: #5a4a22;
+  min-width: 0;
+  max-width: 100%;
+  color: var(--md-text);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+/* Rhythm: one gap between blocks, none at the edges of the bubble. */
+.chat-md > :first-child, .chat-md blockquote > :first-child, .chat-md li > :first-child { margin-top: 0; }
+.chat-md > :last-child, .chat-md blockquote > :last-child, .chat-md li > :last-child { margin-bottom: 0; }
+.chat-md p, .chat-md ul, .chat-md ol, .chat-md blockquote, .chat-md-pre, .chat-md-table, .chat-md hr { margin: 0 0 .8em; }
+
+/* Headings: a message's h1 is never a page title; each written level keeps its own size. */
+.chat-md-heading { margin: 1.15em 0 .45em; color: var(--md-strong); font-weight: 700; line-height: 1.3; letter-spacing: -.01em; }
+.chat-md-h1 { font-size: 1.32rem; padding-bottom: .3em; border-bottom: 1px solid var(--md-rule); }
+.chat-md-h2 { font-size: 1.16rem; padding-bottom: .25em; border-bottom: 1px solid var(--md-rule); }
+.chat-md-h3 { font-size: 1.05rem; }
+.chat-md-h4 { font-size: .98rem; }
+.chat-md-h5 { font-size: .9rem; }
+.chat-md-h6 { font-size: .84rem; color: var(--md-muted); text-transform: uppercase; letter-spacing: .04em; }
+.chat-md strong { color: var(--md-strong); font-weight: 700; }
+.chat-md del { color: var(--md-muted); }
+
+/* Lists: nested lists sit close; task lists drop the bullet for a read-only box. */
+/* Tailwind's preflight removes list markers; bubbles put them back. */
+.chat-md ul, .chat-md ol { padding-left: 1.5em; }
+.chat-md ul { list-style: disc; }
+.chat-md ol { list-style: decimal; }
+.chat-md ul ul { list-style-type: circle; }
+.chat-md ul ul ul { list-style-type: square; }
+.chat-md li { margin: .25em 0; }
+.chat-md li > ul, .chat-md li > ol { margin: .25em 0 .1em; }
+.chat-md li > p { margin: 0 0 .4em; }
+.chat-md li::marker { color: var(--md-muted); }
+.chat-md-line { display: inline; }
+.chat-md-tasks { padding-left: .25em; }
+.chat-md-task { list-style: none; display: flex; gap: 8px; align-items: flex-start; }
+.chat-md-task input { flex: none; width: 15px; height: 15px; margin: .3em 0 0; accent-color: var(--md-accent); }
+.chat-md-task-body { min-width: 0; flex: 1; }
+
+/* Quotes, nested too. */
+.chat-md blockquote { padding: .15em 0 .15em 1em; border-left: 3px solid var(--md-quote); color: #c9c9ce; }
+.chat-md blockquote blockquote { margin-top: .4em; border-left-color: #3d3a33; }
+.chat-md hr { height: 0; border: 0; border-top: 1px solid var(--md-rule); margin: 1.1em 0; }
+
+/* Inline code and code blocks: the block scrolls sideways, the Copy bar stays. */
+.chat-md-code { border: 1px solid var(--md-rule); border-radius: 5px; padding: .05em .35em; background: var(--md-surface); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .86em; overflow-wrap: anywhere; }
+.chat-md-pre { min-width: 0; max-width: 100%; border: 1px solid var(--md-rule); border-radius: 10px; overflow: hidden; background: var(--md-surface); }
+.chat-md-pre-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 3px 6px 3px 12px; border-bottom: 1px solid var(--md-rule); background: #111113; color: #8d8d94; font-size: .74rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.chat-md-copy { min-height: 30px; display: inline-flex; align-items: center; gap: 5px; border: 0; border-radius: 7px; padding: 0 8px; background: transparent; color: #9a9aa1; font-size: .76rem; cursor: pointer; }
+.chat-md-copy:hover { background: var(--panel-hover); color: var(--md-strong); }
+.chat-md-copy svg { width: 14px; }
+.chat-md-pre pre { margin: 0; padding: 12px 14px; overflow-x: auto; font-size: .84rem; line-height: 1.55; tab-size: 4; overflow-wrap: normal; word-break: normal; white-space: pre; }
+.chat-md-pre pre:focus-visible, .chat-md-table:focus-visible { outline: 2px solid var(--yellow); outline-offset: -2px; }
+
+/* Tables: a header row, column lines, faint zebra rows; the wrapper scrolls, the page never does. */
+.chat-md-table { max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; border: 1px solid var(--md-rule); border-radius: 10px; }
+.chat-md-table table { width: max-content; min-width: 100%; border-collapse: collapse; font-size: .87rem; line-height: 1.45; }
+.chat-md-table th, .chat-md-table td { min-width: 4.5em; max-width: 28em; padding: 7px 12px; border-bottom: 1px solid var(--md-rule); text-align: left; vertical-align: top; overflow-wrap: break-word; word-break: normal; }
+.chat-md-table th + th, .chat-md-table td + td { border-left: 1px solid var(--md-rule); }
+.chat-md-table th { background: var(--md-surface-raised); color: var(--md-strong); font-weight: 650; white-space: nowrap; }
+.chat-md-table tbody tr:nth-child(even) { background: var(--md-zebra); }
+.chat-md-table tbody tr:last-child td { border-bottom: 0; }
+
+/* Links: an outside link names its host after the text. */
+.chat-md-link { color: var(--md-accent); text-decoration: underline; text-decoration-thickness: from-font; text-underline-offset: 3px; }
+.chat-md-link-host { color: #9a9aa1; font-size: .8em; text-decoration: none; }
+
+/* Footnotes: a small number in the text, the notes with a way back. */
+.chat-md-fnref { font-size: .72em; line-height: 0; }
+.chat-md-fnref a, .chat-md-footnote-back { color: var(--md-accent); text-decoration: none; padding: 0 .15em; }
+.chat-md-footnote { display: flex; gap: .5em; margin: 0 0 .3em; color: var(--md-muted); font-size: .84rem; line-height: 1.5; }
+:not(.chat-md-footnote) + .chat-md-footnote { margin-top: 1.1em; padding-top: .7em; border-top: 1px solid var(--md-rule); }
+.chat-md-footnote-number { flex: none; min-width: 1.4em; color: var(--md-text); }
+.chat-md-footnote-text { min-width: 0; }
+
+/* Images: fitted to the bubble, aspect kept; a tap opens the viewer. */
+.chat-md-figure { display: block; max-width: 100%; margin: .4em 0; }
+.chat-md-img-button { display: inline-block; max-width: 100%; padding: 0; border: 1px solid var(--md-rule); border-radius: 10px; overflow: hidden; background: var(--md-surface); cursor: zoom-in; line-height: 0; }
+.chat-md-img-button:focus-visible { outline: 2px solid var(--yellow); outline-offset: 2px; }
+.chat-md-img-button img { display: block; max-width: 100%; max-height: min(420px, 60dvh); width: auto; height: auto; object-fit: contain; }
+.chat-md-linked-image { display: inline; }
+.chat-md-linked-image .chat-md-figure { margin-bottom: .1em; }
+.chat-md-image { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; border: 1px dashed #4b3f22; border-radius: 8px; padding: 1px 8px; color: #c9c9ce; font-size: .84em; vertical-align: baseline; }
+.chat-md-image-broken { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; max-width: 100%; margin: .3em 0; padding: 10px 12px; border: 1px dashed #4a3036; border-radius: 10px; color: #c9c9ce; font-size: .86rem; line-height: 1.3; }
+.chat-md-image-broken svg { width: 16px; height: 16px; color: #fda4af; }
+.chat-md-image-broken small { color: var(--md-muted); }
+
+/* An outside image before it loads: what it is, where it is, and the choice. */
+.chat-md-remote { display: grid; gap: 4px; width: min(100%, 420px); margin: .4em 0; padding: 12px 14px; border: 1px dashed #4b3f22; border-radius: 12px; background: #121214; line-height: 1.35; }
+.chat-md-remote-head { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--md-strong); font-weight: 600; }
+.chat-md-remote-head svg { flex: none; width: 18px; height: 18px; color: var(--md-accent); }
+.chat-md-remote-alt { min-width: 0; overflow-wrap: anywhere; }
+.chat-md-remote-host { color: var(--md-text); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem; overflow-wrap: anywhere; }
+.chat-md-remote-note { color: var(--md-muted); font-size: .8rem; }
+.chat-md-remote-error { color: #fda4af; }
+.chat-md-remote-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.chat-md-remote-actions .secondary-button { min-height: 40px; display: inline-flex; align-items: center; gap: 6px; padding: 0 14px; }
+.chat-md-remote-actions svg { width: 15px; height: 15px; }
+.chat-md-remote-always { justify-self: start; min-height: 32px; margin-top: 2px; padding: 0; border: 0; background: transparent; color: var(--md-accent); font-size: .8rem; text-align: left; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.chat-md-remote-always:disabled { opacity: .5; cursor: default; }
+
+/* The viewer sheet: the picture fitted to the screen. */
+.chat-image-viewer.file-dialog { width: min(1100px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); }
+.chat-image-viewer-body { display: grid; place-items: center; min-height: 0; flex: 1; padding: 8px 16px; overflow: auto; }
+.chat-image-viewer-body img { display: block; max-width: 100%; max-height: calc(100dvh - 200px); object-fit: contain; border-radius: 8px; background: #0b0b0d; }
+.chat-image-viewer .file-dialog-actions { padding: 12px 16px 16px; }
+.chat-image-viewer .file-dialog-actions svg { width: 16px; }
+
+/* Tool images (in "Used N tools"). */
+.chat-tool-images { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 6px; }
+.chat-tool-images .chat-md-figure { margin: 0; }
+.chat-tool-images .chat-md-img-button img { max-height: 220px; }
+
+@media (max-width: 720px) {
+  .chat-md-pre pre { font-size: .8rem; }
+  .chat-md-table table { font-size: .84rem; }
+  .chat-md-table th, .chat-md-table td { padding: 6px 10px; max-width: 18em; }
+  .chat-md-img-button img { max-height: min(340px, 55dvh); }
+  .chat-image-viewer.file-dialog { width: 100%; max-height: calc(100dvh - 12px); }
+  .chat-image-viewer-body img { max-height: calc(100dvh - 190px); }
+}

@@ -600,6 +600,7 @@ docker compose ps</code></pre></div></article></div>
           <tr><td><code>MAIL_TRANSPORT</code></td><td><code>resend</code></td><td><code>resend</code>, or <code>file</code> for development and tests only (refused when <code>NODE_ENV=production</code>).</td></tr>
           <tr><td><code>MAIL_FILE_PATH</code></td><td>empty</td><td>With <code>MAIL_TRANSPORT=file</code>: the absolute path of the JSON file messages are written to.</td></tr>
           <tr><td><code>GOOGLE_OIDC_TEST_BASE_URL</code></td><td>empty</td><td>Tests and local QA only: a fake Google issuer. Refused when <code>NODE_ENV=production</code>.</td></tr>
+          <tr><td><code>AGENT_IMAGE_PROXY_TEST_HOSTS</code></td><td>empty</td><td>Tests and local QA only: hosts the chat image proxy may reach over http on any port. Refused when <code>NODE_ENV=production</code>; in production the proxy loads public https addresses on port 443 only.</td></tr>
           <tr><td><code>APP_VERSION</code></td><td><code>0.30.0</code></td><td>Build metadata shown in Settings → About and reported by the MCP server.</td></tr>
           <tr><td><code>GIT_SHA</code></td><td><code>development</code></td><td>Commit shown in Settings → About (first 40 characters).</td></tr>
         </tbody></table></div>

@@ -7,7 +7,7 @@
  * Tools: `echo` (readOnlyHint, openWorldHint false; returns `{echo: args}`), `fetch_page` (read-only
  * but open world), `write_thing` (no annotations → confirm), `huge` (returns `kb` KiB of text),
  * `slow` (waits `ms`), `boom` (isError), `malformed` (a result that fails the schema), `image` (an
- * image part only), `structured` (structuredContent only). `tools/list` is paged in two.
+ * image part only; `kind` png, svg, or many for real pictures), `structured` (structuredContent only). `tools/list` is paged in two.
  *
  * Options: `sse` answers requests with an SSE body (a progress notification first, then the
  * response); `bearer` requires `Authorization: Bearer <token>` (401 otherwise); `header` requires a
@@ -15,6 +15,8 @@
  * `serverRequest` sends a `sampling/createMessage` request inside the SSE stream before the
  * response (Nook must answer -32601).
  */
+
+import { base64, makePng, SVG_IMAGE } from "./images";
 
 export type McpCall = { method: string | null; id: unknown; params: unknown; headers: Record<string, string> };
 export type FakeMcpServer = { url: string; port: number; calls: McpCall[]; sessions: Set<string>; stop: () => void; options: FakeMcpOptions };
@@ -99,7 +101,16 @@ export function startFakeMcpServer(port: number, options: FakeMcpOptions = {}): 
           case "slow": await new Promise((resolve) => setTimeout(resolve, Number(args.ms) || 100)); return respond({ content: [{ type: "text", text: "slow done" }] });
           case "boom": return respond({ content: [{ type: "text", text: "it broke" }], isError: true });
           case "malformed": return respond({ content: "not an array" });
-          case "image": return respond({ content: [{ type: "image", data: "AAAA", mimeType: "image/png" }] });
+          // `{}`: a part that is not an image ("AAAA"); `{kind: "png"}`: a real PNG and a line of text;
+          // `{kind: "svg"}`: an SVG labelled image/png; `{kind: "many"}`: six real PNGs (more than a call keeps).
+          case "image": {
+            const kind = String(args.kind ?? "");
+            const png = { type: "image", data: base64(makePng(48, 32)), mimeType: "image/png" };
+            if (kind === "png") return respond({ content: [{ type: "text", text: "A chart" }, png] });
+            if (kind === "svg") return respond({ content: [{ type: "image", data: base64(SVG_IMAGE), mimeType: "image/png" }] });
+            if (kind === "many") return respond({ content: Array.from({ length: 6 }, () => png) });
+            return respond({ content: [{ type: "image", data: "AAAA", mimeType: "image/png" }] });
+          }
           case "structured": return respond({ content: [], structuredContent: { answer: 42 } });
           default: return Response.json({ jsonrpc: "2.0", id: message.id, error: { code: -32602, message: `Unknown tool ${name}` } });
         }

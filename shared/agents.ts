@@ -157,7 +157,17 @@ export type ToolCallView = {
   decision: "allowed" | "denied" | "expired" | "cancelled" | null;
   /** A Nook write turned into an inbox proposal (D353). */
   proposalId: string | null;
+  /** Images the tool returned (MCP image content), stored with the chat; absent when there are none. */
+  images?: ToolImageRef[];
 };
+/**
+ * An image a tool returned (MCP `image` content): PNG, JPEG, GIF, or WebP by its bytes, never SVG,
+ * within `TOOL_IMAGE_BOUNDS`. The bytes live in `chat_tool_images` (migration 043) and are served by
+ * `GET /api/chats/:chatId/tool-images/:imageId` to whoever can read the chat; the model is told only
+ * that an image was shown.
+ */
+export type ToolImageRef = { id: string; mimeType: "image/png" | "image/jpeg" | "image/gif" | "image/webp"; bytes: number };
+export const TOOL_IMAGE_BOUNDS = { bytes: 2 * 1024 * 1024, perCall: 4, perRun: 12 } as const;
 /**
  * A confirmation card (plan §5.4, T324). `confirmationId` is a server nonce minted per card (never
  * the model's call id) and `argsHash` the SHA-256 of the arguments shown; the client sends both
@@ -177,7 +187,7 @@ export type RunEvent =
   | { type: "done"; data: { status: RunStatus; messageId: string } }
   // AC-B (plan §2.3): tool disclosure and confirmations.
   | { type: "tool_call"; data: { messageId: string; callId: string; tool: string; server: string; serverId: string | null; argsPreview: string } }
-  | { type: "tool_result"; data: { messageId: string; callId: string; ok: boolean; resultPreview: string; truncated: boolean; durationMs: number; decision: ToolCallView["decision"]; proposalId: string | null } }
+  | { type: "tool_result"; data: { messageId: string; callId: string; ok: boolean; resultPreview: string; truncated: boolean; durationMs: number; decision: ToolCallView["decision"]; proposalId: string | null; images?: ToolImageRef[] } }
   | { type: "confirmation_required"; data: { messageId: string } & PendingConfirmation }
   | { type: "confirmation_resolved"; data: { messageId: string; confirmationId: string; callId: string; decision: "allowed" | "denied" | "expired" | "cancelled" } }
   | { type: "snapshot"; data: { status: RunStatus; messageId: string; content: string; messageStatus: MessageStatus; usage: TokenUsage | null; errorCode: string | null; toolCalls: ToolCallView[]; pendingConfirmation: PendingConfirmation | null } };

@@ -1,3 +1,5 @@
+import { imagesSample, markdownSample } from "./markdownSamples";
+
 /**
  * A fake OpenAI-compatible server for the agent chat tests (plan §15 item 1): `GET /v1/models` and
  * a streaming `POST /v1/chat/completions` on 127.0.0.1, which the harness allows through
@@ -15,6 +17,9 @@
  *   `tool:<name>:<json>` stream a call to `<name>` with those arguments (default `lookup({"q":"x"})`);
  *                      once a `tool` turn has come back, answer "Done: <excerpt of the result>"
  *   `loop:<name>:<json>` stream the call at every step, whatever came back (the step cap)
+ *   `md:<name>`        stream a Markdown sample (`gfm`, `long`; tests/support/markdownSamples.ts)
+ *   `mdslow:<ms>:<name>` the same with `ms` between chunks (streaming performance)
+ *   `mdimg:<file id>|<image URL>` stream the images sample (data:, a Nook file, an outside picture)
  */
 
 export type ProviderCall = { method: string; path: string; headers: Record<string, string>; body: unknown };
@@ -79,7 +84,7 @@ export function startFakeProvider(port: number, options: { models?: string[]; na
         const model = payload?.model ?? "gpt-6-luna";
         const last = [...(payload?.messages ?? [])].reverse().find((turn) => turn.role === "user")?.content ?? "";
         const lastTurn = payload?.messages?.at(-1);
-        let match = /^(echo|slow|status|nousage|stall|redirect|huge|tool|loop):(.*)$/s.exec(last);
+        let match = /^(echo|slow|status|nousage|stall|redirect|huge|tool|loop|md|mdslow|mdimg):(.*)$/s.exec(last);
         // AC-B: after a tool result came back (`tool:` mode), the model answers with an excerpt of it;
         // `loop:` keeps calling the tool every step (the step cap). The call names a tool offered to it
         // (`tool:<name>:<json args>`; a name not offered is sent as given, to test "unknown tool").
@@ -96,6 +101,17 @@ export function startFakeProvider(port: number, options: { models?: string[]; na
           text = parts.join(":");
         }
         if (mode === "huge") text = "x".repeat(Math.max(1, Number(rest) || 1) * 1024);
+        // Chat Markdown samples (tests/support/markdownSamples.ts): `md:gfm`, `md:long`, `mdslow:<ms>:long`, `mdimg:<file id>|<image URL>`.
+        if (mode === "md") text = markdownSample(rest.trim());
+        if (mode === "mdslow") {
+          const [ms, name] = rest.split(":");
+          gap = Number(ms) || 20;
+          text = markdownSample((name ?? "").trim());
+        }
+        if (mode === "mdimg") {
+          const [fileId, url] = rest.split("|");
+          text = imagesSample((fileId ?? "").trim(), (url ?? "").trim());
+        }
         const words = mode === "huge" ? text.match(/.{1,4096}/g) ?? [] : text.split(/(?<=\s)/);
         const promptTokens = Math.ceil((payload?.messages ?? []).reduce((sum, turn) => sum + (turn.content?.length ?? 0), 0) / 4);
         const stream = new ReadableStream<Uint8Array>({

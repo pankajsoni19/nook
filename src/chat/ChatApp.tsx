@@ -183,7 +183,7 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
       else if (event.type === "tool_call") {
         if (!next.toolCalls.some((call) => call.id === event.data.callId)) next.toolCalls = [...next.toolCalls, { id: event.data.callId, tool: event.data.tool, server: event.data.server, serverId: event.data.serverId, argsPreview: event.data.argsPreview, resultPreview: null, ok: null, truncated: false, durationMs: null, decision: null, proposalId: null }];
       } else if (event.type === "tool_result") {
-        next.toolCalls = next.toolCalls.map((call) => call.id === event.data.callId ? { ...call, ok: event.data.ok, resultPreview: event.data.resultPreview, truncated: event.data.truncated, durationMs: event.data.durationMs, decision: event.data.decision, proposalId: event.data.proposalId } : call);
+        next.toolCalls = next.toolCalls.map((call) => call.id === event.data.callId ? { ...call, ok: event.data.ok, resultPreview: event.data.resultPreview, truncated: event.data.truncated, durationMs: event.data.durationMs, decision: event.data.decision, proposalId: event.data.proposalId, ...(event.data.images ? { images: event.data.images } : {}) } : call);
       } else if (event.type === "confirmation_required") {
         const { messageId: _message, ...pending } = event.data;
         next.pending = pending;
@@ -550,7 +550,10 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
     }
   }
 
-  const renderContext = useMemo<RenderContext>(() => ({ onExternalLink: (href) => setExternalLink(href), onNookLink: (path) => onOpenPath(path) }), [onOpenPath]);
+  // Images (D370 as amended): Nook's own and data: images show; an outside image loads on a click, and
+  // "always from this host" lasts for this chat (or the Audit log) in this tab.
+  const imageChatId = route.audit ? undefined : route.chatId ?? undefined;
+  const renderContext = useMemo<RenderContext>(() => ({ onExternalLink: (href) => setExternalLink(href), onNookLink: (path) => onOpenPath(path), images: { mode: "app", scope: imageChatId ?? "audit", chatId: imageChatId } }), [onOpenPath, imageChatId]);
   const detailOpen = Boolean(route.chatId || route.newChat || (route.audit && route.runId));
   const agentOptions = useMemo(() => (agents ?? []).map((agent) => ({ value: agent.id, label: `${agent.icon ? `${agent.icon} ` : ""}${agent.name}`, description: agent.description || (agent.model ?? agent.effectiveModel ?? status?.defaultModel ?? "") })), [agents, status?.defaultModel]);
   const newAgent = agents?.find((agent) => agent.id === newAgentId) ?? null;
@@ -758,7 +761,7 @@ function MessageView({ shown, context, streaming, live, busy, editing, deciding,
   const failed = message.status === "error" || message.status === "interrupted";
   const footer = message.status === "cancelled" ? "Stopped" : message.status === "interrupted" ? "Stopped: server restarted" : message.status === "step_limit" ? "Stopped at the step limit" : message.status === "error" ? (live?.error?.message ?? ERROR_TEXT[message.errorCode ?? ""] ?? "The run did not finish") : null;
   return <li className={`chat-message chat-assistant${failed ? " chat-failed" : ""}`}>
-    <ToolCallsDisclosure calls={message.toolCalls} running={streaming} />
+    <ToolCallsDisclosure calls={message.toolCalls} running={streaming} chatId={context.images?.mode === "app" ? context.images.chatId : undefined} />
     {live?.pending && streaming && !readOnly && <ConfirmationCard key={live.pending.confirmationId} confirmation={live.pending} busy={deciding} onDecide={onDecide} />}
     <div className="chat-bubble">
       {message.content ? <Markdown text={message.content} context={context} streaming={streaming} /> : streaming ? <span className="chat-thinking" aria-label={live?.pending ? "Waiting for your answer" : "Answering"}>…</span> : null}

@@ -1,10 +1,11 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { config } from "../config";
 import { audit, db, now } from "../db";
-import { AGENT_BOUNDS, CHAT_RUN_TIMEOUT_S, CONFIRMATION_TTL_MS, PREAMBLE_VERSION, preambleFor, RUN_SLOTS, toolResultEnd, toolResultMarker, type DailyUsage, type PendingConfirmation, type RunErrorCode, type RunStatus, type TokenUsage, type ToolCallView } from "../../shared/agents";
+import { AGENT_BOUNDS, CHAT_RUN_TIMEOUT_S, CONFIRMATION_TTL_MS, PREAMBLE_VERSION, preambleFor, RUN_SLOTS, toolResultEnd, toolResultMarker, type DailyUsage, type PendingConfirmation, type RunErrorCode, type RunStatus, type TokenUsage, type ToolCallView, type ToolImageRef } from "../../shared/agents";
 import type { AgentRow } from "./agentsService";
 import { chatAgent, finishAssistantMessage, flushAssistantText, flushToolCalls, insertAssistantPlaceholder, insertUserMessage, ownedChat, parseToolCalls, pathTo, type ChatRow, type MessageRow } from "./chats";
-import { McpClientError } from "./mcpClient";
+import { McpClientError, type McpImage } from "./mcpClient";
+import { storeToolImages } from "./images";
 import { runNookTool } from "./nookBridge";
 import { ProviderError, runLoop, type ChatTurn, type ModelToolCall, type ToolExecution } from "./loop";
 import { connectionFor } from "./providers";
@@ -219,14 +220,15 @@ function toolExecutor(run: ActiveRun, channel: RunChannel, agent: AgentRow, mess
     resolved = resolveTools(live.agent, { userId: run.userId, role: live.role });
     return resolved.map((tool) => ({ name: tool.modelName, description: tool.description, parameters: tool.parameters }));
   };
-  const finish = (view: ToolCallView, outcome: { ok: boolean; text: string; truncated: boolean; durationMs: number; proposalId?: string | null; decision?: ToolCallView["decision"] }) => {
+  const finish = (view: ToolCallView, outcome: { ok: boolean; text: string; truncated: boolean; durationMs: number; proposalId?: string | null; decision?: ToolCallView["decision"]; images?: ToolImageRef[] }) => {
     view.ok = outcome.ok;
     view.resultPreview = preview(outcome.text);
     view.truncated = outcome.truncated;
     view.durationMs = outcome.durationMs;
     view.proposalId = outcome.proposalId ?? null;
     if (outcome.decision) view.decision = outcome.decision;
-    channel.emit({ type: "tool_result", data: { messageId, callId: view.id, ok: outcome.ok, resultPreview: view.resultPreview, truncated: outcome.truncated, durationMs: outcome.durationMs, decision: view.decision, proposalId: view.proposalId } });
+    if (outcome.images && outcome.images.length > 0) view.images = outcome.images;
+    channel.emit({ type: "tool_result", data: { messageId, callId: view.id, ok: outcome.ok, resultPreview: view.resultPreview, truncated: outcome.truncated, durationMs: outcome.durationMs, decision: view.decision, proposalId: view.proposalId, ...(view.images ? { images: view.images } : {}) } });
     persist();
   };
   const execute = async (call: ModelToolCall): Promise<ToolExecution> => {
@@ -285,6 +287,7 @@ function toolExecutor(run: ActiveRun, channel: RunChannel, agent: AgentRow, mess
     let text: string;
     let ok: boolean;
     let proposalId: string | null = null;
+    let images: McpImage[] = [];
     try {
       if (tool.nook) {
         // The same per-call timeout as a server's (review L9); the result of a late call is discarded.
@@ -301,6 +304,7 @@ function toolExecutor(run: ActiveRun, channel: RunChannel, agent: AgentRow, mess
         const outcome = await withTimeout(sessionFor(tool.serverRow!).callTool(tool.toolName, args, run.controller.signal), tool.timeoutMs, run.controller.signal);
         text = outcome.text;
         ok = !outcome.isError;
+        images = outcome.images ?? [];
       }
     } catch (error) {
       if (run.controller.signal.aborted) throw error;
@@ -309,11 +313,22 @@ function toolExecutor(run: ActiveRun, channel: RunChannel, agent: AgentRow, mess
       console.error("Agent tool call failed", error instanceof Error ? error.name : "Unknown error");
       return fail("INTERNAL", "The tool could not be run");
     }
+    // Tool images are kept with the chat for the person (never sent to the model), within the run's limit,
+    // the chat owner's storage quota, and the free-disk floor (review M2); the model is told which.
+    let imageRefs: ToolImageRef[] = [];
+    if (images.length > 0) {
+      const kept = run.chatId
+        ? await storeToolImages(run.chatId, messageId, images, run.toolCalls.reduce((sum, item) => sum + (item.images?.length ?? 0), 0))
+        : { refs: [], dropped: images.length, reason: "this run has no chat" };
+      imageRefs = kept.refs;
+      if (kept.refs.length > 0) text += `\n[${kept.refs.length === 1 ? "The image was" : `${kept.refs.length} images were`} shown to the person.]`;
+      if (kept.dropped > 0) text += `\n[${kept.dropped === 1 ? "An image was" : `${kept.dropped} images were`} not kept or shown: ${kept.reason ?? "it could not be stored"}.]`;
+    }
     const capped = capResultText(text, tool.resultCapBytes);
     // The fence's nonce is made after the result exists, so the result cannot close the fence (review L7).
     const nonce = randomBytes(6).toString("hex");
     const content = `${toolResultMarker(tool.server, tool.toolName, nonce)}\n${capped.text}${capped.truncated ? `\n[truncated: the result was ${capped.bytes} bytes; the first ${tool.resultCapBytes} are shown]` : ""}\n${toolResultEnd(nonce)}`;
-    finish(view, { ok, text: capped.text, truncated: capped.truncated, durationMs: Date.now() - started, proposalId });
+    finish(view, { ok, text: capped.text, truncated: capped.truncated, durationMs: Date.now() - started, proposalId, images: imageRefs });
     audit(run.userId, null, "agents.tool.call", { runId: run.runId, agentId: agent.id, serverId: view.serverId, server: view.server, tool: view.tool, ok, truncated: capped.truncated, durationMs: view.durationMs, proposalId });
     return { content };
   };
