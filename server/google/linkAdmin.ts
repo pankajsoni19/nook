@@ -1,4 +1,5 @@
 import { recordAccessEvent, type AccessVia } from "../access/events";
+import { clearDevices } from "../signInDevices";
 import { googleResetMask, notifyAccess } from "../access/notices";
 import { SHARE_TABLES } from "../access/shares";
 import { revokeOwnKey } from "../apiKeys";
@@ -132,6 +133,8 @@ export function resetAccountForGoogle(userId: string, actor: Actor, via: AccessV
   db.transaction(() => {
     const at = now();
     db.query("DELETE FROM sessions WHERE user_id = ?").run(userId);
+    // Recognised devices go too (migration 043): the next Google sign-in starts the list.
+    clearDevices(userId);
     revokeUserPushSubscriptions(userId, "google_reset");
     for (const { id } of db.query("SELECT id FROM mcp_api_keys WHERE user_id = ? AND revoked_at IS NULL").all(userId) as Array<{ id: string }>) revokeOwnKey(userId, id, "google_reset");
     db.query("UPDATE calendar_feeds SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL").run(at, userId);
@@ -233,6 +236,7 @@ export function completeRelink(userId: string, identityId: string, google: { sub
     const at = now();
     db.query("UPDATE google_identities SET subject = ?, email = ?, picture_url = NULL, last_login_at = ? WHERE id = ?").run(google.sub, google.email, at, identityId);
     db.query("DELETE FROM sessions WHERE user_id = ?").run(userId);
+    clearDevices(userId);
     revokeUserPushSubscriptions(userId, "google_relinked");
     for (const { id } of db.query("SELECT id FROM mcp_api_keys WHERE user_id = ? AND revoked_at IS NULL").all(userId) as Array<{ id: string }>) revokeOwnKey(userId, id, "google_relink");
     db.query("UPDATE calendar_feeds SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL").run(at, userId);

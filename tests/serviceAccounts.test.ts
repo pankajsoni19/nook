@@ -105,7 +105,7 @@ describe("every sign-in path refuses an integration", () => {
     expect(invite.body.error).toBe("This address cannot be invited");
 
     // 5. Sessions: none can be made (server and database), so no cookie can ever carry it.
-    await expect(createSession({ req: { header: () => undefined } } as never, bot.id)).rejects.toBeInstanceOf(ServiceAccountSignInError);
+    await expect(createSession({ req: { header: () => undefined } } as never, bot.id, { method: "password" })).rejects.toBeInstanceOf(ServiceAccountSignInError);
     expect(() => db.query("INSERT INTO sessions (id, user_id, token_hash, csrf_token, created_at, last_seen_at, expires_at) VALUES (?, ?, ?, 'x', ?, ?, ?)")
       .run(crypto.randomUUID(), bot.id, "h".repeat(64), new Date().toISOString(), new Date().toISOString(), new Date(Date.now() + 3_600_000).toISOString())).toThrow("SERVICE_NO_SESSION");
 

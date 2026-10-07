@@ -39,6 +39,7 @@ import { agentChatMigration } from "./039_agent_chat";
 import { agentAuditMigration } from "./040_agent_audit";
 import { agentSharingMigration } from "./041_agent_sharing";
 import { knowledgeMigration } from "./042_knowledge";
+import { signInDevicesMigration } from "./043_sign_in_devices";
 
 const migrations = [initialMigration, folderSharingMigration, totpMigration, totpRecoveryCodesMigration, mcpApiKeysMigration, documentsMigration, binMigration, noteSearchMigration, taskBoardsMigration, mcpKeyScopesMigration, taskDatesMigration, collectionsMigration, calendarMigration, eventNextOccurrenceMigration, taskCardUxMigration, userPreferencesMigration, teamRolesMigration,
   // 018 (Team invites) may reach existing installs after 019 (task hierarchy) and 020 (task views); none depends on another.
@@ -83,7 +84,10 @@ const migrations = [initialMigration, folderSharingMigration, totpMigration, tot
   agentSharingMigration,
   // 042 (knowledge bases, Wave 44 "AC-E": kb_chunk_fts with the heading path and its sync triggers,
   // source columns and indexes, and the purge of agents' picks) needs 039. The Messages migration moves to 043.
-  knowledgeMigration
+  knowledgeMigration,
+  // 043 (recognised devices and the welcome mail: sign_in_devices, sessions.legacy_device,
+  // users.welcome_mail) needs 001 and 026. The Messages migration moves to 044.
+  signInDevicesMigration
 ];
 
 /**

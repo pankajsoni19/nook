@@ -4,6 +4,7 @@ import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { revokeUserPushSubscriptions } from "./calendar/push";
 import { config, isEmailAllowed, isOriginAllowed } from "./config";
 import { audit, db, now, type UserRow } from "./db";
+import { recordSignIn, touchDevice, type SignInContext } from "./signInDevices";
 
 export type AppEnv = {
   Variables: {
@@ -32,7 +33,12 @@ export class ServiceAccountSignInError extends Error {
   }
 }
 
-export async function createSession(c: Context, userId: string) {
+/**
+ * Starts a session for a completed sign-in. `signIn` says how it happened (password, Google, and
+ * whether a second factor or recovery code finished it) and whether it is the sign-in that created
+ * the account; recordSignIn uses it for the device record, the "New sign-in" mail, and the welcome.
+ */
+export async function createSession(c: Context, userId: string, signIn: SignInContext) {
   const kind = (db.query("SELECT kind FROM users WHERE id = ?").get(userId) as { kind: string } | null)?.kind;
   if (kind !== "person") throw new ServiceAccountSignInError();
   const token = randomToken();
@@ -49,6 +55,8 @@ export async function createSession(c: Context, userId: string) {
     path: "/",
     maxAge: config.sessionDays * 86_400
   });
+  // After the session cookie, so a client that reads the first Set-Cookie still gets the session.
+  recordSignIn(c, userId, signIn, secureCookie(c));
   return csrfToken;
 }
 
@@ -80,10 +88,10 @@ export async function requireAuth(c: Context<AppEnv>, next: Next) {
   const token = getCookie(c, SESSION_COOKIE);
   if (!token) return c.json({ error: "Authentication required" }, 401);
   const row = db.query(`
-    SELECT s.id AS session_id, s.csrf_token, u.id, u.email, u.display_name, u.totp_enabled_at, u.role
+    SELECT s.id AS session_id, s.csrf_token, s.legacy_device, u.id, u.email, u.display_name, u.totp_enabled_at, u.role
     FROM sessions s JOIN users u ON u.id = s.user_id
     WHERE s.token_hash = ? AND s.expires_at > ? AND u.disabled_at IS NULL AND u.kind = 'person'
-  `).get(tokenHash(token), now()) as (Pick<UserRow, "id" | "email" | "display_name" | "totp_enabled_at" | "role"> & { session_id: string; csrf_token: string }) | null;
+  `).get(tokenHash(token), now()) as (Pick<UserRow, "id" | "email" | "display_name" | "totp_enabled_at" | "role"> & { session_id: string; csrf_token: string; legacy_device: number }) | null;
   if (!row) {
     clearSession(c);
     return c.json({ error: "Authentication required" }, 401);
@@ -98,6 +106,8 @@ export async function requireAuth(c: Context<AppEnv>, next: Next) {
   c.set("sessionId", row.session_id);
   c.set("csrfToken", row.csrf_token);
   db.query("UPDATE sessions SET last_seen_at = ? WHERE id = ?").run(now(), row.session_id);
+  // Recognised devices (migration 043): last seen, and the one-time quiet enrolment of a pre-043 session.
+  touchDevice(c, row.id, { id: row.session_id, legacyDevice: row.legacy_device === 1 }, secureCookie(c));
   await next();
 }
 

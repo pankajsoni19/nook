@@ -1,0 +1,29 @@
+Subject: Welcome to Nook
+
+Nook · nook.test
+
+ACCOUNT · WELCOME
+Welcome to Nook, Priya Shah
+
+Your account on nook.test is ready. You joined as a Admin. Admins manage the team and have every member permission.
+
+> Today
+  Your day at a glance: tasks, events, and what was shared with you.
+  https://nook.test/
+> Notification settings
+  Choose which emails and push notifications you get.
+  https://nook.test/settings/notifications
+> Documentation
+  How each part of Nook works.
+  https://pankajsoni19.github.io/nook/
+
+This is the only welcome email. Nothing else to do.
+
+Open Today:
+https://nook.test/
+
+--
+You got this because you created an account on nook.test.
+Email settings:
+https://nook.test/settings/notifications
+Sent by Nook on nook.test, a self-hosted workspace. No tracking. Nook never asks for your password by email.

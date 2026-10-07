@@ -12,6 +12,7 @@ import { enqueueMail } from "./outbox";
 import { emailPrefsPutSchema, readEmailPrefs, turnCategoryOff, writeEmailPrefs } from "./prefs";
 import { answerDigestPrompt, digestPromptSchema, digestPromptVisible } from "./digestPrompt";
 import { hashAuthToken } from "./resolve";
+import { releaseWelcomeMail } from "./signInMail";
 import { isMuteType, listMutes, MuteError, muteTarget, unmuteTarget } from "./mutes";
 import { clearOwnSuppression, suppressionOf } from "./suppression";
 import { verifyUnsubscribeToken } from "./unsubscribe";
@@ -72,6 +73,8 @@ export function consumeVerifyToken(token: string, nowMs = Date.now()): "verified
     audit(row.user_id, null, "mail.email_verified");
     return true;
   })();
+  // A welcome mail that waited for the address (migration 043) goes a minute from now.
+  if (done) releaseWelcomeMail(row.user_id, nowMs);
   return done ? "verified" : "invalid";
 }
 

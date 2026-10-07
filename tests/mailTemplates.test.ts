@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Hono } from "hono";
 import { cleanLine, escapeHtml, html, SafeHtml, stripMarkdown } from "../server/mail/html";
-import { appLink, paths, setMailOriginForTests } from "../server/mail/links";
+import { appLink, DOCS_URL, paths, setMailOriginForTests } from "../server/mail/links";
 import { previewFixtures, renderTemplate, TEMPLATES } from "../server/mail/registry";
 import { darkPreview, fixtureContext, registerMailPreviewRoutes, renderFixture } from "../server/mail/preview";
 import { parseRoute } from "../src/router";
@@ -70,7 +70,8 @@ describe("the design contract", () => {
       // Text part: no markup or entities, and every link on its own line.
       expect(text).not.toMatch(/<[a-z!/]|&[a-z]+;|&#\d+;/i);
       for (const link of hrefs(markup)) {
-        expect(link.startsWith(`${ORIGIN}/`)).toBe(true);
+        // The welcome mail's documentation link is the one fixed link outside the origin.
+        expect(link.startsWith(`${ORIGIN}/`) || link === DOCS_URL).toBe(true);
         expect(text.split("\n").some((line) => line.trim() === link)).toBe(true);
       }
       // Unsubscribe on activity, reminders, and digest mail (B.2); security says it can't be turned off.
@@ -87,11 +88,11 @@ describe("the design contract", () => {
       "calendar.reminder": "calendar", "calendar.reminder.all_day": "calendar", "calendar.reminder.standalone": "notifications",
       "calendar.event_changed": "calendar", "calendar.event_changed.cancelled": "calendar",
       "tasks.sprint": "tasks", "tasks.sprint.completed": "tasks", "bin.expiring": "bin", "digest.summary": "tasks", "digest.summary.weekly": "tasks",
-      "account.password_reset": "home"
+      "account.password_reset": "home", "account.welcome": "home", "account.welcome.admin": "home"
     };
     for (const fixture of previewFixtures()) {
       const links = hrefs(render(fixture.id).html);
-      for (const link of links) {
+      for (const link of links.filter((item) => item !== DOCS_URL)) {
         const url = new URL(link);
         expect(url.origin).toBe(ORIGIN);
         // Only the unsubscribe page's token and nothing else uses a fragment; there are no queries.

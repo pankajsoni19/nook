@@ -7,6 +7,7 @@
  * Admins see account metadata only; nothing here reads anyone's content (D73).
  */
 import { revokeUserPushSubscriptions } from "../calendar/push";
+import { clearDevices } from "../signInDevices";
 import { isEmailAllowed } from "../config";
 import { audit, db, now, type UserRow } from "../db";
 import { joinedWithInvite } from "./invites";
@@ -298,6 +299,8 @@ export function blockUser(actor: TeamActor, targetId: string, reason: string | n
     if (result.changes !== 1) throw new TeamError(409, "ROLE_CHANGED", "This account changed while you were blocking it. Review it and try again.", { currentRole: userRole(target.id) });
     rotateOnLostReach(actor?.id ?? null, reach);
     const sessions = db.query("DELETE FROM sessions WHERE user_id = ?").run(target.id).changes;
+    // Recognised devices start over (migration 043): after an unblock, every sign-in is new again.
+    clearDevices(target.id);
     revokeUserPushSubscriptions(target.id, "user_blocked");
     recordEvent(target.id, actor, options.via, "block", { reason: cleanReason }, timestamp);
     audit(actor?.id ?? null, null, "team.user_blocked", auditMeta(options.via, { targetId: target.id, sessions }));

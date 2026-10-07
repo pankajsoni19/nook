@@ -11,6 +11,7 @@ import { config, isEmailAllowed, isOriginAllowed, passwordAuthEnabled } from "..
 import { audit, db, now, type UserRow } from "../db";
 import { mailEnabled } from "../mail";
 import { kickMailDispatch } from "../mail/dispatcher";
+import { releaseWelcomeMail } from "../mail/signInMail";
 import { mailAccountEvent, mailPasswordChanged, mailTwoFactor } from "../mail/triggers";
 import { isUsablePasswordHash, UNUSABLE_PASSWORD } from "../passwords";
 import { consumeRecoveryCode, consumeTotp, googleReauthUntil, reauthMethod, verifyReauth } from "../reauth";
@@ -117,6 +118,8 @@ function linkIdentity(user: NonNullable<ReturnType<typeof userById>>, claims: Go
     audit(user.id, null, "auth.google_linked", { via });
     return id;
   })();
+  // The address is verified now: a welcome mail waiting for that (migration 043) is queued.
+  releaseWelcomeMail(user.id);
   kickMailDispatch();
   return identityId;
 }
@@ -345,7 +348,8 @@ export function registerGoogleRoutes(app: Hono<AppEnv>) {
       createFlow(c, { intent: flow.intent, stage: "second_factor", returnTo: flow.return_to, userId: user.id, ttlMs: SECOND_FACTOR_TTL_MS, clientHash: sha256Hex(`google-client:${clientAddress(c)}`) });
       return toLogin(c, "google=code");
     }
-    await createSession(c, user.id);
+    // A Google sign-in that just created the account records its device without a "New sign-in" mail.
+    await createSession(c, user.id, { method: "google", registered: created });
     audit(user.id, null, "auth.login", { via: "google" });
     return c.redirect(flow.return_to, 303);
   });
@@ -385,7 +389,7 @@ export function registerGoogleRoutes(app: Hono<AppEnv>) {
     }
     if (!claimFlow(flow.id)) return expired();
     clearFlowCookie(c);
-    const csrfToken = await createSession(c, user.id);
+    const csrfToken = await createSession(c, user.id, { method: !user.totp_enabled_at ? "google" : body.recoveryCode ? "google_recovery" : "google_totp" });
     audit(user.id, null, "auth.login", { via: "google" });
     return c.json({
       ok: true,

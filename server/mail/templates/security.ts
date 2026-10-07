@@ -5,6 +5,7 @@ import { appLink, paths } from "../links";
 import { formatInstant } from "../format";
 import { personName, securityFooter } from "./common";
 import { defineTemplate } from "./types";
+import { deviceLabel, isSignInMethod, SIGN_IN_METHODS } from "../../deviceLabels";
 
 /**
  * Security mail (#2–#8): always on, sent at once, never held by quiet hours, and without an
@@ -224,4 +225,46 @@ export const passwordChangedTemplate = defineTemplate<{ event: PasswordEvent; at
     });
   },
   fixture: () => ({ event: "changed", at: "2026-09-28T09:00:00.000Z" })
+});
+
+/**
+ * #9 New sign-in (outbound email plan §A.3, as built; T327–T331): a sign-in from a device or browser
+ * the account has not used. Coalesced to one mail per 10 minutes, so it may list several sign-ins.
+ * Labels come from the fixed device vocabulary (server/deviceLabels.ts); no address is shown.
+ */
+export type NewSignInMail = { signIns: Array<{ browser: string; os: string; method: string; at: string }>; total: number; delayed?: boolean };
+
+export const newSignInTemplate = defineTemplate<NewSignInMail>({
+  name: "security.new_sign_in",
+  class: "security",
+  render(data, ctx) {
+    const rows = data.signIns.slice(0, 5).map((signIn) => ({
+      title: deviceLabel(signIn.browser, signIn.os),
+      when: formatInstant(signIn.at, ctx.tz),
+      method: isSignInMethod(signIn.method) ? SIGN_IN_METHODS[signIn.method] : "Signed in"
+    }));
+    const total = Math.max(data.total, rows.length);
+    const one = total === 1;
+    const latest = rows[0]!;
+    const security = appLink(paths.settings("security"));
+    return layout({
+      instanceName: ctx.instanceName,
+      tone: "security",
+      subject: delayed(one ? `New sign-in to your ${appName()} account` : `${total} new sign-ins to your ${appName()} account`, data.delayed),
+      preheader: `${latest.title}, ${latest.when}. If this was you, you can ignore this.`,
+      eyebrow: "Security · Sign-in",
+      title: one ? "New sign-in to your account" : `${total} new sign-ins to your account`,
+      lead: one
+        ? `Your ${appName()} account was signed in from a device or browser it hasn't used before.`
+        : `Your ${appName()} account was signed in from devices or browsers it hasn't used before.`,
+      blocks: [
+        context(rows.map((row) => ({ title: row.title, meta: `${row.when} · ${row.method}` })), { tone: "security", more: total - rows.length }),
+        paragraph("If this was you, you can ignore this. A new browser, a private window, or cleared cookies all look new."),
+        context([{ title: "Wasn't you? Change your password and sign out other devices", meta: "Changing your password in Settings → Security signs out every other device.", href: security }], { tone: "security" })
+      ],
+      action: { label: "Review security settings", href: security },
+      footer: securityFooter()
+    });
+  },
+  fixture: () => ({ signIns: [{ browser: "firefox", os: "linux", method: "password_totp", at: "2026-09-28T09:00:00.000Z" }], total: 1 })
 });

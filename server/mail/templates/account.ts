@@ -1,6 +1,6 @@
 import { appName } from "../../config";
-import { layout, note, paragraph } from "../layout";
-import { appLink, paths } from "../links";
+import { context as contextBlock, layout, note, paragraph } from "../layout";
+import { appLink, DOCS_URL, paths } from "../links";
 import { formatInstant } from "../format";
 import { accountFooter, personName } from "./common";
 import { defineTemplate } from "./types";
@@ -59,6 +59,46 @@ export const verifyTemplate = defineTemplate<{ token: string; expiresAt: string;
     });
   },
   fixture: () => ({ token: "b".repeat(43), expiresAt: "2026-09-29T09:00:00.000Z", address: "priya@example.com" })
+});
+
+const WELCOME_ROLES: Record<string, { label: string; line: string }> = {
+  admin: { label: "Admin", line: "Admins manage the team and have every member permission." },
+  member: { label: "Member", line: ROLE_LINES.member },
+  viewer: { label: "Viewer", line: ROLE_LINES.viewer },
+  guest: { label: "Guest", line: ROLE_LINES.guest }
+};
+
+/**
+ * Welcome (#14, D232; outbound email plan §A.3 as built): one-off, no switch, a minute after the
+ * account's first sign-in, to a verified address only. APP_NAME throughout; the instance name, the
+ * role line, and three links: Today, email settings, and the documentation.
+ */
+export const welcomeTemplate = defineTemplate<{ displayName: string; role: string }>({
+  name: "account.welcome",
+  class: "account",
+  render(data, context) {
+    const name = personName(data.displayName, "there");
+    const role = WELCOME_ROLES[data.role] ?? WELCOME_ROLES.member!;
+    return layout({
+      instanceName: context.instanceName,
+      subject: `Welcome to ${appName()}`,
+      preheader: `Your account on ${context.instanceName} is ready.`,
+      eyebrow: "Account · Welcome",
+      title: `Welcome to ${appName()}, ${name}`,
+      lead: `Your account on ${context.instanceName} is ready. You joined as a ${role.label}. ${role.line}`,
+      blocks: [
+        contextBlock([
+          { title: "Today", meta: "Your day at a glance: tasks, events, and what was shared with you.", href: appLink(paths.home()) },
+          { title: "Notification settings", meta: "Choose which emails and push notifications you get.", href: appLink(paths.settings("notifications")) },
+          { title: "Documentation", meta: `How each part of ${appName()} works.`, href: DOCS_URL }
+        ]),
+        note("This is the only welcome email. Nothing else to do.")
+      ],
+      action: { label: "Open Today", href: appLink(paths.home()) },
+      footer: accountFooter(`You got this because you created an account on ${context.instanceName}.`)
+    });
+  },
+  fixture: () => ({ displayName: "Dana Lee", role: "member" })
 });
 
 /** "Send me a test email" (#15). */

@@ -1345,6 +1345,7 @@ Plan of record: [research/2026-09-26-team-module.md](research/2026-09-26-team-mo
 | `POST /api/auth/logout` | both | sign out |
 | `POST /api/auth/totp/setup`, `POST /api/auth/totp/enable`, `POST /api/auth/totp/recovery-codes`, `POST /api/auth/totp/recovery-codes/regenerate`, `DELETE /api/auth/totp` | both | own two-factor |
 | `POST /api/auth/password/change` | both | own password (Wave 30) |
+| `DELETE /api/auth/devices/:id`, `DELETE /api/auth/devices` | both | forget own recognised devices (migration 043) |
 | `POST /api/notifications/read` | both | own notifications |
 | `POST /api/push/subscriptions`, `DELETE /api/push/subscriptions`, `POST /api/push/test` | both | own push devices |
 | `POST /api/reminders`, `DELETE /api/reminders/:reminderId` | both | own reminders on readable events (O4) |
@@ -1844,6 +1845,20 @@ Plan: §A.5 and §E.6 of the research. No migration: reset tokens use `auth_toke
 `GET /api/about` also carries `twoFactor: boolean` (v0.13.0 QA, A7): whether a TOTP key is configured, so two-factor can be set up on this instance. Only the flag, never the key. With `false`, Settings → Security explains that two-factor is not available instead of offering the setup form (which would end in 503).
 
 Tokens: 32 random bytes, base64url, stored as a SHA-256, minted by the dispatcher at send time (the outbox row holds `{}`), 30 minutes, single use; minting deletes the account's older unused reset tokens. Pages: `/forgot-password` (signed out; its own history entry from the sign-in card) and `/reset-password#token=…` (the fragment is stripped on load; `Referrer-Policy: no-referrer` on every response).
+
+### Recognised devices, New sign-in and Welcome mail (migration 043)
+
+Plan: the outbound email plan's "later" items #9 and #14, as built ([research/2026-09-28-outbound-email.md](research/2026-09-28-outbound-email.md) §A.3 and its as-built note; T327–T331). Code: `server/signInDevices.ts`, `server/deviceLabels.ts`, `server/mail/signInMail.ts`.
+
+| Method and path | Auth | Body | Result |
+| --- | --- | --- | --- |
+| `GET /api/auth/devices` | session (every role) | — | `{ devices: [{ id, label, browser, os, firstSeenAt, lastSeenAt, current }], max: 20 }`, most recently seen first. `label` is built from the fixed browser and OS families ("Firefox on Linux", "Firefox", "Browser on Linux", "Unknown device"); `current` is true for the row matching this request's `mynotes_device` cookie. No hash, cookie, User-Agent, or address is returned |
+| `DELETE /api/auth/devices/:id` | session, CSRF, Origin, JSON body `{}` (viewers and guests too: write-gate allowlist) | `{}` | `{ ok: true }`; 404 `{ error: "Device not found" }` for an unknown id, another account's device, or a malformed id. Audited `auth.device_forgotten`. Sessions are untouched |
+| `DELETE /api/auth/devices` | same | `{}` | `{ ok: true, forgotten }` (how many rows went). Audited `auth.devices_forgotten` when any did. Sessions are untouched |
+
+Sign-in side effects. Every successful sign-in (`POST /api/auth/login`, `POST /api/auth/register`, the Google callback, `POST /api/auth/google/second-factor`) sets, after the session cookie, `mynotes_device=<43 base64url chars>; Max-Age=34560000; Path=/; HttpOnly; SameSite=Lax` (plus `Secure` on https). A valid cookie is kept, a missing or malformed one replaced. When the account has no `sign_in_devices` row for SHA-256(`device:<user id>:<cookie>`), a row is added (the 20 most recently seen are kept), an access notice `new_sign_in` is written (bell line "New sign-in from <label>", link `/settings/security`), and security mail `security.new_sign_in` is queued, except for the sign-in that creates the account (registration, invite acceptance, or a Google sign-up). The mail goes only to verified addresses, coalesces per account (`security.new_sign_in:<user id>`) while queued, and waits until 10 minutes after the previous one was sent. Any authenticated request moves the device's `last_seen_at` at most hourly; a session from before 043 (`sessions.legacy_device = 1`) adds its browser without notice or mail on its first request and sets the cookie then.
+
+Welcome mail (`account.welcome`, account class). Accounts created by `createAccount` (registration, invites, Google sign-up) start with `users.welcome_mail = 'pending'`; every other account has NULL and never gets it. The first sign-in queues it with `not_before` = now + 60 s (`queued`) when email is on and the address verified; `waiting` when unverified (verifying within 7 days of registration, by link or by linking Google, queues it then); `skipped` when email is off or the wait ran out.
 
 ### Google sign-in (Wave 35)
 

@@ -2,7 +2,7 @@
 
 Only open work lives here. Shipped work is in [CHANGELOG.md](CHANGELOG.md), the docs site ("What's new") and `git log`. Plans of record: `DEVELOPMENT_PLAN.md` and `docs/plan/research/`. Contracts: [API](docs/plan/API_CONTRACTS.md) · [Threat model](docs/plan/THREAT_MODEL.md) · [Test plan](docs/plan/TEST_PLAN.md).
 
-**Current state (2026-10-07):** production runs **v0.30.0** (`a30e684`, Agentic chat AC-E knowledge bases; backup `mynotes-20261006T190706Z.tar.gz`). The agentic chat plan (AC-A…AC-E) is complete. Released migrations are immutable: **001–042**. Messages takes **043**.
+**Current state (2026-10-07):** production runs **v0.30.0** (`a30e684`, Agentic chat AC-E knowledge bases; backup `mynotes-20261006T190706Z.tar.gz`). The agentic chat plan (AC-A…AC-E) is complete. Released migrations are immutable: **001–042**. Migration **043** is the recognised devices and welcome mail (`email-later`); Messages takes **044**.
 
 ## In flight
 
@@ -10,7 +10,7 @@ Nothing. Waiting for the operator's next pick.
 
 ## Next features (operator to pick)
 
-- [ ] **Messages module** (Slack-like: channels, DMs, threads, notes tab, webhooks, unfurl, reactions). The plan is ready: `docs/plan/research/2026-09-30-messages-module.md`, migration 043. Waiting for the operator's go-ahead.
+- [ ] **Messages module** (Slack-like: channels, DMs, threads, notes tab, webhooks, unfurl, reactions). The plan is ready: `docs/plan/research/2026-09-30-messages-module.md`, migration 044. Waiting for the operator's go-ahead.
 - [ ] **AC-E deferred:**
   - changing a knowledge base's model or dimensions after creation
   - per-source chunk previews
@@ -18,7 +18,6 @@ Nothing. Waiting for the operator's next pick.
   - a search-specific rate limit for keys
   - a hook for group-membership changes (search re-checks access today, so this is not a leak)
   - a Re-index-all limit that survives a restart (it is kept in memory)
-- [ ] **Email "later" items** (`docs/plan/research/2026-09-28-outbound-email.md`): a "new sign-in" security mail (needs device info Nook doesn't store), and a welcome mail.
 
 ## Small UI follow-ups
 

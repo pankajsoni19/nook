@@ -49,7 +49,8 @@ export function createAccount(input: CreateAccountInput) {
     // had nobody to promote). The check and the insert share this transaction, so two concurrent
     // registrations cannot both become admin. A usable invite implies an active admin (D162).
     role = currentCount === 0 || !hasActiveAdmin() ? "admin" : invite ? invite.role : config.signupRole;
-    db.query("INSERT INTO users (id, email, display_name, password_hash, created_at, role) VALUES (?, ?, ?, ?, ?, ?)")
+    // welcome_mail 'pending' (migration 043): the first sign-in queues the welcome mail (server/mail/signInMail.ts).
+    db.query("INSERT INTO users (id, email, display_name, password_hash, created_at, role, welcome_mail) VALUES (?, ?, ?, ?, ?, ?, 'pending')")
       .run(id, input.email, input.displayName, input.passwordHash, timestamp, role);
     if (role === "admin") recordBootstrapAdmin(id, timestamp);
     ensureDefaultFolder(id);

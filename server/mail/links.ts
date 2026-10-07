@@ -62,6 +62,12 @@ export const paths = {
   unsubscribeApi: (value: string) => `/api/mail/unsubscribe?t=${token(value)}`
 } as const;
 
+/**
+ * The one link in mail that is not under APP_ORIGIN: the published documentation (the README's
+ * "Documentation" link). A fixed constant, never built from data (T223 holds).
+ */
+export const DOCS_URL = "https://pankajsoni19.github.io/nook/";
+
 /** The origin mail links use. Tests pin it (golden files use https://nook.test). */
 let origin = config.appOrigin;
 

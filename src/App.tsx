@@ -62,6 +62,7 @@ import { passwordResetOffered, registrationPrompt, type RegistrationInfo } from 
 import { initialMailLink, UnsubscribePage, VerifyEmailPage } from "./auth/mailPages";
 import { FORGOT_PATH, ForgotPasswordPage, initialPasswordLink, ResetPasswordPage, takeNewResetLink, takePasswordLinkFromLocation } from "./auth/passwordPages";
 import { ChangePasswordCard } from "./auth/ChangePassword";
+import { RecognisedDevices } from "./auth/RecognisedDevices";
 import { Avatar } from "./ui/Avatar";
 import { usePageScrollKeys, workspaceScroller } from "./ui/pageScrollKeys";
 import { setSelfAvatar } from "./ui/selfAvatar";
@@ -636,6 +637,7 @@ function SettingsPage({ session, modules, googleResult = null, navigate, flash, 
     {googleNoticeLine}
     {!state.setupRequired && (!account || (account.methods.password && account.hasPassword) ? <ChangePasswordCard totpEnabled={state.enabled} passwordReset={appInfo.passwordReset === true} /> : <PasswordStateCard account={account} />)}
     {!state.setupRequired && account && <GoogleAccountCard account={account} totpEnabled={state.enabled} onChanged={reloadAccount} />}
+    {!state.setupRequired && <RecognisedDevices />}
     <div className="settings-section-heading"><span className="settings-icon"><Smartphone /></span><div><h3 id="security-heading">Two-factor authentication</h3><p>Protect your account with a six-digit code from Google Authenticator or another TOTP app.</p></div></div>
     {state.setupRequired && <div className="settings-warning"><Lock />Two-factor authentication is required before you can use your notes.</div>}
     {error && <p className="form-error" role="alert">{error}</p>}

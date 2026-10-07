@@ -3,6 +3,7 @@ import { presentItem } from "./effective";
 import { ACCESS_KINDS, type AccessKind, type Level } from "./levels";
 import { vaultTitleFor } from "../vault/access";
 import { sharedTitleFor } from "../agents/sharing";
+import { deviceLabelFromCode } from "../deviceLabels";
 
 const LEVEL_WORDS: Record<Level, string> = { view: "Can view", comment: "Can comment", edit: "Can edit", manage: "Manager" };
 
@@ -36,14 +37,17 @@ export type AccessNoticeKind = "share_removed" | "share_lowered" | "access_reset
   | "knowledge_base_shared"
   // Wave 43 fixes (review L4): a manager changed the agent's system prompt, tools, or direct Nook writes,
   // or the change turned on the trifecta. To the agent's owner; `count` carries AGENT_CHANGE_PARTS bits.
-  | "agent_changed";
+  | "agent_changed"
+  // Migration 043 (outbound email plan #9): a sign-in from a device or browser the account had not
+  // used. The resource is `device` with the `browser:os` family codes (server/deviceLabels.ts), never text.
+  | "new_sign_in";
 
 export type AccessNotice = {
   userId: string;
   kind: AccessNoticeKind;
   actorId: string | null;
   targetUserId?: string | null;
-  resource?: { kind: AccessKind | "vault" | "agent" | "chat" | "knowledge_base"; id: string } | null;
+  resource?: { kind: AccessKind | "vault" | "agent" | "chat" | "knowledge_base" | "device"; id: string } | null;
   groupId?: string | null;
   keyId?: string | null;
   count?: number | null;
@@ -80,6 +84,7 @@ export const ACCESS_NOTICE_HREF = "/notifications";
 const isAccessKind = (value: string | null): value is AccessKind => value !== null && (ACCESS_KINDS as readonly string[]).includes(value);
 
 function line(row: NoticeRow, recipientId: string) {
+  if (row.kind === "new_sign_in") return `New sign-in from ${deviceLabelFromCode(row.resource_id)}`;
   const actor = row.actor_name ?? "An admin";
   if (row.resource_kind === "vault" && row.resource_id) {
     const title = vaultTitleFor(recipientId, row.resource_id);
@@ -216,6 +221,8 @@ export function listAccessNotices(userId: string, options: { unread: boolean; li
       : row.kind === "agent_changed" && row.resource_id && sharedTitleFor("agent", row.resource_id, userId) !== null ? `/settings/agents/${row.resource_id}`
       // Wave 44 (AC-E): a knowledge base opens its page in Settings → Knowledge.
       : row.kind === "knowledge_base_shared" && row.resource_id && sharedTitleFor("knowledge_base", row.resource_id, userId) !== null ? `/settings/knowledge/${row.resource_id}`
+      // Migration 043: a new sign-in opens Settings → Security, where the recognised devices are.
+      : row.kind === "new_sign_in" ? "/settings/security"
       : ACCESS_NOTICE_HREF,
     late: false, read: row.read_at !== null, createdAt: row.created_at, occurrenceStart: null
   }));

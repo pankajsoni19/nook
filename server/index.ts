@@ -13,6 +13,7 @@ import { hit, invitePreviewLimited, registerLimited, resetRegistrationRateLimit,
 import { registerGoogleAccountRoutes, registerGoogleRoutes } from "./google/routes";
 import { googleResetNotice } from "./google/linkAdmin";
 import { createSession, logoutCurrentSession, requireAuth, requireMutationSafety, type AppEnv } from "./auth";
+import { registerDeviceRoutes } from "./signInDevices";
 import { editableNote, listReadableFolders, noteLevel, ownedNote, readableNote, readableNotePredicate, visibleNoteFolderIdExpression } from "./access";
 import { checksum, storage, withNoteLock } from "./storage";
 import { startSweeper } from "./sweeper";
@@ -262,7 +263,8 @@ app.post("/api/auth/register", async (c) => {
     if ((error as { code?: string }).code?.includes("CONSTRAINT")) return c.json({ error: "An account with that email already exists" }, 409);
     throw error;
   }
-  const csrfToken = await createSession(c, id);
+  // The sign-in that creates the account: its device is recorded without a "New sign-in" mail.
+  const csrfToken = await createSession(c, id, { method: "password", registered: true });
   audit(id, null, "auth.register");
   // Everyone else verifies their address before Nook sends them anything but security mail.
   enqueueVerifyMail(id);
@@ -295,9 +297,11 @@ app.post("/api/auth/login", async (c) => {
     audit(user.id, null, "auth.login_blocked");
     return c.json({ error: "This account has been blocked. Contact your Nook administrator.", code: "ACCOUNT_BLOCKED" }, 403);
   }
+  let method: "password" | "password_totp" | "password_recovery" = "password";
   if (user.totp_enabled_at) {
     if (!body.totpCode && !body.recoveryCode) return c.json({ error: "Enter your six-digit authentication code", requiresTotp: true }, 428);
     const usedRecoveryCode = body.recoveryCode !== undefined;
+    method = usedRecoveryCode ? "password_recovery" : "password_totp";
     const validFactor = body.recoveryCode !== undefined
       ? consumeRecoveryCode(user, body.recoveryCode)
       : consumeTotp(user, body.totpCode!) !== null;
@@ -310,7 +314,7 @@ app.post("/api/auth/login", async (c) => {
       mailTwoFactor(user.id, "recovery_used");
     }
   }
-  const csrfToken = await createSession(c, user.id);
+  const csrfToken = await createSession(c, user.id, { method });
   audit(user.id, null, "auth.login");
   return c.json({
     user: { id: user.id, email: user.email, displayName: user.display_name, role: user.role, avatarUrl: avatarUrlFor(user.id) },
@@ -375,6 +379,8 @@ registerKeyRoutes(app);
 
 // Settings → Security → Change password (Wave 30).
 registerPasswordChangeRoute(app);
+// Settings → Security → Recognised devices (migration 043).
+registerDeviceRoutes(app);
 // Settings → Security → Google sign-in and re-authentication state (Wave 35), and avatars (D299).
 registerGoogleAccountRoutes(app);
 registerAvatarRoute(app);

@@ -236,6 +236,7 @@ const NOT_CONTENT = new Set([
   "reminders.user_id", "notifications.user_id", "push_subscriptions.user_id", "calendar_feeds.user_id", "user_preferences.user_id",
   "email_prefs.user_id", "mail_outbox.user_id", "auth_tokens.user_id", "email_mutes.user_id", "mail_share_log.user_id", "mail_share_log.actor_id",
   "access_notices.user_id", "access_notices.actor_id", "access_notices.target_user_id", "google_identities.user_id", "google_auth_flows.user_id",
+  "sign_in_devices.user_id",
   "mcp_api_keys.user_id", "mcp_api_keys.created_by", "mcp_api_keys.revoked_by",
   // Logs keep ids (set to NULL) and are not content.
   // Only declared foreign keys are scanned: a column that holds a user id without one (for example

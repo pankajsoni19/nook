@@ -499,7 +499,11 @@ describe("existing accounts (D292, D293, HIGH-1, MEDIUM-1, T254, T255)", () => {
     expect(userRow(squatter.email)!.google_link_allowed_until).toBeNull();
     expect(userRow(squatter.email)!.google_reset_notice_at).toBeNull();
 
+    // Migration 043: the reset clears the account's recognised devices too.
+    db.query("INSERT INTO sign_in_devices (id, user_id, token_hash, browser, os, first_seen_at, last_seen_at) VALUES (?, ?, ?, 'firefox', 'linux', ?, ?)")
+      .run(crypto.randomUUID(), squatter.userId, "d".repeat(64), new Date().toISOString(), new Date().toISOString());
     expect((await request(`/team/${squatter.userId}/google/allow`, { method: "POST", body: JSON.stringify({ reset: true, password: admin.password }) }, admin)).status).toBe(200);
+    expect(db.query("SELECT COUNT(*) AS count FROM sign_in_devices WHERE user_id = ?").get(squatter.userId)).toEqual({ count: 0 });
     const owner = await googleSignIn(workspace(squatter.email));
     const body = (await (await fetch(`${origin}/api/auth/me`, { headers: { Cookie: owner.session! } })).json()) as { notices: { googleReset: { at: string; counts: Record<string, number> } | null }; csrfToken: string };
     expect(body.notices.googleReset?.counts).toMatchObject({ sessions: 1, password: 1 });
@@ -511,7 +515,8 @@ describe("existing accounts (D292, D293, HIGH-1, MEDIUM-1, T254, T255)", () => {
 
   test("section 2: allow, reset, re-link allowance, admin unlink, and a completed re-link reach the member's bell", async () => {
     const admin = await adminUser();
-    const notices = (userId: string) => db.query("SELECT kind, actor_id, count FROM access_notices WHERE user_id = ? ORDER BY created_at, rowid").all(userId) as Array<{ kind: string; actor_id: string | null; count: number | null }>;
+    // Each Google sign-in here comes from a new device (no cookie jar), so its "new_sign_in" notices (043) are left out.
+    const notices = (userId: string) => db.query("SELECT kind, actor_id, count FROM access_notices WHERE user_id = ? AND kind <> 'new_sign_in' ORDER BY created_at, rowid").all(userId) as Array<{ kind: string; actor_id: string | null; count: number | null }>;
     const allow = (target: Session | string, body: Record<string, unknown> = {}) => request(`/team/${typeof target === "string" ? target : target.userId}/google/allow`, { method: "POST", body: JSON.stringify({ reset: false, password: admin.password, ...body }) }, admin);
 
     const plain = await createUser("Bell allow");
@@ -542,7 +547,7 @@ describe("existing accounts (D292, D293, HIGH-1, MEDIUM-1, T254, T255)", () => {
     expect(googleResetParts(relinked.count!)).toEqual(["signed-in sessions", "the password"]);
     // The bell lines: ids and counts rendered at read time, no address or title.
     const { listAccessNotices } = await import("../server/access/notices");
-    expect(listAccessNotices(linked.userId, { unread: false, limit: 10 }).map((notice) => notice.title)).toEqual([
+    expect(listAccessNotices(linked.userId, { unread: false, limit: 10 }).map((notice) => notice.title).filter((title) => !title.startsWith("New sign-in from"))).toEqual([
       "A new Google account was linked to your account; removed signed-in sessions and the password",
       "An admin allowed your account to be re-linked: the next Google sign-in with your address takes it over".replace("An admin", (db.query("SELECT display_name AS name FROM users WHERE id = ?").get(admin.userId) as { name: string }).name),
       `${(db.query("SELECT display_name AS name FROM users WHERE id = ?").get(admin.userId) as { name: string }).name} unlinked Google from your account`

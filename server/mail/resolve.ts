@@ -15,6 +15,7 @@ import { isMuted } from "./mutes";
 import { resolveEventChanged, resolveReminder } from "./calendarMail";
 import { resolveBinExpiring, resolveSprint } from "./laterMail";
 import { resolveDigest } from "./digest";
+import { resolveNewSignIn, resolveWelcome } from "./signInMail";
 import type { TemplateName } from "./registry";
 import type { AssignedCard, CommentExcerpt, SharedItem, SharedKind } from "./templates/activity";
 import type { AccountEvent, PasswordEvent, TwoFactorEvent } from "./templates/security";
@@ -28,7 +29,7 @@ import type { AccountEvent, PasswordEvent, TwoFactorEvent } from "./templates/se
  */
 
 export type Recipient = { id: string; email: string; displayName: string; role: string; tz: string };
-export type Resolution = { data: unknown } | { skip: "access_lost" | "empty" | "muted" };
+export type Resolution = { data: unknown } | { skip: "access_lost" | "empty" | "muted" | "unverified" };
 
 type Payload = Record<string, unknown>;
 const ids = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
@@ -240,6 +241,8 @@ export function resolvePayload(template: TemplateName, payload: Payload, recipie
     case "tasks.sprint": return resolveSprint(payload, recipient);
     case "bin.expiring": return resolveBinExpiring(recipient, nowMs);
     case "digest.summary": return resolveDigest(payload, recipient, nowMs);
+    case "security.new_sign_in": return resolveNewSignIn(payload, recipient);
+    case "account.welcome": return resolveWelcome(recipient);
     // Invites are sent synchronously and never queued (D254).
     case "team.invite": return { skip: "empty" };
   }

@@ -1,9 +1,9 @@
-import { inviteTemplate, passwordResetTemplate, testTemplate, verifyTemplate } from "./templates/account";
+import { inviteTemplate, passwordResetTemplate, testTemplate, verifyTemplate, welcomeTemplate } from "./templates/account";
 import { assignedTemplate, commentTemplate, proposalsTemplate, sharedTemplate } from "./templates/activity";
 import { eventChangedTemplate, reminderTemplate } from "./templates/calendar";
 import { binExpiringTemplate, sprintTemplate } from "./templates/later";
 import { digestTemplate } from "./templates/digest";
-import { accountEventTemplate, apiKeyCreatedTemplate, passwordChangedTemplate, roleChangedTemplate, twoFactorTemplate } from "./templates/security";
+import { accountEventTemplate, apiKeyCreatedTemplate, newSignInTemplate, passwordChangedTemplate, roleChangedTemplate, twoFactorTemplate } from "./templates/security";
 import type { TemplateDef } from "./templates/types";
 
 /**
@@ -31,7 +31,10 @@ export const TEMPLATES = {
   "digest.summary": digestTemplate,
   // Wave 30 (E3).
   "account.password_reset": passwordResetTemplate,
-  "security.password_changed": passwordChangedTemplate
+  "security.password_changed": passwordChangedTemplate,
+  // The plan's "later" items (#9, #14), with migration 043.
+  "security.new_sign_in": newSignInTemplate,
+  "account.welcome": welcomeTemplate
 } as const;
 
 export type TemplateName = keyof typeof TEMPLATES;
@@ -61,7 +64,16 @@ export function previewFixtures(): Array<{ id: string; template: TemplateName; d
     { id: "security.password_changed.google_linked", template: "security.password_changed", data: { event: "google_linked", at: "2026-09-28T09:00:00.000Z" } },
     { id: "security.account.google_unlinked_self", template: "security.account", data: { event: "google_unlinked_self", actorName: null, at: "2026-09-28T09:00:00.000Z" } },
     { id: "security.account.google_reset", template: "security.account", data: { event: "google_reset", actorName: "Priya Admin", at: "2026-09-28T09:00:00.000Z", counts: { sessions: 2, keys: 1, feeds: 0, items: 3, shares: 4, groupGrants: 1, invites: 0, routines: 1, password: 1, twoFactor: 1 } } },
-    { id: "security.account.sessions_revoked", template: "security.account", data: { event: "sessions_revoked", actorName: "Priya Admin", at: "2026-09-28T09:00:00.000Z" } }
+    { id: "security.account.sessions_revoked", template: "security.account", data: { event: "sessions_revoked", actorName: "Priya Admin", at: "2026-09-28T09:00:00.000Z" } },
+    { id: "security.new_sign_in.many", template: "security.new_sign_in", data: { total: 7, signIns: [
+      { browser: "chrome", os: "android", method: "google", at: "2026-09-28T09:20:00.000Z" },
+      { browser: "safari", os: "ios", method: "password", at: "2026-09-28T09:15:00.000Z" },
+      { browser: "edge", os: "windows", method: "password_recovery", at: "2026-09-28T09:12:00.000Z" },
+      { browser: "other", os: "other", method: "google_totp", at: "2026-09-28T09:10:00.000Z" },
+      { browser: "firefox", os: "other", method: "password", at: "2026-09-28T09:05:00.000Z" },
+      { browser: "firefox", os: "linux", method: "password_totp", at: "2026-09-28T09:00:00.000Z" }
+    ] } },
+    { id: "account.welcome.admin", template: "account.welcome", data: { displayName: "Priya Shah", role: "admin" } }
   ];
 }
 
