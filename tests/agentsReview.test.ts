@@ -9,6 +9,7 @@ const { config } = await import("../server/config");
 const { setAgentsKeyForTests, agentsStatus } = await import("../server/agents/status");
 const { secretHint } = await import("../server/agents/secrets");
 const { windowTurns } = await import("../server/agents/runs");
+const { cutUsage, partialUsage } = await import("../server/agents/loop");
 const { channelOf } = await import("../server/agents/stream");
 const { listChats } = await import("../server/agents/chats");
 
@@ -292,6 +293,27 @@ describe("review: search, Bin, and resume edges", () => {
     expect(message.status).toBe("complete");
     expect(message.content.length).toBeLessThanOrEqual(AGENT_BOUNDS.assistantMessageChars);
     expect(message.content.endsWith("[truncated: the reply was longer than allowed]")).toBe(true);
+    // Charged for what was kept (TODO "usage charged on cut replies"): the provider reported 300 KiB ÷ 4
+    // output tokens; the run, the message, and the day's usage count the provider's prompt plus the kept text ÷ 4.
+    const kept = Math.ceil(AGENT_BOUNDS.assistantMessageChars / 4);
+    const row = db.query("SELECT prompt_tokens, completion_tokens, tokens_estimated FROM agent_runs WHERE id = ?").get(runId) as { prompt_tokens: number; completion_tokens: number; tokens_estimated: number };
+    expect(row).toMatchObject({ completion_tokens: kept, tokens_estimated: 1 });
+    expect(row.completion_tokens).toBeLessThan(300 * 1024 / 4);
+    expect(row.prompt_tokens).toBeGreaterThan(0);
+    const stored = db.query("SELECT usage_json FROM chat_messages WHERE id = ?").get(started.body.assistantMessage.id) as { usage_json: string };
+    expect(JSON.parse(stored.usage_json)).toMatchObject({ promptTokens: row.prompt_tokens, completionTokens: kept, estimated: true });
+  });
+
+  test("cut usage: within the bound the provider's figures stand; past it the output is the kept text ÷ 4, estimated", () => {
+    const cap = AGENT_BOUNDS.assistantMessageChars;
+    const reported = { promptTokens: 120, completionTokens: 90_000, estimated: false, cachedTokens: 40 };
+    expect(cutUsage(reported, "x".repeat(cap))).toBe(reported);
+    expect(cutUsage(reported, "x".repeat(cap + 1))).toEqual({ promptTokens: 120, completionTokens: Math.ceil(cap / 4), estimated: true, cachedTokens: 40 });
+    // Never more than the provider reported.
+    expect(cutUsage({ promptTokens: 5, completionTokens: 10, estimated: false }, "x".repeat(cap + 1))).toEqual({ promptTokens: 5, completionTokens: 10, estimated: true });
+    // A stopped call that overflowed is charged the same way; one without a provider figure is estimated as before.
+    expect(partialUsage({ started: true, content: "x".repeat(cap + 1), usage: reported, model: null, promptChars: 400 })).toEqual({ promptTokens: 120, completionTokens: Math.ceil(cap / 4), estimated: true, cachedTokens: 40 });
+    expect(partialUsage({ started: true, content: "abcdefgh", usage: null, model: null, promptChars: 400 })).toEqual({ promptTokens: 100, completionTokens: 2, estimated: true });
   });
 
   test("MCP agents:read tools honour chat_roles, and editing an agent needs create_roles (L11)", async () => {

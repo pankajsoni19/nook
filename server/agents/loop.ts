@@ -33,7 +33,18 @@ export type StreamProgress = { started: boolean; content: string; usage: TokenUs
 export const newProgress = (messages: readonly ChatTurn[]): StreamProgress => ({ started: false, content: "", usage: null, model: null, promptChars: messages.reduce((sum, turn) => sum + (turn.content?.length ?? 0), 0) });
 
 /** The usage of a call that ended early: the provider's when it reported one, else prompt and kept text ÷ 4. */
-export const partialUsage = (progress: StreamProgress): TokenUsage => progress.usage ?? { promptTokens: Math.ceil(progress.promptChars / 4), completionTokens: estimateTokens(progress.content), estimated: true };
+export const partialUsage = (progress: StreamProgress): TokenUsage => progress.usage ? cutUsage(progress.usage, progress.content) : { promptTokens: Math.ceil(progress.promptChars / 4), completionTokens: estimateTokens(progress.content), estimated: true };
+
+/**
+ * A reply cut at the stored bound (`AGENT_BOUNDS.assistantMessageChars`; the message ends with the
+ * truncation marker) is charged for what was kept, as a stopped reply is: the prompt as the provider
+ * reported it, and the kept text ÷ 4 for the output, marked estimated. The text past the cut was
+ * dropped, never shown or stored, so it is not charged. Usage of a reply within the bound is unchanged.
+ */
+export function cutUsage(usage: TokenUsage, content: string): TokenUsage {
+  if (content.length <= AGENT_BOUNDS.assistantMessageChars) return usage;
+  return { ...usage, completionTokens: Math.min(usage.completionTokens, estimateTokens(content.slice(0, AGENT_BOUNDS.assistantMessageChars))), estimated: true };
+}
 
 export class ProviderError extends Error {
   /** The fuller excerpt for admin surfaces (Test, the models list); `message` is what a chat's owner sees (review L3). */
@@ -229,8 +240,10 @@ export async function completeStreaming(connection: ProviderConnection, request:
   }
   if (!usage) {
     const promptChars = request.messages.reduce((sum, turn) => sum + (turn.content?.length ?? 0), 0);
-    usage = { promptTokens: Math.ceil(promptChars / 4), completionTokens: estimateTokens(content), estimated: true };
+    usage = { promptTokens: Math.ceil(promptChars / 4), completionTokens: estimateTokens(content.slice(0, AGENT_BOUNDS.assistantMessageChars)), estimated: true };
   }
+  // A reply cut at the stored bound is charged for the kept text only (TODO "usage charged on cut replies").
+  usage = cutUsage(usage, content);
   return { content, finishReason, usage, model, toolCalls: [...calls.entries()].sort((a, b) => a[0] - b[0]).map(([, call]) => call) };
 }
 
