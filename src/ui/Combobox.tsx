@@ -16,6 +16,8 @@ export type ComboboxProps<V extends string> = {
   selectedOptions?: Option<V>[];
   /** Offers a "Create “x”" row when nothing matches the text exactly (tags). */
   onCreate?: (label: string) => Promise<Option<V>>;
+  /** The Create row's text for what was typed (default `Create “x”`): a free-text field says `Use “x”`. */
+  createLabel?: (text: string) => string;
   maxSelected?: number;
   label: string;
   placeholder?: string;
@@ -48,11 +50,11 @@ export type ComboboxHandle = { open: () => void };
 const CREATE_VALUE = "\u0000create";
 
 /** The "Create" row when the text matches no option exactly. */
-export function createRow(query: string, options: readonly { label: string }[], canCreate: boolean): Option | null {
+export function createRow(query: string, options: readonly { label: string }[], canCreate: boolean, createLabel?: (text: string) => string): Option | null {
   const label = query.trim();
   if (!canCreate || !label) return null;
   if (options.some((option) => foldText(option.label) === foldText(label))) return null;
-  return { value: CREATE_VALUE, label: `Create “${label}”`, icon: <Plus /> };
+  return { value: CREATE_VALUE, label: createLabel ? createLabel(label) : `Create “${label}”`, icon: <Plus /> };
 }
 
 /**
@@ -83,7 +85,7 @@ export function pickFocusTarget(sheet: boolean, focusInside: boolean): "field" |
  * values (D91). Desktop: a popup under the field. Phones: a bottom sheet with a sticky search box
  * that Back closes (D69).
  */
-export function Combobox<V extends string>({ multiple = false, value, onChange, options, loadOptions, selectedOptions, onCreate, maxSelected = multiple ? Infinity : 1, label, placeholder = "Search…", placeholderWithValues = "", emptyText = "No matches", disabled = false, id, presentation = "auto", defaultOpen = false, onSheetClose, openOnFocus = false, handleRef, backspaceRemoves = true }: ComboboxProps<V>) {
+export function Combobox<V extends string>({ multiple = false, value, onChange, options, loadOptions, selectedOptions, onCreate, createLabel, maxSelected = multiple ? Infinity : 1, label, placeholder = "Search…", placeholderWithValues = "", emptyText = "No matches", disabled = false, id, presentation = "auto", defaultOpen = false, onSheetClose, openOnFocus = false, handleRef, backspaceRemoves = true }: ComboboxProps<V>) {
   const autoId = useId();
   const inputId = id ?? `${autoId}-input`;
   const listId = `${autoId}-listbox`;
@@ -118,7 +120,7 @@ export function Combobox<V extends string>({ multiple = false, value, onChange, 
   const atMax = value.length >= maxSelected && multiple;
   const matches = (loader ? loaded : filterOptions(options ?? [], query)).map((option) =>
     atMax && !value.includes(option.value) ? { ...option, disabled: true } : option);
-  const create = onCreate && !atMax ? createRow(query, matches, true) : null;
+  const create = onCreate && !atMax ? createRow(query, matches, true, createLabel) : null;
   const { shown } = comboboxRows(matches, create);
   // Focus moved back into the field by close(): not a reason to open again.
   const refocusing = useRef(false);
@@ -248,7 +250,7 @@ export function Combobox<V extends string>({ multiple = false, value, onChange, 
         return;
       }
       const typed = filterOptions(options ?? [], text).map((option) => atMax && !value.includes(option.value) ? { ...option, disabled: true } : option);
-      setActive(comboboxRows(typed, onCreate && !atMax ? createRow(text, typed, true) : null).firstActive);
+      setActive(comboboxRows(typed, onCreate && !atMax ? createRow(text, typed, true, createLabel) : null).firstActive);
     }}
     onClick={() => { if (!open) openList(); }}
     onFocus={() => { if (openOnFocus && !open && !sheet && !inSheet && !refocusing.current) openList(); }}

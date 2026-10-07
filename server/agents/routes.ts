@@ -11,7 +11,7 @@ import { chatDetail, createChat, deleteChat, forkChat, listChats, listSharedChat
 import { publicLinkFor, publicLinksOn, publicLinkState, revokePublicLink, roleMayPublish, upsertPublicLink } from "./publicShares";
 import { readShareAccess, shareLevel, writeShareAccess, type ShareKind } from "./sharing";
 import { subscribeChatUpdates } from "./chatUpdates";
-import { createProvider, deleteProvider, listProviders, providerModels, providerRow, providerSummary, testProvider, updateProvider } from "./providers";
+import { createProvider, deleteProvider, listProviders, providerChoices, providerModels, providerRow, providerSummary, testProvider, updateProvider } from "./providers";
 import { activeRunForChat, cancelChatRuns, cancelRun, confirmRun, dailyUsage, pendingConfirmationFor, runReadableBy, runSnapshot, startChatRun } from "./runs";
 import { readAgentSettings, roleMayChat, roleMayCreate, writeAgentSettings } from "./settings";
 import { AgentError, adminRecoveryAllowed, agentsStatus, recheckAgentsStatus, requireAgentsEnabled } from "./status";
@@ -282,6 +282,11 @@ export function registerAgentRoutes(app: Hono<AppEnv>) {
 
   // The caller's own usage today, for the budget indicator (before the :agentId routes).
   app.get("/api/agents/usage", handle(chatter((c) => ({ usage: dailyUsage(c.get("user").id) }))));
+  // The agent editor's provider picker: names and known models only, for anyone who may create (and so edit) agents.
+  app.get("/api/agents/providers", handle(chatter((c) => {
+    if (!roleMayCreate(c.get("user").role)) throw new AgentError(403, "ROLE_REFUSED", "Your role cannot create agents");
+    return { providers: providerChoices() };
+  })));
   // The tool picker's catalog (plan §12): servers the caller may use, and Nook's tools (bounded by the linked key when `agentId` is given).
   app.get("/api/agents/catalog", handle(chatter((c) => {
     const raw = c.req.query("agentId");

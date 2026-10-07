@@ -4,10 +4,11 @@ import { ApiError } from "../api";
 import { AccessSheet } from "../access/AccessSheet";
 import { hubDocumentTitle, keysTabRoute, NEW_AGENT, type Route } from "../router";
 import { EmojiPicker } from "../ui/EmojiPicker";
-import { Select } from "../ui/Select";
+import { Combobox } from "../ui/Combobox";
+import { Select, type Option } from "../ui/Select";
 import { useConfirm } from "../ui/useConfirm";
-import { AGENT_BOUNDS, type AgentApiUsage, type AgentDetail, type AgentSummary, type AgentToolRef, type KnowledgeCatalogBase, type LinkState, type NookLink, type ToolCatalog } from "../../shared/agents";
-import { agentApiUsage, agentsStatus, createAgent, deleteAgent, errorCode, getAgent, listAgents, messageOf, toolCatalog, updateAgent, type AgentsStatus } from "./chatApi";
+import { AGENT_BOUNDS, type AgentApiUsage, type AgentDetail, type AgentProviderChoice, type AgentSummary, type AgentToolRef, type KnowledgeCatalogBase, type LinkState, type NookLink, type ToolCatalog } from "../../shared/agents";
+import { agentApiUsage, agentProviders, agentsStatus, createAgent, deleteAgent, errorCode, getAgent, listAgents, messageOf, toolCatalog, updateAgent, type AgentsStatus } from "./chatApi";
 import { LinkNookKeySheet } from "./LinkNookKeySheet";
 import { TrifectaBadge } from "./ToolDisclosure";
 import { hasRef, knowledgePickerBases, nookGroups, nookWriteMode, orphanRefs, pickCounts, POLICY_BADGES, policyOptions, refKey, refName, setRefPolicy, toggleRef } from "./toolPicker";
@@ -58,7 +59,7 @@ export function AgentsSettings({ agentId, navigate, flash, onOpenChat }: { agent
   const row = (agent: AgentSummary) => <li key={agent.id}>
     <button type="button" className="agents-row" onClick={() => navigate({ ...toList, agentId: agent.id })}>
       <span className="agents-row-icon" aria-hidden="true">{agent.icon || "🤖"}</span>
-      <span className="agents-row-text"><strong>{agent.name}</strong><small>{agent.yourLevel !== "owner" ? `${agent.ownerName} · ${agent.yourLevel === "manage" ? "Manager" : "Can chat"} · ` : ""}{agent.description || "No description"} · {agent.model ?? status?.defaultModel ?? "default model"} · {agent.maxSteps} steps</small></span>
+      <span className="agents-row-text"><strong>{agent.name}</strong><small>{agent.yourLevel !== "owner" ? `${agent.ownerName} · ${agent.yourLevel === "manage" ? "Manager" : "Can chat"} · ` : ""}{agentRowDetail(agent, status?.defaultModel ?? null)}</small></span>
     </button>
     <button type="button" className="secondary-button" onClick={() => onOpenChat(agent.id)}>Chat</button>
   </li>;
@@ -74,12 +75,35 @@ export function AgentsSettings({ agentId, navigate, flash, onOpenChat }: { agent
   </section>;
 }
 
-export type EditorForm = { name: string; description: string; icon: string; systemPrompt: string; model: string; maxSteps: number; temperature: string; starters: string; directWrites: boolean; tools: AgentToolRef[] };
+/** The agent row's small line: description, the provider when the agent has its own, the model, and the step limit. */
+export const agentRowDetail = (agent: AgentSummary, defaultModel: string | null) =>
+  [agent.description || "No description", ...(agent.providerName ? [agent.providerName] : []), agent.model ?? agent.effectiveModel ?? defaultModel ?? "default model", `${agent.maxSteps} steps`].join(" · ");
+
+/** The Provider picker's value for `providerId: null`: follow whichever provider is the default, now and later. */
+export const DEFAULT_PROVIDER = "default";
+
+/** "Default (<the default's name>)", then each provider by name. */
+export function providerOptions(providers: AgentProviderChoice[]): Option<string>[] {
+  const fallback = providers.find((provider) => provider.isDefault);
+  return [{ value: DEFAULT_PROVIDER, label: fallback ? `Default (${fallback.name})` : "Default" }, ...providers.map((provider) => ({ value: provider.id, label: provider.name }))];
+}
+
+/** The provider a run would use: the chosen one, else the default (also after the chosen one was deleted). */
+export const effectiveProvider = (providers: AgentProviderChoice[], providerId: string | null) =>
+  providers.find((provider) => provider.id === providerId) ?? providers.find((provider) => provider.isDefault) ?? null;
+
+/** The model field's suggestions: the provider's known models, else just its default model; free text still works. */
+export function modelSuggestions(provider: AgentProviderChoice | null): Option<string>[] {
+  const models = provider?.models?.length ? provider.models : provider ? [provider.defaultModel] : [];
+  return models.map((model) => ({ value: model, label: model === provider?.defaultModel ? `${model} (default)` : model }));
+}
+
+export type EditorForm = { name: string; description: string; icon: string; systemPrompt: string; providerId: string | null; model: string; maxSteps: number; temperature: string; starters: string; directWrites: boolean; tools: AgentToolRef[] };
 
 /** Whether the editor's fields differ from the agent as loaded (Wave 41 QA Q2): such a form is never refilled by a background load. */
 export function editorDiffers(agent: AgentDetail, form: EditorForm) {
   return form.name !== agent.name || form.description !== agent.description || form.icon !== (agent.icon ?? "") || form.systemPrompt !== (agent.systemPrompt ?? "")
-    || form.model !== (agent.model ?? "") || form.maxSteps !== agent.maxSteps || form.temperature !== (agent.temperature === null ? "" : String(agent.temperature))
+    || (form.providerId ?? null) !== (agent.providerId ?? null) || form.model !== (agent.model ?? "") || form.maxSteps !== agent.maxSteps || form.temperature !== (agent.temperature === null ? "" : String(agent.temperature))
     || form.starters !== agent.starters.join("\n") || form.directWrites !== agent.nookDirectWrites || JSON.stringify(form.tools) !== JSON.stringify(agent.tools);
 }
 
@@ -90,6 +114,8 @@ function AgentEditor({ agentId, navigate, flash, canCreate, onOpenChat, keysRout
   const [description, setDescription] = useState("");
   const [icon, setIcon] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
+  const [providerId, setProviderId] = useState<string | null>(null);
+  const [providers, setProviders] = useState<AgentProviderChoice[] | null>(null);
   const [model, setModel] = useState("");
   const [maxSteps, setMaxSteps] = useState<number>(AGENT_BOUNDS.maxSteps.default);
   const [temperature, setTemperature] = useState("");
@@ -103,7 +129,7 @@ function AgentEditor({ agentId, navigate, flash, canCreate, onOpenChat, keysRout
   const [error, setError] = useState<string | null>(null);
   const [stale, setStale] = useState(false);
   const confirm = useConfirm();
-  const ids = { name: useId(), description: useId(), icon: useId(), prompt: useId(), model: useId(), steps: useId(), temperature: useId(), starters: useId(), direct: useId() };
+  const ids = { name: useId(), description: useId(), icon: useId(), prompt: useId(), provider: useId(), model: useId(), steps: useId(), temperature: useId(), starters: useId(), direct: useId() };
   const toList = { app: "settings" as const, section: "agents" as const };
 
   const fill = useCallback((detail: AgentDetail) => {
@@ -112,6 +138,7 @@ function AgentEditor({ agentId, navigate, flash, canCreate, onOpenChat, keysRout
     setDescription(detail.description);
     setIcon(detail.icon ?? "");
     setSystemPrompt(detail.systemPrompt ?? "");
+    setProviderId(detail.providerId);
     setModel(detail.model ?? "");
     setMaxSteps(detail.maxSteps);
     setTemperature(detail.temperature === null ? "" : String(detail.temperature));
@@ -127,6 +154,13 @@ function AgentEditor({ agentId, navigate, flash, canCreate, onOpenChat, keysRout
       setCatalog(null);
     }
   }, [agentId, creating]);
+  const loadProviders = useCallback(async () => {
+    try {
+      setProviders((await agentProviders()).providers);
+    } catch {
+      setProviders([]);
+    }
+  }, []);
   // Wave 41 QA Q2: `flash` and `navigate` are new functions on every parent render (a toast clearing
   // re-renders it); kept in refs so `load` does not re-run then and wipe what is being typed.
   const flashRef = useRef(flash);
@@ -135,7 +169,7 @@ function AgentEditor({ agentId, navigate, flash, canCreate, onOpenChat, keysRout
   navigateRef.current = navigate;
   // The form differs from the agent as loaded: never refilled behind the person's back (only Reload does).
   const dirtyRef = useRef<string | null>(null);
-  dirtyRef.current = agent !== null && editorDiffers(agent, { name, description, icon, systemPrompt, model, maxSteps, temperature, starters, directWrites, tools }) ? agent.id : null;
+  dirtyRef.current = agent !== null && editorDiffers(agent, { name, description, icon, systemPrompt, providerId, model, maxSteps, temperature, starters, directWrites, tools }) ? agent.id : null;
   const load = useCallback(async (force = false) => {
     void loadCatalog();
     if (creating) return;
@@ -149,6 +183,7 @@ function AgentEditor({ agentId, navigate, flash, canCreate, onOpenChat, keysRout
     }
   }, [agentId, creating, fill, loadCatalog]);
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void loadProviders(); }, [loadProviders]);
   const onLinkChanged = useCallback((link: NookLink) => {
     setAgent((current) => current ? { ...current, linked: link !== null && (link.state === "active" || link.state === "grace"), linkState: link === null ? "none" : link.state === "active" || link.state === "grace" ? "live" : link.state === "revoked" ? "revoked" : link.state === "expired" ? "expired" : "inactive" } : current);
     void loadCatalog();
@@ -162,7 +197,7 @@ function AgentEditor({ agentId, navigate, flash, canCreate, onOpenChat, keysRout
     if (temp !== null && (!Number.isFinite(temp) || temp < 0 || temp > 2)) return setError("Temperature is between 0 and 2.");
     setBusy(true);
     setError(null);
-    const input = { name: name.trim(), description: description.trim(), icon: icon.trim() || null, systemPrompt, model: model.trim() || null, maxSteps, temperature: temp, starters: starters.split("\n").map((line) => line.trim()).filter(Boolean).slice(0, AGENT_BOUNDS.starters), tools, nookDirectWrites: directWrites };
+    const input = { name: name.trim(), description: description.trim(), icon: icon.trim() || null, systemPrompt, providerId, model: model.trim() || null, maxSteps, temperature: temp, starters: starters.split("\n").map((line) => line.trim()).filter(Boolean).slice(0, AGENT_BOUNDS.starters), tools, nookDirectWrites: directWrites };
     try {
       if (creating) {
         const { agent: created } = await createAgent(input);
@@ -217,8 +252,7 @@ function AgentEditor({ agentId, navigate, flash, canCreate, onOpenChat, keysRout
       <textarea id={ids.prompt} className="agents-prompt" value={systemPrompt} maxLength={AGENT_BOUNDS.systemPrompt} rows={10} spellCheck={false} onChange={(event) => setSystemPrompt(event.target.value)} />
       <p className="file-dialog-hint">A fixed preamble goes before it: tool results and documents are untrusted, and secrets are never revealed. Put no secrets in prompts.</p>
       <h4>Model</h4>
-      <label htmlFor={ids.model}>Model override</label>
-      <input id={ids.model} value={model} maxLength={AGENT_BOUNDS.model} autoComplete="off" spellCheck={false} placeholder="The provider's default model" onChange={(event) => setModel(event.target.value)} />
+      <ProviderModelFields ids={ids} providers={providers} providerId={providerId} model={model} onProvider={setProviderId} onModel={setModel} />
       <span className="ai-label" id={ids.steps}>Max steps</span>
       <Select<string> labelledBy={ids.steps} label="Max steps" value={String(maxSteps)} onChange={(value) => setMaxSteps(Number(value))} options={Array.from({ length: AGENT_BOUNDS.maxSteps.max }, (_, index) => ({ value: String(index + 1), label: `${index + 1}${index + 1 === AGENT_BOUNDS.maxSteps.default ? " (default)" : ""}` }))} />
       <p className="file-dialog-hint">Model calls per answer. Without tools an answer is one call; the limit matters once tools arrive.</p>
@@ -247,6 +281,31 @@ function AgentEditor({ agentId, navigate, flash, canCreate, onOpenChat, keysRout
   </div>;
 }
 
+/**
+ * The Model section's Provider and Model fields. Provider is a custom select (D91): "Default (<name>)"
+ * keeps `providerId: null`, so the agent follows whichever provider is the default later. Model is a
+ * single-value combobox: the chosen provider's known models as suggestions, any typed id with
+ * "Use “x”", and empty (the chip's ×) for the provider's default, which the placeholder names.
+ */
+export function ProviderModelFields({ ids, providers, providerId, model, onProvider, onModel }: {
+  ids: { provider: string; model: string }; providers: AgentProviderChoice[] | null; providerId: string | null; model: string; onProvider: (id: string | null) => void; onModel: (model: string) => void;
+}) {
+  const list = providers ?? [];
+  const chosen = effectiveProvider(list, providerId);
+  const suggestions = modelSuggestions(chosen);
+  return <>
+    <span className="ai-label" id={ids.provider}>Provider</span>
+    {providers === null ? <p className="chat-muted" role="status">Loading providers…</p>
+      : <Select<string> labelledBy={ids.provider} label="Provider" value={providerId && list.some((provider) => provider.id === providerId) ? providerId : DEFAULT_PROVIDER}
+        onChange={(value) => onProvider(value === DEFAULT_PROVIDER ? null : value)} options={providerOptions(list)} />}
+    <p className="file-dialog-hint">{providerId === null ? "Default follows whichever provider an admin makes the default, now and later." : "Admins add providers in Settings → AI → Model providers."}</p>
+    <label htmlFor={ids.model}>Model</label>
+    <Combobox<string> id={ids.model} label="Model" value={model.trim() ? [model.trim()] : []} onChange={(next) => onModel(next.at(-1) ?? "")} options={suggestions}
+      onCreate={async (text) => ({ value: text.slice(0, AGENT_BOUNDS.model), label: text.slice(0, AGENT_BOUNDS.model) })} createLabel={(text) => `Use “${text}”`}
+      placeholder={chosen ? `${chosen.defaultModel} (the provider's default)` : "The provider's default model"} emptyText="Type a model id" />
+  </>;
+}
+
 /** What sharing an agent means (D356, D359, T311, T322), under the Access sheet. */
 export const AGENT_SHARE_NOTE = "Can view: they chat with it and never see its prompt or tools (prompts are not secret: the model can repeat them). Manager: they also edit and share it. Its Nook tools always run through each person's own linked key, never yours.";
 
@@ -264,7 +323,8 @@ function AgentInfo({ agent, onBack, onOpenChat, onLink, linking, onCloseLink, on
     {agent.trifecta && <TrifectaBadge />}
     <dl className="agents-info-list">
       <dt>Description</dt><dd>{agent.description || "No description"}</dd>
-      <dt>Model</dt><dd>{agent.model ?? "The provider's default model"} · up to {agent.maxSteps} steps</dd>
+      <dt>Provider</dt><dd>{agent.providerName ?? "The default provider"}</dd>
+      <dt>Model</dt><dd>{agent.model ?? agent.effectiveModel ?? "The provider's default model"} · up to {agent.maxSteps} steps</dd>
       {agent.starters.length > 0 && <><dt>Starters</dt><dd><ul>{agent.starters.map((starter) => <li key={starter}>{starter}</li>)}</ul></dd></>}
       <dt>Nook tools</dt><dd>{agent.usesNook ? agent.linked ? "They run through your linked Nook key." : agent.linkState !== "none" ? `${LINK_DEAD_SENTENCE[agent.linkState]}: link another to give it Nook's tools.` : "This agent can use Nook's tools through a key of yours. Without one it answers without them." : "This agent uses none of Nook's tools."}</dd>
     </dl>
