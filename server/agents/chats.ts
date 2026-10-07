@@ -5,6 +5,7 @@ import { usableAgent, type AgentRow } from "./agentsService";
 import { shareLevel, shareReadableSql } from "./sharing";
 import { publishChatUpdate } from "./chatUpdates";
 import { AgentError } from "./status";
+import { copyToolImages } from "./images";
 
 /**
  * Chats and their message trees (plan §6.1, D360): a chat belongs to its owner and one agent; its
@@ -332,6 +333,8 @@ export function forkChat(userId: string, chatId: string, messageId: string): Cha
       parent = copy;
     }
     db.query("UPDATE chats SET active_leaf_id = ? WHERE id = ?").run(parent, id);
+    // The copy's messages keep their tool-call lists, so they keep the pictures those calls returned (same ids).
+    copyToolImages(chatId, id, path.filter((row) => row.role === "assistant").map((row) => row.id));
     audit(userId, null, "agents.chat.fork", { chatId: id, messages: path.length, ...(source.owner_id !== userId ? { shared: true } : {}) });
     return summaryRows("c.id = $id", { id }, userId)[0]!;
   })();

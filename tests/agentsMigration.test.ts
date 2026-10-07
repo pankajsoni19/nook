@@ -71,7 +71,7 @@ const schemaOf = (db: Database, type: "index" | "trigger") => (db.query(`SELECT 
 describe("migration 039 agent chat", () => {
   test("is registered last, as 39, and creates every table of the plan", () => {
     // Wave 42: 040 (the Audit log guards) follows it.
-    expect(registeredMigrationIds.slice(registeredMigrationIds.indexOf(39))).toEqual([39, 40, 41, 42]);
+    expect(registeredMigrationIds.slice(registeredMigrationIds.indexOf(39))).toEqual([39, 40, 41, 42, 43]);
     expect(agentChatMigration.name).toBe("agent_chat");
     const db = openDb();
     const tables = (db.query("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all() as Array<{ name: string }>).map((row) => row.name);

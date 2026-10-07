@@ -132,7 +132,7 @@ describe("Markdown (D370, T303, T304)", () => {
 
   test("renders the supported blocks without ever producing HTML from the text", () => {
     const html = render("# Title\n\nSome *em* and **strong** and `code` and ~~del~~.\n\n- one\n- [x] done\n\n1. first\n\n> quote\n\n```js\nconsole.log(1)\n```\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\n---\n");
-    expect(html).toContain("<h2 class=\"chat-md-heading\">Title</h2>");
+    expect(html).toContain("<h2 class=\"chat-md-heading chat-md-h1\">Title</h2>");
     expect(html).toContain("<em>em</em>");
     expect(html).toContain("<strong>strong</strong>");
     expect(html).toContain("<code class=\"chat-md-code\">code</code>");
@@ -143,7 +143,7 @@ describe("Markdown (D370, T303, T304)", () => {
     expect(html).not.toContain("[x]");
     expect(html).toContain("<ol start=\"1\">");
     expect(html).toContain("<blockquote>");
-    expect(html).toContain("<pre><code>console.log(1)</code></pre>");
+    expect(html).toContain("<code>console.log(1)</code></pre>");
     expect(html).toContain("Copy");
     expect(html).toContain("class=\"chat-md-table\"");
     expect(html).toContain("<hr/>");
@@ -179,7 +179,7 @@ describe("Markdown (D370, T303, T304)", () => {
     const deep = Array.from({ length: 40 }, (_, index) => `${"  ".repeat(index)}- item`).join("\n");
     expect(render(deep)).toContain("<ul>");
     const open = render("Start\n\n```python\nprint(1)\n", true);
-    expect(open).toContain("<pre><code>print(1)");
+    expect(open).toContain("<code>print(1)");
     expect(splitStreaming("a\n\nb\n\n```\nc\n\nd")).toEqual({ settled: "a\n\nb\n\n", tail: "```\nc\n\nd" });
     expect(splitStreaming("no blank line")).toEqual({ settled: "", tail: "no blank line" });
   });

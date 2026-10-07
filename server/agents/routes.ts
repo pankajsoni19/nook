@@ -21,6 +21,7 @@ import { catalogFor, currentLink, linkableKeys, setLink } from "./tools";
 import { createServer, deleteServer, listServers, serverRow, serverSummary, setPolicies, syncServer, updateServer } from "./toolServers";
 import { ProviderError } from "./loop";
 import { agentApiUsage, auditFacets, auditRunDetail, auditVisibleTo, exportAuditRuns, listAuditRuns } from "./audit";
+import { proxyImage, toolImageResponse } from "./images";
 import "./bin";
 
 /**
@@ -220,6 +221,17 @@ export function registerAgentRoutes(app: Hono<AppEnv>) {
       ...(role === "admin" ? { hasProvider: db.query("SELECT 1 FROM agent_providers LIMIT 1").get() !== null } : {})
     });
   });
+
+  // --- Images in chats (D370 as amended, T304; server/agents/images.ts) ---
+  // An outside image the person chose to load: session only, the egress guard, image bytes only.
+  app.get("/api/agents/image-proxy", handle((c) => proxyImage(c)));
+  // A picture an MCP tool returned, to whoever can read the chat (the owner and the people it is shared with).
+  app.get("/api/chats/:chatId/tool-images/:imageId", handle((c) => {
+    const chatId = id(c, "chatId");
+    const imageId = id(c, "imageId");
+    readableChat(chatId, c.get("user").id);
+    return toolImageResponse(chatId, imageId);
+  }));
 
   // --- Admin: providers and policy (plan §4.1) ---
   app.get("/api/agents/admin/settings", handle(adminOnly(() => ({ settings: readAgentSettings() }))));

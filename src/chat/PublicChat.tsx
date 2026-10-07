@@ -37,8 +37,8 @@ export async function loadPublicSnapshot(token: string, fetcher: typeof fetch = 
  * without the app shell and without a session (src/main.tsx mounts it instead of the app). Minimal
  * chrome: the app's name, the chat's title, the agent's name, and the owner's display name; never an
  * email, an id, or another chat. Every turn is untrusted text, rendered through the same Markdown
- * renderer as the app (D370: no HTML, no remote images, links through a sheet that shows the full
- * address). Read-only; 390 px first. The link sheet closes on Back (D18).
+ * renderer as the app (D370: no HTML; no remote or Nook images, which stay chips, only embedded
+ * PNG/JPEG/GIF/WebP `data:` images; links through a sheet that shows the full address). Read-only; 390 px first. The link sheet closes on Back (D18).
  */
 export function PublicChat({ token, initial }: { token: string | null; initial?: PublicLoad }) {
   const [load, setLoad] = useState<PublicLoad>(initial ?? (token ? { state: "loading" } : { state: "missing" }));
@@ -66,7 +66,9 @@ export function PublicChat({ token, initial }: { token: string | null; initial?:
   const context = useMemo<RenderContext>(() => ({
     onExternalLink: (href) => setLink(href),
     // A Nook path in a public page is shown like any link: the reader may not have an account here.
-    onNookLink: (path) => setLink(new URL(path, window.location.origin).href)
+    onNookLink: (path) => setLink(new URL(path, window.location.origin).href),
+    // Signed out: nothing is proxied or fetched; outside and Nook images stay chips, data: images show.
+    images: { mode: "public" }
   }), []);
 
   return <div className="public-chat">

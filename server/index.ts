@@ -55,6 +55,7 @@ import { registerCalendarRoutes } from "./calendar/routes";
 import { readPreferences, registerPreferenceRoutes } from "./preferences";
 import { isFeedRequest } from "./calendar/feeds";
 import { contentRouteSecurityHeaders, isContentRequest, registerDocumentRoutes } from "./documents";
+import { isChatImageRequest } from "./agents/images";
 import { createMcpApiKey, handleMcpRequest, listMcpApiKeys, revokeMcpApiKey } from "./mcp";
 import { handleMcpUpload } from "./mcpUploads";
 import { registerRestV1 } from "./restV1";
@@ -156,9 +157,10 @@ app.use("/api/public/chat-shares/*", publicShareHeaders);
 
 // secureHeaders overwrites headers after next(), so the document content route (and only it)
 // is excluded and sets its own strict header set, including a sandboxing CSP.
-// The vault export (Wave 26) is a plaintext attachment: it gets the same sandboxing header set.
+// The vault export (Wave 26) is a plaintext attachment: it gets the same sandboxing header set, and so
+// do the chat image routes (the image proxy and tool images, server/agents/images.ts).
 const isVaultExport = (method: string, path: string) => method === "GET" && /^\/api\/vault\/vaults\/[^/]+\/environments\/[^/]+\/export$/.test(path);
-app.use("*", (c, next) => isContentRequest(c.req.method, c.req.path) || isVaultExport(c.req.method, c.req.path)
+app.use("*", (c, next) => isContentRequest(c.req.method, c.req.path) || isVaultExport(c.req.method, c.req.path) || isChatImageRequest(c.req.method, c.req.path)
   ? contentRouteSecurityHeaders(c, next)
   : globalSecureHeaders(c, next));
 

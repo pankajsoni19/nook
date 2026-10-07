@@ -128,8 +128,10 @@ test("Chat (Wave 40): a split page on a computer (the list | the chat, each its 
   // The composer sticks to the pane's bottom (above the keyboard with the safe-area inset), and wide content scrolls inside itself.
   expect(rule(css, ".chat-composer")).toContain("position: sticky");
   expect(rule(css, ".chat-composer")).toContain("env(safe-area-inset-bottom)");
-  expect(rule(css, ".chat-md-table")).toContain("overflow-x: auto");
-  expect(rule(css, ".chat-md-pre pre")).toContain("overflow-x: auto");
+  // Bubble Markdown lives in its own stylesheet (src/chat/markdown/markdown.css).
+  const markdownCss = await read("chat/markdown/markdown.css");
+  expect(rule(markdownCss, ".chat-md-table")).toContain("overflow-x: auto");
+  expect(rule(markdownCss, ".chat-md-pre pre")).toContain("overflow-x: auto");
 });
 
 test("Chat (Wave 41 QA Q5): one long unbroken token wraps inside its bubble and never widens the chat pane", async () => {
@@ -141,7 +143,7 @@ test("Chat (Wave 41 QA Q5): one long unbroken token wraps inside its bubble and 
   expect(rule(css, ".chat-bubble")).toContain("overflow-wrap: anywhere");
   expect(rule(css, ".chat-bubble")).toContain("word-break: break-word");
   expect(rule(css, ".chat-tool-detail pre, .chat-confirm-args")).toContain("overflow-wrap: anywhere");
-  expect(rule(css, ".chat-md-pre pre")).toContain("overflow-wrap: normal");
+  expect(rule(await read("chat/markdown/markdown.css"), ".chat-md-pre pre")).toContain("overflow-wrap: normal");
   // The real-browser check (headless Chrome, 390 × 844, a 2,000-character token): the chat pane's scrollWidth equals its clientWidth.
 });
 
