@@ -22,8 +22,8 @@ const { ConfirmationCard } = await import("../src/chat/ToolDisclosure");
 
 /**
  * Wave 41 (AC-B, tools) external security review probes. Each `FINDING` test pinned the behaviour at review time
- * so the fix flips it; the other tests record what was verified. Ports 24486–24489 (the review's
- * range); nothing here reaches the internet: every outbound call goes to 127.0.0.1 fakes, which the
+ * so the fix flips it; the other tests record what was verified. The fakes and the spawned server
+ * take free ports (24485 stays a fixed, closed port for the egress refusal checks); nothing here reaches the internet: every outbound call goes to 127.0.0.1 fakes, which the
  * harness allows through AGENT_ALLOWED_PRIVATE_HOSTS.
  */
 
@@ -37,7 +37,7 @@ const completions: Array<{ messages: Array<{ role: string; content: string | nul
 const encoder = new TextEncoder();
 const sse = (data: unknown) => encoder.encode(`data: ${JSON.stringify(data)}\n\n`);
 const provider = Bun.serve({
-  hostname: "127.0.0.1", port: 24486, idleTimeout: 60,
+  hostname: "127.0.0.1", port: 0, idleTimeout: 60,
   async fetch(request) {
     const url = new URL(request.url);
     if (request.method === "GET" && url.pathname === "/v1/models") return Response.json({ object: "list", data: [{ id: "gpt-6-luna", object: "model" }] });
@@ -57,14 +57,14 @@ const provider = Bun.serve({
     return new Response(new Blob(chunks), { headers: { "Content-Type": "text/event-stream" } });
   }
 });
-const providerUrl = "http://127.0.0.1:24486/v1";
+const providerUrl = `http://127.0.0.1:${provider.port}/v1`;
 
 // --- A hostile MCP server whose behaviour each test sets -------------------------------------------
 type HostileCall = { path: string; method: string; rpc: string | null; id: unknown; headers: Record<string, string> };
 const hostileCalls: HostileCall[] = [];
 let hostileRoute: (request: Request, rpc: { id?: unknown; method?: string; params?: Record<string, unknown> } | null, path: string) => Response | Promise<Response> = () => new Response(null, { status: 404 });
 const hostile = Bun.serve({
-  hostname: "127.0.0.1", port: 24487, idleTimeout: 60,
+  hostname: "127.0.0.1", port: 0, idleTimeout: 60,
   async fetch(request) {
     const url = new URL(request.url);
     const headers: Record<string, string> = {};
@@ -75,7 +75,7 @@ const hostile = Bun.serve({
     return hostileRoute(request, rpc, url.pathname);
   }
 });
-const hostileUrl = (path = "/mcp") => `http://127.0.0.1:24487${path}`;
+const hostileUrl = (path = "/mcp") => `http://127.0.0.1:${hostile.port}${path}`;
 const initResult = (id: unknown, session = "hs-1") => Response.json({ jsonrpc: "2.0", id, result: { protocolVersion: "2025-11-25", capabilities: { tools: {} }, serverInfo: { name: "hostile", version: "1" } } }, { headers: { "Mcp-Session-Id": session } });
 /** A well-behaved base: initialize, notifications, and whatever `onCall` answers. */
 const behaved = (onCall: (rpc: { id?: unknown; method?: string; params?: Record<string, unknown> }, path: string) => Response | Promise<Response>) =>
@@ -86,7 +86,7 @@ const behaved = (onCall: (rpc: { id?: unknown; method?: string; params?: Record<
     return onCall(rpc, path);
   };
 
-const mcp = startFakeMcpServer(24488);
+const mcp = startFakeMcpServer(0);
 
 let admin: Session;
 let member: Session;
@@ -755,6 +755,14 @@ describe("review 8: upgrade from a v0.26.0 (main 45a6b93) database", () => {
     && Bun.spawnSync(["git", "-C", root, "cat-file", "-e", "45a6b93^{commit}"], { stdout: "ignore", stderr: "ignore" }).exitCode === 0;
   const totp = Buffer.alloc(32, 7).toString("base64");
   const secrets = Buffer.alloc(32, 11).toString("base64");
+  /** A port that was free a moment ago, for the spawned server (it reads PORT from the environment). */
+  const freePort = () => {
+    const probe = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response(null) });
+    const value = probe.port!;
+    probe.stop(true);
+    return value;
+  };
+  const childPort = String(freePort());
 
   /** A data dir whose schema was created by the code at `commit` (git archive), as an operator's DB would be. */
   function dataDirAt(commit: string) {
@@ -765,7 +773,7 @@ describe("review 8: upgrade from a v0.26.0 (main 45a6b93) database", () => {
     const data = join(tree, "data");
     const init = Bun.spawnSync(["bun", "--no-env-file", "-e", "await import('./server/db.ts'); process.exit(0)"], {
       cwd: tree, stdout: "pipe", stderr: "pipe",
-      env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", DATA_DIR: data, APP_ORIGIN: "http://localhost:24489", PORT: "24489", NODE_ENV: "test", TOTP_ENCRYPTION_KEY: totp }
+      env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", DATA_DIR: data, APP_ORIGIN: `http://localhost:${childPort}`, PORT: childPort, NODE_ENV: "test", TOTP_ENCRYPTION_KEY: totp }
     });
     expect(init.exitCode).toBe(0);
     return { tree, data };
@@ -782,10 +790,10 @@ describe("review 8: upgrade from a v0.26.0 (main 45a6b93) database", () => {
     seed.query("INSERT INTO users (id, email, display_name, password_hash, created_at, role) VALUES (?, 'upgrade@example.test', 'Upgrade admin', 'x', ?, 'admin')").run(userId, at);
     seed.query("INSERT INTO sessions (id, user_id, token_hash, csrf_token, created_at, last_seen_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(crypto.randomUUID(), userId, createHash("sha256").update(token).digest("hex"), csrf, at, at, new Date(Date.now() + 86_400_000).toISOString());
     seed.close();
-    const base = "http://localhost:24489";
+    const base = `http://localhost:${childPort}`;
     const child = Bun.spawn(["bun", "--no-env-file", join(root, "server", "index.ts")], {
       cwd: root, stdout: "pipe", stderr: "pipe",
-      env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", DATA_DIR: data, APP_ORIGIN: base, APP_ORIGINS: base, PORT: "24489", NODE_ENV: "test", COOKIE_SECURE: "false", TOTP_ENCRYPTION_KEY: totp, AGENT_SECRETS_KEY: secrets, AGENT_ALLOWED_PRIVATE_HOSTS: "127.0.0.1" }
+      env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", DATA_DIR: data, APP_ORIGIN: base, APP_ORIGINS: base, PORT: childPort, NODE_ENV: "test", COOKIE_SECURE: "false", TOTP_ENCRYPTION_KEY: totp, AGENT_SECRETS_KEY: secrets, AGENT_ALLOWED_PRIVATE_HOSTS: "127.0.0.1" }
     });
     const stderr = new Response(child.stderr).text();
     try {

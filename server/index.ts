@@ -379,7 +379,7 @@ registerKeyRoutes(app);
 
 // Settings → Security → Change password (Wave 30).
 registerPasswordChangeRoute(app);
-// Settings → Security → Recognised devices (migration 043).
+// Settings → Security → Recognised devices (migration 044).
 registerDeviceRoutes(app);
 // Settings → Security → Google sign-in and re-authentication state (Wave 35), and avatars (D299).
 registerGoogleAccountRoutes(app);

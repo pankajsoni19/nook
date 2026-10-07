@@ -133,7 +133,7 @@ export function resetAccountForGoogle(userId: string, actor: Actor, via: AccessV
   db.transaction(() => {
     const at = now();
     db.query("DELETE FROM sessions WHERE user_id = ?").run(userId);
-    // Recognised devices go too (migration 043): the next Google sign-in starts the list.
+    // Recognised devices go too (migration 044): the next Google sign-in starts the list.
     clearDevices(userId);
     revokeUserPushSubscriptions(userId, "google_reset");
     for (const { id } of db.query("SELECT id FROM mcp_api_keys WHERE user_id = ? AND revoked_at IS NULL").all(userId) as Array<{ id: string }>) revokeOwnKey(userId, id, "google_reset");

@@ -16,7 +16,7 @@ import type { Recipient, Resolution } from "./resolve";
  *   sign-in (the one registration or invite acceptance makes), sent a minute later so the
  *   verification mail is not overtaken. Only while email is on and the address is verified; an
  *   unverified address waits and is queued when it is verified (within 7 days). `users.welcome_mail`
- *   records the step, so it is queued at most once; accounts from before migration 043 have NULL and
+ *   records the step, so it is queued at most once; accounts from before migration 044 have NULL and
  *   never get it. The outbox row survives a restart.
  */
 
@@ -40,11 +40,12 @@ const verified = (userId: string) => (db.query("SELECT email_verified_at FROM us
 
 /** #9: queues (or joins) the "New sign-in" mail. Call after the sign-in's device row is written. */
 export function mailNewSignIn(userId: string, entry: SignInEntry, nowMs = Date.now()) {
+  let done = false;
   safely("security.new_sign_in", () => {
     if (!verified(userId)) return;
     const last = db.query(`SELECT MAX(COALESCE(sent_at, created_at)) AS at FROM mail_outbox
         WHERE user_id = ? AND template = 'security.new_sign_in' AND status <> 'queued'`).get(userId) as { at: string | null };
-    enqueueMail({
+    done = enqueueMail({
       userId, template: "security.new_sign_in", payload: { signIns: [entry], total: 1 }, nowMs,
       coalesceKey: `security.new_sign_in:${userId}`,
       notBeforeMs: last.at ? Date.parse(last.at) + NEW_SIGN_IN_GAP_MS : 0,
@@ -52,8 +53,9 @@ export function mailNewSignIn(userId: string, entry: SignInEntry, nowMs = Date.n
         signIns: [...(Array.isArray(queued.signIns) ? queued.signIns : []), ...(Array.isArray(incoming.signIns) ? incoming.signIns : [])].slice(-SIGN_IN_LIST_MAX),
         total: (typeof queued.total === "number" ? queued.total : 1) + 1
       })
-    });
+    }) !== null;
   });
+  return done;
 }
 
 /** Queues the welcome mail a minute from now and records it; false when nothing was queued. */
@@ -65,7 +67,7 @@ function queueWelcome(userId: string, nowMs: number) {
 
 /**
  * #14 on every sign-in: only an account in `pending` (made by registration or an invite since
- * migration 043) moves on, so this is a no-op after the first sign-in.
+ * migration 044) moves on, so this is a no-op after the first sign-in.
  */
 export function startWelcomeMail(userId: string, nowMs = Date.now()) {
   safely("account.welcome", () => {

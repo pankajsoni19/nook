@@ -1,5 +1,5 @@
 /**
- * The fixed vocabulary of recognised devices (server/signInDevices.ts, migration 043): a browser
+ * The fixed vocabulary of recognised devices (server/signInDevices.ts, migration 044): a browser
  * family and an OS family read from the User-Agent, and how a sign-in happened. Only these codes are
  * stored or mailed, never the User-Agent string, so every label is built from the lists below. A leaf
  * module: the mail templates and the bell import it without importing the sign-in code.

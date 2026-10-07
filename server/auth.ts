@@ -106,7 +106,7 @@ export async function requireAuth(c: Context<AppEnv>, next: Next) {
   c.set("sessionId", row.session_id);
   c.set("csrfToken", row.csrf_token);
   db.query("UPDATE sessions SET last_seen_at = ? WHERE id = ?").run(now(), row.session_id);
-  // Recognised devices (migration 043): last seen, and the one-time quiet enrolment of a pre-043 session.
+  // Recognised devices (migration 044): last seen, and the one-time quiet enrolment of a pre-044 session.
   touchDevice(c, row.id, { id: row.session_id, legacyDevice: row.legacy_device === 1 }, secureCookie(c));
   await next();
 }

@@ -90,7 +90,7 @@
   .password-change-actions > * { flex: 1 1 100%; }
 }
 
-/* Settings → Security → Recognised devices (migration 043). Rows and buttons are 44 px; at 390 px the button sits under the text. */
+/* Settings → Security → Recognised devices (migration 044). Rows and buttons are 44 px; at 390 px the button sits under the text. */
 .recognised-devices { margin-bottom: 22px; }
 .recognised-devices-summary { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .recognised-devices-summary > div { flex: 1 1 240px; display: grid; gap: 4px; }

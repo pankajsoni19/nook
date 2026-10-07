@@ -5,7 +5,7 @@ Nook · nook.test
 ACCOUNT · WELCOME
 Welcome to Nook, Priya Shah
 
-Your account on nook.test is ready. You joined as a Admin. Admins manage the team and have every member permission.
+Your account on nook.test is ready. You joined as an Admin. Admins manage the team and have every member permission.
 
 > Today
   Your day at a glance: tasks, events, and what was shared with you.

@@ -73,7 +73,7 @@ export function consumeVerifyToken(token: string, nowMs = Date.now()): "verified
     audit(row.user_id, null, "mail.email_verified");
     return true;
   })();
-  // A welcome mail that waited for the address (migration 043) goes a minute from now.
+  // A welcome mail that waited for the address (migration 044) goes a minute from now.
   if (done) releaseWelcomeMail(row.user_id, nowMs);
   return done ? "verified" : "invalid";
 }

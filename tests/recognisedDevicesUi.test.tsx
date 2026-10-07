@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { deviceSeenLine, RecognisedDevices, RecognisedDevicesView, type RecognisedDevice } from "../src/auth/RecognisedDevices";
 
 /**
- * Settings → Security → Recognised devices (migration 043). Rendered with fixed devices; the
+ * Settings → Security → Recognised devices (migration 044). Rendered with fixed devices; the
  * confirm, history, and 44 px contracts are read from the source and stylesheet. The browser walk
  * (1280 and 390 px, Back closing the confirm) is in the live QA notes.
  */

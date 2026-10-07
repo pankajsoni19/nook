@@ -20,8 +20,9 @@ const { serverOptions } = await import("./support/harness");
 
 retireUsersAfterFile();
 settleAgentRunsAfterEach();
-const fake = startFakeProvider(24666);
-const mcp = startFakeMcpServer(24667);
+// Free ports (0), so a parallel run on this machine cannot collide.
+const fake = startFakeProvider(0);
+const mcp = startFakeMcpServer(0);
 let admin: Session;
 let owner: Session;
 let reader: Session;

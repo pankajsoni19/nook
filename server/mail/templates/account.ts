@@ -61,11 +61,12 @@ export const verifyTemplate = defineTemplate<{ token: string; expiresAt: string;
   fixture: () => ({ token: "b".repeat(43), expiresAt: "2026-09-29T09:00:00.000Z", address: "priya@example.com" })
 });
 
+/** The role with its article ("an Admin", "a Member") and what it can do. */
 const WELCOME_ROLES: Record<string, { label: string; line: string }> = {
-  admin: { label: "Admin", line: "Admins manage the team and have every member permission." },
-  member: { label: "Member", line: ROLE_LINES.member },
-  viewer: { label: "Viewer", line: ROLE_LINES.viewer },
-  guest: { label: "Guest", line: ROLE_LINES.guest }
+  admin: { label: "an Admin", line: "Admins manage the team and have every member permission." },
+  member: { label: "a Member", line: ROLE_LINES.member },
+  viewer: { label: "a Viewer", line: ROLE_LINES.viewer },
+  guest: { label: "a Guest", line: ROLE_LINES.guest }
 };
 
 /**
@@ -85,7 +86,7 @@ export const welcomeTemplate = defineTemplate<{ displayName: string; role: strin
       preheader: `Your account on ${context.instanceName} is ready.`,
       eyebrow: "Account · Welcome",
       title: `Welcome to ${appName()}, ${name}`,
-      lead: `Your account on ${context.instanceName} is ready. You joined as a ${role.label}. ${role.line}`,
+      lead: `Your account on ${context.instanceName} is ready. You joined as ${role.label}. ${role.line}`,
       blocks: [
         contextBlock([
           { title: "Today", meta: "Your day at a glance: tasks, events, and what was shared with you.", href: appLink(paths.home()) },

@@ -299,7 +299,7 @@ export function blockUser(actor: TeamActor, targetId: string, reason: string | n
     if (result.changes !== 1) throw new TeamError(409, "ROLE_CHANGED", "This account changed while you were blocking it. Review it and try again.", { currentRole: userRole(target.id) });
     rotateOnLostReach(actor?.id ?? null, reach);
     const sessions = db.query("DELETE FROM sessions WHERE user_id = ?").run(target.id).changes;
-    // Recognised devices start over (migration 043): after an unblock, every sign-in is new again.
+    // Recognised devices start over (migration 044): after an unblock, every sign-in is new again.
     clearDevices(target.id);
     revokeUserPushSubscriptions(target.id, "user_blocked");
     recordEvent(target.id, actor, options.via, "block", { reason: cleanReason }, timestamp);

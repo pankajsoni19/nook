@@ -6,12 +6,13 @@ import type { AppEnv } from "./auth";
 import { audit, db, now } from "./db";
 import { notifyAccess } from "./access/notices";
 import { mailNewSignIn, startWelcomeMail } from "./mail/signInMail";
+import { kickMailDispatch } from "./mail/dispatcher";
 import { deviceFamilies, deviceLabel, type BrowserFamily, type OsFamily, type SignInMethod } from "./deviceLabels";
 
 export { deviceFamilies, deviceLabel, deviceLabelFromCode, SIGN_IN_METHODS, type SignInMethod } from "./deviceLabels";
 
 /**
- * Recognised devices (outbound email plan #9 and §A.3, as built; migration 043, T327–T331).
+ * Recognised devices (outbound email plan #9 and §A.3, as built; migration 044, T327–T331).
  *
  * A browser that signs in gets a random device cookie (`mynotes_device`: 32 random bytes,
  * base64url, HttpOnly, SameSite=Lax, Secure on https, 400 days). For each account that signs in
@@ -54,8 +55,8 @@ function prune(userId: string) {
       SELECT id FROM sign_in_devices WHERE user_id = ? ORDER BY last_seen_at DESC, first_seen_at DESC LIMIT ?)`).run(userId, userId, MAX_DEVICES).changes;
 }
 
-function insertDevice(userId: string, token: string, families: { browser: BrowserFamily; os: OsFamily }, at: string) {
-  db.query("INSERT INTO sign_in_devices (id, user_id, token_hash, browser, os, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+function insertDevice(userId: string, token: string, families: { browser: BrowserFamily; os: OsFamily }, at: string, ifMissing = false) {
+  db.query(`INSERT ${ifMissing ? "OR IGNORE " : ""}INTO sign_in_devices (id, user_id, token_hash, browser, os, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?)`)
     .run(crypto.randomUUID(), userId, deviceHash(userId, token), families.browser, families.os, at, at);
   prune(userId);
 }
@@ -79,13 +80,20 @@ export function recordSignIn(c: Context, userId: string, signIn: SignInContext, 
       const known = existing ? db.query("UPDATE sign_in_devices SET last_seen_at = ?, browser = ?, os = ? WHERE user_id = ? AND token_hash = ?")
         .run(at, families.browser, families.os, userId, deviceHash(userId, existing)).changes === 1 : false;
       if (known) return false;
+      // An account from before migration 044 with no device yet (its session expired, or this is its
+      // usual second browser): the first device is its baseline, recorded without a notice or mail.
+      const baseline = db.query("UPDATE users SET device_baseline = 0 WHERE id = ? AND device_baseline = 1").run(userId).changes === 1
+        && !db.query("SELECT 1 FROM sign_in_devices WHERE user_id = ? LIMIT 1").get(userId);
       insertDevice(userId, token, families, at);
-      if (signIn.registered) return false;
+      if (signIn.registered || baseline) return false;
       // The bell, so people without email see it too (outbound email plan #9 as built).
       notifyAccess({ userId, kind: "new_sign_in", actorId: null, resource: { kind: "device", id: `${families.browser}:${families.os}` } }, at);
       return true;
     })();
-    if (isNew) mailNewSignIn(userId, { browser: families.browser, os: families.os, method: signIn.method, at });
+    // Queued (or joined) and then sent on the next tick, like the other security mail. Coalescing still
+    // holds: once one is sent, the next new device waits 10 minutes after it (not_before) and later
+    // ones within that wait merge into the same queued row, so a kick cannot send a second one early.
+    if (isNew && mailNewSignIn(userId, { browser: families.browser, os: families.os, method: signIn.method, at })) kickMailDispatch();
     startWelcomeMail(userId);
   } catch (error) {
     console.error(`Sign-in device record failed: error=${error instanceof Error ? error.name : "Unknown"}`);
@@ -95,24 +103,35 @@ export function recordSignIn(c: Context, userId: string, signIn: SignInContext, 
 /**
  * Once per authenticated request (from requireAuth): moves the device's last-seen time at most hourly,
  * and quietly enrols the browser of a session that was signed in before devices were recorded
- * (`sessions.legacy_device`, migration 043), so the next sign-in there is not "new". A session made
+ * (`sessions.legacy_device`, migration 044), so the next sign-in there is not "new". A session made
  * since then never enrols itself: only a sign-in records a device. Never throws.
  */
 export function touchDevice(c: Context, userId: string, session: { id: string; legacyDevice: boolean }, secure: boolean) {
   try {
     const token = readDeviceCookie(c);
     if (token) {
-      db.query("UPDATE sign_in_devices SET last_seen_at = ? WHERE user_id = ? AND token_hash = ? AND last_seen_at < ?")
-        .run(now(), userId, deviceHash(userId, token), new Date(Date.now() - DEVICE_TOUCH_MS).toISOString());
+      // A read first: the write (and its lock) happens at most hourly per device, not on every request.
+      const hash = deviceHash(userId, token);
+      const seen = db.query("SELECT id, last_seen_at FROM sign_in_devices WHERE user_id = ? AND token_hash = ?").get(userId, hash) as { id: string; last_seen_at: string } | null;
+      if (seen && Date.parse(seen.last_seen_at) < Date.now() - DEVICE_TOUCH_MS) {
+        db.query("UPDATE sign_in_devices SET last_seen_at = ? WHERE id = ? AND last_seen_at = ?").run(now(), seen.id, seen.last_seen_at);
+      }
     }
     if (!session.legacyDevice) return;
     db.transaction(() => {
+      const families = deviceFamilies(c.req.header("User-Agent"));
       if (!token) {
         const fresh = newToken();
-        insertDevice(userId, fresh, deviceFamilies(c.req.header("User-Agent")), now());
+        insertDevice(userId, fresh, families, now());
         writeDeviceCookie(c, fresh, secure);
+      } else {
+        // The browser already has a cookie (another account signed in here, or this one forgot it):
+        // this account's own row for it, unless it has one.
+        insertDevice(userId, token, families, now(), true);
       }
       db.query("UPDATE sessions SET legacy_device = 0 WHERE id = ?").run(session.id);
+      // Its baseline is set (migration 044): a later sign-in from another browser is new.
+      db.query("UPDATE users SET device_baseline = 0 WHERE id = ? AND device_baseline = 1").run(userId);
     })();
   } catch (error) {
     console.error(`Device touch failed: error=${error instanceof Error ? error.name : "Unknown"}`);

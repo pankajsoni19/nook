@@ -32,6 +32,7 @@ const TOOLS = [
   { name: "structured", description: "Answers with structuredContent only.", inputSchema: { type: "object" }, annotations: { readOnlyHint: true, openWorldHint: false } }
 ];
 
+/** `port` 0 picks a free port; the returned `port` and `url` are the real ones. */
 export function startFakeMcpServer(port: number, options: FakeMcpOptions = {}): FakeMcpServer {
   const calls: McpCall[] = [];
   const sessions = new Set<string>();
@@ -106,5 +107,6 @@ export function startFakeMcpServer(port: number, options: FakeMcpOptions = {}): 
       return Response.json({ jsonrpc: "2.0", id: message.id, error: { code: -32601, message: "Method not found" } });
     }
   });
-  return { url: `http://127.0.0.1:${port}/mcp`, port, calls, sessions, options, stop: () => server.stop(true) };
+  const bound = server.port ?? port;
+  return { url: `http://127.0.0.1:${bound}/mcp`, port: bound, calls, sessions, options, stop: () => server.stop(true) };
 }

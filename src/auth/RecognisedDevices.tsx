@@ -5,7 +5,7 @@ import { useConfirm } from "../ui/useConfirm";
 import "./auth.css";
 
 /**
- * Settings → Security → Recognised devices (migration 043; outbound email plan #9 as built). The
+ * Settings → Security → Recognised devices (migration 044; outbound email plan #9 as built). The
  * browsers that signed in to this account, newest first, with "This device" on the one in use. A
  * sign-in from a browser not on the list sends a "New sign-in" email and a bell notice. Forget
  * removes a device from the list only: nothing is signed out (changing the password does that).

@@ -499,7 +499,7 @@ describe("existing accounts (D292, D293, HIGH-1, MEDIUM-1, T254, T255)", () => {
     expect(userRow(squatter.email)!.google_link_allowed_until).toBeNull();
     expect(userRow(squatter.email)!.google_reset_notice_at).toBeNull();
 
-    // Migration 043: the reset clears the account's recognised devices too.
+    // Migration 044: the reset clears the account's recognised devices too.
     db.query("INSERT INTO sign_in_devices (id, user_id, token_hash, browser, os, first_seen_at, last_seen_at) VALUES (?, ?, ?, 'firefox', 'linux', ?, ?)")
       .run(crypto.randomUUID(), squatter.userId, "d".repeat(64), new Date().toISOString(), new Date().toISOString());
     expect((await request(`/team/${squatter.userId}/google/allow`, { method: "POST", body: JSON.stringify({ reset: true, password: admin.password }) }, admin)).status).toBe(200);
@@ -515,7 +515,7 @@ describe("existing accounts (D292, D293, HIGH-1, MEDIUM-1, T254, T255)", () => {
 
   test("section 2: allow, reset, re-link allowance, admin unlink, and a completed re-link reach the member's bell", async () => {
     const admin = await adminUser();
-    // Each Google sign-in here comes from a new device (no cookie jar), so its "new_sign_in" notices (043) are left out.
+    // Each Google sign-in here comes from a new device (no cookie jar), so its "new_sign_in" notices (044) are left out.
     const notices = (userId: string) => db.query("SELECT kind, actor_id, count FROM access_notices WHERE user_id = ? AND kind <> 'new_sign_in' ORDER BY created_at, rowid").all(userId) as Array<{ kind: string; actor_id: string | null; count: number | null }>;
     const allow = (target: Session | string, body: Record<string, unknown> = {}) => request(`/team/${typeof target === "string" ? target : target.userId}/google/allow`, { method: "POST", body: JSON.stringify({ reset: false, password: admin.password, ...body }) }, admin);
 

@@ -42,6 +42,7 @@ export function fakeEmbedding(text: string, dims: number): number[] {
   return vector;
 }
 
+/** `port` 0 picks a free port; the returned `port` and `baseUrl` are the real ones. */
 export function startFakeProvider(port: number, options: { models?: string[]; nativeDims?: number } = {}): FakeProvider {
   const calls: ProviderCall[] = [];
   const models = options.models ?? ["gpt-6-luna", "gpt-6-mini", "text-embedding-3-small"];
@@ -86,7 +87,7 @@ export function startFakeProvider(port: number, options: { models?: string[]; na
         const mode = match?.[1] ?? "echo";
         const rest = match ? match[2]! : `You said: ${last}`;
         if (mode === "status") return Response.json({ error: { message: `Simulated failure sk-secret-should-not-echo-123456789012345 (${rest})`, type: "server_error" } }, { status: Number(rest) || 500 });
-        if (mode === "redirect") return new Response(null, { status: 302, headers: { Location: `http://127.0.0.1:${port}/v1/chat/completions` } });
+        if (mode === "redirect") return new Response(null, { status: 302, headers: { Location: `http://127.0.0.1:${server.port}/v1/chat/completions` } });
         let text = rest;
         let gap = 0;
         if (mode === "slow") {
@@ -139,5 +140,6 @@ export function startFakeProvider(port: number, options: { models?: string[]; na
       return Response.json({ error: { message: "not found" } }, { status: 404 });
     }
   });
-  return { baseUrl: `http://127.0.0.1:${port}/v1`, port, calls, models, stop: () => server.stop(true) };
+  const bound = server.port ?? port;
+  return { baseUrl: `http://127.0.0.1:${bound}/v1`, port: bound, calls, models, stop: () => server.stop(true) };
 }

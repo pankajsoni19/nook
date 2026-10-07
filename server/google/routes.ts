@@ -118,7 +118,7 @@ function linkIdentity(user: NonNullable<ReturnType<typeof userById>>, claims: Go
     audit(user.id, null, "auth.google_linked", { via });
     return id;
   })();
-  // The address is verified now: a welcome mail waiting for that (migration 043) is queued.
+  // The address is verified now: a welcome mail waiting for that (migration 044) is queued.
   releaseWelcomeMail(user.id);
   kickMailDispatch();
   return identityId;

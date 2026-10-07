@@ -32,7 +32,7 @@ export const TEMPLATES = {
   // Wave 30 (E3).
   "account.password_reset": passwordResetTemplate,
   "security.password_changed": passwordChangedTemplate,
-  // The plan's "later" items (#9, #14), with migration 043.
+  // The plan's "later" items (#9, #14), with migration 044.
   "security.new_sign_in": newSignInTemplate,
   "account.welcome": welcomeTemplate
 } as const;

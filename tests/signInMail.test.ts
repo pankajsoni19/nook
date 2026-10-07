@@ -15,7 +15,7 @@ const { config } = await import("../server/config");
 const { runMigrations } = await import("../server/migrations");
 
 /**
- * The outbound email plan's "later" items (#9 New sign-in, #14 Welcome; migration 043): device
+ * The outbound email plan's "later" items (#9 New sign-in, #14 Welcome; migration 044): device
  * recognition (cookie, hash, cap, Forget), the new-sign-in mail and its 10-minute coalescing, the bell
  * notice, the welcome mail (once, a minute later, verified only, APP_NAME, never for older accounts),
  * and the gates (email off, unverified, integrations, the registration sign-in). Mail goes through the
@@ -287,6 +287,52 @@ describe("Recognised devices: list, cap, Forget", () => {
     expect((await request("/auth/devices", { method: "DELETE", body: "{}" }, { ...session, csrf })).status).toBe(200);
   });
 
+  test("an account from before 044 records its first device quietly, once (users.device_baseline)", async () => {
+    const existing = await person("Baseline account");
+    db.query("UPDATE users SET device_baseline = 1 WHERE id = ?").run(existing.userId);
+    // Its pre-044 session expired: the usual browser signs in without a cookie. Quiet, and the flag clears.
+    const usual = await signIn(existing);
+    expect(devices(existing.userId)).toHaveLength(1);
+    expect(devices(existing.userId)[0]!.token_hash).toBe(hash(existing.userId, usual.device!));
+    expect(notices(existing.userId)).toHaveLength(0);
+    expect(rows(existing.userId)).toHaveLength(0);
+    expect((db.query("SELECT device_baseline FROM users WHERE id = ?").get(existing.userId) as { device_baseline: number }).device_baseline).toBe(0);
+    // The next unknown browser is new as usual.
+    await signIn(existing, { ua: CHROME_WINDOWS });
+    expect(notices(existing.userId)).toHaveLength(1);
+    expect(rows(existing.userId)).toHaveLength(1);
+
+    // With the flag but a device already recorded (a legacy session enrolled it), an unknown browser is new.
+    const enrolled = await person("Baseline enrolled");
+    db.query("UPDATE users SET device_baseline = 1 WHERE id = ?").run(enrolled.userId);
+    db.query("INSERT INTO sign_in_devices (id, user_id, token_hash, browser, os, first_seen_at, last_seen_at) VALUES (?, ?, ?, 'chrome', 'windows', ?, ?)")
+      .run(crypto.randomUUID(), enrolled.userId, hash(enrolled.userId, "enrolled-token"), new Date().toISOString(), new Date().toISOString());
+    await signIn(enrolled);
+    expect(notices(enrolled.userId)).toHaveLength(1);
+    expect(rows(enrolled.userId)).toHaveLength(1);
+    expect((db.query("SELECT device_baseline FROM users WHERE id = ?").get(enrolled.userId) as { device_baseline: number }).device_baseline).toBe(0);
+
+    // New accounts never carry the flag: their first sign-in after registration is quiet for its own reason.
+    const fresh = await person("Baseline fresh");
+    expect((db.query("SELECT device_baseline FROM users WHERE id = ?").get(fresh.userId) as { device_baseline: number }).device_baseline).toBe(0);
+    await signIn(fresh);
+    expect(notices(fresh.userId)).toHaveLength(1);
+  });
+
+  test("last seen moves at most hourly on ordinary requests", async () => {
+    const who = await person("Touch hourly");
+    const result = await signIn(who);
+    const session = { ...who, cookie: `mynotes_session=${result.session}; mynotes_device=${result.device}` };
+    const recent = new Date(Date.now() - 10 * 60_000).toISOString();
+    db.query("UPDATE sign_in_devices SET last_seen_at = ? WHERE user_id = ?").run(recent, who.userId);
+    expect((await request("/auth/me", {}, session)).status).toBe(200);
+    expect(devices(who.userId)[0]!.last_seen_at).toBe(recent);
+    const old = new Date(Date.now() - 2 * 3_600_000).toISOString();
+    db.query("UPDATE sign_in_devices SET last_seen_at = ? WHERE user_id = ?").run(old, who.userId);
+    expect((await request("/auth/me", {}, session)).status).toBe(200);
+    expect(Date.parse(devices(who.userId)[0]!.last_seen_at)).toBeGreaterThan(Date.now() - 60_000);
+  });
+
   test("a block clears the account's devices", async () => {
     const admin = await person("Block admin");
     db.query("UPDATE users SET role = 'admin' WHERE id = ?").run(admin.userId);
@@ -298,7 +344,7 @@ describe("Recognised devices: list, cap, Forget", () => {
     expect(devices(target.userId)).toHaveLength(0);
   });
 
-  test("a session from before 043 enrols its browser quietly on its next request; a newer session never does", async () => {
+  test("a session from before 044 enrols its browser quietly on its next request; a newer session never does", async () => {
     const legacy = await person("Legacy session");
     db.query("UPDATE sessions SET legacy_device = 1 WHERE user_id = ?").run(legacy.userId);
     const response = await request("/auth/me", { headers: { "User-Agent": CHROME_WINDOWS } }, legacy);
@@ -311,6 +357,20 @@ describe("Recognised devices: list, cap, Forget", () => {
     expect((db.query("SELECT legacy_device FROM sessions WHERE user_id = ?").get(legacy.userId) as { legacy_device: number }).legacy_device).toBe(0);
     await signIn(legacy, { device: token, ua: CHROME_WINDOWS });
     expect(notices(legacy.userId)).toHaveLength(0);
+
+    // A legacy session in a browser whose cookie another account set: this account gets its own row for it.
+    const other = await person("Legacy other");
+    const otherSignIn = await signIn(other);
+    const shared = await person("Legacy shared browser");
+    db.query("UPDATE sessions SET legacy_device = 1 WHERE user_id = ?").run(shared.userId);
+    const sharedResponse = await request("/auth/me", { headers: { Cookie: `${shared.cookie}; mynotes_device=${otherSignIn.device}` } }, { ...shared, cookie: `${shared.cookie}; mynotes_device=${otherSignIn.device}` });
+    expect(sharedResponse.status).toBe(200);
+    expect(sharedResponse.headers.getSetCookie().some((cookie) => cookie.startsWith("mynotes_device="))).toBe(false);
+    expect(devices(shared.userId).map((row) => row.token_hash)).toEqual([hash(shared.userId, otherSignIn.device!)]);
+    expect(notices(shared.userId)).toHaveLength(0);
+    // The same browser then signs in to it as known.
+    await signIn(shared, { device: otherSignIn.device });
+    expect(notices(shared.userId)).toHaveLength(0);
 
     const fresh = await person("Fresh session");
     const plain = await request("/auth/me", {}, fresh);
@@ -356,6 +416,7 @@ describe("the Welcome mail", () => {
     expect(welcome[0]!.html).toContain("Welcome &lt;Dana&gt;");
     expect(welcome[0]!.html).not.toContain("<Dana>");
     expect(welcome[0]!.text).toContain("You joined as a Member.");
+    expect(welcome[0]!.text).not.toContain("as a Admin");
     expect(welcome[0]!.text).toContain("/settings/notifications");
     expect(welcome[0]!.text).toContain("https://pankajsoni19.github.io/nook/");
     expect(welcome[0]!.text).not.toContain("Nook");
@@ -404,18 +465,23 @@ describe("the Welcome mail", () => {
   });
 });
 
-describe("migration 043", () => {
+describe("migration 044", () => {
   test("adds the devices table and columns: older accounts get no welcome, older sessions enrol quietly, and re-running is a no-op", () => {
     const memory = new Database(":memory:", { strict: true });
     memory.exec("PRAGMA foreign_keys = ON");
     runMigrations(memory);
     // Back to the 042 shape, with an account and a session from before.
-    memory.exec("DROP TABLE sign_in_devices; ALTER TABLE users DROP COLUMN welcome_mail; ALTER TABLE sessions DROP COLUMN legacy_device; DELETE FROM schema_migrations WHERE id = 43;");
+    memory.exec("DROP TABLE sign_in_devices; ALTER TABLE users DROP COLUMN welcome_mail; ALTER TABLE users DROP COLUMN device_baseline; ALTER TABLE sessions DROP COLUMN legacy_device; DELETE FROM schema_migrations WHERE id = 44;");
     const at = "2026-09-01T00:00:00.000Z";
     memory.query("INSERT INTO users (id, email, display_name, password_hash, created_at, role) VALUES ('u1', 'u1@example.test', 'U1', 'x', ?, 'member')").run(at);
     memory.query("INSERT INTO sessions (id, user_id, token_hash, csrf_token, created_at, last_seen_at, expires_at) VALUES ('s1', 'u1', ?, 'c', ?, ?, '2099-01-01T00:00:00.000Z')").run("a".repeat(64), at, at);
     runMigrations(memory);
-    expect(memory.query("SELECT welcome_mail FROM users WHERE id = 'u1'").get()).toEqual({ welcome_mail: null });
+    expect(memory.query("SELECT welcome_mail, device_baseline FROM users WHERE id = 'u1'").get()).toEqual({ welcome_mail: null, device_baseline: 1 });
+    // Accounts made after the migration start without the baseline flag.
+    memory.query("INSERT INTO users (id, email, display_name, password_hash, created_at, role) VALUES ('u2', 'u2@example.test', 'U2', 'x', ?, 'member')").run(at);
+    expect(memory.query("SELECT device_baseline FROM users WHERE id = 'u2'").get()).toEqual({ device_baseline: 0 });
+    expect(() => memory.query("UPDATE users SET device_baseline = 2 WHERE id = 'u2'").run()).toThrow();
+    memory.query("DELETE FROM users WHERE id = 'u2'").run();
     expect(memory.query("SELECT legacy_device FROM sessions WHERE id = 's1'").get()).toEqual({ legacy_device: 1 });
     memory.query("INSERT INTO sessions (id, user_id, token_hash, csrf_token, created_at, last_seen_at, expires_at) VALUES ('s2', 'u1', ?, 'c', ?, ?, '2099-01-01T00:00:00.000Z')").run("b".repeat(64), at, at);
     expect(memory.query("SELECT legacy_device FROM sessions WHERE id = 's2'").get()).toEqual({ legacy_device: 0 });
