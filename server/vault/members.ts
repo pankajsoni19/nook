@@ -274,9 +274,20 @@ export function writeVaultAccess(actor: VaultActor, vaultId: string, body: Vault
         if (from !== to && (had?.role !== "owner" || to !== "none")) recordVaultEvent(vaultId, actor.userId, "access.level", { targetId: person.id, envId, level: to });
       }
     }
-    const groupsChanged = nextGroups.length !== current.groups.length
-      || nextGroups.some((group) => { const was = current.groups.find((item) => item.id === group.id); return !was || envIds.some((envId) => (was.levels[envId] ?? "none") !== group.levels[envId]); });
-    if (groupsChanged) recordVaultEvent(vaultId, actor.userId, "access.change", { count: nextGroups.length });
+    // Groups the same way, named in Activity (the group's id in target_id): one event per group given
+    // or taken out of access, and one per group and environment whose level changed.
+    for (const group of nextGroups) {
+      const was = current.groups.find((item) => item.id === group.id);
+      if (!was) recordVaultEvent(vaultId, actor.userId, "group.add", { targetId: group.id });
+      for (const envId of envIds) {
+        const from = was?.levels[envId] ?? "none";
+        const to = group.levels[envId] ?? "none";
+        if (from !== to) recordVaultEvent(vaultId, actor.userId, "group.level", { targetId: group.id, envId, level: to });
+      }
+    }
+    for (const group of current.groups) {
+      if (!nextGroups.some((item) => item.id === group.id)) recordVaultEvent(vaultId, actor.userId, "group.remove", { targetId: group.id });
+    }
     const added = addedPeople.length;
     for (const userId of gained) notifyAccess({ userId, kind: "vault_shared", actorId: actor.userId, resource: { kind: "vault", id: vaultId } }, timestamp);
     // Email only for people added by name (as other modules: groups hear through the bell, §C.11).
