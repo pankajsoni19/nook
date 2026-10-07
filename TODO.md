@@ -2,7 +2,7 @@
 
 Only open work lives here. Shipped work is in [CHANGELOG.md](CHANGELOG.md), the docs site ("What's new") and `git log`. Plans of record: `DEVELOPMENT_PLAN.md` and `docs/plan/research/`. Contracts: [API](docs/plan/API_CONTRACTS.md) · [Threat model](docs/plan/THREAT_MODEL.md) · [Test plan](docs/plan/TEST_PLAN.md).
 
-**Current state (2026-10-07):** production runs **v0.31.0** (`17770ff`: formatted replies and images, a provider per agent, new sign-in alerts and recognised devices, the welcome mail; backup `mynotes-20261007T054827Z.tar.gz`). Released migrations are immutable: **001–044**. Messages takes **045**.
+**Current state (2026-10-07):** production runs **v0.32.0** (`2d3becf`: notification deep links, feed and routine controls on access pages, phone header, Settings, and chat polish; backup `mynotes-20261007T113841Z.tar.gz`). Released migrations are immutable: **001–044**. Messages takes **045**.
 
 ## In flight
 
@@ -19,34 +19,11 @@ Nothing. Waiting for the operator's next pick.
   - a hook for group-membership changes (search re-checks access today, so this is not a leak)
   - a Re-index-all limit that survives a restart (it is kept in memory)
 
-## Small UI follow-ups
-
-- [ ] **Phone sizing:**
-  - the Tasks/Collections header takes 3 rows
-  - the Vault header wraps the bell at 390 px
-  - the whiteboard editor-load Retry button is cramped
-- [ ] **Bell:** deep links into items.
-- [ ] **Member access page:** per-feed revoke and per-routine pause.
-- [ ] **Settings polish:**
-  - "Google sign-in is linked" wording on an integration page
-  - focus ring on a script-focused heading
-  - duplicated H3 on account sections
-- [ ] **Settings → AI tabs:**
-  - all three share the browser title "Settings · AI" (the API keys tabs have one title per tab)
-  - the phone header back arrow on a second tab goes to the list; match the API keys page (`hubBackSteps`)
-- [ ] **Chat policy panel (1280):** the "Who can create agents" checkboxes sit well below their label (they align with the taller input in the next column).
-- [ ] **Scroll audit:** seeding asks for 19 invites against the 10-an-hour limit and stalls ~15 min in 429 retries (`docs/plan/qa/scroll-audit.mjs`). No dedicated routes yet for the Knowledge Share… and Move to Bin dialogs (both use shared components).
-
 ## Known LOW leftovers
 
-- [ ] **Sign-in labels:** headless Chrome's user agent shows as "Browser on Linux" (`server/deviceLabels.ts`).
-- [ ] **Image proxy:** Load image on a plain-http or non-443 URL logs a browser console 400 (`URL_REFUSED`, by design; consider answering inside the card without an HTTP error).
-- [ ] **Agentic chat:**
-  - a Basic-auth-wrapped Nook key in a tool-server credential isn't detected
-  - the ACCESS_REVOKED text is hidden while the chat role is removed
-  - the chat 503 lacks `Retry-After`
-  - provider-reported usage is charged in full when a reply is cut
-  - an `?after` overflow sends a terminal snapshot without a separate `done`
+- [ ] **Chat role message:** when "Who can chat" excludes your role, opening `/chat` (or a "shared the chat with you" bell link) goes Home with "Chat is not available on this server" although Chat is on; say it is off for your role, and don't link shared-chat notices to `/chat/<id>` for a role that cannot chat (`src/App.tsx` module redirect, `sharedPath` in `server/access/notices.ts`).
+- [ ] **Cut-reply charging:** in a multi-step run whose combined text passes the stored bound across steps, later text is still charged in full (it went back to the model as context).
+- [ ] **Push notifications:** the push body says "Calendar reminder" for every kind.
 
 ## Standing rules for agent briefs
 
