@@ -22,6 +22,7 @@ import { LinkNookKeySheet } from "./LinkNookKeySheet";
 import { Markdown, type RenderContext } from "./markdown/render";
 import { ConfirmationCard, ToolCallsDisclosure, TrifectaBadge } from "./ToolDisclosure";
 import { AuditLog } from "./AuditLog";
+import { ACCESS_REVOKED_TEXT, accessLost, ChatOffNotice } from "./accessNotice";
 import "./chat.css";
 
 type ChatNavigate = (route: Route, options?: { replace?: boolean; removed?: boolean }) => void;
@@ -54,7 +55,7 @@ const ERROR_TEXT: Record<string, string> = {
   NO_PROVIDER: "No model provider is configured",
   EGRESS_REFUSED: "The provider's address is not allowed",
   TOO_LARGE: "The reply was too large",
-  ACCESS_REVOKED: "You can no longer chat with this agent; the answer stopped",
+  ACCESS_REVOKED: ACCESS_REVOKED_TEXT,
   AGENT_GONE: "This chat's agent is in the Bin, deleted, or no longer shared with you",
   INTERNAL: "Something went wrong while answering"
 };
@@ -74,6 +75,8 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
   navigateRef.current = navigate;
   const [status, setStatus] = useState<AgentsStatus | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
+  // Why an answer stopped when the person lost chat rights: shown on the "Chat is off" page too.
+  const [revoked, setRevoked] = useState<string | null>(null);
   const [chats, setChats] = useState<ChatSummary[] | null>(null);
   const [agents, setAgents] = useState<AgentSummary[] | null>(null);
   const [query, setQuery] = useState("");
@@ -165,6 +168,13 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
     return () => window.clearTimeout(timer);
   }, [loadChats, query, status?.enabled]);
 
+  // The person may no longer chat: keep why, end the live answer with it, and reload the status (the "Chat is off" page).
+  const loseAccess = useCallback(() => {
+    setRevoked(ACCESS_REVOKED_TEXT);
+    setLive((current) => current && !current.status ? { ...current, status: "error", error: { code: "ACCESS_REVOKED", message: ACCESS_REVOKED_TEXT } } : current);
+    void loadStatus();
+  }, [loadStatus]);
+
   // --- The open chat and its run ---
   const stopFollowing = useCallback(() => {
     followController.current?.abort();
@@ -172,6 +182,7 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
   }, []);
 
   const applyEvent = useCallback((event: SequencedRunEvent, replaying: boolean) => {
+    if ((event.type === "error" && event.data.code === "ACCESS_REVOKED") || (event.type === "snapshot" && event.data.errorCode === "ACCESS_REVOKED")) setRevoked(ACCESS_REVOKED_TEXT);
     setLive((current) => {
       if (!current || current.runId !== (event.type === "run" ? event.data.runId : current.runId)) return current;
       const next: LiveRun = { ...current, seq: Math.max(current.seq, event.seq) };
@@ -224,13 +235,14 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
         } catch (reason) {
           if (controller.signal.aborted) return;
           if (reason instanceof ApiError && reason.status === 404) { setLive(null); return; }
+          if (accessLost(reason)) { loseAccess(); return; }
           await new Promise((resolve) => setTimeout(resolve, Math.min(5000, 500 * 2 ** Math.min(attempt, 4))));
         }
       }
     })();
     // The search text is read through a ref: typing in the search box must not restart the stream.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [applyEvent, loadChats, loadUsage, stopFollowing]);
+  }, [applyEvent, loadChats, loadUsage, loseAccess, stopFollowing]);
 
   const refreshDetail = useCallback(async (chatId: string, keepLive = false) => {
     const generation = ++detailGeneration.current;
@@ -258,10 +270,11 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
         flash("Chat not found");
         go(chatRoute(), true);
       } else {
+        if (accessLost(reason)) loseAccess();
         setDetailError(messageOf(reason, "Could not open this chat"));
       }
     }
-  }, [flash, follow, go]);
+  }, [flash, follow, go, loseAccess]);
 
   useEffect(() => {
     setMenuOpen(false);
@@ -454,6 +467,7 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
       setEditing(null);
       startRun(started, route.chatId);
     } catch (reason) {
+      if (accessLost(reason)) loseAccess();
       flash(failureText(reason, "Could not send"));
     } finally {
       setBusy(false);
@@ -476,6 +490,7 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
       const started = await regenerate(route.chatId, message.id);
       startRun(started, route.chatId);
     } catch (reason) {
+      if (accessLost(reason)) loseAccess();
       flash(failureText(reason, "Could not regenerate"));
     } finally {
       setBusy(false);
@@ -567,7 +582,7 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
     : status && !status.enabled ? <section className="chat-state"><span className="chat-state-icon"><Bot /></span><h2>Chat is not configured</h2>
       {role === "admin" ? <p>{status.reason === "key_mismatch" ? "AGENT_SECRETS_KEY does not open the stored provider secrets. Restore the key the providers were saved with, or remove and re-enter their API keys." : "Set AGENT_SECRETS_KEY (openssl rand -base64 32, different from the TOTP and vault keys) on the server, restart, then add a model provider in Settings → AI."} See docs/OPERATIONS.md, Agent chat.</p> : <p>Ask an admin to configure it.</p>}
     </section>
-    : status && !status.canChat && !route.audit ? <section className="chat-state"><span className="chat-state-icon"><Bot /></span><h2>Chat is off for your role</h2><p>An admin decides which roles may chat with agents (Settings → AI).</p></section>
+    : status && !status.canChat && !route.audit ? <ChatOffNotice revoked={revoked} />
     : null;
 
   const groups = useMemo(() => {

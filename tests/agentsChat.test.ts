@@ -449,7 +449,9 @@ describe("the loop against the fake provider (§2.1–§2.4)", () => {
     const settings = (await api(admin, "GET", "/agents/admin/settings")).body.settings;
     await api(admin, "PUT", "/agents/admin/settings", { chatRoles: ["admin", "member"], expectedRevision: settings.revision });
     try {
-      expect((await api(viewer, "GET", "/chats")).status).toBe(403);
+      // The client reads this 403 ROLE_REFUSED as an access loss and keeps the ACCESS_REVOKED explanation (src/chat/accessNotice.tsx).
+      expect(await api(viewer, "GET", "/chats")).toMatchObject({ status: 403, body: { code: "ROLE_REFUSED" } });
+      expect(await api(viewer, "GET", `/runs/${crypto.randomUUID()}/events`)).toMatchObject({ status: 403, body: { code: "ROLE_REFUSED" } });
       expect((await api(viewer, "GET", "/agents/status")).body.canChat).toBe(false);
     } finally {
       const latest = (await api(admin, "GET", "/agents/admin/settings")).body.settings;
