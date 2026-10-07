@@ -84,10 +84,18 @@ export const messageOf = (reason: unknown, fallback: string) => reason instanceo
 
 export type SequencedRunEvent = RunEvent & { seq: number };
 
+/** A run still going: a snapshot with one of these is followed by the live events, not by the end. */
+export const LIVE_RUN_STATUSES: ReadonlySet<string> = new Set(["queued", "running", "awaiting_confirmation"]);
+/**
+ * Whether the stream is over after this event. The server ends every stream with `done`, a
+ * snapshot's included; a snapshot of an ended run also counts as the end, for a server that sends no `done` after it.
+ */
+export const endsStream = (event: SequencedRunEvent) => event.type === "done" || (event.type === "snapshot" && !LIVE_RUN_STATUSES.has(event.data.status));
+
 /**
  * Follows a run's events (plan §2.3) over `fetch` plus a ReadableStream: EventSource cannot send
  * the CSRF header, and `credentials: "same-origin"` keeps the session. Resumes from `after`. The
- * promise settles when the run ends (`done` or `snapshot`), the signal aborts, or the connection
+ * promise settles when the run ends (`done`, see `endsStream`), the signal aborts, or the connection
  * drops (then it rejects, and the caller reconnects with the last seq it saw).
  */
 export async function followRun(runId: string, after: number, onEvent: (event: SequencedRunEvent) => void, signal: AbortSignal): Promise<"ended" | "aborted"> {
@@ -126,7 +134,7 @@ export async function followRun(runId: string, after: number, onEvent: (event: S
         const event = parseFrame(frame);
         if (!event) continue;
         onEvent(event);
-        if (event.type === "done" || event.type === "snapshot") ended = true;
+        if (endsStream(event)) ended = true;
       }
       if (ended && !fallback) fallback = setTimeout(() => { reader.cancel().catch(() => undefined); }, 2000);
     }

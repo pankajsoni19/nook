@@ -153,12 +153,36 @@ describe("R-M1: recursion across an HTTP hop (T318)", () => {
     const unprefixed = key.token.replace(/^mynotes_/, "");
     db.query("UPDATE mcp_api_keys SET token_hash = ? WHERE id = ?").run(new Bun.CryptoHasher("sha256").update(unprefixed).digest("hex"), key.id);
     expect(refused({ authKind: "bearer", secret: unprefixed })).toBe("NOOK_KEY_REFUSED");
+    // Wrapped: Basic auth (either half), custom headers with odd Bearer spacing or casing, URL-encoded, base64url.
+    const b64 = (text: string) => Buffer.from(text).toString("base64");
+    const b64url = (text: string) => Buffer.from(text).toString("base64url");
+    const wrapped = [
+      { authKind: "header", authHeader: "Authorization", secret: `Basic ${b64(`user:${key.token}`)}` },
+      { authKind: "header", authHeader: "Authorization", secret: `basic   ${b64(`${key.token}:x`)}` },
+      { authKind: "header", authHeader: "Authorization", secret: `Basic ${b64("vault:nkv_abcdefghijklmnop")}` },
+      { authKind: "header", authHeader: "X-Token", secret: `bEaReR\t\t${key.token}` },
+      { authKind: "header", authHeader: "X-Token", secret: `BEARER:${key.token}` },
+      { authKind: "header", authHeader: "X-Token", secret: `"Bearer ${key.token}"` },
+      { authKind: "header", authHeader: "X-Token", secret: encodeURIComponent(`Bearer ${key.token}`) },
+      { authKind: "header", authHeader: "X-Token", secret: `token%3D${key.token}` },
+      { authKind: "header", authHeader: "X-Token", secret: b64url(`user:${key.token}`) },
+      { authKind: "header", authHeader: "X-Token", secret: `Basic ${b64url(`${key.token}:?>?>`)}` },
+      { authKind: "header", authHeader: "X-Token", secret: b64(`Basic ${b64(`u:${key.token}`)}`) },
+      { authKind: "bearer", secret: b64(unprefixed) }
+    ];
+    for (const input of wrapped) expect({ secret: input.secret, code: refused(input) }).toEqual({ secret: input.secret, code: "NOOK_KEY_REFUSED" });
+    // Ordinary wrapped credentials still save: Basic auth for a user, a base64 token, a percent-encoded one.
+    for (const secret of [`Basic ${b64("svc-user:s3cret-pass")}`, b64("just-some-random-token-bytes"), "abc%2Fdef-123", "Bearer srv-own-token-456"]) {
+      const saved = createServer(admin.userId, { name: "Wrapped fine", url: mcp.url, authKind: "header", authHeader: "Authorization", secret, availability: "all" } as never);
+      deleteServer(admin.userId, saved.id);
+    }
     // Over HTTP: 400 with the code and the field.
     const http = await api(admin, "POST", "/agents/admin/servers", { name: "Refused", url: mcp.url, authKind: "bearer", secret: key.token, availability: "all" });
     expect(http).toMatchObject({ status: 400, body: { code: "NOOK_KEY_REFUSED" } });
     // Edit: the same refusal; an ordinary credential saves.
     const row = serverRow(serverId);
     expect(() => updateServer(admin.userId, serverId, { expectedRevision: row.revision, authKind: "bearer", secret: "mynotes_abc" })).toThrow();
+    expect(() => updateServer(admin.userId, serverId, { expectedRevision: row.revision, authKind: "header", authHeader: "Authorization", secret: `Basic ${Buffer.from(`me:${key.token}`).toString("base64")}` })).toThrow(expect.objectContaining({ code: "NOOK_KEY_REFUSED" }));
     const ok = createServer(admin.userId, { name: "Fine creds", url: mcp.url, authKind: "bearer", secret: "srv-own-credential-123", availability: "all" } as never);
     deleteServer(admin.userId, ok.id);
   });
@@ -285,7 +309,9 @@ describe("R-L3, R-L4, R-L5: labels, blank turns, run_agent's errors", () => {
     config.agents.maxConcurrentRuns = 1;
     try {
       expect(await rest(otherKey.token, "POST", "/tools/run_agent", { agentId: otherAgent, input: "echo:x" })).toMatchObject({ status: 503, body: { code: "AGENT_BUSY" } });
-      expect(await rest(otherKey.token, "POST", `/agents/${otherAgent}/runs`, { input: "echo:x" })).toMatchObject({ status: 503, body: { code: "AGENT_BUSY" } });
+      const full = await rest(otherKey.token, "POST", `/agents/${otherAgent}/runs`, { input: "echo:x" });
+      expect(full).toMatchObject({ status: 503, body: { code: "AGENT_BUSY" } });
+      expect(full.headers.get("retry-after")).toBe("5");
       expect(JSON.parse((await invokeMcpToolForTests("run_agent", { agentId: otherAgent, input: "echo:x" }, otherKey.id)).content[0]!.text)).toMatchObject({ code: "AGENT_BUSY", scope: "instance" });
     } finally {
       config.agents.maxConcurrentRuns = saved;
