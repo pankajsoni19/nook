@@ -2,11 +2,11 @@
 
 Only open work lives here. Shipped work is in [CHANGELOG.md](CHANGELOG.md), the docs site ("What's new") and `git log`. Plans of record: `DEVELOPMENT_PLAN.md` and `docs/plan/research/`. Contracts: [API](docs/plan/API_CONTRACTS.md) · [Threat model](docs/plan/THREAT_MODEL.md) · [Test plan](docs/plan/TEST_PLAN.md).
 
-**Current state (2026-10-07):** production runs **v0.30.0** (`a30e684`, Agentic chat AC-E knowledge bases; backup `mynotes-20261006T190706Z.tar.gz`). The agentic chat plan (AC-A…AC-E) is complete. Released migrations are immutable: **001–042**. Migration **043** is the chat tool images (`chat-markdown-images`) and **044** the recognised devices and welcome mail (`email-later`); Messages takes **045**.
+**Current state (2026-10-07):** production runs **v0.30.0** (`a30e684`). The agentic chat plan (AC-A…AC-E) is complete. Released migrations are immutable: **001–042**. On main, unreleased: **043** chat tool images, **044** recognised devices and welcome mail. Messages takes **045**.
 
 ## In flight
 
-Nothing. Waiting for the operator's next pick.
+- [ ] **v0.31.0** (all merged on main at `778f055`; final release QA running): the chat layout fix, the agent provider picker, chat Markdown (full GFM) and images (click-to-load proxy, tool images), New sign-in alerts with Recognised devices, the welcome mail, and the operator's vault fixes (PRs #1/#2).
 
 ## Next features (operator to pick)
 
