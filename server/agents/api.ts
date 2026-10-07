@@ -8,6 +8,7 @@ import { EXTERNAL_BOUNDS, isOneLineLabel } from "../../shared/agents";
 import { holdPlainRun } from "./limits";
 import { cancelExternalRun, externalRunResult, runnableAgents, startExternalRun, type ExternalEvent, type ExternalRequest } from "./external";
 import { AgentError } from "./status";
+import { providerNameOf } from "./providers";
 import { keepRequestOpen, SSE_TIMING } from "../longRequests";
 
 /**
@@ -104,7 +105,7 @@ export async function handleAgentRest(request: Request, route: AgentRoute, auth:
   if (retryAfter) return refuse(429, "Too many requests for this API key. Try again later.", "RATE_LIMITED", { retryAfterSeconds: retryAfter }, { "Retry-After": String(retryAfter) });
   try {
     if (route.name === "list") {
-      const agents = runnableAgents(keyId, "rest").map(({ agent, tools }) => ({ id: agent.id, name: agent.name, description: agent.description, model: agent.model, maxSteps: agent.max_steps, tools }));
+      const agents = runnableAgents(keyId, "rest").map(({ agent, tools }) => ({ id: agent.id, name: agent.name, description: agent.description, model: agent.model, providerName: providerNameOf(agent.provider_id), maxSteps: agent.max_steps, tools }));
       return json(200, { agents });
     }
     if (!UUID.test(route.agentId)) return refuse(404, "Not found", "NOT_FOUND");

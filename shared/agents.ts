@@ -210,6 +210,13 @@ export type ProviderSummary = {
   compat: ProviderCompat; isDefault: boolean; hasSecret: boolean; hint: string | null; revision: number; createdAt: string; updatedAt: string;
 };
 /**
+ * A provider as the agent editor sees it (`GET /api/agents/providers`): anyone who may create agents
+ * picks one, so never the base URL, the key, or its hint. `isDefault` is the provider an agent with no
+ * provider uses now; `models` is the admin's last model list (Test, or the models route) when the
+ * server still has it, else null (the editor then suggests `defaultModel` and takes free text).
+ */
+export type AgentProviderChoice = { id: string; name: string; isDefault: boolean; defaultModel: string; models: string[] | null };
+/**
  * A tool an agent picked (AC-B, plan §5.2): a remote server's tool, or one of Nook's own tools;
  * AC-E (Wave 44): a knowledge base (all of an agent's bases become one `search_knowledge` tool).
  */
@@ -236,6 +243,13 @@ export type AgentSummary = {
    * cannot use; this counts them ("N tools from servers you can't use"), and a save keeps them. 0 otherwise.
    */
   hiddenTools: number;
+  /**
+   * The name of the agent's own provider (`providerId`), for display at every level (viewers too; never
+   * its address). Null when the agent follows the default provider, including after its provider was deleted.
+   */
+  providerName: string | null;
+  /** The model a run uses now: `model`, else the default model of the agent's provider (or of the default provider). Null with no provider at all. */
+  effectiveModel: string | null;
 };
 export type AgentLevel = "owner" | "manage" | "view";
 /** The system prompt is null below `manage` (D356: viewers chat, they never read the prompt). */

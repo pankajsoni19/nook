@@ -555,7 +555,7 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
   const imageChatId = route.audit ? undefined : route.chatId ?? undefined;
   const renderContext = useMemo<RenderContext>(() => ({ onExternalLink: (href) => setExternalLink(href), onNookLink: (path) => onOpenPath(path), images: { mode: "app", scope: imageChatId ?? "audit", chatId: imageChatId } }), [onOpenPath, imageChatId]);
   const detailOpen = Boolean(route.chatId || route.newChat || (route.audit && route.runId));
-  const agentOptions = useMemo(() => (agents ?? []).map((agent) => ({ value: agent.id, label: `${agent.icon ? `${agent.icon} ` : ""}${agent.name}`, description: agent.description || (agent.model ?? status?.defaultModel ?? "") })), [agents, status?.defaultModel]);
+  const agentOptions = useMemo(() => (agents ?? []).map((agent) => ({ value: agent.id, label: `${agent.icon ? `${agent.icon} ` : ""}${agent.name}`, description: agent.description || (agent.model ?? agent.effectiveModel ?? status?.defaultModel ?? "") })), [agents, status?.defaultModel]);
   const newAgent = agents?.find((agent) => agent.id === newAgentId) ?? null;
   const chatAgent = detail ? agents?.find((agent) => agent.id === detail.chat.agentId) ?? null : null;
   // Wave 43 (AC-D): a chat shared with me is read-only; I continue in my own copy.
@@ -641,7 +641,7 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
           {phone && <button type="button" className="icon-button chat-back" onClick={back} aria-label="Back to chats"><ChevronLeft /></button>}
           <div className="chat-agent-pick">
             <Select<string> label="Agent" value={newAgentId} onChange={(value) => setNewAgentId(value)} options={agentOptions} placeholder="Choose an agent" variant="chip" />
-            {newAgent && <span className="chat-model-chip">{newAgent.model ?? status?.defaultModel ?? ""}</span>}
+            {newAgent && <span className="chat-model-chip">{newAgent.model ?? newAgent.effectiveModel ?? status?.defaultModel ?? ""}</span>}
             {newAgent?.trifecta && <TrifectaBadge compact />}
           </div>
         </header>
@@ -659,7 +659,7 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
         <header className="chat-thread-header">
           {phone && <button type="button" className="icon-button chat-back" onClick={back} aria-label="Back to chats"><ChevronLeft /></button>}
           <button type="button" className="chat-agent-chip" onClick={() => { if (chatAgent?.isOwner) onOpenAgents(chatAgent.id); }} title={chatAgent ? chatAgent.description : !detail.chat.agentId ? "This agent was deleted; start a new chat with another agent" : detail.agentState === "binned" ? "This agent is in the Bin; restore it to continue" : "This chat's agent is no longer available"}>{chatAgent?.icon ? `${chatAgent.icon} ` : ""}{detail.chat.agentName ?? "(agent deleted)"}</button>
-          <span className="chat-model-chip">{chatAgent?.model ?? status?.defaultModel ?? ""}</span>
+          <span className="chat-model-chip">{chatAgent?.model ?? chatAgent?.effectiveModel ?? status?.defaultModel ?? ""}</span>
           {chatAgent?.trifecta && <TrifectaBadge compact />}
           <h2 className="chat-title">{detail.chat.title}</h2>
           {readOnly && <span className="chat-shared-chip" title={`Shared with you by ${detail.chat.ownerName}`}><UsersRound aria-hidden="true" />{detail.chat.ownerName} · read-only</span>}
