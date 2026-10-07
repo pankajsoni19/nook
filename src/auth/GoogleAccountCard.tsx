@@ -16,6 +16,15 @@ export function googleSettingsNotice(result: GoogleSettingsResult): { tone: "ok"
   return result.kind === "error" ? { tone: "error", text: googleErrorMessage(result.code, result.domain) } : null;
 }
 
+/**
+ * The line an integration's page shows after an admin's Google round trip came back to it (review L6).
+ * An integration never signs in, so "Google sign-in is linked" is not shown there (linking returns to
+ * Security, so only a hand-made URL brings it); the admin's confirmation and errors are.
+ */
+export function googleIntegrationNotice(result: GoogleSettingsResult) {
+  return result?.kind === "linked" ? null : googleSettingsNotice(result);
+}
+
 /** The re-authentication part of a request body: the password (when asked for) and the code. */
 export function reauthBody(form: FormData, account: AccountAuth | null, totpEnabled: boolean) {
   const password = String(form.get("password") ?? "");

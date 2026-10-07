@@ -413,7 +413,7 @@ describe("Wave 37 fixes (QA)", () => {
 
   test("Q4: after a move, focus goes to the section heading", () => {
     const hub = read("settings/SettingsHub.tsx");
-    expect(hub).toContain("if (lost || (isMobileViewport() && !inSection)) headingRef.current?.focus({ preventScroll: true });");
+    expect(hub).toContain("if (lost || (isMobileViewport() && !inSection)) focusFromScript(headingRef.current, { preventScroll: true });");
     expect(read("App.tsx")).toContain("screenKey={formatRoute(route)}");
   });
 
@@ -437,7 +437,7 @@ describe("Wave 37 fixes (QA)", () => {
 
   test("L6: a Google return to an integration's page shows its result there", () => {
     const page = read("team/IntegrationPage.tsx");
-    expect(page).toContain("const result = googleIntegrationResultFor(integrationId);");
+    expect(page).toContain("googleIntegrationNotice(googleIntegrationResultFor(integrationId))");
     expect(page).toContain("notice={returned && <GoogleReturnNotice notice={returned} onDismiss={() => setReturned(null)} />}");
     expect(read("auth/googleSignIn.tsx")).toContain("initialTeamPath.startsWith(`/settings/team/integrations/${integrationId}`)");
   });

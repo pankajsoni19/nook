@@ -100,7 +100,9 @@ describe("central access on the client", () => {
     expect(pages[1]).toContain('class="team-back"');
     expect(pages[2]).toContain("Access activity");
     expect(pages[2]).toContain("Any change");
-    expect(pages[3]).toContain("My access");
+    // v0.31 follow-up: the section is named by the hub's heading (its own h3 repeated it).
+    expect(pages[3]).toContain('aria-labelledby="settings-hub-title"');
+    expect(pages[3]).toContain("What others share with you");
     for (const html of pages) expect(html).not.toContain("<select");
   });
 

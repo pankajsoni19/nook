@@ -333,7 +333,7 @@ export function formatRoute(route: Route): string {
   if (route.app === "settings") {
     if (route.section === "agents" && route.agentId && (route.agentId === NEW_AGENT || isRouteId(route.agentId))) return `${settingsPath("agents")}/${route.agentId.toLowerCase()}`;
     if (route.section === "knowledge" && route.kbId && isRouteId(route.kbId)) return `${settingsPath("knowledge")}/${route.kbId.toLowerCase()}`;
-    if (route.section === "ai" && isAiTab(route.aiTab)) return `${settingsPath("ai")}/${route.aiTab}`;
+    if (route.section === "ai" && isAiTab(route.aiTab)) return aiTabPath(route.aiTab);
     if (route.section === "mcp" && isKeysTab(route.keysTab)) return keysTabPath(route.keysTab);
     return route.section && SETTINGS_SECTIONS.includes(route.section) ? settingsPath(route.section) : "/settings";
   }
@@ -396,6 +396,10 @@ export type SettingsSection = typeof SETTINGS_SECTIONS[number];
 export const AI_TABS = ["providers", "tools", "policy"] as const;
 export type AiTab = typeof AI_TABS[number];
 export const isAiTab = (value: unknown): value is AiTab => typeof value === "string" && (AI_TABS as readonly string[]).includes(value);
+/** Settings → AI's tab labels (also the tab's part of its document title). */
+export const AI_TAB_LABELS: Record<AiTab, string> = { providers: "Model providers", tools: "Tool servers", policy: "Chat policy" };
+/** The URL of one Settings → AI tab. */
+export const aiTabPath = (tab: AiTab) => `${settingsPath("ai")}/${tab}`;
 
 /**
  * The URL slug of each section. API keys (section id "mcp" since Wave 8) lives at `/settings/keys`
@@ -438,10 +442,12 @@ export const keysTabRoute = (tab: KeysTab): Route => ({ app: "settings", section
 
 /**
  * The document title on an account section: "Settings · Notifications · Nook"; on an API keys tab,
- * "Settings · API keys · Vault · Nook".
+ * "Settings · API keys · Vault · Nook"; on a Settings → AI tab (v0.31 follow-up), "Settings · AI · Model providers · Nook".
  */
-export const settingsDocumentTitle = (section: SettingsSection, keysTab?: KeysTab) =>
-  hubDocumentTitle(section === "mcp" && keysTab ? `${SETTINGS_SECTION_NAMES.mcp} · ${KEYS_TAB_LABELS[keysTab]}` : SETTINGS_SECTION_NAMES[section]);
+export const settingsDocumentTitle = (section: SettingsSection, keysTab?: KeysTab, aiTab?: AiTab) =>
+  hubDocumentTitle(section === "mcp" && keysTab ? `${SETTINGS_SECTION_NAMES.mcp} · ${KEYS_TAB_LABELS[keysTab]}`
+    : section === "ai" && aiTab ? `${SETTINGS_SECTION_NAMES.ai} · ${AI_TAB_LABELS[aiTab]}`
+    : SETTINGS_SECTION_NAMES[section]);
 
 /** The document title on a Settings hub screen (Wave 37): "Settings · Members · Nook", or "Settings · Nook" on the list. */
 export const hubDocumentTitle = (name: string | null) => name ? `Settings · ${name} · ${appName()}` : `Settings · ${appName()}`;

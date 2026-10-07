@@ -1087,7 +1087,7 @@ export default function WhiteboardCanvas({ boardId, userId, folders, flash, onBa
     return <div className="whiteboard-canvas-page whiteboard-loading" role="alert">
       <TriangleAlert aria-hidden="true" />
       <p>{loadError}</p>
-      <button className="secondary-button" onClick={onBack}>Back to whiteboards</button>
+      <button type="button" className="action-button secondary" onClick={onBack}>Back to whiteboards</button>
     </div>;
   }
   if (!loaded) {

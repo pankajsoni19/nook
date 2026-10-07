@@ -17,6 +17,8 @@ import { namesProtected, valueReadsTodayLine, vaultFlagChips, vaultGrantChips, v
 import { appName } from "../appName";
 import { holdsAgentGrants, KEYS_TAB_INTROS, KEYS_TAB_LABELS, keysTabCounts, keysTabPreset, keysTabsFor, keyTabOf, listedOnLine, shownKeysTab, type KeysTab } from "./keyTabs";
 import { SettingsTabs, settingsTabIds, type SettingsTab } from "../settings/SettingsTabs";
+import { focusFromScript } from "../ui/scriptFocus";
+import { HUB_TITLE_ID } from "../settings/hubModel";
 import "./keys.css";
 
 /**
@@ -135,7 +137,8 @@ export function KeysSettings({ onPendingChange, onNestedDialogChange, totpEnable
       const target = row?.querySelector<HTMLElement>("button:not([disabled])")
         ?? (newKeyRef.current && !newKeyRef.current.disabled ? newKeyRef.current : null)
         ?? headingRef.current;
-      target?.focus();
+      if (target === headingRef.current) focusFromScript(target);
+      else target?.focus();
     });
   }, [data, error]);
 
@@ -164,9 +167,9 @@ export function KeysSettings({ onPendingChange, onNestedDialogChange, totpEnable
   const atLimit = data ? data.liveCount >= data.policy.keysPerUser : false;
   const revokedFocusKey = (revokedId: string) => keyAfterRevoke(live.map((key) => key.id), revokedId);
 
-  return <section className="settings-content mcp-settings keys-settings" aria-labelledby="keys-heading">
+  return <section className="settings-content mcp-settings keys-settings" aria-labelledby={integration ? "keys-heading" : HUB_TITLE_ID}>
     {notice}
-    <div className="settings-section-heading"><span className="settings-icon"><KeyRound /></span><div><h3 id="keys-heading">API keys</h3><p>{integration
+    <div className="settings-section-heading"><span className="settings-icon"><KeyRound /></span><div>{integration && <h3 id="keys-heading">API keys</h3>}<p>{integration
       ? `Keys let an AI client or script act as ${integration.name}, over MCP or the REST API. A key reaches only what owners share with ${integration.name} by name, only what its permissions allow, and only until it expires. Creating or rotating one asks for your password; copy the new key into the client that uses it.`
       : `Keys let trusted AI clients and scripts use ${appName()} as you, over MCP or the REST API. Each key does only what its permissions allow, only with items you can open, and only until it expires. No key can share, manage access, manage keys, or delete forever.`}</p></div></div>
     {/* The bar holds the scrolling row, so this section's grid sizes it by its tabs. */}

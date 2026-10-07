@@ -135,13 +135,21 @@
 .ai-test.failed { color: #fda4af; }
 .ai-policy { display: grid; gap: 12px; }
 .ai-policy p { margin: 0; color: #8d8d94; font-size: .86rem; line-height: 1.5; }
-.ai-policy-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
-.ai-policy-grid label, .ai-policy-grid > div { display: grid; gap: 6px; color: #c9c9ce; font-size: .84rem; }
+/*
+ * v0.31 follow-up: each cell keeps its label right above its control. The cells of a row stretched to
+ * the tallest one (a 44 px field beside two checkbox rows), and a stretched grid cell spread its own
+ * rows apart, so the role checkboxes sat well below "Who can create agents". Cells and their rows now
+ * start at the top.
+ */
+.ai-policy-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); align-items: start; gap: 14px; }
+.ai-policy-grid > label, .ai-policy-grid > div { display: grid; align-content: start; gap: 6px; color: #c9c9ce; font-size: .84rem; }
 .ai-policy-grid input[type="number"], .ai-provider-form input[type="number"] { min-height: 44px; border: 1px solid var(--field-border); border-radius: var(--field-radius); padding: 0 12px; background: var(--field-bg); color: #ededee; font-size: var(--field-font-size); outline: 0; }
 .ai-policy-grid small { color: #7c7c83; }
 .ai-label { color: #8d8d94; font-size: .72rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .ai-roles { display: flex; flex-wrap: wrap; gap: 10px; }
 .ai-roles label, .ai-check { display: inline-flex; align-items: center; gap: 6px; color: #e1e1e3; font-size: .86rem; text-transform: none; letter-spacing: normal; }
+/* Phones: each role checkbox (label and box) is a 44 px target. */
+@media (max-width: 760px) { .ai-roles label, .ai-policy .ai-check { min-height: 44px; } }
 .ai-provider-form { padding-bottom: 16px; }
 .ai-provider-form label small { font-weight: 500; letter-spacing: normal; text-transform: none; }
 .agents-list li { display: flex; align-items: center; gap: 10px; }

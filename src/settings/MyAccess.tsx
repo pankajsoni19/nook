@@ -3,6 +3,7 @@ import { KeyRound, RotateCcw, ShieldCheck } from "lucide-react";
 import { AccessOverview } from "../access/AccessOverview";
 import { feedsAndRoutines, getMyAccess, getMyAccessPage, type AccessKind, type AccessSummary } from "../access/memberAccessApi";
 import { ROLE_LABELS } from "../team/teamRoles";
+import { HUB_TITLE_ID } from "./hubModel";
 import "../team/team.css";
 
 /**
@@ -20,9 +21,8 @@ export function MyAccess() {
   useEffect(load, [load]);
   const loadPage = useCallback((kind: AccessKind, cursor?: string | null) => getMyAccessPage(kind, cursor), []);
 
-  return <section className="settings-content my-access" aria-labelledby="my-access-heading">
+  return <section className="settings-content my-access" aria-labelledby={HUB_TITLE_ID}>
     <div className="settings-section-heading"><span className="settings-icon"><ShieldCheck /></span><div>
-      <h3 id="my-access-heading">My access</h3>
       <p>What others share with you, and through what. Owners change their own sharing; admins decide who is in a group.</p>
     </div></div>
     {error && <div className="team-state team-error" role="alert"><p>{error}</p><button className="secondary-button" onClick={load}><RotateCcw />Try again</button></div>}

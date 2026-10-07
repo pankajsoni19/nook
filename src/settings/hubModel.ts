@@ -2,7 +2,7 @@
 // selects, and where the phone's back arrow goes. Pure, so it is unit tested directly.
 import { readHistoryDepth } from "../appShellNavigation";
 import type { AiTab, KeysTab, Route, SettingsSection } from "../router";
-import { AI_TABS, formatRoute, KEYS_TABS, keysTabPath, SETTINGS_SECTION_NAMES } from "../router";
+import { AI_TAB_LABELS, AI_TABS, aiTabPath, formatRoute, KEYS_TABS, keysTabPath, SETTINGS_SECTION_NAMES } from "../router";
 import { canManageTeam, canSeeTeam, type Role } from "../team/teamRoles";
 
 export type TeamEntryId = "members" | "invites" | "groups" | "integrations" | "keys" | "policies" | "templates" | "activity" | "email";
@@ -125,6 +125,12 @@ export const isHubRoute = (route: Route) => route.app === "settings" || route.ap
 /** The account section the Home tile, the header button, and a hint open. */
 export const settingsRoute = (section: SettingsSection | null = null): Route => ({ app: "settings", section });
 
+/**
+ * The id of the hub's page heading (SettingsHubShell's h1, the section's name). v0.31 follow-up: an
+ * account section is labelled by it instead of repeating its name in an h3 of its own.
+ */
+export const HUB_TITLE_ID = "settings-hub-title";
+
 /** The URL an entry was pushed over (App's PUSHED_OVER_KEY; kept in step by tests/settingsHub.test.tsx). */
 export const HUB_PUSHED_OVER_KEY = "mynotes.pushed-over";
 
@@ -138,16 +144,20 @@ export function hubBackAction(state: unknown): "history" | "list" {
   return readHistoryDepth(entry) > 0 && entry?.[HUB_PUSHED_OVER_KEY] === "/settings" ? "history" : "list";
 }
 
-/** The URLs of API keys' tabs (/settings/keys/:tab), which sit side by side in one section. */
-const KEYS_TAB_URLS: ReadonlySet<string> = new Set(KEYS_TABS.map(keysTabPath));
+/**
+ * The URLs of a section's tabs, which sit side by side in one section: API keys' (/settings/keys/:tab)
+ * and, since the v0.31 follow-ups, Settings → AI's (/settings/ai/:tab).
+ */
+const TAB_URLS: ReadonlySet<string> = new Set([...KEYS_TABS.map(keysTabPath), ...AI_TABS.map(aiTabPath)]);
 /** The URLs an entry was pushed over, nearest first (App's PUSHED_OVER_CHAIN_KEY; kept in step by tests/keysTabs.test.tsx). */
 export const HUB_PUSHED_OVER_CHAIN_KEY = "mynotes.pushed-over-chain";
 
 /**
  * Phones: how many entries the section's back arrow steps back to reach the section list, when this
- * section was opened from it in this visit and then moved only between API keys' tabs (each tab is
- * an entry); 0 otherwise (the list replaces the section, as hubBackAction's "list"). The chain is the
- * URLs each entry was pushed over (App's PUSHED_OVER_CHAIN_KEY), nearest first.
+ * section was opened from it in this visit and then moved only between its tabs (API keys' or
+ * Settings → AI's; each tab is an entry); 0 otherwise (the list replaces the section, as
+ * hubBackAction's "list"). The chain is the URLs each entry was pushed over (App's
+ * PUSHED_OVER_CHAIN_KEY), nearest first.
  */
 export function hubBackSteps(state: unknown): number {
   if (hubBackAction(state) === "history") return 1;
@@ -157,7 +167,7 @@ export function hubBackSteps(state: unknown): number {
   for (let index = 0; index < chain.length && index < depth; index += 1) {
     const url = chain[index];
     if (url === "/settings") return index + 1;
-    if (typeof url !== "string" || !KEYS_TAB_URLS.has(url)) return 0;
+    if (typeof url !== "string" || !TAB_URLS.has(url)) return 0;
   }
   return 0;
 }
@@ -199,8 +209,8 @@ export function hubListGoesUnder(target: Route, current: Route, mobile: boolean)
   return mobile && isHubRoute(target) && !(target.app === "settings" && target.section === null) && !isHubRoute(current);
 }
 
-/** Settings → AI's tab labels. */
-export const AI_TAB_LABELS: Record<AiTab, string> = { providers: "Model providers", tools: "Tool servers", policy: "Chat policy" };
+/** Settings → AI's tab labels (kept in the router, beside the document title that uses them). */
+export { AI_TAB_LABELS };
 
 /**
  * The Settings → AI tabs a role sees, in tab order. The whole page is for admins (its nav entry and

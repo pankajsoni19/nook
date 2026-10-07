@@ -16,7 +16,7 @@ import {
 import { eventLabel } from "./teamFormat";
 import { hubDocumentTitle } from "../router";
 import { googleIntegrationResultFor } from "../auth/googleSignIn";
-import { googleSettingsNotice } from "../auth/GoogleAccountCard";
+import { googleIntegrationNotice } from "../auth/GoogleAccountCard";
 import { GoogleReturnNotice } from "./TeamGoogle";
 
 const formatDate = (value: string) => new Date(value).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
@@ -60,10 +60,8 @@ export function IntegrationPage({ integrationId, totpEnabled, onBack, onDeleted,
   }, [onKeyPendingChange]);
   const { ask, confirmElement } = useConfirm();
   // Review L6: an admin's Google confirmation started from this page's keys comes back here; its result shows over the keys.
-  const [returned, setReturned] = useState(() => {
-    const result = googleIntegrationResultFor(integrationId);
-    return result ? googleSettingsNotice(result) : null;
-  });
+  // An integration never signs in: a "linked" result is not shown on its page (googleIntegrationNotice).
+  const [returned, setReturned] = useState(() => googleIntegrationNotice(googleIntegrationResultFor(integrationId)));
   const generation = useRef(0);
   const keysApi = useMemo(() => integrationKeysApi(integrationId), [integrationId]);
 
