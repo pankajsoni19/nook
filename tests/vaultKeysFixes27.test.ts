@@ -55,7 +55,7 @@ describe("wave 27 fixes: the daily value-read alert (V-O6)", () => {
     notifyAccess({ userId: owner.userId, kind: "key_vault_volume", actorId: null, keyId: key.id, count: 501 });
     const notice = listAccessNotices(owner.userId, { unread: true, limit: 10 }).find((item) => item.title.includes("500 values"));
     expect(notice?.title).toMatch(/^Your vault API key “F27 key .+” read more than 500 values today\. If you did not expect this much use, revoke it/);
-    expect(keyEventLine({ action: "key.vault.volume", meta: { threshold: 500, surface: "rest" } })).toBe("Read more than 500 values today over REST");
+    expect(keyEventLine({ action: "key.vault.volume", meta: { threshold: 500, surface: "rest" } })).toBe("Read more than 500 values in a day over REST");
     expect(keyEventLine({ action: "key.vault.limited", meta: { surface: "mcp" } })).toBe("Hit a vault limit over MCP");
   });
 });

@@ -10,6 +10,8 @@ import { requireVault, VaultError, visibleEnvironments, type VaultActor } from "
  * - A secret's name is shown when the secret still exists (binned secrets show "a secret in the
  *   Bin" to members; owners see the name, as in the Bin itself). An environment the caller cannot
  *   read shows as "an environment you cannot see".
+ * - Access events name whom they were about: a person, or a group (`group.add`, `group.remove`,
+ *   `group.level`; older saves wrote one unnamed `access.change` with the number of groups).
  * - Filters: person (`actor`), event family (`event`: reads, writes, access, keys, transfer,
  *   structure), and environment (`env`). Pages of 100, newest first, with an opaque cursor.
  */
@@ -17,7 +19,7 @@ import { requireVault, VaultError, visibleEnvironments, type VaultActor } from "
 export const EVENT_FAMILIES: Record<string, readonly string[]> = {
   reads: ["value.read", "version.read", "comment.read"],
   writes: ["value.write", "value.clear", "value.restore", "secret.create", "secret.update", "secret.delete", "secret.restore", "secret.purge"],
-  access: ["member.add", "member.remove", "member.leave", "member.owner", "member.demote", "access.change", "access.level"],
+  access: ["member.add", "member.remove", "member.leave", "member.owner", "member.demote", "access.change", "access.level", "group.add", "group.remove", "group.level"],
   keys: ["key.rotate", "key.rotate.auto", "key.rotate.skipped", "key.retire", "reauth"],
   transfer: ["export", "import", "import.preview"],
   /** Wave 27: what vault keys did here, and keys created or rotated with access to this vault (any event with a key). */
@@ -56,8 +58,8 @@ export function listVaultActivity(actor: VaultActor, vaultId: string, filters: {
   const actorId = owner ? filters.actorId : actor.userId;
   const rows = db.query(`SELECT e.id, e.created_at, e.event, e.via, e.count, e.actor_id, u.display_name AS actor_name,
       e.secret_id, s.name AS secret_name, s.deleted_at AS secret_deleted, e.env_id, n.name AS env_name,
-      e.target_id, t.display_name AS target_name, e.level, e.key_id, COALESCE(e.key_name, k.name) AS key_name, COALESCE(e.key_prefix, k.key_prefix) AS key_prefix
-    FROM vault_events e LEFT JOIN users u ON u.id = e.actor_id LEFT JOIN users t ON t.id = e.target_id LEFT JOIN mcp_api_keys k ON k.id = e.key_id
+      e.target_id, CASE WHEN e.event LIKE 'group.%' THEN g.name ELSE t.display_name END AS target_name, e.level, e.key_id, COALESCE(e.key_name, k.name) AS key_name, COALESCE(e.key_prefix, k.key_prefix) AS key_prefix
+    FROM vault_events e LEFT JOIN users u ON u.id = e.actor_id LEFT JOIN users t ON t.id = e.target_id LEFT JOIN user_groups g ON g.id = e.target_id LEFT JOIN mcp_api_keys k ON k.id = e.key_id
       LEFT JOIN vault_secrets s ON s.id = e.secret_id AND s.vault_id = e.vault_id
       LEFT JOIN vault_environments n ON n.id = e.env_id AND n.vault_id = e.vault_id
     WHERE e.vault_id = $vaultId
@@ -88,7 +90,10 @@ export function listVaultActivity(actor: VaultActor, vaultId: string, filters: {
         secret,
         environment: row.env_id === null ? null : envVisible ? { id: row.env_id, name: row.env_name } : { id: null, name: null },
         // Whom an access event was about (names only, QA L1), and the level it gave.
-        target: row.target_id === null ? null : { displayName: row.target_name ?? "a former member", isYou: row.target_id === actor.userId },
+        // A group event's target is the group: its current name, or null once the group is deleted.
+        target: row.target_id === null ? null : row.event.startsWith("group.")
+          ? { kind: "group" as const, displayName: row.target_name, isYou: false }
+          : { kind: "person" as const, displayName: row.target_name ?? "a former member", isYou: row.target_id === actor.userId },
         level: row.level,
         // Wave 27: the vault key that acted (shown as `key:<name>`), its creator being `actor`. The name
         // is the one the key had when the event was written (review L5), so a rename re-labels nothing.

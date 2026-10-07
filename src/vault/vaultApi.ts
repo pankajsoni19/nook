@@ -113,7 +113,7 @@ export type ActivityEvent = {
   secret: { name: string | null; state: "live" | "binned" | "gone" } | null;
   environment: { id: string | null; name: string | null } | null;
   /** Whom an access event was about (names only), and the level it gave. Absent on older events. */
-  target?: { displayName: string; isYou: boolean } | null;
+  target?: { kind?: "person"; displayName: string; isYou: boolean } | { kind: "group"; displayName: string | null; isYou: false } | null;
   level?: string | null;
   /** Wave 27: the vault key that acted (shown as key:<name>); `actor` is the person who made it. */
   key?: { name: string; prefix: string | null } | null;
