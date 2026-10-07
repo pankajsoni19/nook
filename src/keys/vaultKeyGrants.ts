@@ -145,13 +145,18 @@ export function vaultFlagChips(flags: { allowMcpValueReads: boolean; protectedAc
   ];
 }
 
+/** A vault key's value reads so far today (UTC), the count behind the 500-a-day volume alert. */
+export function valueReadsTodayLine(reads: number) {
+  return `${reads.toLocaleString("en-US")} ${reads === 1 ? "value" : "values"} read today (UTC)${reads > 500 ? ", past the 500 alert" : ""}`;
+}
+
 /** A vault key event of the key's own history (the key's Recent activity), never a value or a secret's name. */
 export function vaultKeyEventLine(event: { event: string; via: string; vault: { name: string } | null; environment: { name: string } | null }) {
   const where = [event.vault?.name ?? "a vault", event.environment?.name].filter(Boolean).join(" · ");
   const surface = event.via === "api" ? " over REST" : event.via === "mcp" ? " over MCP" : "";
   const what: Record<string, string> = {
     "value.read": "Read a value", "value.write": "Wrote a value", "secret.create": "Created a secret", "comment.read": "Read a comment",
-    "version.read": "Read an old version", "key.limited": "Hit its rate limit", "key.volume": "Read more than 500 values today", "apikey.create": "Given access", "apikey.rotate": "Rotated with access"
+    "version.read": "Read an old version", "key.limited": "Hit its rate limit", "key.volume": "Read more than 500 values in a day", "apikey.create": "Given access", "apikey.rotate": "Rotated with access"
   };
   return `${what[event.event] ?? event.event}${surface} · ${where}`;
 }

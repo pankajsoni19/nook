@@ -71,6 +71,33 @@ describe("QA L1: access lines in Activity name whom they were about", () => {
     expect(() => db.query("UPDATE vault_events SET target_id = 'someone' WHERE vault_id = ? AND target_id IS NOT NULL").run(vault.id)).toThrow("APPEND_ONLY");
   });
 
+  test("group grants are named: given access, a level per environment, and removed", async () => {
+    const owner = await createUser("QA26 group owner");
+    const member = await createUser("QA26 group member");
+    const groupId = crypto.randomUUID();
+    const at = new Date().toISOString();
+    db.query("INSERT INTO user_groups (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)").run(groupId, `QA26 Ops ${groupId.slice(0, 6)}`, at, at);
+    db.query("INSERT INTO group_members (group_id, user_id, added_at) VALUES (?, ?, ?)").run(groupId, member.userId, at);
+    const name = `QA26 Ops ${groupId.slice(0, 6)}`;
+    const vault = await newVault(owner);
+    await share(owner, vault, [], [{ id: groupId, levels: { dev: "read" } }]);
+    await share(owner, vault, [], [{ id: groupId, levels: { dev: "write", staging: "read" } }]);
+    await share(owner, vault, [], []);
+    const page = await call(owner, "GET", `/vaults/${vault.id}/events?event=access`);
+    expect(page.status).toBe(200);
+    expect((page.body.events as ActivityEvent[]).map(activityLine).sort()).toEqual([
+      `You gave the group ${name} access`,
+      `You gave the group ${name} read access to Development`,
+      `You gave the group ${name} write access to Development`,
+      `You gave the group ${name} read access to Staging`,
+      `You removed the group ${name}`
+    ].sort());
+    // A deleted group still reads as a group.
+    db.query("DELETE FROM user_groups WHERE id = ?").run(groupId);
+    const after = await call(owner, "GET", `/vaults/${vault.id}/events?event=access`);
+    expect((after.body.events as ActivityEvent[]).map(activityLine)).toContain("You removed a deleted group");
+  });
+
   test("older events without a target keep their wording, and a lowered level reads as taken away", () => {
     const base: ActivityEvent = { id: "e", createdAt: "2026-09-30T00:00:00.000Z", event: "member.remove", via: "session", count: 2, actor: { id: "a", displayName: "Alice", isYou: false }, secret: null, environment: null };
     expect(activityLine(base)).toBe("Alice removed people (2)");

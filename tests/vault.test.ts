@@ -288,4 +288,30 @@ describe("rate limits (§7)", () => {
     // Once the previous window has slid out, the bucket is empty again.
     expect(() => chargeVault("write", subject, 300, start + 2 * window)).not.toThrow();
   });
+
+  test("retryAfterSeconds is the wait until the request fits, not just the end of the current window", () => {
+    const window = VAULT_LIMITS.write.windowMs;
+    const start = Math.floor(Date.now() / window) * window + 10 * window;
+    const refusedAt = (subject: string, at: number) => {
+      try { chargeVault("write", subject, 1, at); return null; } catch (error) { return (error as { details: { retryAfterSeconds: number } }).details.retryAfterSeconds; }
+    };
+    // A full window refused just before it ends: waiting for the turnover alone was ~1 s, but the 300
+    // then still count almost in full as the previous window.
+    const full = crypto.randomUUID();
+    chargeVault("write", full, 300, start + 1);
+    const late = start + window - 1000;
+    const wait = refusedAt(full, late)!;
+    expect(wait).toBeGreaterThan(1);
+    expect(refusedAt(full, late + (wait - 1) * 1000)).not.toBeNull();
+    expect(refusedAt(full, late + wait * 1000)).toBeNull();
+    // Room in the current window, a full previous one: the wait is until enough has slid out.
+    const sliding = crypto.randomUUID();
+    chargeVault("write", sliding, 300, start + 1);
+    const half = start + window + window / 2;
+    chargeVault("write", sliding, 150, half);
+    const early = half + 1;
+    const slideWait = refusedAt(sliding, early)!;
+    expect(refusedAt(sliding, early + (slideWait - 1) * 1000)).not.toBeNull();
+    expect(refusedAt(sliding, early + slideWait * 1000)).toBeNull();
+  });
 });

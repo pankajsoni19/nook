@@ -13,7 +13,7 @@ import {
 } from "./keyGrants";
 import { keyDetailEvents, useKeysApi, type ApiKey, type KeyEvent, type KeyList, type NarrowBody, type KeysApi, type VaultKeyEvent } from "./keysApi";
 import { firstVaultRow, useVaultChoices, VaultGrantBuilder } from "./VaultGrantBuilder";
-import { namesProtected, vaultFlagChips, vaultGrantChips, vaultGrantCountChips, vaultGrantsToRows, vaultKeyEventLine, vaultRowsNarrow, vaultRowsToGrants, type VaultGrantRow, type VaultGrantView } from "./vaultKeyGrants";
+import { namesProtected, valueReadsTodayLine, vaultFlagChips, vaultGrantChips, vaultGrantCountChips, vaultGrantsToRows, vaultKeyEventLine, vaultRowsNarrow, vaultRowsToGrants, type VaultGrantRow, type VaultGrantView } from "./vaultKeyGrants";
 import { appName } from "../appName";
 import { holdsAgentGrants, KEYS_TAB_INTROS, KEYS_TAB_LABELS, keysTabCounts, keysTabPreset, keysTabsFor, keyTabOf, listedOnLine, shownKeysTab, type KeysTab } from "./keyTabs";
 import { SettingsTabs, settingsTabIds, type SettingsTab } from "../settings/SettingsTabs";
@@ -366,12 +366,15 @@ function KeyActivity({ keyId, vault = false }: { keyId: string; vault?: boolean 
   const [events, setEvents] = useState<KeyEvent[] | "error" | null>(null);
   // Wave 27: a vault key also lists what it did in vaults (never a value or a secret's name).
   const [vaultEvents, setVaultEvents] = useState<VaultKeyEvent[]>([]);
+  const [readsToday, setReadsToday] = useState<number | null>(null);
   return <details className="keys-activity" onToggle={(event) => {
     if (!(event.currentTarget as HTMLDetailsElement).open || events !== null) return;
-    if (vault) keyDetailEvents(keyId).then((result) => { setEvents(result.events); setVaultEvents(result.vaultEvents ?? []); }, () => setEvents("error"));
+    if (vault) keyDetailEvents(keyId).then((result) => { setEvents(result.events); setVaultEvents(result.vaultEvents ?? []); setReadsToday(result.valueReadsToday ?? null); }, () => setEvents("error"));
     else keysApi.events(keyId).then(setEvents, () => setEvents("error"));
   }}>
     <summary>Recent activity</summary>
+    {/* The volume alert's count: values this key read today (UTC), shown once it has read any. */}
+    {readsToday !== null && readsToday > 0 && <small className="keys-activity-today">{valueReadsTodayLine(readsToday)}</small>}
     {events === null ? <small role="status">Loading…</small> : events === "error" ? <small role="alert">Could not load this key's activity.</small>
       : events.length === 0 && vaultEvents.length === 0 ? <small>Nothing yet.</small>
         : <ul>
