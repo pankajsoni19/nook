@@ -6,9 +6,11 @@ import { KeysDialog } from "../keys/KeysDialog";
 import { adminRevokeKey } from "../keys/keysApi";
 import { Select, type Option } from "../ui/Select";
 import { AccessOverview } from "../access/AccessOverview";
+import { FeedsAndRoutines } from "../access/FeedsAndRoutines";
+import { useConfirm } from "../ui/useConfirm";
 import {
   applyTemplateToMember, getMemberAccess, getMemberAccessPage, LEVEL_WORDS, listTemplates, lowerMemberAccess, removeMemberAccess, removeMemberFromGroup,
-  resetMemberAccess, resetLines, resetSummary, feedsAndRoutines, guestRefusedNames, guestRefusalReason, type AccessKind, type AccessLevel, type AccessRow, type AccessSource, type AccessSummary, type AccessTemplate, type ResetCounts, type VaultAccessRow
+  resetMemberAccess, resetLines, resetSummary, feedsAndRoutines, revokeMemberFeed, pauseMemberRoutine, feedCalendarPhrase, type FeedAccessRow, type RoutineAccessRow, guestRefusedNames, guestRefusalReason, type AccessKind, type AccessLevel, type AccessRow, type AccessSource, type AccessSummary, type AccessTemplate, type ResetCounts, type VaultAccessRow
 } from "../access/memberAccessApi";
 import { ROLE_LABELS } from "./teamRoles";
 import "../keys/keys.css";
@@ -17,7 +19,7 @@ import { hubDocumentTitle } from "../router";
 /**
  * A member's access at /team/:userId/access (Wave 33, access plan §C.6, §E, D268, D269), admins
  * only: their groups, keys, feeds and routines, and per module what they reach. Every action is a
- * reduction (remove, lower, leave a group, revoke a key, Reset access) or adds groups from a
+ * reduction (remove, lower, leave a group, revoke a key or a feed link, pause a routine, Reset access) or adds groups from a
  * template, and each goes through a confirm dialog that Back closes. Titles of items the admin
  * cannot open stay hidden.
  */
@@ -44,6 +46,9 @@ export function MemberAccess({ userId, onBack, flash }: { userId: string; onBack
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const generation = useRef(0);
+  // Feed links and routines (v0.32) confirm in the app's own dialog (D91): Back or Escape cancels.
+  const { ask, confirmOpen, confirmElement } = useConfirm();
+  const [acting, setActing] = useState(false);
 
   const load = useCallback(async () => {
     const current = ++generation.current;
@@ -83,6 +88,30 @@ export function MemberAccess({ userId, onBack, flash }: { userId: string; onBack
     return { value: template.id, label: refused.length ? `${template.name} (refused for a guest)` : template.name, description: refused.length ? `${groups}. ${guestRefusalReason(refused)}` : groups };
   });
   const nothingToReset = Object.values(summary.resetCounts).every((count) => count === 0);
+  const name = member.displayName;
+
+  async function act(confirmed: Promise<boolean>, operation: () => Promise<unknown>, message: string) {
+    if (!await confirmed) return;
+    setActing(true);
+    try {
+      await operation();
+      changed(message);
+    } catch (reason) {
+      // Already gone or already paused: the page shows the latest.
+      if (reason instanceof ApiError && (reason.status === 404 || reason.status === 409)) {
+        flash("That changed meanwhile. The page now shows the latest.");
+        void load();
+      } else flash(messageOf(reason, "Something went wrong"));
+    } finally {
+      setActing(false);
+    }
+  }
+  const revokeFeed = (feed: FeedAccessRow) => void act(
+    ask({ title: `Revoke ${name}'s feed link?`, message: `The link ${feed.prefix}… for ${feedCalendarPhrase(feed)} stops working at once in every app subscribed to it. ${name} is told and can make a new link if they still read the calendar.`, confirmLabel: "Revoke link", danger: true }),
+    () => revokeMemberFeed(member.id, feed.id), `${name}'s feed link was revoked`);
+  const pauseRoutine = (routine: RoutineAccessRow) => void act(
+    ask({ title: `Pause ${name}'s routine “${routine.name}”?`, message: `It stops running on its schedule. ${name} is told; only they can resume it.`, confirmLabel: "Pause routine", danger: true }),
+    () => pauseMemberRoutine(member.id, routine.id), `“${routine.name}” was paused`);
 
   return <article className="team-detail member-access" aria-labelledby="member-access-title">
     <button type="button" className="team-back team-back-visible" onClick={onBack}><ChevronLeft />{member.displayName}</button>
@@ -124,12 +153,14 @@ export function MemberAccess({ userId, onBack, flash }: { userId: string; onBack
         </li>)}
       </ul>}
       <p className="ma-summary-line">{feedsAndRoutines(summary) ?? "No calendar feeds or active routines."}{feedsAndRoutines(summary) ? " Reset access revokes feeds and pauses routines." : ""}</p>
+      <FeedsAndRoutines summary={summary} mode="admin" busy={acting || confirmOpen} onRevokeFeed={revokeFeed} onPauseRoutine={pauseRoutine} />
     </section>
 
     <AccessOverview summary={summary} loadPage={loadPage} reloadKey={reloadKey} busy={dialog !== null}
       actions={{ onRemove: (row, source) => setDialog({ kind: "remove", row, source }), onLower: (row, source, level) => setDialog({ kind: "lower", row, source, level }),
         onRemoveVault: (row) => setDialog({ kind: "vaultRemove", row }), onLowerVault: (row) => setDialog({ kind: "vaultLower", row }) }} />
 
+    {confirmElement}
     {dialog && <ActionDialog dialog={dialog} summary={summary} onClose={() => setDialog(null)} onDone={changed} onStale={() => { setDialog(null); flash("That access changed meanwhile. The page now shows the latest."); setReloadKey((value) => value + 1); void load(); }} />}
   </article>;
 }

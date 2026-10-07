@@ -3,6 +3,7 @@ import { calendarAudiencePredicate, readableEvent, type EventRow } from "./acces
 import { isValidTimeZone, nextOccurrence, parseLocal, zonedToUtc, type RecurrenceRule, type SeriesInput } from "./recurrence";
 import { mailReminder } from "../mail/calendarMail";
 import { listAccessNotices, markAccessNoticesRead, sweepAccessNotices, unreadAccessNotices } from "../access/notices";
+import { paths } from "../mail/links";
 
 /**
  * Reminders, the dispatcher, and in-app notifications (WAVES_10-12.md §4.1–4.3, D64, T66, T67).
@@ -361,7 +362,36 @@ export function notificationHref(eventId: string | null) {
 type NotificationRow = {
   id: string; event_id: string | null; reminder_title: string | null; late: number; read_at: string | null; created_at: string; occurrence_start: string | null;
   kind: "reminder" | "proposals"; proposal_count: number | null; key_name: string | null; routine_name: string | null;
+  run_id: string | null; proposal_key_id: string | null;
 };
+
+const runProposals = db.query("SELECT id, status FROM proposals WHERE run_id = ? AND owner_id = ? ORDER BY created_at, rowid LIMIT 2");
+// A key's burst notification is created right after its first proposal (notifyProposals), so that
+// proposal is the key's newest one at or before the notification.
+const keyProposal = db.query(`SELECT id, status FROM proposals WHERE key_id = ? AND owner_id = ? AND run_id IS NULL AND created_at <= ?
+  ORDER BY created_at DESC, rowid DESC LIMIT 1`);
+
+/**
+ * Where a proposals notification opens (bell deep links, v0.32): the one proposal when it is about
+ * exactly one (pending ones beside the pending list, resolved ones beside History), else the Inbox.
+ * The proposal must still be the reader's own; ids only (T68).
+ */
+export function proposalNotificationHref(userId: string, row: Pick<NotificationRow, "proposal_count" | "run_id" | "proposal_key_id" | "created_at">) {
+  if ((row.proposal_count ?? 1) !== 1) return paths.inbox();
+  let proposal: { id: string; status: string } | null = null;
+  if (row.run_id) {
+    const found = runProposals.all(row.run_id, userId) as Array<{ id: string; status: string }>;
+    proposal = found.length === 1 ? found[0]! : null;
+  } else if (row.proposal_key_id) {
+    proposal = keyProposal.get(row.proposal_key_id, userId, row.created_at) as { id: string; status: string } | null;
+  }
+  if (!proposal) return paths.inbox();
+  try {
+    return proposal.status === "pending" ? paths.proposal(proposal.id) : paths.proposalHistory(proposal.id);
+  } catch {
+    return paths.inbox();
+  }
+}
 
 /**
  * A proposals notification (agent inbox D159, T135): "Key “laptop” suggested 2 changes". Only the
@@ -381,14 +411,14 @@ export function proposalNotificationTitle(keyName: string | null, count: number,
  */
 export function listNotifications(userId: string, options: { unread: boolean; limit: number }) {
   const rows = db.query(`SELECT n.id, n.event_id, r.title AS reminder_title, n.late, n.read_at, n.created_at, n.occurrence_start,
-             n.kind, n.proposal_count, k.name AS key_name, ro.name AS routine_name
+             n.kind, n.proposal_count, k.name AS key_name, ro.name AS routine_name, n.run_id, n.proposal_key_id
       FROM notifications n LEFT JOIN reminders r ON r.id = n.reminder_id LEFT JOIN mcp_api_keys k ON k.id = n.proposal_key_id
       LEFT JOIN routine_runs rr ON rr.id = n.run_id LEFT JOIN routines ro ON ro.id = rr.routine_id
       WHERE n.user_id = $userId AND ($unread = 0 OR n.read_at IS NULL) ORDER BY n.created_at DESC, n.rowid DESC LIMIT $limit`)
     .all({ userId, unread: options.unread ? 1 : 0, limit: options.limit }) as NotificationRow[];
   const calendarItems = rows.map((row): NotificationItem => {
     if (row.kind === "proposals") {
-      return { id: row.id, title: proposalNotificationTitle(row.key_name, row.proposal_count ?? 1, row.routine_name), href: "/inbox", late: false, read: row.read_at !== null, createdAt: row.created_at, occurrenceStart: null };
+      return { id: row.id, title: proposalNotificationTitle(row.key_name, row.proposal_count ?? 1, row.routine_name), href: proposalNotificationHref(userId, row), late: false, read: row.read_at !== null, createdAt: row.created_at, occurrenceStart: null };
     }
     const event = row.event_id ? readableEvent(row.event_id, userId) : null;
     const title = event ? event.event.title : row.event_id ? "An event you can no longer open" : row.reminder_title ?? "Reminder";

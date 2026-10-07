@@ -6,7 +6,7 @@ import { ACTIVITY_CATEGORIES, listAccessActivity } from "../access/events";
 import { ACCESS_KINDS, LEVELS, type AccessKind } from "../access/levels";
 import { parseJson, uuid } from "../validation";
 import { vaultTitleFor } from "../vault/access";
-import { accessItems, accessSummary, lowerAccess, MemberAccessError, removeAccess, removeFromGroup, resetAccess } from "./memberAccess";
+import { accessItems, accessSummary, adminPauseRoutine, adminRevokeFeed, lowerAccess, MemberAccessError, removeAccess, removeFromGroup, resetAccess } from "./memberAccess";
 import { applyTemplateToMember, createTemplate, createTemplateSchema, deleteTemplate, deleteTemplateSchema, listTemplates, patchTemplate, patchTemplateSchema, TemplateError } from "./templates";
 
 /**
@@ -15,6 +15,8 @@ import { applyTemplateToMember, createTemplate, createTemplateSchema, deleteTemp
  * - `GET /api/team/members/:userId/access[?kind&cursor]` (admins): the summary, or one page (200)
  *   of one item kind. Titles redacted per D269; each row carries an opaque handle (T204).
  * - `DELETE` / `PATCH /api/team/members/:userId/access/:handle`: remove or lower (reduction only).
+ * - `POST /api/team/members/:userId/feeds/:feedId/revoke` and `…/routines/:routineId/pause` (v0.32):
+ *   revoke one calendar feed link, pause one routine (reductions; no resume here).
  * - `DELETE /api/team/members/:userId/groups/:groupId`, `POST …/access/reset`, and
  *   `POST …/templates/:templateId/apply`.
  * - `GET/POST /api/team/templates`, `PATCH/DELETE /api/team/templates/:templateId`.
@@ -106,6 +108,26 @@ export function registerCentralAccessRoutes(app: Hono<AppEnv>, gates: { read: Ga
     return respond(c, () => resetAccess(c.get("user").id, id));
   });
 
+  app.post("/api/team/members/:userId/feeds/:feedId/revoke", async (c) => {
+    const refused = gates.write(c);
+    if (refused) return refused;
+    const id = memberId(c);
+    const feedId = uuid.safeParse(c.req.param("feedId")?.toLowerCase()).data;
+    if (!id || !feedId) return notFound(c);
+    await parseJson(c.req.raw, emptySchema);
+    return respond(c, () => adminRevokeFeed(c.get("user").id, id, feedId));
+  });
+
+  app.post("/api/team/members/:userId/routines/:routineId/pause", async (c) => {
+    const refused = gates.write(c);
+    if (refused) return refused;
+    const id = memberId(c);
+    const routineId = uuid.safeParse(c.req.param("routineId")?.toLowerCase()).data;
+    if (!id || !routineId) return notFound(c);
+    await parseJson(c.req.raw, emptySchema);
+    return respond(c, () => adminPauseRoutine(c.get("user").id, id, routineId));
+  });
+
   app.delete("/api/team/members/:userId/groups/:groupId", async (c) => {
     const refused = gates.write(c);
     if (refused) return refused;
@@ -169,7 +191,7 @@ export function registerCentralAccessRoutes(app: Hono<AppEnv>, gates: { read: Ga
       if ((ACCESS_KINDS as readonly string[]).includes(kind)) return presentItem(kind as AccessKind, id, viewerId, readable);
       // Vaults (Wave 26): the name only for an admin who can open the vault themselves (D73, D269).
       const vault = kind === "vault" ? vaultTitleFor(viewerId, id) : null;
-      return vault ? { kind, title: vault, titleHidden: false } : { kind, title: kind === "vault" ? "A vault" : "An item", titleHidden: true };
+      return vault ? { kind, title: vault, titleHidden: false } : { kind, title: kind === "vault" ? "A vault" : kind === "routine" ? "A routine" : "An item", titleHidden: true };
     };
     const { user, group, key, action, cursor } = query.data;
     c.header("Cache-Control", "no-store");

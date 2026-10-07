@@ -41,12 +41,26 @@ export type VaultAccessRow = {
   environments: Array<{ name: string; level: "none" | "read" | "write" | "admin" }>; active: boolean; handle?: string;
 };
 
+/**
+ * One live calendar feed link (v0.32). The calendar's name only when the viewer can open it (else
+ * "Calendar owned by …", D269). `id` is the feed's own id, which the revoke takes.
+ */
+export type FeedAccessRow = {
+  id: string; detail: "busy" | "full"; prefix: string; createdAt: string; lastUsedAt: string | null;
+  calendar: { title: string; titleHidden: boolean; owner: { displayName: string } };
+};
+
+/** One routine (v0.32): name, schedule, and state only, never its instructions. */
+export type RoutineAccessRow = { id: string; name: string; enabled: boolean; schedule: string; nextDueAt: string | null; lastRunAt: string | null; keyName: string | null };
+
 export type AccessSummary = {
   member: { id: string; displayName: string; role: Role; status: "active" | "blocked"; isYou: boolean };
   groups: Array<{ id: string; name: string; grantCount: number; memberCount: number; addedAt: string; addedBy: { id: string; displayName: string } | null; selfAdded: boolean }>;
   keys: Array<{ id: string; name: string; prefix: string; state: string; surfaces: string; expiresAt: string | null; lastUsedAt: string | null; modules: string[] }>;
-  feeds: { live: number };
-  routines: { enabled: number };
+  /** `items` (v0.32): each live feed link; older servers send the count only. */
+  feeds: { live: number; items?: FeedAccessRow[] };
+  /** `items` (v0.32): every routine, enabled first; older servers send the count only. */
+  routines: { enabled: number; items?: RoutineAccessRow[] };
   kinds: KindCount[];
   /** Wave 26: vault memberships (older servers omit it). */
   vaults?: VaultAccessRow[];
@@ -101,6 +115,21 @@ export const removeMemberFromGroup = (userId: string, groupId: string) =>
   api<{ groupId: string }>(`${memberPath(userId)}/groups/${encodeURIComponent(groupId)}`, { method: "DELETE", body: "{}" });
 export const resetMemberAccess = (userId: string) =>
   api<{ removed: ResetCounts; remaining: ResetCounts }>(`${memberPath(userId)}/access/reset`, { method: "POST", body: "{}" });
+/** v0.32: an admin revokes one of the person's feed links, or pauses one of their routines (reductions only). */
+export const revokeMemberFeed = (userId: string, feedId: string) =>
+  api<{ revoked: true; feedId: string }>(`${memberPath(userId)}/feeds/${encodeURIComponent(feedId)}/revoke`, { method: "POST", body: "{}" });
+export const pauseMemberRoutine = (userId: string, routineId: string) =>
+  api<{ paused: true; routineId: string }>(`${memberPath(userId)}/routines/${encodeURIComponent(routineId)}/pause`, { method: "POST", body: "{}" });
+/** Your own (Settings → My access): the owner routes Calendar and the Inbox already use. */
+export const revokeOwnFeed = (feedId: string) => api<{ ok: true }>(`/feeds/${encodeURIComponent(feedId)}`, { method: "DELETE", body: "{}" });
+export const setOwnRoutinePaused = (routineId: string, paused: boolean) =>
+  api<unknown>(`/inbox/routines/${encodeURIComponent(routineId)}/${paused ? "pause" : "resume"}`, { method: "POST", body: "{}" });
+
+/** "the calendar “Team”" or "a calendar owned by Carol". */
+export const feedCalendarPhrase = (row: Pick<FeedAccessRow, "calendar">) => row.calendar.titleHidden
+  ? `a calendar owned by ${row.calendar.owner.displayName}` : `the calendar “${row.calendar.title}”`;
+export const FEED_DETAIL_WORDS: Record<FeedAccessRow["detail"], string> = { busy: "Busy times only", full: "Full details" };
+
 export const applyTemplateToMember = (userId: string, templateId: string) =>
   api<{ added: number; skipped: number; templateName: string }>(`${memberPath(userId)}/templates/${encodeURIComponent(templateId)}/apply`, { method: "POST", body: "{}" });
 
@@ -210,6 +239,8 @@ const ACTION_LABELS: Record<string, (event: ActivityEvent) => string> = {
   "access.share_removed": (event) => `${who(event)} removed ${target(event)}'s access to ${itemName(event)}`,
   "access.share_lowered": (event) => `${who(event)} lowered ${target(event)}'s access to ${itemName(event)}`,
   "access.reset": (event) => `${who(event)} reset ${target(event)}'s access`,
+  "access.feed_revoked": (event) => `${who(event)} revoked ${target(event)}'s calendar feed link for ${itemName(event)}`,
+  "access.routine_paused": (event) => `${who(event)} paused one of ${target(event)}'s routines`,
   "template.created": (event) => `${who(event)} created the template ${templateName(event)}`,
   "template.updated": (event) => `${who(event)} changed the template ${templateName(event)}`,
   "template.deleted": (event) => `${who(event)} deleted the template ${templateName(event)}`,

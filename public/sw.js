@@ -10,12 +10,24 @@ const GENERIC_TITLE = "You have a reminder in Nook";
 const ICON = "/icons/nook-192.png";
 const MAX_SHOWN = 5;
 
-/** The only paths a notification may open: an event page built from its id, or the list. */
+// Bell deep links (v0.32): the shapes the server builds (server/access/notices.ts and
+// server/calendar/reminders.ts, from server/mail/links.ts), each from ids only. The app's own
+// safeNotificationPath checks the same paths against the router.
+const ID = "[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
+const SAFE_PATHS = [
+  "/notifications", "/inbox", "/inbox/routines", `/inbox/p/${ID}`, `/inbox/history/p/${ID}`,
+  "/calendar", `/calendar/event/${ID}`,
+  "/notes", `/notes/${ID}`, `/notes/folder/${ID}`, "/files", `/files/${ID}`,
+  "/tasks", `/tasks/${ID}`, `/tasks/${ID}/card/${ID}`, `/tasks/views/${ID}`,
+  "/collections", `/collections/${ID}`, `/collections/${ID}/row/${ID}`, `/whiteboards/${ID}`,
+  "/vault", `/vault/${ID}`, "/chat", `/chat/${ID}`, `/chat/new\\?agent=${ID}`,
+  "/settings/(?:security|keys|access|notifications|agents|knowledge)", `/settings/agents/${ID}`, `/settings/knowledge/${ID}`
+].map((pattern) => new RegExp(`^${pattern}$`, "i"));
+
+/** The only paths a notification may open: one of the shapes above, lowercased; anything else opens the list. */
 function safePath(href) {
-  // The agent inbox (Wave 21): proposal notifications open the Inbox.
-  if (href === "/inbox") return "/inbox";
-  const match = typeof href === "string" ? /^\/calendar\/event\/([^/?#]+)$/.exec(href) : null;
-  return match && idPattern.test(match[1]) ? `/calendar/event/${match[1].toLowerCase()}` : "/notifications";
+  if (typeof href !== "string" || href.length > 200 || !SAFE_PATHS.some((pattern) => pattern.test(href))) return "/notifications";
+  return href.toLowerCase();
 }
 
 self.addEventListener("install", () => {

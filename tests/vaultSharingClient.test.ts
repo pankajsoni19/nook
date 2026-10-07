@@ -57,7 +57,9 @@ describe("import counts, the bell link, and file formats", () => {
   test("a shared-vault notice opens that vault; anything else stays on the list (T68)", () => {
     expect(safeNotificationPath(`/vault/${V}`)).toBe(`/vault/${V}`);
     expect(safeNotificationPath(`/vault/${V.toUpperCase()}`)).toBe(`/vault/${V}`);
-    expect(safeNotificationPath(`/vault/${V}/secrets/${V}`)).toBe("/notifications");
+    // v0.32: any path the router writes from ids opens (the vault re-checks access); a malformed one does not.
+    expect(safeNotificationPath(`/vault/${V}/secrets/${V}`)).toBe(`/vault/${V}/secrets/${V}`);
+    expect(safeNotificationPath(`/vault/${V}/secrets/nope`)).toBe("/notifications");
     expect(safeNotificationPath("/vault/not-an-id")).toBe("/notifications");
     expect(safeNotificationPath("https://example.test/vault")).toBe("/notifications");
   });
