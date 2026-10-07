@@ -102,7 +102,7 @@ You need Git, Docker Engine, and Docker Compose.
 git clone https://github.com/pankajsoni19/nook.git && cd nook
 cp .env.example .env            # set ALLOWED_EMAILS, TOTP_POLICY, APP_ORIGINS as needed
 sudo mkdir -p /srv/mynotes && sudo chown 1000:1000 /srv/mynotes   # or set MYNOTES_DATA_DIR
-APP_VERSION=0.31.0 GIT_SHA=$(git rev-parse --short HEAD) docker compose up -d --build
+APP_VERSION=0.32.0 GIT_SHA=$(git rev-parse --short HEAD) docker compose up -d --build
 curl http://localhost:2026/api/health   # then open http://localhost:2026 and create the first account (the admin)
 ```
 
@@ -114,11 +114,11 @@ Back up first (`./scripts/backup.sh --force`), pull, rebuild, and let migrations
 
 ## What's new
 
-Release notes for every version are in [CHANGELOG.md](CHANGELOG.md). Latest (v0.31.0):
+Release notes for every version are in [CHANGELOG.md](CHANGELOG.md). Latest (v0.32.0):
 
-- **Formatted agent replies** with tables, lists, and footnotes, and **images in the bubble** (outside pictures load only when you click).
-- **New sign-in alerts** by email and bell, **Recognised devices** in Settings → Security, and a welcome email for new accounts.
-- **A provider per agent**; **migrations 043 and 044** run on the first boot, so back up first.
+- **Notifications open what they are about**, from the bell and the Notifications page.
+- **Admins can revoke a member's calendar feed link or pause their routine**; My access lists your own.
+- **Phone headers, Settings, and chat polish**; no migration.
 
 ## Documentation
 

@@ -2,6 +2,15 @@
 
 Release notes for Nook, newest first. Upgrade steps for each release are in [docs/OPERATIONS.md](docs/OPERATIONS.md#upgrades).
 
+## v0.32.0 — 2026-10-07
+
+- **Notifications open what they are about**: a removed or lowered share opens that note, folder, file, board, collection, agent, chat, or knowledge base; one Inbox proposal opens that proposal; group, key, sign-in, and Google notices open the right Settings page. Links are built from ids only, and an item you can no longer open shows its list instead. A click in the bell on the first page you opened is no longer undone.
+- **Feed links and routines in access pages**: on a member's access page an admin can **Revoke** a calendar feed link and **Pause** a routine (only the owner resumes it); both are recorded in Access activity and tell the member on the bell. **Settings → My access** lists your own feed links and routines with Revoke and Pause/Resume; viewers can revoke their own feed links.
+- **Phones**: Tasks and Collections headers take two rows instead of three, with the view switch, filters, and actions in one row that scrolls sideways; the whiteboard load-error buttons are full-size.
+- **Settings polish**: each Settings → AI tab has its own browser title and the phone back arrow steps over tabs; Chat policy labels sit right above their controls; no stray focus ring on headings after a click or link; duplicated section headings removed; integration pages no longer say "Google sign-in is linked".
+- **Chat**: a Nook key hidden in a tool-server credential (Basic auth, base64, URL-encoded) is refused; "Load image" explains a refused (non-https) link without a request; a reply cut for length is charged only for the text kept; "Chat is off for your role" says why an answer stopped; busy responses carry `Retry-After`; resuming a finished reply ends cleanly; headless Chrome shows as Chrome in Recognised devices.
+- No migration and no new settings.
+
 ## v0.31.0 — 2026-10-07
 
 - **Formatted agent replies**: headings, bullet and numbered lists (they show again), task lists, tables with a header row that scroll inside the bubble on phones, block quotes, code with Copy, strikethrough, footnotes, and links, in chats, shared chats, public links, and the Audit log. Your own messages stay plain text.
