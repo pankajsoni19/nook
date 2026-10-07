@@ -23,16 +23,11 @@ Nothing. Waiting for the operator's next pick.
 ## Small UI follow-ups
 
 - [ ] **Phone sizing:**
-  - the note toolbar's "Publish version" is 34 px tall
   - the Tasks/Collections header takes 3 rows
   - the Vault header wraps the bell at 390 px
   - the whiteboard editor-load Retry button is cramped
-- [ ] **Phone Back:** after deleting the open note from the list, Back shows the Folders panel where the editor step was.
-- [ ] **Stray 404:** opening a member page logs a 404 for `/api/team/<id>/google` while Google sign-in is off.
-- [ ] **Guest sharing:** an Access sheet already open when guest sharing is turned off keeps offering guests until reopened.
 - [ ] **Bell:** deep links into items.
 - [ ] **Member access page:** per-feed revoke and per-routine pause.
-- [ ] **Card activity:** still draws letters.
 - [ ] **Settings polish:**
   - "Google sign-in is linked" wording on an integration page
   - focus ring on a script-focused heading
@@ -42,7 +37,6 @@ Nothing. Waiting for the operator's next pick.
   - the phone header back arrow on a second tab goes to the list; match the API keys page (`hubBackSteps`)
 - [ ] **Chat policy panel (1280):** the "Who can create agents" checkboxes sit well below their label (they align with the taller input in the next column).
 - [ ] **Scroll audit:** no dedicated routes yet for the Knowledge Share… and Move to Bin dialogs (both use shared components).
-- [ ] **README:** the link to `#rate-limits-and-reverse-proxies` lands at the page top (it is a bold paragraph, not a heading).
 
 ## Known LOW leftovers
 
