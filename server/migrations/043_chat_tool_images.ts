@@ -17,7 +17,7 @@ import type { Migration } from "./types";
  * whoever can read the chat (people it is shared with: the active branch only).
  *
  * Needs 039. Transactional and filesystem-free; re-running changes nothing. The Messages plan's
- * migration moves to 044.
+ * migration moves to 045.
  */
 export const chatToolImagesMigration: Migration = {
   id: 43,
