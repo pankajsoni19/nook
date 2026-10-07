@@ -179,6 +179,23 @@ export const PROXY_ERROR_TEXT: Record<string, string> = {
   AGENTS_DISABLED: "Chat is turned off on this Nook"
 };
 
+/**
+ * Why the proxy would refuse this address, checked here first so the card explains it without a
+ * request (and without a 400 in the console): only https, on the default port (443), and with no
+ * user name or password. The proxy checks the same rules again, and more (public addresses only).
+ */
+export function proxyRefusal(url: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return PROXY_ERROR_TEXT.URL_REFUSED!;
+  }
+  // `new URL` drops a port that is the scheme's default, so "https://host:443/" has port "".
+  if (parsed.protocol !== "https:" || (parsed.port !== "" && parsed.port !== "443") || parsed.username || parsed.password) return PROXY_ERROR_TEXT.URL_REFUSED!;
+  return null;
+}
+
 function asDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -196,6 +213,8 @@ function asDataUrl(blob: Blob): Promise<string> {
 export async function loadProxiedImage(url: string, fetcher: typeof fetch = fetch, toDataUrl: (blob: Blob) => Promise<string> = asDataUrl): Promise<{ ok: true; src: string } | ProxyFailure> {
   const cached = loadedImage(url);
   if (cached) return { ok: true, src: cached };
+  const refusal = proxyRefusal(url);
+  if (refusal) return { ok: false, message: refusal };
   let response: Response;
   try {
     response = await fetcher(`${IMAGE_PROXY_PATH}?url=${encodeURIComponent(url)}`, { credentials: "same-origin", headers: { [IMAGE_PROXY_HEADER]: "1", Accept: IMAGE_MIME_TYPES.join(",") } });
