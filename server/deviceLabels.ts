@@ -17,7 +17,7 @@ export function deviceFamilies(userAgent: string | null | undefined): { browser:
     : /\bEdg(e|A|iOS)?\//.test(ua) ? "edge"
     : /\bOPR\/|\bOpera\b/.test(ua) ? "opera"
     : /\bFirefox\/|\bFxiOS\//.test(ua) ? "firefox"
-    : /\bChrome\/|\bCriOS\/|\bChromium\//.test(ua) ? "chrome"
+    : /\b(?:Headless)?Chrome\/|\bCriOS\/|\bChromium\//.test(ua) ? "chrome"
     : /\bSafari\//.test(ua) && /\bVersion\//.test(ua) ? "safari"
     : "other";
   const os: OsFamily = /Windows/.test(ua) ? "windows"
