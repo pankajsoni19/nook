@@ -401,6 +401,7 @@ Compose passes these variables from `.env` (see `.env.example`). Invalid values 
 | `MAIL_TRANSPORT` | `resend` | `resend`, or `file` for development and tests only (refused when `NODE_ENV=production`). |
 | `MAIL_FILE_PATH` | empty | With `MAIL_TRANSPORT=file`: the absolute path of the JSON file messages are written to. |
 | `GOOGLE_OIDC_TEST_BASE_URL` | empty | Tests and local QA only: a fake Google issuer (`tests/support/fakeGoogle.ts`). Refused when `NODE_ENV=production`. |
+| `AGENT_IMAGE_PROXY_TEST_HOSTS` | empty | Tests and local QA only: hosts (names, addresses, or CIDR ranges) the chat image proxy may reach over http on any port, standing in for a public picture host. Refused at startup when `NODE_ENV=production`. The proxy never uses `AGENT_ALLOWED_PRIVATE_HOSTS`: in production it loads public https addresses on port 443 only. |
 | `APP_VERSION` | `0.30.0` | Build metadata shown in Settings → About and reported by the MCP server. |
 | `GIT_SHA` | `development` | Commit shown in Settings → About (first 40 characters). |
 

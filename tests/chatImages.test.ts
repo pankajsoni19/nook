@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createUser, db, origin, type Session } from "./support/harness";
 import { api, makeKey } from "./support/mcpClient";
 import { startFakeProvider } from "./support/fakeProvider";
@@ -8,6 +10,7 @@ import { settleAgentRunsAfterEach } from "./support/agentRuns";
 import { GIF_1X1, makePng, SVG_IMAGE } from "./support/images";
 
 const { config } = await import("../server/config");
+const { storedBytes } = await import("../server/documents");
 const { chargeImageLoad, IMAGE_PROXY_LIMITS, imageLoadsInFlight } = await import("../server/agents/images");
 const { deleteProvider } = await import("../server/agents/providers");
 const { resetToolServersForTests } = await import("../server/agents/toolServers");
@@ -18,8 +21,14 @@ const { toolImageOf } = await import("../server/agents/mcpClient");
  * images (`GET /api/chats/:chatId/tool-images/:imageId`). The proxy needs a session and its header,
  * never takes an API key, goes out through the egress guard (private hosts, redirects, caps), answers
  * only sniffed PNG/JPEG/GIF/WebP bytes with the strict header set, and is rate-limited per person.
- * Tool images are checked by their bytes, capped, stored with the chat, served to its readers only,
- * and kept by a continued copy; the model is told only that an image was shown.
+ * Tool images are checked by their bytes, capped, stored once per picture with a reference per chat,
+ * counted against the owner's quota and the disk floor, served to its readers (the active branch for
+ * people it is shared with), and kept by a copy; the model is told only whether an image was shown.
+ *
+ * Security review fixes: the proxy never uses AGENT_ALLOWED_PRIVATE_HOSTS (public https on 443 only;
+ * the test-only AGENT_IMAGE_PROXY_TEST_HOSTS stands in for a local picture host here), every failure
+ * on the far side is one 502, and a browser that leaves aborts the fetch (M1, L1, L2); blobs are
+ * deduplicated and released by the last reference (M2); readers see the active branch only (L3, L4).
  */
 
 retireUsersAfterFile();
@@ -30,6 +39,8 @@ const PNG = makePng(32, 20);
 const BIG = new Uint8Array(IMAGE_PROXY_LIMITS.maxBytes + 1024);
 BIG.set(PNG.subarray(0, 16));
 const received: Array<{ path: string; headers: Record<string, string> }> = [];
+let slowCancelled = false;
+let slowTimer: ReturnType<typeof setTimeout> | undefined;
 const imageHost = Bun.serve({
   hostname: "127.0.0.1", port: IMAGE_PORT,
   fetch(request) {
@@ -53,6 +64,11 @@ const imageHost = Bun.serve({
         }
       }), { headers: { "Content-Type": "image/png" } });
       case "/moved.png": return new Response(null, { status: 302, headers: { Location: `http://127.0.0.1:${IMAGE_PORT}/chart.png` } });
+      // Sends the first bytes, then nothing for 20 s: the browser leaves first (L1).
+      case "/slow.png": return new Response(new ReadableStream({
+        start(controller) { controller.enqueue(PNG.subarray(0, 64)); slowTimer = setTimeout(() => { try { controller.close(); } catch { /* gone */ } }, 20_000); },
+        cancel() { slowCancelled = true; clearTimeout(slowTimer); }
+      }), { headers: { "Content-Type": "image/png" } });
       default: return new Response("missing", { status: 404 });
     }
   }
@@ -85,8 +101,12 @@ beforeAll(async () => {
   expect(server.status).toBe(201);
   serverId = server.body.server.id;
   expect((await api(admin, "POST", `/agents/admin/servers/${serverId}/sync`, {})).status).toBe(200);
+  // The local picture host stands in for a public one (test-only setting; refused in production).
+  config.agents.imageProxyTestHosts = ["127.0.0.1"];
 });
 afterAll(async () => {
+  config.agents.imageProxyTestHosts = [];
+  clearTimeout(slowTimer);
   deleteProvider(admin.userId, providerId);
   await resetToolServersForTests();
   imageHost.stop(true);
@@ -131,20 +151,43 @@ describe("the image proxy (T304)", () => {
     expect((await proxy(guest, imageUrl("/chart.png"))).status).toBe(404);
   });
 
-  test("refuses private hosts, Nook itself, other schemes, credentials, and SVG addresses before fetching", async () => {
-    const previous = config.agents.allowedPrivateHosts;
-    config.agents.allowedPrivateHosts = [];
+  test("never uses AGENT_ALLOWED_PRIVATE_HOSTS: private hosts are refused even when listed there, and only https on 443 is fetched (M1, L2)", async () => {
+    config.agents.imageProxyTestHosts = [];
+    expect(config.agents.allowedPrivateHosts).toContain("127.0.0.1");
+    received.length = 0;
     try {
-      const refused = await proxy(member, imageUrl("/chart.png"));
-      // Plain http to a host that is not on the list is refused, as https to a private address would be.
-      expect([400, 403]).toContain(refused.status);
-      expect(["URL_REFUSED", "PRIVATE_ADDRESS"]).toContain(await codeOf(refused));
-      const literal = await proxy(member, "https://127.0.0.1:9/x.png");
-      expect(literal.status).toBe(403);
-      expect(await codeOf(literal)).toBe("PRIVATE_ADDRESS");
+      // Plain http, another port, or a private address: never fetched, whatever the admin allowed for providers.
+      for (const url of [imageUrl("/chart.png"), `https://127.0.0.1:${IMAGE_PORT}/chart.png`, "https://images.example.test:8443/a.png", "http://images.example.test/a.png"]) {
+        const refused = await proxy(member, url);
+        expect({ url, status: refused.status, code: await codeOf(refused) }).toEqual({ url, status: 400, code: "URL_REFUSED" });
+      }
+      // https on 443 to a private or local address: the same 502 as any other failure, never a hint.
+      for (const url of ["https://127.0.0.1/x.png", "https://[::1]/x.png", "https://10.0.0.1/x.png", "https://169.254.169.254/latest/meta-data/x.png"]) {
+        const refused = await proxy(member, url);
+        expect({ url, status: refused.status, code: await codeOf(refused) }).toEqual({ url, status: 502, code: "IMAGE_UNAVAILABLE" });
+      }
+      expect(received.length).toBe(0);
     } finally {
-      config.agents.allowedPrivateHosts = previous;
+      config.agents.imageProxyTestHosts = ["127.0.0.1"];
     }
+  });
+
+  test("AGENT_IMAGE_PROXY_TEST_HOSTS is refused in production, and read otherwise", () => {
+    const configPath = join(import.meta.dir, "..", "server", "config.ts");
+    const load = (env: Record<string, string>) => {
+      const result = Bun.spawnSync(["bun", "--no-env-file", "--eval", `const { config } = await import(${JSON.stringify(configPath)}); console.log(JSON.stringify(config.agents.imageProxyTestHosts));`], {
+        cwd: tmpdir(), env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", DATA_DIR: join(tmpdir(), "mynotes-config-test"), ...env }, stdout: "pipe", stderr: "pipe"
+      });
+      return { ok: result.exitCode === 0, stdout: result.stdout.toString().trim().split("\n").at(-1) ?? "", stderr: result.stderr.toString() };
+    };
+    const production = load({ NODE_ENV: "production", COOKIE_SECURE: "true", AGENT_IMAGE_PROXY_TEST_HOSTS: "127.0.0.1" });
+    expect(production.ok).toBe(false);
+    expect(production.stderr).toContain("AGENT_IMAGE_PROXY_TEST_HOSTS is for tests only");
+    expect(JSON.parse(load({ AGENT_IMAGE_PROXY_TEST_HOSTS: "127.0.0.1" }).stdout)).toEqual(["127.0.0.1"]);
+    expect(JSON.parse(load({}).stdout)).toEqual([]);
+  }, 30_000);
+
+  test("refuses Nook itself, other schemes, credentials, long addresses, and SVG addresses before fetching", async () => {
     received.length = 0;
     expect((await proxy(member, `${origin}/api/files/x/content`)).status).toBe(400);
     expect((await proxy(member, "ftp://images.example.test/a.png")).status).toBe(400);
@@ -156,29 +199,33 @@ describe("the image proxy (T304)", () => {
     expect(received.length).toBe(0);
   });
 
-  test("answers only image bytes: HTML and SVG labelled as images are refused, and so is anything over the cap", async () => {
-    const html = await proxy(member, imageUrl("/page.png"));
-    expect(html.status).toBe(415);
-    expect(await codeOf(html)).toBe("NOT_AN_IMAGE");
-    const svg = await proxy(member, imageUrl("/logo"));
-    expect(svg.status).toBe(415);
-    const big = await proxy(member, imageUrl("/big.png"));
-    expect(big.status).toBe(413);
-    expect(await codeOf(big)).toBe("IMAGE_TOO_LARGE");
-    const streamed = await proxy(member, imageUrl("/stream-big.png"));
-    expect(streamed.status).toBe(413);
+  test("every failure on the far side is the same 502 with the same words: not an image, SVG bytes, too large, a redirect (not followed), missing", async () => {
+    received.length = 0;
+    const bodies = new Set<string>();
+    for (const path of ["/page.png", "/logo", "/big.png", "/stream-big.png", "/moved.png", "/nope.png"]) {
+      const response = await proxy(member, imageUrl(path));
+      expect({ path, status: response.status }).toEqual({ path, status: 502 });
+      bodies.add(await response.text());
+    }
+    expect([...bodies]).toEqual([JSON.stringify({ error: "That image could not be loaded", code: "IMAGE_UNAVAILABLE" })]);
+    // The redirect was not followed.
+    expect(received.filter((entry) => entry.path === "/chart.png").length).toBe(0);
     expect(imageLoadsInFlight(member.userId)).toBe(0);
   });
 
-  test("redirects are refused, not followed (as egressFetch does), and a missing picture is a 502", async () => {
-    received.length = 0;
-    const moved = await proxy(member, imageUrl("/moved.png"));
-    expect(moved.status).toBe(502);
-    expect(await codeOf(moved)).toBe("REDIRECT_REFUSED");
-    expect(received.map((entry) => entry.path)).toEqual(["/moved.png"]);
-    const missing = await proxy(member, imageUrl("/nope.png"));
-    expect(missing.status).toBe(502);
-    expect(await codeOf(missing)).toBe("IMAGE_UNAVAILABLE");
+  test("a browser that leaves aborts the fetch and frees its slot (L1)", async () => {
+    slowCancelled = false;
+    const controller = new AbortController();
+    const pending = fetch(`${origin}/api/agents/image-proxy?url=${encodeURIComponent(imageUrl("/slow.png"))}`, { headers: { Cookie: member.cookie, "X-Nook-Image-Proxy": "1" }, signal: controller.signal }).catch(() => null);
+    const until = Date.now() + 3000;
+    while (imageLoadsInFlight(member.userId) === 0 && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(imageLoadsInFlight(member.userId)).toBe(1);
+    controller.abort();
+    await pending;
+    const freed = Date.now() + 5000;
+    while ((imageLoadsInFlight(member.userId) > 0 || !slowCancelled) && Date.now() < freed) await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(imageLoadsInFlight(member.userId)).toBe(0);
+    expect(slowCancelled).toBe(true);
   });
 
   test("is rate-limited per person (a sliding minute), with Retry-After; others are unaffected", async () => {
@@ -252,6 +299,7 @@ describe("tool images (MCP image content)", () => {
     const lastTurn = (fake.calls.filter((call) => call.path === "/v1/chat/completions").at(-1)!.body as { messages: Array<{ role: string; content: string | null }> }).messages.at(-1)!;
     expect(lastTurn.role).toBe("tool");
     expect(lastTurn.content).toContain("[image: image/png");
+    expect(lastTurn.content).toContain("[The image was shown to the person.]");
     expect(lastTurn.content).not.toContain(Buffer.from(PNG).toString("base64").slice(0, 40));
     // The message keeps the reference; the route serves the bytes with the strict headers.
     const detail = await api(member, "GET", `/chats/${chat.id}`);
@@ -272,10 +320,71 @@ describe("tool images (MCP image content)", () => {
     // A wrong pairing of chat and image is 404.
     const other = (await api(member, "POST", "/chats", { agentId: agent.body.agent.id })).body.chat as { id: string };
     expect((await imageGet(member, other.id, ref.id)).status).toBe(404);
-    // Continue as a copy: the copy's tool calls still show the picture.
+    // Continue as a copy: the copy's tool calls still show the picture, through a reference to the same
+    // bytes (stored once) under the copy's own message id (M2, L4); the owner pays for it once.
+    const sha = (db.query("SELECT sha256 FROM chat_tool_images WHERE chat_id = ? AND id = ?").get(chat.id, ref.id) as { sha256: string }).sha256;
+    const before = storedBytes(member.userId);
     const fork = await api(member, "POST", `/chats/${chat.id}/fork`, { messageId });
     expect(fork.status).toBe(201);
     expect((await imageGet(member, fork.body.chat.id, ref.id)).status).toBe(200);
+    expect(storedBytes(member.userId)).toBe(before);
+    expect((db.query("SELECT COUNT(*) AS count FROM chat_image_blobs WHERE sha256 = ?").get(sha) as { count: number }).count).toBe(1);
+    const copyRef = db.query("SELECT message_id FROM chat_tool_images WHERE chat_id = ? AND id = ?").get(fork.body.chat.id, ref.id) as { message_id: string };
+    const copyAssistant = db.query("SELECT id FROM chat_messages WHERE chat_id = ? AND role = 'assistant'").get(fork.body.chat.id) as { id: string };
+    expect(copyRef.message_id).toBe(copyAssistant.id);
+    // A copy by someone else counts against their own quota.
+    const readerBefore = storedBytes(reader.userId);
+    const readerFork = await api(reader, "POST", `/chats/${chat.id}/fork`, { messageId });
+    expect(readerFork.status === 201 || readerFork.status === 403).toBe(true);
+    if (readerFork.status === 201) expect(storedBytes(reader.userId)).toBe(readerBefore + ref.bytes);
+    // Purge releases references; the bytes go with the last one.
+    db.query("DELETE FROM chats WHERE id = ?").run(chat.id);
+    expect((db.query("SELECT COUNT(*) AS count FROM chat_image_blobs WHERE sha256 = ?").get(sha) as { count: number }).count).toBe(1);
+    db.query("DELETE FROM chats WHERE id = ?").run(fork.body.chat.id);
+    if (readerFork.status === 201) db.query("DELETE FROM chats WHERE id = ?").run(readerFork.body.chat.id);
+    expect((db.query("SELECT COUNT(*) AS count FROM chat_image_blobs WHERE sha256 = ?").get(sha) as { count: number }).count).toBe(0);
+    expect(storedBytes(member.userId)).toBe(before - ref.bytes);
+  });
+
+  test("people a chat is shared with see tool images and continue only on the active branch (L3)", async () => {
+    const agent = await api(member, "POST", "/agents", { name: "Painter 3", systemPrompt: "Draw.", providerId, tools: [{ source: "server", serverId, toolName: "image", policy: null }] });
+    const chat = (await api(member, "POST", "/chats", { agentId: agent.body.agent.id })).body.chat as { id: string };
+    const { messageId, events } = await sendAndWait(member, chat.id, 'tool:fake-images__image:{"kind":"png"}');
+    const ref = events.find((event) => event.type === "tool_result")!.data.images[0] as { id: string };
+    const access = await api(member, "GET", `/chats/${chat.id}/access`);
+    expect((await fetch(`${origin}/api/chats/${chat.id}/access`, { method: "PUT", headers: { Cookie: member.cookie, Origin: origin, "X-CSRF-Token": member.csrf, "Content-Type": "application/json", "If-Match": access.body.etag }, body: JSON.stringify({ audience: "selected", people: [{ id: reader.userId, level: "view" }], groups: [] }) })).status).toBe(200);
+    expect((await imageGet(reader, chat.id, ref.id)).status).toBe(200);
+    // The owner switches to another branch (here: back to the question alone); the reply with the picture is off it.
+    const question = db.query("SELECT parent_id FROM chat_messages WHERE id = ?").get(messageId) as { parent_id: string };
+    db.query("UPDATE chats SET active_leaf_id = ? WHERE id = ?").run(question.parent_id, chat.id);
+    expect((await imageGet(reader, chat.id, ref.id)).status).toBe(404);
+    expect((await imageGet(member, chat.id, ref.id)).status).toBe(200);
+    expect((await api(reader, "POST", `/chats/${chat.id}/fork`, { messageId })).status).toBe(404);
+    const onPath = await api(reader, "POST", `/chats/${chat.id}/fork`, { messageId: question.parent_id });
+    expect(onPath.status === 201 || onPath.status === 403).toBe(true);
+  });
+
+  test("nothing is kept past the owner's storage quota or the free-disk floor, and the model is told so (M2)", async () => {
+    const agent = await api(stranger, "POST", "/agents", { name: "Painter 4", systemPrompt: "Draw.", providerId, tools: [{ source: "server", serverId, toolName: "image", policy: null }] });
+    const chat = (await api(stranger, "POST", "/chats", { agentId: agent.body.agent.id })).body.chat as { id: string };
+    const quota = config.userStorageQuotaBytes;
+    const floor = config.minFreeDiskBytes;
+    const lastTool = () => (fake.calls.filter((call) => call.path === "/v1/chat/completions").at(-1)!.body as { messages: Array<{ role: string; content: string | null }> }).messages.at(-1)!.content ?? "";
+    try {
+      config.userStorageQuotaBytes = storedBytes(stranger.userId) + 100;
+      const full = await sendAndWait(stranger, chat.id, 'tool:fake-images__image:{"kind":"png"}');
+      expect(full.events.find((event) => event.type === "tool_result")!.data.images).toBeUndefined();
+      expect(lastTool()).toContain("[An image was not kept or shown: the chat owner's storage quota is full.]");
+      config.userStorageQuotaBytes = quota;
+      config.minFreeDiskBytes = Number.MAX_SAFE_INTEGER;
+      const disk = await sendAndWait(stranger, chat.id, 'tool:fake-images__image:{"kind":"png"}');
+      expect(disk.events.find((event) => event.type === "tool_result")!.data.images).toBeUndefined();
+      expect(lastTool()).toContain("this Nook's disk is nearly full");
+    } finally {
+      config.userStorageQuotaBytes = quota;
+      config.minFreeDiskBytes = floor;
+    }
+    expect((db.query("SELECT COUNT(*) AS count FROM chat_tool_images WHERE chat_id = ?").get(chat.id) as { count: number }).count).toBe(0);
   });
 
   test("an SVG part is refused and a call keeps at most 4 pictures", async () => {
@@ -286,7 +395,13 @@ describe("tool images (MCP image content)", () => {
     expect(svgResult.data.images).toBeUndefined();
     expect(svgResult.data.resultPreview).toContain("[image omitted]");
     const many = await sendAndWait(member, chat.id, 'tool:fake-images__image:{"kind":"many"}');
-    expect(many.events.find((event) => event.type === "tool_result")!.data.images).toHaveLength(4);
+    const manyResult = many.events.find((event) => event.type === "tool_result")!;
+    expect(manyResult.data.images).toHaveLength(4);
+    expect(manyResult.data.resultPreview).toContain("[4 images were shown to the person.]");
+    // A call keeps at most 4; the rest are placeholders the model sees.
+    expect(manyResult.data.resultPreview.match(/\[image omitted\]/g)).toHaveLength(2);
     expect((db.query("SELECT COUNT(*) AS count FROM chat_tool_images WHERE chat_id = ?").get(chat.id) as { count: number }).count).toBe(4);
+    // Six identical pictures: the bytes are stored once.
+    expect((db.query("SELECT COUNT(DISTINCT sha256) AS count FROM chat_tool_images WHERE chat_id = ?").get(chat.id) as { count: number }).count).toBe(1);
   });
 });

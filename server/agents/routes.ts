@@ -7,7 +7,7 @@ import { db } from "../db";
 import { parseJson, uuid } from "../validation";
 import { AGENT_BOUNDS, AGENT_ROLE_OPTIONS, DEFAULT_MODEL, SERVER_AUTH_KINDS, SERVER_AVAILABILITIES, TOOL_POLICIES, type ChatUpdateEvent } from "../../shared/agents";
 import { createAgent, deleteAgent, agentDetail, listUsableAgents, manageableAgent, updateAgent, usableAgent } from "./agentsService";
-import { chatDetail, createChat, deleteChat, forkChat, listChats, listSharedChats, messageOf, readableChat, updateChat } from "./chats";
+import { chatDetail, createChat, deleteChat, forkChat, listChats, listSharedChats, messageOf, pathTo, readableChat, updateChat } from "./chats";
 import { publicLinkFor, publicLinksOn, publicLinkState, revokePublicLink, roleMayPublish, upsertPublicLink } from "./publicShares";
 import { readShareAccess, shareLevel, writeShareAccess, type ShareKind } from "./sharing";
 import { subscribeChatUpdates } from "./chatUpdates";
@@ -225,12 +225,14 @@ export function registerAgentRoutes(app: Hono<AppEnv>) {
   // --- Images in chats (D370 as amended, T304; server/agents/images.ts) ---
   // An outside image the person chose to load: session only, the egress guard, image bytes only.
   app.get("/api/agents/image-proxy", handle((c) => proxyImage(c)));
-  // A picture an MCP tool returned, to whoever can read the chat (the owner and the people it is shared with).
+  // A picture an MCP tool returned, to whoever can read the chat: the owner, and the people it is shared
+  // with for the messages of the active branch only, as they see the chat (security review L3).
   app.get("/api/chats/:chatId/tool-images/:imageId", handle((c) => {
     const chatId = id(c, "chatId");
     const imageId = id(c, "imageId");
-    readableChat(chatId, c.get("user").id);
-    return toolImageResponse(chatId, imageId);
+    const chat = readableChat(chatId, c.get("user").id);
+    const visible = chat.owner_id === c.get("user").id ? null : new Set(pathTo(chatId, chat.active_leaf_id).map((row) => row.id));
+    return toolImageResponse(chatId, imageId, visible);
   }));
 
   // --- Admin: providers and policy (plan §4.1) ---

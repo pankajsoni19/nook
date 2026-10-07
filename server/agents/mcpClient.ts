@@ -352,7 +352,8 @@ export class McpSession {
         const image = images.length < TOOL_IMAGE_BOUNDS.perCall ? toolImageOf(item.data) : null;
         if (image) {
           images.push(image);
-          parts.push(`[image: ${image.mimeType}, ${Math.max(1, Math.round(image.bytes.byteLength / 1024))} KiB, shown to the person]`);
+          // Whether the person sees it is decided when it is stored (server/agents/runs.ts adds a line saying so).
+          parts.push(`[image: ${image.mimeType}, ${Math.max(1, Math.round(image.bytes.byteLength / 1024))} KiB]`);
         } else parts.push("[image omitted]");
       }
       else if (item.type === "audio") parts.push("[audio omitted]");

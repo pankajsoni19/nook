@@ -259,10 +259,10 @@ describe("images in the bubble", () => {
 
   test("click to load: the proxy's refusals become a message on the card; a non-image answer is refused again here", async () => {
     const answer = (status: number, body: unknown, type = "application/json") => (async () => new Response(typeof body === "string" ? body : JSON.stringify(body), { status, headers: { "Content-Type": type } })) as unknown as typeof fetch;
-    expect(await loadProxiedImage("https://a.example.test/1.png", answer(415, { code: "NOT_AN_IMAGE" }))).toEqual({ ok: false, message: "That address is not a PNG, JPEG, GIF, or WebP image" });
-    expect(await loadProxiedImage("https://a.example.test/2.png", answer(502, { code: "REDIRECT_REFUSED" }))).toEqual({ ok: false, message: "The image's host answered with a redirect, which Nook does not follow" });
+    expect(await loadProxiedImage("https://a.example.test/1.png", answer(502, { code: "IMAGE_UNAVAILABLE" }))).toEqual({ ok: false, message: "That image could not be loaded" });
+    expect(await loadProxiedImage("http://a.example.test:8080/2.png", answer(400, { code: "URL_REFUSED" }))).toEqual({ ok: false, message: "Nook loads outside images only from public https addresses" });
     expect(await loadProxiedImage("https://a.example.test/3.png", answer(429, "slow down", "text/plain"))).toEqual({ ok: false, message: "Too many images loaded; wait a minute" });
-    expect(await loadProxiedImage("https://a.example.test/4.png", answer(200, "<svg/>", "image/svg+xml"))).toEqual({ ok: false, message: "That address is not a PNG, JPEG, GIF, or WebP image" });
+    expect(await loadProxiedImage("https://a.example.test/4.png", answer(200, "<svg/>", "image/svg+xml"))).toEqual({ ok: false, message: "That image could not be loaded" });
     const offline = (async () => { throw new TypeError("offline"); }) as unknown as typeof fetch;
     expect(await loadProxiedImage("https://a.example.test/5.png", offline)).toEqual({ ok: false, message: "Nook could not be reached" });
   });

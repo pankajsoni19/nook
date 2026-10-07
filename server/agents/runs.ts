@@ -313,12 +313,21 @@ function toolExecutor(run: ActiveRun, channel: RunChannel, agent: AgentRow, mess
       console.error("Agent tool call failed", error instanceof Error ? error.name : "Unknown error");
       return fail("INTERNAL", "The tool could not be run");
     }
+    // Tool images are kept with the chat for the person (never sent to the model), within the run's limit,
+    // the chat owner's storage quota, and the free-disk floor (review M2); the model is told which.
+    let imageRefs: ToolImageRef[] = [];
+    if (images.length > 0) {
+      const kept = run.chatId
+        ? await storeToolImages(run.chatId, messageId, images, run.toolCalls.reduce((sum, item) => sum + (item.images?.length ?? 0), 0))
+        : { refs: [], dropped: images.length, reason: "this run has no chat" };
+      imageRefs = kept.refs;
+      if (kept.refs.length > 0) text += `\n[${kept.refs.length === 1 ? "The image was" : `${kept.refs.length} images were`} shown to the person.]`;
+      if (kept.dropped > 0) text += `\n[${kept.dropped === 1 ? "An image was" : `${kept.dropped} images were`} not kept or shown: ${kept.reason ?? "it could not be stored"}.]`;
+    }
     const capped = capResultText(text, tool.resultCapBytes);
     // The fence's nonce is made after the result exists, so the result cannot close the fence (review L7).
     const nonce = randomBytes(6).toString("hex");
     const content = `${toolResultMarker(tool.server, tool.toolName, nonce)}\n${capped.text}${capped.truncated ? `\n[truncated: the result was ${capped.bytes} bytes; the first ${tool.resultCapBytes} are shown]` : ""}\n${toolResultEnd(nonce)}`;
-    // Tool images are kept with the chat for the person (never sent to the model); an API run has no chat, so none are kept.
-    const imageRefs = images.length > 0 && run.chatId ? storeToolImages(run.chatId, messageId, images, run.toolCalls.reduce((sum, item) => sum + (item.images?.length ?? 0), 0)) : [];
     finish(view, { ok, text: capped.text, truncated: capped.truncated, durationMs: Date.now() - started, proposalId, images: imageRefs });
     audit(run.userId, null, "agents.tool.call", { runId: run.runId, agentId: agent.id, serverId: view.serverId, server: view.server, tool: view.tool, ok, truncated: capped.truncated, durationMs: view.durationMs, proposalId });
     return { content };

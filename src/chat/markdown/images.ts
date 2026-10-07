@@ -13,6 +13,8 @@
  *   and **Load image** fetches the picture through Nook's image proxy (`/api/agents/image-proxy`),
  *   so the page CSP stays `img-src 'self' data:`, the viewer's address is not exposed, and the bytes
  *   are checked to be an image. The click is the consent; the URL, query and all, reaches that host.
+ *   The proxy loads public https addresses on port 443 only; anything else, and any failure on the
+ *   far side, is one message: "That image could not be loaded" (security review M1).
  *   "Always load from this host" lasts for this chat, in this tab, until it is reloaded.
  * - Everything else (SVG, other types, other schemes, oversized or malformed data) is refused and
  *   shows as a chip, as before.
@@ -25,7 +27,7 @@ export const IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/gif", "image/
 export type ImageMimeType = (typeof IMAGE_MIME_TYPES)[number];
 /** The largest `data:` image shown, decoded. The stored message bound (256 Ki characters) is the tighter cap in practice. */
 export const DATA_IMAGE_MAX_BYTES = 2 * 1024 * 1024;
-/** The proxy's cap, mirrored from server/agents/imageProxy.ts for the card's wording. */
+/** The proxy's cap, mirrored from server/agents/images.ts. */
 export const PROXY_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
 export const IMAGE_PROXY_PATH = "/api/agents/image-proxy";
 /** The header the proxy requires: an `<img>`, a link, or another site's page cannot send it. */
@@ -169,15 +171,10 @@ function remember(url: string, dataUrl: string) {
 
 export type ProxyFailure = { ok: false; message: string };
 export const PROXY_ERROR_TEXT: Record<string, string> = {
-  NOT_AN_IMAGE: "That address is not a PNG, JPEG, GIF, or WebP image",
-  IMAGE_TOO_LARGE: `The image is larger than ${PROXY_IMAGE_MAX_BYTES / 1024 / 1024} MiB`,
-  IMAGE_UNAVAILABLE: "The image's host did not return it",
-  REDIRECT_REFUSED: "The image's host answered with a redirect, which Nook does not follow",
-  PRIVATE_ADDRESS: "The image is on a private or local address",
-  URL_REFUSED: "Nook does not load images from that address",
-  DNS_FAILED: "The image's host could not be found",
-  TIMEOUT: "The image's host did not answer in time",
-  NETWORK: "The image's host could not be reached",
+  // The proxy gives one answer for anything that went wrong on the far side (security review M1).
+  IMAGE_UNAVAILABLE: "That image could not be loaded",
+  URL_REFUSED: "Nook loads outside images only from public https addresses",
+  NOT_AN_IMAGE: "SVG images are never loaded",
   RATE_LIMITED: "Too many images loaded; wait a minute",
   AGENTS_DISABLED: "Chat is turned off on this Nook"
 };
@@ -211,10 +208,10 @@ export async function loadProxiedImage(url: string, fetcher: typeof fetch = fetc
     return { ok: false, message: PROXY_ERROR_TEXT[code] ?? (response.status === 429 ? PROXY_ERROR_TEXT.RATE_LIMITED! : "The image could not be loaded") };
   }
   const type = (response.headers.get("Content-Type") ?? "").split(";")[0]!.trim().toLowerCase();
-  if (!IMAGE_MIME_TYPES.includes(type as ImageMimeType)) return { ok: false, message: PROXY_ERROR_TEXT.NOT_AN_IMAGE! };
+  if (!IMAGE_MIME_TYPES.includes(type as ImageMimeType)) return { ok: false, message: PROXY_ERROR_TEXT.IMAGE_UNAVAILABLE! };
   try {
     const src = await toDataUrl(await response.blob());
-    if (!src.startsWith(`data:${type};`)) return { ok: false, message: PROXY_ERROR_TEXT.NOT_AN_IMAGE! };
+    if (!src.startsWith(`data:${type};`)) return { ok: false, message: PROXY_ERROR_TEXT.IMAGE_UNAVAILABLE! };
     remember(url, src);
     return { ok: true, src };
   } catch {

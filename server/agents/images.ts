@@ -1,10 +1,15 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { statfs } from "node:fs/promises";
+import { isIP } from "node:net";
 import type { Context } from "hono";
 import type { AppEnv } from "../auth";
+import { config } from "../config";
 import { db, now } from "../db";
+import { storedBytes } from "../documents";
+import { keepRequestOpen } from "../longRequests";
 import { sniff, SNIFF_BYTES } from "../mimeSniff";
 import { TOOL_IMAGE_BOUNDS, type ToolImageRef } from "../../shared/agents";
-import { checkEgressUrl, EgressError, egressFetch } from "./egress";
+import { checkEgressUrl, EgressError, egressFetch, privateHostAllowed } from "./egress";
 import type { McpImage } from "./mcpClient";
 import { AgentError } from "./status";
 
@@ -22,12 +27,24 @@ import { AgentError } from "./status";
  *   an `<img>`, a link, a form, or another site's page cannot send (another origin would need a CORS
  *   preflight Nook never grants), and refuses a `Sec-Fetch-Site` other than same-origin. So nothing
  *   in a note, a file, or a reply can make a browser call it without the person's click.
- * - The fetch is `egressFetch`: https (http only for AGENT_ALLOWED_PRIVATE_HOSTS), no credentials in
- *   the URL, DNS checked and pinned, private and local addresses and Nook's own origin refused,
- *   redirects refused (not followed), no cookie or key sent, and its byte cap and timeouts. Nothing
- *   logs the URL.
+ * - **Public https on port 443 only** (security review M1, L2): the proxy never uses
+ *   AGENT_ALLOWED_PRIVATE_HOSTS, which is the admin's allowance for providers and tool servers, not
+ *   for every chat user; so it reaches no private or local address, no plain http, and no other port.
+ *   AGENT_IMAGE_PROXY_TEST_HOSTS (tests and local QA only, refused in production) is the one exception.
+ * - The fetch is `egressFetch` (DNS checked and pinned, Nook's own origin refused, redirects refused,
+ *   no cookie or key sent, its byte cap and timeouts), aborted when the browser goes away (review L1).
+ * - Every failure that depends on the far side (DNS, a private address, a redirect, a timeout, a
+ *   status, the size, bytes that are not an image) is one answer, 502 `IMAGE_UNAVAILABLE` "That image
+ *   could not be loaded", so the proxy cannot be used to map hosts or ports; the reason is logged with
+ *   the host only, never the path or query.
  * - Per person: `IMAGE_PROXY_LIMITS.perMinute` images a minute (sliding, in `agent_rate_limits`) and
  *   `concurrent` at a time; the body is buffered under `maxBytes` and checked by its first bytes.
+ *
+ * Tool images (review M2): each picture's bytes are stored once by SHA-256 (`chat_image_blobs`);
+ * `chat_tool_images` rows reference them per chat and message, and a trigger removes a blob when its
+ * last reference goes (a chat purged from the Bin, a copy deleted). A chat owner's references count
+ * against their storage quota (`storedBytes`, each distinct picture once), and nothing is kept when
+ * the quota or the disk (`MIN_FREE_DISK_BYTES`) would be exceeded.
  */
 
 export const IMAGE_PROXY_LIMITS = { maxBytes: 5 * 1024 * 1024, perMinute: 60, concurrent: 4, urlChars: 2048, firstByteMs: 10_000, idleMs: 10_000, totalMs: 30_000 } as const;
@@ -85,20 +102,19 @@ export function chargeImageLoad(userId: string, nowMs = Date.now()): number {
 /** Test hook: the proxy requests in flight per person. */
 export const imageLoadsInFlight = (userId: string) => inFlight.get(userId) ?? 0;
 
-const EGRESS_STATUS: Record<string, { status: number; code: string; message: string }> = {
-  URL_REFUSED: { status: 400, code: "URL_REFUSED", message: "Nook does not load images from that address" },
-  PRIVATE_ADDRESS: { status: 403, code: "PRIVATE_ADDRESS", message: "The image is on a private or local address" },
-  REDIRECT_REFUSED: { status: 502, code: "REDIRECT_REFUSED", message: "The image's host answered with a redirect, which is not followed" },
-  DNS_FAILED: { status: 502, code: "DNS_FAILED", message: "The image's host could not be found" },
-  TOO_LARGE: { status: 413, code: "IMAGE_TOO_LARGE", message: "The image is larger than allowed" },
-  TIMEOUT: { status: 504, code: "TIMEOUT", message: "The image's host did not answer in time" },
-  NETWORK: { status: 502, code: "NETWORK", message: "The image's host could not be reached" }
-};
+const URL_REFUSED = () => new AgentError(400, "URL_REFUSED", "Nook loads outside images only from public https addresses");
+/** The one answer for anything that went wrong on the far side (review M1). */
+class Unavailable extends Error {
+  constructor(readonly reason: string) { super(reason); }
+}
 
-const asAgentError = (error: EgressError) => {
-  const mapped = EGRESS_STATUS[error.code] ?? EGRESS_STATUS.NETWORK!;
-  return new AgentError(mapped.status, mapped.code, mapped.message, error.code === "TOO_LARGE" ? { limitBytes: IMAGE_PROXY_LIMITS.maxBytes } : {});
-};
+/** Whether a test-only host is named (AGENT_IMAGE_PROXY_TEST_HOSTS); never in production (config refuses it there). */
+function testHostListed(url: URL) {
+  const hosts = config.agents.imageProxyTestHosts;
+  if (hosts.length === 0) return false;
+  const host = url.hostname.toLowerCase().replace(/\.$/, "").replace(/^\[|\]$/g, "");
+  return privateHostAllowed(host, isIP(host) ? [host] : [], hosts);
+}
 
 /** `GET /api/agents/image-proxy?url=…` (see the module comment). */
 export async function proxyImage(c: Context<AppEnv>): Promise<Response> {
@@ -112,46 +128,65 @@ export async function proxyImage(c: Context<AppEnv>): Promise<Response> {
   try {
     url = checkEgressUrl(raw);
   } catch (error) {
-    throw error instanceof EgressError ? asAgentError(error) : error;
+    if (error instanceof EgressError) throw URL_REFUSED();
+    throw error;
   }
+  const testHost = testHostListed(url);
+  // Public https on the default port, unless a test host is named (review M1, L2).
+  if (!testHost && (url.protocol !== "https:" || url.port !== "")) throw URL_REFUSED();
   if (/\.svgz?$/i.test(url.pathname)) throw new AgentError(415, "NOT_AN_IMAGE", "SVG images are never loaded");
   if ((inFlight.get(userId) ?? 0) >= IMAGE_PROXY_LIMITS.concurrent) throw new AgentError(429, "RATE_LIMITED", "Too many images are loading; wait a moment", { retryAfterSeconds: 2 });
   const wait = chargeImageLoad(userId);
   if (wait > 0) throw new AgentError(429, "RATE_LIMITED", "Too many images loaded; wait a minute", { retryAfterSeconds: wait });
   inFlight.set(userId, (inFlight.get(userId) ?? 0) + 1);
+  // Up to 30 s: past the server's idle timeout, so the request is kept open; it ends when the browser leaves (review L1).
+  keepRequestOpen(c.req.raw);
   try {
-    const response = await egressFetch(url.toString(), { method: "GET", headers: { Accept: "image/png,image/jpeg,image/gif,image/webp" } }, IMAGE_PROXY_LIMITS);
+    let response;
+    try {
+      response = await egressFetch(url.toString(), { method: "GET", headers: { Accept: "image/png,image/jpeg,image/gif,image/webp" }, signal: c.req.raw.signal }, IMAGE_PROXY_LIMITS,
+        { allowlist: testHost ? config.agents.imageProxyTestHosts : [] });
+    } catch (error) {
+      throw new Unavailable(error instanceof EgressError ? error.code : c.req.raw.signal.aborted ? "CLIENT_GONE" : "NETWORK");
+    }
     if (response.status !== 200) {
       response.cancel();
-      throw new AgentError(502, "IMAGE_UNAVAILABLE", "The image's host did not return it");
+      throw new Unavailable(`STATUS_${response.status}`);
     }
     const declared = Number(response.headers.get("content-length") ?? "");
     if (Number.isFinite(declared) && declared > IMAGE_PROXY_LIMITS.maxBytes) {
       response.cancel();
-      throw new AgentError(413, "IMAGE_TOO_LARGE", "The image is larger than allowed", { limitBytes: IMAGE_PROXY_LIMITS.maxBytes });
+      throw new Unavailable("TOO_LARGE");
     }
     const chunks: Uint8Array[] = [];
     let size = 0;
     let checked = false;
-    for await (const chunk of response.body) {
-      chunks.push(chunk);
-      size += chunk.byteLength;
-      // Decided on the first bytes: an HTML page or an SVG is dropped before the rest is downloaded.
-      if (!checked && size >= 16) {
-        checked = true;
-        if (!imageTypeOf(Buffer.concat(chunks))) {
-          response.cancel();
-          throw new AgentError(415, "NOT_AN_IMAGE", "That address is not a PNG, JPEG, GIF, or WebP image");
+    try {
+      for await (const chunk of response.body) {
+        chunks.push(chunk);
+        size += chunk.byteLength;
+        // Decided on the first bytes: an HTML page or an SVG is dropped before the rest is downloaded.
+        if (!checked && size >= 16) {
+          checked = true;
+          if (!imageTypeOf(Buffer.concat(chunks))) {
+            response.cancel();
+            throw new Unavailable("NOT_AN_IMAGE");
+          }
         }
       }
+    } catch (error) {
+      if (error instanceof Unavailable) throw error;
+      throw new Unavailable(error instanceof EgressError ? error.code : c.req.raw.signal.aborted ? "CLIENT_GONE" : "NETWORK");
     }
     const bytes = new Uint8Array(Buffer.concat(chunks));
     const mimeType = imageTypeOf(bytes);
-    if (!mimeType) throw new AgentError(415, "NOT_AN_IMAGE", "That address is not a PNG, JPEG, GIF, or WebP image");
+    if (!mimeType) throw new Unavailable("NOT_AN_IMAGE");
     return imageResponse(bytes, mimeType);
   } catch (error) {
-    if (error instanceof EgressError) throw asAgentError(error);
-    throw error;
+    if (!(error instanceof Unavailable)) throw error;
+    // The host and the reason only: the path and query can carry what the reply tried to send out.
+    if (error.reason !== "CLIENT_GONE") console.warn(`Image proxy: ${url.host} not loaded (${error.reason})`);
+    throw new AgentError(502, "IMAGE_UNAVAILABLE", "That image could not be loaded");
   } finally {
     const left = (inFlight.get(userId) ?? 1) - 1;
     if (left <= 0) inFlight.delete(userId);
@@ -161,34 +196,75 @@ export async function proxyImage(c: Context<AppEnv>): Promise<Response> {
 
 // --- Tool images ---
 
-/** Stores a call's images with the chat, within what is left of the run's `TOOL_IMAGE_BOUNDS.perRun`. */
-export function storeToolImages(chatId: string, messageId: string, images: readonly McpImage[], alreadyInRun: number): ToolImageRef[] {
-  const room = Math.max(0, TOOL_IMAGE_BOUNDS.perRun - alreadyInRun);
-  const kept = images.slice(0, Math.min(room, TOOL_IMAGE_BOUNDS.perCall)).filter((image) => image.bytes.byteLength > 0 && image.bytes.byteLength <= TOOL_IMAGE_BOUNDS.bytes && imageTypeOf(image.bytes) === image.mimeType);
-  if (kept.length === 0) return [];
+export type ToolImagesKept = { refs: ToolImageRef[]; dropped: number; reason: string | null };
+
+const sha256Of = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
+/** Whether the owner already holds a reference to this picture (it then costs them nothing more). */
+const ownerHolds = (ownerId: string, sha256: string) => db.query("SELECT 1 FROM chat_tool_images r JOIN chats c ON c.id = r.chat_id WHERE c.owner_id = ? AND r.sha256 = ? LIMIT 1").get(ownerId, sha256) !== null;
+
+/**
+ * Stores a call's images with the chat, within the run's `TOOL_IMAGE_BOUNDS.perRun`, the chat owner's
+ * storage quota, and the free-disk floor. Returns what was kept, how many were not, and why.
+ */
+export async function storeToolImages(chatId: string, messageId: string, images: readonly McpImage[], alreadyInRun: number): Promise<ToolImagesKept> {
+  const valid = images.filter((image) => image.bytes.byteLength > 0 && image.bytes.byteLength <= TOOL_IMAGE_BOUNDS.bytes && imageTypeOf(image.bytes) === image.mimeType);
+  const room = Math.max(0, Math.min(TOOL_IMAGE_BOUNDS.perRun - alreadyInRun, TOOL_IMAGE_BOUNDS.perCall));
+  const candidates = valid.slice(0, room);
+  let reason: string | null = images.length > candidates.length ? (valid.length < images.length ? "it was not a usable picture" : "the run's picture limit was reached") : null;
+  const owner = db.query("SELECT owner_id FROM chats WHERE id = ?").get(chatId) as { owner_id: string } | null;
+  if (!owner || candidates.length === 0) return { refs: [], dropped: images.length, reason: reason ?? "the run has no chat" };
+  const hashed = candidates.map((image) => ({ ...image, sha256: sha256Of(image.bytes) }));
+  const seen = new Set<string>();
+  const newBytes = hashed.reduce((sum, image) => {
+    if (seen.has(image.sha256) || ownerHolds(owner.owner_id, image.sha256)) return sum;
+    seen.add(image.sha256);
+    return sum + image.bytes.byteLength;
+  }, 0);
+  if (newBytes > 0) {
+    const quota = config.userStorageQuotaBytes;
+    if (quota > 0 && storedBytes(owner.owner_id) + newBytes > quota) return { refs: [], dropped: images.length, reason: "the chat owner's storage quota is full" };
+    try {
+      const disk = await statfs(config.dataDir);
+      if (disk.bavail * disk.bsize < config.minFreeDiskBytes + newBytes) return { refs: [], dropped: images.length, reason: "this Nook's disk is nearly full" };
+    } catch {
+      return { refs: [], dropped: images.length, reason: "this Nook's disk could not be checked" };
+    }
+  }
   const refs: ToolImageRef[] = [];
-  const insert = db.query("INSERT INTO chat_tool_images (chat_id, id, message_id, mime_type, size_bytes, bytes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)");
+  const blob = db.query("INSERT OR IGNORE INTO chat_image_blobs (sha256, mime_type, size_bytes, bytes, created_at) VALUES (?, ?, ?, ?, ?)");
+  const ref = db.query("INSERT INTO chat_tool_images (chat_id, id, message_id, sha256, mime_type, size_bytes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)");
   db.transaction(() => {
-    for (const image of kept) {
+    if (!db.query("SELECT 1 FROM chats WHERE id = ? AND deleted_at IS NULL").get(chatId)) return;
+    for (const image of hashed) {
       const id = randomUUID();
-      insert.run(chatId, id, messageId, image.mimeType, image.bytes.byteLength, image.bytes, now());
+      blob.run(image.sha256, image.mimeType, image.bytes.byteLength, image.bytes, now());
+      ref.run(chatId, id, messageId, image.sha256, image.mimeType, image.bytes.byteLength, now());
       refs.push({ id, mimeType: image.mimeType, bytes: image.bytes.byteLength });
     }
   })();
-  return refs;
+  if (refs.length < images.length && !reason) reason = "the chat is no longer there";
+  return { refs, dropped: images.length - refs.length, reason: refs.length < images.length ? reason : null };
 }
 
-/** A continued copy keeps the tool images of the messages it copied: the same ids, under the new chat. */
-export function copyToolImages(fromChatId: string, toChatId: string, messageIds: readonly string[]) {
-  const copy = db.query(`INSERT OR IGNORE INTO chat_tool_images (chat_id, id, message_id, mime_type, size_bytes, bytes, created_at)
-    SELECT ?, id, message_id, mime_type, size_bytes, bytes, created_at FROM chat_tool_images WHERE chat_id = ? AND message_id = ?`);
-  for (const messageId of messageIds) copy.run(toChatId, fromChatId, messageId);
+/**
+ * A continued copy keeps the tool images of the messages it copied: new reference rows (the same image
+ * ids, the copy's own message ids) to the same stored bytes, never a second copy of them (review M2, L4).
+ */
+export function copyToolImages(fromChatId: string, toChatId: string, messageIds: ReadonlyMap<string, string>) {
+  const copy = db.query(`INSERT OR IGNORE INTO chat_tool_images (chat_id, id, message_id, sha256, mime_type, size_bytes, created_at)
+    SELECT ?, id, ?, sha256, mime_type, size_bytes, created_at FROM chat_tool_images WHERE chat_id = ? AND message_id = ?`);
+  for (const [source, target] of messageIds) copy.run(toChatId, target, fromChatId, source);
 }
 
-/** `GET /api/chats/:chatId/tool-images/:imageId`: the caller has already been checked to read the chat. */
-export function toolImageResponse(chatId: string, imageId: string): Response {
-  const row = db.query("SELECT mime_type, bytes FROM chat_tool_images WHERE chat_id = ? AND id = ?").get(chatId, imageId) as { mime_type: string; bytes: Uint8Array } | null;
-  if (!row) throw new AgentError(404, "NOT_FOUND", "Not found");
+/**
+ * `GET /api/chats/:chatId/tool-images/:imageId`: the caller has already been checked to read the chat.
+ * `visibleMessages` (people the chat is shared with) limits it to the messages on the chat's active
+ * branch, as the chat itself shows them (review L3); null for the owner.
+ */
+export function toolImageResponse(chatId: string, imageId: string, visibleMessages: ReadonlySet<string> | null): Response {
+  const row = db.query(`SELECT r.mime_type, r.message_id, b.bytes FROM chat_tool_images r JOIN chat_image_blobs b ON b.sha256 = r.sha256
+    WHERE r.chat_id = ? AND r.id = ?`).get(chatId, imageId) as { mime_type: string; message_id: string; bytes: Uint8Array } | null;
+  if (!row || (visibleMessages && !visibleMessages.has(row.message_id))) throw new AgentError(404, "NOT_FOUND", "Not found");
   const bytes = new Uint8Array(row.bytes);
   const mimeType = imageTypeOf(bytes);
   if (!mimeType || mimeType !== row.mime_type) throw new AgentError(404, "NOT_FOUND", "Not found");

@@ -128,6 +128,10 @@ export function parseAllowedPrivateHosts(value: string | undefined) {
   });
 }
 const agentAllowedPrivateHosts = parseAllowedPrivateHosts(process.env.AGENT_ALLOWED_PRIVATE_HOSTS);
+// Tests and local QA only: hosts the chat image proxy may reach over http, on any port, even when
+// private (a local picture host). The proxy never uses AGENT_ALLOWED_PRIVATE_HOSTS (review M1). Never in production.
+const agentImageProxyTestHosts = parseAllowedPrivateHosts(process.env.AGENT_IMAGE_PROXY_TEST_HOSTS);
+if (agentImageProxyTestHosts.length > 0 && process.env.NODE_ENV === "production") throw new Error("AGENT_IMAGE_PROXY_TEST_HOSTS is for tests only and cannot be used in production");
 if (agentAllowedPrivateHosts.length > 50) throw new Error("AGENT_ALLOWED_PRIVATE_HOSTS takes at most 50 entries");
 // At most 16 (Wave 42 review L2): with the held-run caps, runs never take more than their share of the request slots.
 const agentMaxConcurrentRuns = integerEnv("AGENT_MAX_CONCURRENT_RUNS", 4, 1, 16);
@@ -325,7 +329,7 @@ export const config = {
    * Agent chat (Wave 40): the secrets key (null = module off), the private hosts the server may
    * call, and the run caps. Tests switch these in process.
    */
-  agents: { key: agentSecretsKey.key, source: agentSecretsKey.source, allowedPrivateHosts: agentAllowedPrivateHosts, maxConcurrentRuns: agentMaxConcurrentRuns, runTimeoutS: agentRunTimeoutS, stdio: agentMcpStdioRaw === "on", stdioFile: agentMcpStdioFile, auditRetentionDays: agentAuditRetentionDays },
+  agents: { key: agentSecretsKey.key, source: agentSecretsKey.source, allowedPrivateHosts: agentAllowedPrivateHosts, imageProxyTestHosts: agentImageProxyTestHosts, maxConcurrentRuns: agentMaxConcurrentRuns, runTimeoutS: agentRunTimeoutS, stdio: agentMcpStdioRaw === "on", stdioFile: agentMcpStdioFile, auditRetentionDays: agentAuditRetentionDays },
   signupRole,
   sessionDays: Math.max(1, Number(process.env.SESSION_DAYS ?? 14)),
   maxMarkdownBytes: Math.max(1024, Number(process.env.MAX_MARKDOWN_BYTES ?? 2_000_000)),
