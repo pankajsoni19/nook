@@ -309,7 +309,9 @@ describe("R-L3, R-L4, R-L5: labels, blank turns, run_agent's errors", () => {
     config.agents.maxConcurrentRuns = 1;
     try {
       expect(await rest(otherKey.token, "POST", "/tools/run_agent", { agentId: otherAgent, input: "echo:x" })).toMatchObject({ status: 503, body: { code: "AGENT_BUSY" } });
-      expect(await rest(otherKey.token, "POST", `/agents/${otherAgent}/runs`, { input: "echo:x" })).toMatchObject({ status: 503, body: { code: "AGENT_BUSY" } });
+      const full = await rest(otherKey.token, "POST", `/agents/${otherAgent}/runs`, { input: "echo:x" });
+      expect(full).toMatchObject({ status: 503, body: { code: "AGENT_BUSY" } });
+      expect(full.headers.get("retry-after")).toBe("5");
       expect(JSON.parse((await invokeMcpToolForTests("run_agent", { agentId: otherAgent, input: "echo:x" }, otherKey.id)).content[0]!.text)).toMatchObject({ code: "AGENT_BUSY", scope: "instance" });
     } finally {
       config.agents.maxConcurrentRuns = saved;

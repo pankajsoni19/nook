@@ -135,7 +135,9 @@ function id(c: Context<AppEnv>, name: string) {
 
 function fail(c: Context<AppEnv>, error: unknown) {
   if (error instanceof AgentError) {
-    if (error.status === 429 && typeof error.details.retryAfterSeconds === "number") c.header("Retry-After", String(error.details.retryAfterSeconds));
+    // Retry-After on every refusal that clears with time: 429 limits and budgets, and the 503 for a
+    // full instance (AGENT_BUSY). A module that is off (503 AGENTS_DISABLED) carries no hint: it does not clear by waiting.
+    if ((error.status === 429 || error.status === 503) && typeof error.details.retryAfterSeconds === "number") c.header("Retry-After", String(error.details.retryAfterSeconds));
     return c.json({ error: error.message, code: error.code, ...error.details }, error.status as 400);
   }
   if (error instanceof ZodError) return c.json({ error: "Invalid request", code: "INVALID", details: error.issues.map((issue) => `${issue.path.join(".") || "body"}: ${issue.message}`) }, 400);

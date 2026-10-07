@@ -393,8 +393,11 @@ describe("the loop against the fake provider (§2.1–§2.4)", () => {
     config.agents.maxConcurrentRuns = 2;
     try {
       const other = await newChat(admin, (await newAgent(admin)).id);
-      const full = await send(admin, other.id, "echo:full");
+      const full = await request(`/chats/${other.id}/messages`, { method: "POST", body: JSON.stringify({ content: "echo:full" }) }, admin);
       expect(full.status).toBe(503);
+      // A full instance clears with time: Retry-After, as the 429s carry it.
+      expect(full.headers.get("retry-after")).toBe("5");
+      expect(await full.json()).toMatchObject({ code: "AGENT_BUSY", retryAfterSeconds: 5 });
     } finally {
       config.agents.maxConcurrentRuns = previous;
     }
