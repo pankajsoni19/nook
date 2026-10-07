@@ -22,9 +22,6 @@ Nothing. Waiting for the operator's next pick.
 
 ## Small UI follow-ups
 
-- [ ] **Team pane:** the desktop right pane can be taller than the window. Its heading hides under the header after scrolling, and Tab can focus a control below the window on Invites.
-- [ ] **Home/Today header:** it scrolls away, while every other module keeps its header.
-- [ ] **Keyboard scrolling:** End/PageDown don't scroll the Files list or grid, or a long note body.
 - [ ] **Phone sizing:**
   - the note toolbar's "Publish version" is 34 px tall
   - the Tasks/Collections header takes 3 rows
