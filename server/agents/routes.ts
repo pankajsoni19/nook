@@ -135,7 +135,9 @@ function id(c: Context<AppEnv>, name: string) {
 
 function fail(c: Context<AppEnv>, error: unknown) {
   if (error instanceof AgentError) {
-    if (error.status === 429 && typeof error.details.retryAfterSeconds === "number") c.header("Retry-After", String(error.details.retryAfterSeconds));
+    // Retry-After on every refusal that clears with time: 429 limits and budgets, and the 503 for a
+    // full instance (AGENT_BUSY). A module that is off (503 AGENTS_DISABLED) carries no hint: it does not clear by waiting.
+    if ((error.status === 429 || error.status === 503) && typeof error.details.retryAfterSeconds === "number") c.header("Retry-After", String(error.details.retryAfterSeconds));
     return c.json({ error: error.message, code: error.code, ...error.details }, error.status as 400);
   }
   if (error instanceof ZodError) return c.json({ error: "Invalid request", code: "INVALID", details: error.issues.map((issue) => `${issue.path.join(".") || "body"}: ${issue.message}`) }, 400);
@@ -561,31 +563,33 @@ export function registerAgentRoutes(app: Hono<AppEnv>) {
           if (ownerOnly && OWNER_ONLY_EVENTS.has(event.type)) return;
           await stream.write(sseFrame(event));
         };
+        // A snapshot replaces what the ring no longer holds; an ended run's snapshot is followed by its
+        // `done`, so every stream ends the same way (TODO "`?after` overflow"): `snapshot`, then `done`.
         const snapshot = async () => {
           const fresh = runReadableBy(runId, userId);
-          await stream.write(`id: 0\nevent: snapshot\ndata: ${JSON.stringify(runSnapshot(fresh, { owner: fresh.owner }))}\n\n`);
+          const data = runSnapshot(fresh, { owner: fresh.owner });
+          await stream.write(`id: 0\nevent: snapshot\ndata: ${JSON.stringify(data)}\n\n`);
+          return data;
         };
-        if (!channel) {
-          await snapshot();
+        const snapshotThenDone = async () => {
+          const data = await snapshot();
+          await stream.write(sseFrame({ seq: channel?.lastSeq ?? 0, type: "done", data: { status: data.status, messageId: data.messageId } }));
+        };
+        if (!channel || channel.closed && channel.replay(after) === "overflow") {
+          await snapshotThenDone();
           return;
         }
-        // `after` past the ring (or past everything the run emitted) is an overflow too (review L7): a snapshot, not an empty stream.
+        // `after` past the ring (or past everything the run emitted) is an overflow too (review L7): a
+        // snapshot, then the live events after it. The queue is filled before anything is written, so an
+        // event emitted while the replay or the snapshot is written is never lost.
         const replay = channel.replay(after);
-        if (replay === "overflow") {
-          await snapshot();
-          if (channel.closed) return;
-        } else {
-          for (const event of replay) await send(event);
-          if (channel.closed) return;
-        }
-        // Live: forward events until the run ends or the client leaves; a keep-alive comment every SSE_TIMING.pingMs (QA D1).
+        const queue: SequencedEvent[] = replay === "overflow" ? [] : [...replay];
         let seen = replay === "overflow" ? channel.lastSeq : Math.max(after, replay.at(-1)?.seq ?? after);
-        const queue: SequencedEvent[] = [];
         let wake: (() => void) | null = null;
         let ended = false;
         const unsubscribe = channel.subscribe((event) => {
           if (event === null) ended = true;
-          else if (event.seq > seen) queue.push(event);
+          else if (event.seq > seen) { queue.push(event); seen = event.seq; }
           wake?.();
         });
         const { pingMs } = SSE_TIMING;
@@ -593,6 +597,7 @@ export function registerAgentRoutes(app: Hono<AppEnv>) {
         stream.onAbort(() => { wake?.(); });
         let lastPing = Date.now();
         try {
+          if (replay === "overflow") await snapshot();
           while (!ended || queue.length > 0) {
             if (queue.length === 0) {
               if (Date.now() - lastPing >= pingMs) {
@@ -604,9 +609,7 @@ export function registerAgentRoutes(app: Hono<AppEnv>) {
               wake = null;
               continue;
             }
-            const event = queue.shift()!;
-            seen = event.seq;
-            await send(event);
+            await send(queue.shift()!);
           }
         } finally {
           clearInterval(keepAlive);

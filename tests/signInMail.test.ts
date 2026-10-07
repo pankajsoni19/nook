@@ -81,6 +81,16 @@ describe("device families and labels (never the User-Agent string)", () => {
     expect(deviceLabelFromCode("chrome:windows")).toBe("Chrome on Windows");
     expect(deviceLabelFromCode(null)).toBe("Unknown device");
   });
+
+  test("headless Chrome counts as Chrome, and the stored code stays a fixed pair", () => {
+    const headless = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/131.0.6778.85 Safari/537.36";
+    const families = deviceFamilies(headless);
+    expect(families).toEqual({ browser: "chrome", os: "linux" });
+    expect(deviceLabel(families.browser, families.os)).toBe("Chrome on Linux");
+    expect(`${families.browser}:${families.os}`).toBe("chrome:linux");
+    // A word that merely ends in "Chrome/" is not a browser token.
+    expect(deviceFamilies("Mozilla/5.0 (X11; Linux x86_64) NotChrome/1.0").browser).toBe("other");
+  });
 });
 
 describe("recognition: cookie, hash, new vs known", () => {

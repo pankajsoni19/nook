@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { ExternalLink, ImageIcon, ImageOff, RefreshCw } from "lucide-react";
 import { ModalDialog } from "../../files/Dialog";
 import { useHistoryDialogGuard } from "../../ui/useHistoryDialogGuard";
-import { allowHost, classifyImage, hostAllowed, loadedImage, loadProxiedImage, REFUSAL_TEXT, subscribeImageConsent } from "./images";
+import { allowHost, classifyImage, hostAllowed, loadedImage, loadProxiedImage, proxyRefusal, REFUSAL_TEXT, subscribeImageConsent } from "./images";
 
 /**
  * The image elements of agent Markdown (images.ts has the rules). Everything is a `<span>` or a
@@ -60,11 +60,20 @@ export function ImageViewer({ src, alt, host, onClose, onOpenLink }: { src: stri
   return typeof document === "undefined" ? dialog : createPortal(dialog, document.body);
 }
 
-export type ExternalState = { status: "idle" } | { status: "loading" } | { status: "shown"; src: string } | { status: "failed"; message: string };
+export type ExternalState = { status: "idle" } | { status: "loading" } | { status: "shown"; src: string } | { status: "failed"; message: string } | { status: "refused"; message: string };
 
 /** The external image's card, by state (exported for tests: it renders without a DOM). */
 export function ExternalImageCard({ state, host, alt, title, onLoad, onAlways, onOpenLink }: { state: ExternalState; host: string; alt: string; title?: string | null; onLoad: () => void; onAlways: () => void; onOpenLink: () => void }) {
   if (state.status === "shown") return <ShownImage src={state.src} alt={alt} title={title} host={host} onOpenLink={onOpenLink} />;
+  // An address the proxy never loads (plain http, another port, a user name): the reason, and no Load button.
+  if (state.status === "refused") {
+    return <span className="chat-md-remote" role="group" aria-label={`Image from ${host}, not loaded`}>
+      <span className="chat-md-remote-head"><ImageIcon aria-hidden="true" /><span className="chat-md-remote-alt">{alt || "Image"}</span></span>
+      <span className="chat-md-remote-host">{host}</span>
+      <span className="chat-md-remote-note">{state.message}</span>
+      <span className="chat-md-remote-actions"><button type="button" className="secondary-button" onClick={onOpenLink}><ExternalLink />Open link</button></span>
+    </span>;
+  }
   const busy = state.status === "loading";
   return <span className="chat-md-remote" role="group" aria-label={`Image from ${host}, not loaded`}>
     <span className="chat-md-remote-head"><ImageIcon aria-hidden="true" /><span className="chat-md-remote-alt">{alt || "Image"}</span></span>
@@ -82,7 +91,11 @@ export function ExternalImageCard({ state, host, alt, title, onLoad, onAlways, o
 
 function ExternalImage({ url, host, alt, title, scope, onExternalLink }: { url: string; host: string; alt: string; title?: string | null; scope: string; onExternalLink: (href: string) => void }) {
   const cached = loadedImage(url);
-  const [state, setState] = useState<ExternalState>(cached ? { status: "shown", src: cached } : { status: "idle" });
+  const [state, setState] = useState<ExternalState>(() => {
+    if (cached) return { status: "shown", src: cached };
+    const refusal = proxyRefusal(url);
+    return refusal ? { status: "refused", message: refusal } : { status: "idle" };
+  });
   const allowed = useSyncExternalStore(subscribeImageConsent, () => hostAllowed(scope, host), () => false);
   const load = () => {
     setState({ status: "loading" });

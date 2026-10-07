@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { classifyLink, lex, Markdown, splitStreaming, type RenderContext } from "../src/chat/markdown/render";
 import { decodeEntities } from "../src/chat/markdown/entities";
 import { footnoteLabels } from "../src/chat/markdown/footnotes";
-import { allowHost, classifyImage, DATA_IMAGE_MAX_BYTES, hostAllowed, IMAGE_PROXY_HEADER, IMAGE_PROXY_PATH, loadedImage, loadProxiedImage, resetImageConsentForTests, sniffImage, subscribeImageConsent } from "../src/chat/markdown/images";
+import { allowHost, classifyImage, DATA_IMAGE_MAX_BYTES, hostAllowed, IMAGE_PROXY_HEADER, IMAGE_PROXY_PATH, loadedImage, loadProxiedImage, proxyRefusal, resetImageConsentForTests, sniffImage, subscribeImageConsent } from "../src/chat/markdown/images";
 import { ExternalImageCard, ImageViewer, MarkdownImage, ShownImage } from "../src/chat/markdown/MarkdownImage";
 import { ToolCallsDisclosure, toolImageUrl } from "../src/chat/ToolDisclosure";
 import { PublicTranscript } from "../src/chat/PublicChat";
@@ -260,11 +260,33 @@ describe("images in the bubble", () => {
   test("click to load: the proxy's refusals become a message on the card; a non-image answer is refused again here", async () => {
     const answer = (status: number, body: unknown, type = "application/json") => (async () => new Response(typeof body === "string" ? body : JSON.stringify(body), { status, headers: { "Content-Type": type } })) as unknown as typeof fetch;
     expect(await loadProxiedImage("https://a.example.test/1.png", answer(502, { code: "IMAGE_UNAVAILABLE" }))).toEqual({ ok: false, message: "That image could not be loaded" });
-    expect(await loadProxiedImage("http://a.example.test:8080/2.png", answer(400, { code: "URL_REFUSED" }))).toEqual({ ok: false, message: "Nook loads outside images only from public https addresses" });
+    // A URL_REFUSED answer from the server still reads as words (defence in depth: the client checks first).
+    expect(await loadProxiedImage("https://a.example.test/2.png", answer(400, { code: "URL_REFUSED" }))).toEqual({ ok: false, message: "Nook loads outside images only from public https addresses" });
     expect(await loadProxiedImage("https://a.example.test/3.png", answer(429, "slow down", "text/plain"))).toEqual({ ok: false, message: "Too many images loaded; wait a minute" });
     expect(await loadProxiedImage("https://a.example.test/4.png", answer(200, "<svg/>", "image/svg+xml"))).toEqual({ ok: false, message: "That image could not be loaded" });
     const offline = (async () => { throw new TypeError("offline"); }) as unknown as typeof fetch;
     expect(await loadProxiedImage("https://a.example.test/5.png", offline)).toEqual({ ok: false, message: "Nook could not be reached" });
+  });
+
+  test("an address the proxy never loads is refused here, with no request: http, another port, a user name", async () => {
+    let requests = 0;
+    const fetcher = (async () => { requests += 1; return new Response("", { status: 400 }); }) as unknown as typeof fetch;
+    const refused = "Nook loads outside images only from public https addresses";
+    for (const url of ["http://a.example.test/1.png", "http://a.example.test:8080/1.png", "https://a.example.test:8443/1.png", "https://user:pw@a.example.test/1.png", "https://user@a.example.test/1.png", "ftp://a.example.test/1.png", "not a url"]) {
+      expect({ url, refusal: proxyRefusal(url) }).toEqual({ url, refusal: refused });
+      expect(await loadProxiedImage(url, fetcher)).toEqual({ ok: false, message: refused });
+    }
+    expect(requests).toBe(0);
+    expect(proxyRefusal("https://a.example.test/1.png")).toBeNull();
+    expect(proxyRefusal("https://a.example.test:443/1.png")).toBeNull();
+    // The card says why at once, and offers no Load or Always button (Open link stays).
+    const card = strip(renderToStaticMarkup(<MarkdownImage href="http://a.example.test:8080/chart.png" alt="Chart" policy={{ mode: "app", scope: "c" }} onExternalLink={() => undefined} />));
+    expect(card).toContain(refused);
+    expect(card).not.toContain("Load image");
+    expect(card).not.toContain("Always load");
+    expect(card).toContain("Open link");
+    const fine = strip(renderToStaticMarkup(<MarkdownImage href="https://a.example.test/chart.png" alt="Chart" policy={{ mode: "app", scope: "c" }} onExternalLink={() => undefined} />));
+    expect(fine).toContain("Load image");
   });
 
   test("Always load from this host: per chat, for this page's life, and every card of that host hears it", () => {

@@ -131,11 +131,63 @@ function normalizeUrl(value: string) {
  * could call Nook back and start a run from inside a run, which no in-process guard can see. Refused
  * at save and edit: any word of the value that looks like a Nook key (`mynotes_…`, `nkv_…`), or
  * whose SHA-256 is the hash of any Nook key, live or not.
+ *
+ * The value is looked at as written and unwrapped, so a wrapped key is caught too: split into words
+ * (whitespace, `,;:=`, so `Bearer`, `bearer:`, `BEARER\t\t…` all fall away), each word
+ * percent-decoded, and each word decoded as base64 or base64url when that gives printable text (so
+ * `Basic base64(user:mynotes_…)` and `Basic base64(mynotes_…:x)` split again into user and key).
+ * Unwrapping is bounded: a few layers, a capped number of words.
  */
 const NOOK_KEY_SHAPE = /^(mynotes|nkv)_/i;
+const UNWRAP_DEPTH = 3;
+const UNWRAP_WORDS = 256;
+
+function percentDecoded(word: string) {
+  if (!word.includes("%")) return null;
+  try {
+    const decoded = decodeURIComponent(word);
+    return decoded === word ? null : decoded;
+  } catch {
+    return null;
+  }
+}
+
+/** The text a base64 or base64url word encodes, when it is printable (a credential, not bytes). */
+function base64Decoded(word: string) {
+  if (word.length < 8 || !/^[A-Za-z0-9+/_-]+={0,2}$/.test(word)) return null;
+  const standard = word.replace(/-/g, "+").replace(/_/g, "/").replace(/=+$/, "");
+  if (standard.length % 4 === 1) return null;
+  try {
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(Buffer.from(standard, "base64"));
+    return /^[\x20-\x7e]+$/.test(text) ? text : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Every word a credential value holds, as written and unwrapped (see above). Exported for tests. */
+export function credentialWords(secret: string): string[] {
+  const seen = new Set<string>();
+  const visit = (text: string, depth: number) => {
+    const words = [text, ...text.split(/[\s,;:=]+/)].map((word) => word.trim().replace(/^["']+|["']+$/g, "")).filter(Boolean);
+    for (const word of words) {
+      if (seen.size >= UNWRAP_WORDS) return;
+      if (seen.has(word)) continue;
+      seen.add(word);
+      if (depth >= UNWRAP_DEPTH) continue;
+      const percent = percentDecoded(word);
+      if (percent) visit(percent, depth + 1);
+      const decoded = base64Decoded(word);
+      if (decoded) visit(decoded, depth + 1);
+    }
+  };
+  visit(secret, 0);
+  return [...seen];
+}
+
 export function refuseNookCredential(secret: string | null) {
   if (!secret) return;
-  const words = [secret, ...secret.split(/[\s,;:=]+/)].map((word) => word.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
+  const words = credentialWords(secret);
   const hashes = new Set(words.map((word) => createHash("sha256").update(word).digest("hex")));
   const known = words.some((word) => NOOK_KEY_SHAPE.test(word))
     || db.query("SELECT 1 FROM mcp_api_keys WHERE token_hash IN (SELECT value FROM json_each(?)) LIMIT 1").get(JSON.stringify([...hashes])) !== null;

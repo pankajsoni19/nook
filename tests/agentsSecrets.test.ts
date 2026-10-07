@@ -110,6 +110,10 @@ describe("agent secrets (D354, T309)", () => {
       expect(setAgentsKeyForTests(null)).toEqual({ enabled: false, reason: "unset" });
       expect((await api(member, "GET", "/agents")).status).toBe(503);
       expect((await api(member, "GET", "/chats")).status).toBe(503);
+      // Off is not a capacity condition: no Retry-After.
+      const off = await request("/chats", {}, member);
+      expect(off.status).toBe(503);
+      expect(off.headers.get("retry-after")).toBeNull();
       expect((await api(admin, "GET", "/agents/admin/providers")).status).toBe(503);
       expect((await api(member, "GET", "/agents/status")).body).toMatchObject({ enabled: false, reason: null, canChat: false });
       expect((await api(admin, "GET", "/agents/status")).body).toMatchObject({ enabled: false, reason: "unset" });
