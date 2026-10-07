@@ -38,7 +38,10 @@
 .chat-md del { color: var(--md-muted); }
 
 /* Lists: nested lists sit close; task lists drop the bullet for a read-only box. */
+/* Tailwind's preflight removes list markers; bubbles put them back. */
 .chat-md ul, .chat-md ol { padding-left: 1.5em; }
+.chat-md ul { list-style: disc; }
+.chat-md ol { list-style: decimal; }
 .chat-md ul ul { list-style-type: circle; }
 .chat-md ul ul ul { list-style-type: square; }
 .chat-md li { margin: .25em 0; }

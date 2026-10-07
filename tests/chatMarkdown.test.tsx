@@ -72,6 +72,9 @@ describe("GitHub-flavoured Markdown", () => {
     expect(css).toMatch(/\.chat-md-pre pre \{[^}]*overflow-x: auto/);
     expect(css).toMatch(/\.chat-md-img-button img \{[^}]*max-width: 100%/);
     expect(css).toContain("tbody tr:nth-child(even)");
+    // Tailwind's preflight strips list markers; bubbles put bullets and numbers back.
+    expect(css).toContain(".chat-md ul { list-style: disc; }");
+    expect(css).toContain(".chat-md ol { list-style: decimal; }");
   });
 
   test("fenced code keeps its language label and the Copy button; quotes nest; rules render", () => {
