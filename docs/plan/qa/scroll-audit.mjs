@@ -13,9 +13,19 @@
 //   ORIGIN=http://localhost:22384 PUPPETEER_CORE=/path/to/node_modules/puppeteer-core/lib/puppeteer/puppeteer-core.js \
 //     CHROME=/usr/bin/google-chrome bun docs/plan/qa/scroll-audit.mjs
 //
-// It prints one line per route and width (PASS or FAIL with what failed) and exits non-zero on a
-// failure. ROUTES below is the list it covers. SEED_FILE=path keeps the seeded ids for a later run
-// against the same instance; ONLY=regex audits only the routes whose name matches.
+// It prints one line per route and width (PASS, FAIL with what failed, or SKIP with why), a progress
+// line with the elapsed time for every seeding phase and every rate-limit wait, and a summary with
+// the counts and the run's time per phase; it exits by itself, non-zero on a failure. ROUTES below is
+// the list it covers. ONLY=regex audits only the routes whose name matches.
+//
+// v0.31 (re-runs): the seeded ids are kept in a draft note of the admin's ("Scroll audit seed"), so a
+// second run against the same data directory, or after a server restart, signs in, finds them, checks
+// they still exist, and seeds nothing again (a fresh run takes a few minutes; a re-run seconds).
+// Invites are never retried against their limit (10 an hour per admin, 20 live per instance): the run
+// tops the seeded list up to INVITE_TARGET with whatever both admins may still create, reuses the
+// sign-up link invite while it is live, and leaves the "Register (invite)" route out (SKIP) only when
+// no link can be had. SEED_FILE=path still keeps the ids in a file instead, for an instance whose
+// admin account is not the script's.
 
 const ORIGIN = process.env.ORIGIN ?? "http://localhost:22384";
 const { default: puppeteer } = await import(process.env.PUPPETEER_CORE ?? "puppeteer-core");
@@ -24,6 +34,17 @@ const PASSWORD = "correct horse battery staple";
 const PREFIX = process.env.ACCOUNT_PREFIX ?? "co-scroll";
 const RUN = Date.now().toString(36).slice(-5);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+// v0.31: the run's clock, so a slow phase never looks hung, and the summary's time per phase.
+const STARTED = Date.now();
+const clock = (ms = Date.now() - STARTED) => `${Math.floor(ms / 60_000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, "0")}`;
+const progress = (message) => console.log(`[${clock()}] ${message}`);
+const phases = [];
+let phaseStart = Date.now();
+function phase(name) {
+  if (phases.length) phases.at(-1).ms = Date.now() - phaseStart;
+  phaseStart = Date.now();
+  if (name) { phases.push({ name, ms: 0 }); progress(name); }
+}
 
 // v0.30: every browser the run launches (a lost one is replaced) is closed at the end, so the run exits.
 const browsers = [];
@@ -46,8 +67,10 @@ async function session(email, name, width = 1280, height = 800) {
   await page.goto(`${ORIGIN}/api/health`);
   if (email) {
     const body = await page.evaluate(async ({ email, name, password }) => {
-      let response = await fetch("/api/auth/register", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, displayName: name, password }) });
-      if (response.status !== 201) response = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password }) });
+      // Sign in first (a re-run's accounts exist), register only when that fails: registering is the
+      // tighter limit (5 a minute per client), and a re-run should not spend it.
+      let response = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password }) });
+      if (response.status !== 200) response = await fetch("/api/auth/register", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, displayName: name, password }) });
       return response.json();
     }, { email, name, password: PASSWORD });
     page.csrf = body.csrfToken;
@@ -71,14 +94,19 @@ const apiOnce = (page, method, path, body, headers = {}) => page.evaluate(async 
   const text = await response.text();
   let parsed = null;
   try { parsed = text ? JSON.parse(text) : null; } catch { parsed = text; }
-  return { status: response.status, body: parsed };
+  return { status: response.status, body: parsed, retryAfter: response.headers.get("Retry-After") };
 }, { method, path, body, csrf: page.csrf, headers });
-/** Team writes are rate limited per admin (30 a minute): seeding waits the window out instead of failing. */
+/**
+ * Team writes are rate limited per admin (30 a minute): seeding waits the window out instead of
+ * failing, saying so. Only for per-minute limits: the invite limit is hourly and never retried (seedInvites).
+ */
 async function api(page, method, path, body, headers = {}) {
   for (let attempt = 0; ; attempt += 1) {
     const result = await apiOnce(page, method, path, body, headers);
     if (result.status !== 429 || attempt >= 20) return result;
-    await sleep(5000);
+    const wait = Math.min(60, Math.max(1, Number(result.retryAfter ?? result.body?.retryAfter) || 5));
+    progress(`  rate limited on ${method} ${path}; waiting ${wait} s (attempt ${attempt + 1} of 20)`);
+    await sleep(wait * 1000);
   }
 }
 
@@ -87,8 +115,8 @@ let clientNumber = 10;
 async function nodeSession(email, name) {
   clientNumber += 1;
   const headers = { "Content-Type": "application/json", Origin: ORIGIN, "X-Forwarded-For": `198.51.100.${clientNumber}` };
-  let response = await fetch(`${ORIGIN}/api/auth/register`, { method: "POST", headers, body: JSON.stringify({ email, displayName: name, password: PASSWORD }) });
-  if (response.status !== 201) response = await fetch(`${ORIGIN}/api/auth/login`, { method: "POST", headers, body: JSON.stringify({ email, password: PASSWORD }) });
+  let response = await fetch(`${ORIGIN}/api/auth/login`, { method: "POST", headers, body: JSON.stringify({ email, password: PASSWORD }) });
+  if (response.status !== 200) response = await fetch(`${ORIGIN}/api/auth/register`, { method: "POST", headers, body: JSON.stringify({ email, displayName: name, password: PASSWORD }) });
   const body = await response.json();
   if (!body.csrfToken) throw new Error(`could not sign in ${email}: ${JSON.stringify(body)}`);
   return { cookie: response.headers.get("set-cookie").split(";")[0], csrf: body.csrfToken, userId: body.user.id, forwarded: headers["X-Forwarded-For"] };
@@ -103,18 +131,172 @@ const putAccess = async (page, path, body) => api(page, "PUT", path, body, { "If
 
 // ------------------------------------------------------------------ seeding
 
+// v0.31: seeded ids live in a draft note of the admin's, so a re-run on the same data reuses them.
+const MANIFEST_TITLE = "Scroll audit seed";
+/** Invites the Team → Invites list is seeded with, and the note that marks them and the sign-up link. */
+const INVITE_TARGET = 18;
+const INVITE_NOTE = "Scroll invite";
+const LINK_NOTE = "Scroll audit link";
+
+async function readManifest(admin) {
+  const listed = (await api(admin, "GET", "/notes")).body?.notes ?? [];
+  const note = listed.find((row) => row.is_owner && row.title === MANIFEST_TITLE);
+  if (!note) return null;
+  const markdown = (await api(admin, "GET", `/notes/${note.id}`)).body?.note?.markdown ?? "";
+  try {
+    return { noteId: note.id, seeded: JSON.parse(markdown.match(/```json\n([\s\S]*?)\n```/)?.[1] ?? "null") };
+  } catch {
+    return { noteId: note.id, seeded: null };
+  }
+}
+
+async function writeManifest(admin, noteId, seeded) {
+  const markdown = `# ${MANIFEST_TITLE}\n\nIds seeded by docs/plan/qa/scroll-audit.mjs; a re-run reuses them.\n\n\`\`\`json\n${JSON.stringify(seeded)}\n\`\`\`\n`;
+  const id = noteId ?? (await api(admin, "POST", "/notes", {})).body.note.id;
+  const revision = (await api(admin, "GET", `/notes/${id}`)).body.note.draft_revision;
+  const saved = await api(admin, "PUT", `/notes/${id}/draft`, { markdown, revision });
+  if (saved.status !== 200) progress(`  could not save the seed manifest (${saved.status}); the next run seeds again`);
+}
+
+/** Whether the ids a manifest names are still there (the data directory may have been reset or edited). */
+async function manifestValid(admin, seeded) {
+  if (!seeded?.longNote?.id || !seeded.members?.length) return false;
+  const checks = [`/notes/${seeded.longNote.id}`, `/notes/${seeded.sharedNote.id}`, `/tasks/boards/${seeded.board.id}`, `/collections/${seeded.collection.id}`, `/team/groups/${seeded.group.id}`, `/whiteboards/${seeded.whiteboard.id}`];
+  for (const path of checks) if ((await api(admin, "GET", path)).status !== 200) return false;
+  return true;
+}
+
 async function seed() {
+  phase("Seeding: signing in the admin");
   const admin = await session(`${PREFIX}-admin@nook.test`, "Scroll Admin");
+  if (!admin.csrf) throw new Error(`could not sign in ${PREFIX}-admin@nook.test (another instance's admin? use a fresh data directory or ACCOUNT_PREFIX)`);
+  const manifest = await readManifest(admin);
+  let seeded;
+  if (manifest && await manifestValid(admin, manifest.seeded)) {
+    seeded = manifest.seeded;
+    progress(`  found the seeded data from an earlier run (note “${MANIFEST_TITLE}”): nothing to seed again`);
+  } else {
+    if (manifest) progress("  the seed manifest names items that are gone: seeding afresh");
+    seeded = await seedFresh(admin);
+  }
+  // The parts that depend on this run (the instance's limits and options), each idempotent.
+  phase("Seeding: invites");
+  const second = await nodeSession(`${PREFIX}-0@nook.test`, "Scroll Person 0");
+  seeded.inviteToken = await seedInvites(admin, second, seeded.inviteToken ?? null);
+  if (!seeded.chat || !seeded.knowledge) {
+    phase("Seeding: chat and knowledge");
+    Object.assign(seeded, await seedChat(admin, seeded));
+  }
+  await writeManifest(admin, manifest?.noteId ?? null, seeded);
+  await admin.browserContext().close();
+  phase(null);
+  return seeded;
+}
+
+/**
+ * Invites (D164): 10 created an hour per admin, 20 live on the instance; the hourly window is in
+ * memory, so a restart clears it, but the live invites stay. Never retried: the list is topped up to
+ * INVITE_TARGET with what the two admins may still create, and the sign-up link invite is reused while
+ * it is live (its token is in the manifest), else a new one replaces it. Returns the link's token, or
+ * null when none can be had (the Register (invite) route is then skipped, saying why).
+ */
+async function seedInvites(admin, second, previousToken) {
+  const creators = [
+    { name: "admin", create: (body) => apiOnce(admin, "POST", "/team/invites", body), spent: false },
+    { name: "second admin", create: (body) => nodeApi(second, "POST", "/team/invites", body), spent: false }
+  ];
+  let full = false;
+  const create = async (body) => {
+    for (const creator of creators) {
+      if (creator.spent || full) continue;
+      const result = await creator.create(body);
+      if (result.status === 201) return result.body;
+      if (result.status === 429) { creator.spent = true; progress(`  the ${creator.name} has created 10 invites in the last hour; not retrying`); continue; }
+      if (result.body?.code === "INVITE_LIMIT") { full = true; progress("  the instance has 20 live invites; not creating more"); return null; }
+      progress(`  could not create an invite: ${result.status} ${JSON.stringify(result.body)}`);
+      return null;
+    }
+    return null;
+  };
+  const listed = (await api(admin, "GET", "/team/invites")).body;
+  const live = (listed?.invites ?? []).filter((invite) => invite.status === "live");
+  // The link first: it is the only invite a route needs.
+  const links = live.filter((invite) => invite.note === LINK_NOTE);
+  let token = previousToken && links.some((invite) => previousToken.startsWith(invite.tokenPrefix)) ? previousToken : null;
+  if (token) progress("  reusing the live sign-up link invite");
+  else {
+    // A link from an earlier run whose token is lost is revoked, so it does not use a live slot.
+    for (const stale of links) await api(admin, "POST", `/team/invites/${stale.id}/revoke`, {});
+    token = (await create({ role: "member", note: LINK_NOTE }))?.token ?? null;
+    progress(token ? "  created the sign-up link invite" : "  no sign-up link invite could be created: Register (invite) is skipped this run");
+  }
+  const have = live.filter((invite) => invite.note?.startsWith(INVITE_NOTE)).length;
+  let made = 0;
+  for (let index = have; index < INVITE_TARGET; index += 1) {
+    if (!await create({ role: "member", note: `${INVITE_NOTE} ${index}` })) break;
+    made += 1;
+  }
+  progress(`  invites: ${have} already live, ${made} created, ${have + made} of ${INVITE_TARGET} seeded`);
+  return token;
+}
+
+/**
+ * Chat (Wave 40): a provider at AGENT_FAKE_PROVIDER (tests/support/fakeProvider.ts, e.g.
+ * http://127.0.0.1:24423/v1, listed in AGENT_ALLOWED_PRIVATE_HOSTS), an agent, and one long chat;
+ * v0.30: a knowledge base (it uses the provider's embedding model) for the Knowledge sheets, shared
+ * with the seeded people and groups (v0.31: a long Share… sheet). Each part only when missing.
+ */
+async function seedChat(admin, seeded) {
+  const status = (await api(admin, "GET", "/agents/status")).body;
+  const out = { agents: Boolean(status?.enabled), chat: seeded.chat ?? null, knowledge: seeded.knowledge ?? null };
+  if (!process.env.AGENT_FAKE_PROVIDER || !status?.enabled) return out;
+  const providers = (await api(admin, "GET", "/agents/admin/providers")).body.providers ?? [];
+  if (!providers.length) await api(admin, "POST", "/agents/admin/providers", { name: "Scroll fake provider", baseUrl: process.env.AGENT_FAKE_PROVIDER, apiKey: "sk-test-scroll-0000", defaultModel: "gpt-6-luna" });
+  if (!out.chat) {
+    const agent = (await api(admin, "POST", "/agents", { name: `Scroll agent ${RUN}`, description: "Answers at length", systemPrompt: "Answer at length.", starters: ["Summarise my day", "Draft a reply"] })).body.agent;
+    const chat = (await api(admin, "POST", "/chats", { agentId: agent.id })).body.chat;
+    const paragraph = Array.from({ length: 12 }, (_, index) => `Paragraph ${index + 1} of a long answer that keeps going so the pane has to scroll. See [docs](https://docs.example.test/page?x=${index}) for more.`).join("\n\n");
+    for (let turn = 0; turn < 6; turn += 1) {
+      const started = await api(admin, "POST", `/chats/${chat.id}/messages`, { content: `echo:${paragraph}` });
+      if (started.status !== 201) break;
+      for (let wait = 0; wait < 50; wait += 1) {
+        await sleep(100);
+        if (!(await api(admin, "GET", `/chats/${chat.id}/run`)).body.run) break;
+      }
+    }
+    out.chat = { id: chat.id, agentId: agent.id };
+    progress("  chat: a provider, an agent, and a 6-turn chat");
+  }
+  if (!out.knowledge) {
+    const knowledge = await api(admin, "POST", "/knowledge", { name: `Scroll knowledge ${RUN}`, description: "Seeded by the scroll audit" });
+    out.knowledge = knowledge.status === 201 ? { id: knowledge.body.knowledgeBase.id } : null;
+    if (out.knowledge) {
+      // 17 people and 13 groups, as the note's Access sheet.
+      const groups = ((await api(admin, "GET", "/team/groups")).body?.groups ?? []).filter((group) => group.name.startsWith("Scroll group")).slice(1, 14);
+      await putAccess(admin, `/knowledge/${out.knowledge.id}/access`, { audience: "selected", people: seeded.members.map((member) => ({ id: member.userId, level: "view" })), groups: groups.map((group) => ({ id: group.id, level: "view" })) });
+    }
+    progress(out.knowledge ? "  knowledge: a base shared with 30 people and groups" : `  knowledge: could not create a base (${knowledge.status})`);
+  }
+  return out;
+}
+
+async function seedFresh(admin) {
   const seeded = { admin };
+  phase("Seeding: 17 accounts");
   const members = [];
-  for (let index = 0; index < 17; index += 1) members.push(await nodeSession(`${PREFIX}-${index}@nook.test`, `Scroll Person ${index}`));
+  for (let index = 0; index < 17; index += 1) {
+    members.push(await nodeSession(`${PREFIX}-${index}@nook.test`, `Scroll Person ${index}`));
+    if (index % 5 === 4 || index === 16) progress(`  accounts ${index + 1}/17`);
+  }
   seeded.members = members;
-  // A second admin, so the first gets group notices in the bell.
+  // A second admin, so the first gets group notices in the bell (and invites have a second creator).
   const second = members[0];
   await api(admin, "PUT", `/team/${second.userId}/role`, { role: "admin", expectedRole: "member" });
+  phase("Seeding: API keys");
   for (const member of members.slice(1, 11)) await nodeApi(member, "POST", "/keys", { name: `Scroll key ${RUN}`, password: PASSWORD, grants: [{ module: "notes", permission: "read" }] });
   for (let index = 0; index < 8; index += 1) await api(admin, "POST", "/keys", { name: `Admin key ${index} ${RUN}`, password: PASSWORD, grants: [{ module: "notes", permission: "read" }], expiresInDays: null });
 
+  phase("Seeding: groups, templates, integrations (Team writes: 30 a minute)");
   const groups = [];
   for (let index = 0; index < 26; index += 1) {
     const group = (await api(admin, "POST", "/team/groups", { name: `Scroll group ${index} ${RUN}` })).body.group;
@@ -127,16 +309,18 @@ async function seed() {
     await nodeApi(second, "PUT", `/team/groups/${group.id}/members`, { userIds: [admin.userId], revision: current.revision });
   }
   seeded.group = big;
+  progress("  26 groups");
   for (let index = 0; index < 18; index += 1) await api(admin, "POST", "/team/templates", { name: `Scroll template ${index} ${RUN}`, role: "member", groupIds: groups.slice(0, 3).map((group) => group.id) });
-  for (let index = 0; index < 18; index += 1) await api(admin, "POST", "/team/invites", { role: "member", note: `Scroll invite ${index}` });
-  seeded.inviteToken = (await api(admin, "POST", "/team/invites", { role: "member" })).body.token;
+  progress("  18 templates");
   // Wave 36: 16 integrations, the first with 6 keys, for Team → Integrations and one integration's page.
   const integrations = [];
   for (let index = 0; index < 16; index += 1) integrations.push((await api(admin, "POST", "/team/integrations", { name: `Scroll bot ${index} ${RUN}`, role: index % 3 ? "member" : "viewer", description: "Seeded by the scroll audit" })).body.integration);
   for (let index = 0; index < 6; index += 1) await api(admin, "POST", `/team/integrations/${integrations[1].id}/keys`, { name: `Bot key ${index} ${RUN}`, password: PASSWORD, grants: [{ module: "tasks", permission: "read" }] });
   seeded.integration = integrations[1];
+  progress("  16 integrations");
 
   // Notes: many notes and folders, one long note, one shared with 30 people.
+  phase("Seeding: notes and folders");
   const folders = [];
   for (let index = 0; index < 26; index += 1) folders.push((await api(admin, "POST", "/folders", { name: `Scroll folder ${index} ${RUN}` })).body.folder);
   const notes = [];
@@ -146,6 +330,7 @@ async function seed() {
     await api(admin, "PUT", `/notes/${note.id}/draft`, { markdown, revision: note.draft_revision });
     await api(admin, "POST", `/notes/${note.id}/publish`, {});
     notes.push(note);
+    if (index % 10 === 9) progress(`  notes ${index + 1}/50`);
   }
   seeded.longNote = notes[0];
   seeded.sharedNote = notes[1];
@@ -156,11 +341,13 @@ async function seed() {
   for (const note of notes.slice(30, 50)) await api(admin, "DELETE", `/notes/${note.id}`, {});
 
   // Files: many small files and one long text file to preview.
+  phase("Seeding: files");
   const files = [];
   for (let index = 0; index < 32; index += 1) files.push((await api(admin, "POST", "/files", ["file", `scroll-${index}.txt`, index === 0 ? Array.from({ length: 400 }, (_, line) => `line ${line}`).join("\n") : `file ${index}`])).body.document);
   seeded.longFile = files[0];
 
   // Tasks: many boards, one board with a long column, one card with a long description.
+  phase("Seeding: tasks and collections");
   let board = null;
   for (let index = 0; index < 22; index += 1) {
     const created = (await api(admin, "POST", "/tasks/boards", { name: `Scroll board ${index} ${RUN}` })).body;
@@ -190,6 +377,7 @@ async function seed() {
   seeded.row = row;
 
   // Calendar: many events this month, many calendars.
+  phase("Seeding: calendar and inbox");
   const calendars = (await api(admin, "GET", "/calendars")).body.calendars;
   for (let index = 0; index < 14; index += 1) await api(admin, "POST", "/calendars", { name: `Scroll calendar ${index} ${RUN}`, color: "blue" });
   const today = new Date();
@@ -202,15 +390,13 @@ async function seed() {
   // Inbox: many routines.
   for (let index = 0; index < 22; index += 1) await api(admin, "POST", "/inbox/routines", { name: `Scroll routine ${index}`, instructions: "Audit", outputKinds: ["note_draft"], cadence: "manual", tz: "UTC" });
 
-  // Whiteboards: 64 boards (the create limit is 30 a minute: wait as the server says).
+  // Whiteboards: 64 boards (the create limit is 30 a minute: api() waits as the server says, saying so).
+  phase("Seeding: 64 whiteboards (30 a minute)");
   let whiteboard = null;
   for (let index = 0; index < 64; index += 1) {
-    let created = await api(admin, "POST", "/whiteboards", { name: `Scroll board ${String(index).padStart(2, "0")} ${RUN}` });
-    while (created.status === 429) {
-      await sleep(((created.body?.retryAfter ?? 10) + 1) * 1000);
-      created = await api(admin, "POST", "/whiteboards", { name: `Scroll board ${String(index).padStart(2, "0")} ${RUN}` });
-    }
+    const created = await api(admin, "POST", "/whiteboards", { name: `Scroll board ${String(index).padStart(2, "0")} ${RUN}` });
     if (index === 0) whiteboard = created.body.whiteboard;
+    if (index % 16 === 15) progress(`  whiteboards ${index + 1}/64`);
   }
   seeded.whiteboard = whiteboard;
 
@@ -218,6 +404,7 @@ async function seed() {
   // the instance has VAULT_ENCRYPTION_KEY; otherwise the vault routes are left out.
   seeded.vault = null;
   if ((await api(admin, "GET", "/vault/status")).body?.enabled) {
+    phase("Seeding: vault");
     const vault = (await api(admin, "POST", "/vault/vaults", { name: `Scroll vault ${RUN}` })).body.vault;
     for (let index = 0; index < 6; index += 1) await api(admin, "POST", `/vault/vaults/${vault.id}/environments`, { slug: `extra${index}`, name: `Extra ${index}` });
     const environments = (await api(admin, "GET", `/vault/vaults/${vault.id}`)).body.vault.environments;
@@ -236,37 +423,12 @@ async function seed() {
     for (let version = 1; version <= 21; version += 1) await api(admin, "PUT", `/vault/vaults/${vault.id}/secrets/${secretId}/values/${environments[0].id}`, { value: `scroll value v${version}`, expectedVersion: version });
     seeded.vault = { id: vault.id, envId: environments[1].id, secretId };
   }
-  // Chat (Wave 40): a provider at AGENT_FAKE_PROVIDER (tests/support/fakeProvider.ts, e.g.
-  // http://127.0.0.1:24423/v1, listed in AGENT_ALLOWED_PRIVATE_HOSTS), an agent, and one long chat.
-  seeded.chat = null;
-  seeded.agents = Boolean((await api(admin, "GET", "/agents/status")).body?.enabled);
-  if (process.env.AGENT_FAKE_PROVIDER && (await api(admin, "GET", "/agents/status")).body?.enabled) {
-    const providers = (await api(admin, "GET", "/agents/admin/providers")).body.providers ?? [];
-    if (!providers.length) await api(admin, "POST", "/agents/admin/providers", { name: "Scroll fake provider", baseUrl: process.env.AGENT_FAKE_PROVIDER, apiKey: "sk-test-scroll-0000", defaultModel: "gpt-6-luna" });
-    const agent = (await api(admin, "POST", "/agents", { name: `Scroll agent ${RUN}`, description: "Answers at length", systemPrompt: "Answer at length.", starters: ["Summarise my day", "Draft a reply"] })).body.agent;
-    const chat = (await api(admin, "POST", "/chats", { agentId: agent.id })).body.chat;
-    const paragraph = Array.from({ length: 12 }, (_, index) => `Paragraph ${index + 1} of a long answer that keeps going so the pane has to scroll. See [docs](https://docs.example.test/page?x=${index}) for more.`).join("\n\n");
-    for (let turn = 0; turn < 6; turn += 1) {
-      const started = await api(admin, "POST", `/chats/${chat.id}/messages`, { content: `echo:${paragraph}` });
-      if (started.status !== 201) break;
-      for (let wait = 0; wait < 50; wait += 1) {
-        await sleep(100);
-        if (!(await api(admin, "GET", `/chats/${chat.id}/run`)).body.run) break;
-      }
-    }
-    seeded.chat = { id: chat.id, agentId: agent.id };
-    // v0.30: a knowledge base (it uses the provider's embedding model) for the Knowledge sheets.
-    const knowledge = await api(admin, "POST", "/knowledge", { name: `Scroll knowledge ${RUN}`, description: "Seeded by the scroll audit" });
-    seeded.knowledge = knowledge.status === 201 ? { id: knowledge.body.knowledgeBase.id } : null;
-  }
-  admin.browserContext().close();
-  // Ids only: a later run against the same instance reuses them (SEED_FILE), under the registration limits.
+  // Ids only: the manifest (or SEED_FILE) keeps them for a later run against the same instance.
   return {
     longNote: { id: seeded.longNote.id }, sharedNote: { id: seeded.sharedNote.id }, longFile: { id: seeded.longFile.id },
     board: { id: seeded.board.id }, card: { id: seeded.card.id }, collection: { id: seeded.collection.id }, row: { id: seeded.row.id },
-    group: { id: seeded.group.id }, members: seeded.members.map((member) => ({ userId: member.userId })), inviteToken: seeded.inviteToken,
-    whiteboard: { id: seeded.whiteboard.id }, vault: seeded.vault, integration: { id: seeded.integration.id }, chat: seeded.chat, agents: seeded.agents,
-    knowledge: seeded.knowledge ?? null
+    group: { id: seeded.group.id }, members: seeded.members.map((member) => ({ userId: member.userId })),
+    whiteboard: { id: seeded.whiteboard.id }, vault: seeded.vault, integration: { id: seeded.integration.id }, chat: null, agents: false, knowledge: null
   };
 }
 
@@ -593,14 +755,15 @@ const HUB_SPLIT = { split: true, check: async (page) => [...await hubPanes(page)
  * The shared dialog contract (files.css): the header stays put, one body scrolls, and the footer's
  * buttons are in view without scrolling, inside the dialog and the window. Add source once had a
  * body that did not scroll in a dialog that clipped, so Done and Add text sat below its edge.
+ * `parts` names the header and footer of a layer built on other classes (the Access sheet, v0.31).
  */
-async function dialogContract(page, selector) {
-  const found = await page.evaluate((selector) => {
+async function dialogContract(page, selector, parts = {}) {
+  const found = await page.evaluate((selector, headerSelector, footerSelector) => {
     const dialog = document.querySelector(selector);
     if (!dialog) return null;
     const box = dialog.getBoundingClientRect();
-    const header = dialog.querySelector(".file-dialog-header")?.getBoundingClientRect();
-    const footer = [...dialog.querySelectorAll(".file-dialog-actions")].filter((node) => node.getClientRects().length).at(-1);
+    const header = dialog.querySelector(headerSelector)?.getBoundingClientRect();
+    const footer = [...dialog.querySelectorAll(footerSelector)].filter((node) => node.getClientRects().length).at(-1);
     const bottom = Math.min(innerHeight, box.bottom);
     const buttons = footer ? [...footer.querySelectorAll("button")].map((button) => { const rect = button.getBoundingClientRect(); return { label: button.textContent.trim(), top: Math.round(rect.top), bottom: Math.round(rect.bottom), height: Math.round(rect.height) }; }) : [];
     // A text field scrolling its own text is not a second body scroller.
@@ -609,7 +772,7 @@ async function dialogContract(page, selector) {
     const body = footer?.parentElement;
     const gap = body && body.scrollHeight > body.clientHeight + 2 ? Math.round(Math.min(innerHeight, body.getBoundingClientRect().bottom) - footer.getBoundingClientRect().bottom) : 0;
     return { buttons, bottom: Math.round(bottom), headerBottom: Math.round(header?.bottom ?? box.top), scrollers, gap };
-  }, selector);
+  }, selector, parts.header ?? ".file-dialog-header", parts.footer ?? ".file-dialog-actions");
   if (!found) return [`no ${selector}`];
   const problems = [];
   if (!found.buttons.length) problems.push("no footer buttons");
@@ -763,7 +926,11 @@ const ROUTES = (s) => [
     ["Knowledge: Rename", `/settings/knowledge/${s.knowledge.id}`, async (page) => { await tapText(page, ".knowledge-actions button", "Rename"); await page.waitForSelector(".knowledge-sheet"); }, { scope: ".knowledge-sheet", short: true, check: (page) => dialogContract(page, ".knowledge-sheet") }],
     ["Knowledge: Add source, Note (many notes)", `/settings/knowledge/${s.knowledge.id}`, async (page) => { await tapText(page, ".knowledge-actions button", "Add source"); await page.waitForSelector(".knowledge-add .knowledge-candidates li"); }, { scope: ".knowledge-add", short: true, check: (page) => dialogContract(page, ".knowledge-add") }],
     ["Knowledge: Add source, File (many files)", `/settings/knowledge/${s.knowledge.id}`, async (page) => { await tapText(page, ".knowledge-actions button", "Add source"); await tapText(page, ".knowledge-mode", "File"); await page.waitForFunction(() => document.querySelector(".knowledge-add .knowledge-candidates li")?.textContent.includes(".txt")); }, { scope: ".knowledge-add", short: true, check: (page) => dialogContract(page, ".knowledge-add") }],
-    ["Knowledge: Add source, Paste text with an error", `/settings/knowledge/${s.knowledge.id}`, async (page) => { await tapText(page, ".knowledge-actions button", "Add source"); await tapText(page, ".knowledge-mode", "Paste text"); await tapText(page, ".knowledge-add button[type=submit]", "Add text"); await page.waitForSelector(".knowledge-add .form-error"); }, { scope: ".knowledge-add", short: true, check: (page) => dialogContract(page, ".knowledge-add") }]
+    ["Knowledge: Add source, Paste text with an error", `/settings/knowledge/${s.knowledge.id}`, async (page) => { await tapText(page, ".knowledge-actions button", "Add source"); await tapText(page, ".knowledge-mode", "Paste text"); await tapText(page, ".knowledge-add button[type=submit]", "Add text"); await page.waitForSelector(".knowledge-add .form-error"); }, { scope: ".knowledge-add", short: true, check: (page) => dialogContract(page, ".knowledge-add") }],
+    // v0.31: Share… (the shared Access sheet, 17 people and 13 groups) and the Move to Bin confirm
+    // (the shared confirm dialog). Opened only: nothing is saved or moved.
+    ["Knowledge: Share… (30 people and groups)", `/settings/knowledge/${s.knowledge.id}`, async (page) => { await tapText(page, ".knowledge-actions button", "Share…"); await page.waitForSelector(".access-sheet .access-list"); }, { scope: ".access-sheet", short: true, check: (page) => dialogContract(page, ".access-sheet", { header: ".access-header", footer: ".access-actions" }) }],
+    ["Knowledge: Move to Bin", `/settings/knowledge/${s.knowledge.id}`, async (page) => { await tapText(page, ".knowledge-actions button", "Move to Bin"); await page.waitForSelector(".app-confirm-layer .file-dialog"); }, { scope: ".app-confirm-layer .file-dialog", short: true, check: (page) => dialogContract(page, ".app-confirm-layer .file-dialog") }]
   ] : []),
   ["Notifications", "/notifications"],
   // The Settings hub (Wave 37): a page with its nav beside the section on a computer; on a phone the
@@ -823,6 +990,9 @@ async function tapText(page, selector, text) {
 // ------------------------------------------------------------------ run
 
 const results = [];
+const skipped = [];
+let fatal = null;
+const report = (result) => console.log(`${result.ok ? "PASS" : "FAIL"} ${result.width} ${result.name} — ${result.detail}`);
 try {
   const { existsSync, readFileSync, writeFileSync } = await import("node:fs");
   const seedFile = process.env.SEED_FILE;
@@ -832,13 +1002,15 @@ try {
   // 1280 × 600 is a short computer window: only the two-pane pages, whose panes are bounded by it.
   // v0.30: 1280 × 500 and 390 × 667 only for the routes marked `short` (the Knowledge sheets).
   for (const [width, height] of [[1280, 800], [390, 844], [1280, 600], [1280, 500], [390, 667]]) {
+    const routes = ROUTES(seeded).filter(([name, , , options]) => (!only || only.test(name))
+      // 1280 × 600 also covers every dialog and sheet (a scope): a short window is where they overflow.
+      && !(height === 600 && !options?.split && !options?.scope)
+      && !((height === 500 || height === 667) && !options?.short));
+    if (!routes.length) continue;
+    phase(`Auditing ${width}x${height}: ${routes.length} routes`);
     let base = await session(`${PREFIX}-admin@nook.test`, "Scroll Admin", width, height);
     const nativeDialogs = base.nativeDialogs;
-    for (const [name, path, setup, options] of ROUTES(seeded)) {
-      if (only && !only.test(name)) continue;
-      // 1280 × 600 also covers every dialog and sheet (a scope): a short window is where they overflow.
-      if (height === 600 && !options?.split && !options?.scope) continue;
-      if ((height === 500 || height === 667) && !options?.short) continue;
+    for (const [name, path, setup, options] of routes) {
       let page = null;
       try {
         if (!browser.connected || base.isClosed()) base = await freshSession(base, width, height);
@@ -855,22 +1027,33 @@ try {
       } finally {
         await page?.close().catch(() => undefined);
       }
-      console.log(`${results.at(-1).ok ? "PASS" : "FAIL"} ${width}x${height} ${name} — ${results.at(-1).detail}`);
+      report(results.at(-1));
     }
-    if (nativeDialogs.length) results.push({ width: `${width}x${height}`, name: "native dialogs", ok: false, detail: nativeDialogs.join("; ") });
+    if (nativeDialogs.length) { results.push({ width: `${width}x${height}`, name: "native dialogs", ok: false, detail: nativeDialogs.join("; ") }); report(results.at(-1)); }
     await base.browserContext().close().catch(() => undefined);
   }
+  phase("Auditing the signed-out pages");
   for (const [width, height] of [[1280, 800], [390, 844], [844, 390]]) {
     const page = await session(null, null, width, height);
     for (const [name, path] of PUBLIC_ROUTES(seeded)) {
       if (only && !only.test(name)) continue;
+      if (name === "Register (invite)" && !seeded.inviteToken) {
+        skipped.push(`${width}x${height} ${name}`);
+        console.log(`SKIP ${width}x${height} ${name} — no live invite link (both admins are at the 10-an-hour invite limit, or the instance at 20 live invites)`);
+        continue;
+      }
       await page.goto(`${ORIGIN}${path}`, { waitUntil: "networkidle2" });
       results.push({ width: `${width}x${height}`, ...(await audit(page, name)) });
-      console.log(`${results.at(-1).ok ? "PASS" : "FAIL"} ${width}x${height} ${name} — ${results.at(-1).detail}`);
+      report(results.at(-1));
     }
     await page.browserContext().close();
   }
+} catch (error) {
+  // Seeding or a whole viewport failed: still close the browsers and print the summary.
+  fatal = error;
+  console.log(`\nERROR ${error?.stack ?? error}`);
 } finally {
+  phase(null);
   // v0.30: a run once printed its summary and then never exited (until a 1800 s timeout). Close every
   // browser it launched, give each 10 s, then kill its process group (this run's own Chrome only).
   for (const launched of browsers) {
@@ -880,6 +1063,9 @@ try {
   }
 }
 const failed = results.filter((result) => !result.ok);
-console.log(`\n${results.length - failed.length}/${results.length} passed${failed.length ? `; failed: ${failed.map((result) => `${result.width} ${result.name}`).join(", ")}` : ""}`);
+console.log(`\n${results.length - failed.length}/${results.length} passed${skipped.length ? `, ${skipped.length} skipped` : ""}${failed.length ? `; failed: ${failed.map((result) => `${result.width} ${result.name}`).join(", ")}` : ""}${fatal ? "; the run stopped early (ERROR above)" : ""}`);
+const totals = new Map();
+for (const entry of phases) totals.set(entry.name.split(":")[0], (totals.get(entry.name.split(":")[0]) ?? 0) + entry.ms);
+console.log(`Time: ${clock()} in all (${[...totals].map(([name, ms]) => `${name} ${clock(ms)}`).join(", ")})`);
 // Exit explicitly once stdout has drained, whatever handle (a socket, a timer) is still open.
-process.stdout.write("", () => process.exit(failed.length ? 1 : 0));
+process.stdout.write("", () => process.exit(failed.length || fatal ? 1 : 0));
