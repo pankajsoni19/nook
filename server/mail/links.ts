@@ -23,7 +23,7 @@ function token(value: string) {
 }
 
 /** The URL slugs of Settings sections (API keys is `/settings/keys` since C3; the client still opens `/settings/mcp`). */
-export const SETTINGS_SECTIONS = ["security", "modules", "keys", "access", "notifications", "about"] as const;
+export const SETTINGS_SECTIONS = ["security", "modules", "keys", "access", "notifications", "agents", "knowledge", "about"] as const;
 export type SettingsSection = typeof SETTINGS_SECTIONS[number];
 
 /** Path builders, one per place a mail may open. */
@@ -49,6 +49,19 @@ export const paths = {
   bin: () => "/bin",
   inbox: () => "/inbox",
   proposal: (proposalId: string) => `/inbox/p/${id(proposalId)}`,
+  /** A resolved proposal opens beside History, so the list next to it matches. */
+  proposalHistory: (proposalId: string) => `/inbox/history/p/${id(proposalId)}`,
+  routines: () => "/inbox/routines",
+  notesList: () => "/notes",
+  filesList: () => "/files",
+  boards: () => "/tasks",
+  collections: () => "/collections",
+  vaults: () => "/vault",
+  chats: () => "/chat",
+  /** Settings → Agents' editor for one agent (its owner and managers). */
+  agent: (agentId: string) => `/settings/agents/${id(agentId)}`,
+  /** Settings → Knowledge, one base's page. */
+  knowledgeBase: (kbId: string) => `/settings/knowledge/${id(kbId)}`,
   team: (userId: string) => `/team/${id(userId)}`,
   settings: (section: SettingsSection) => {
     if (!SETTINGS_SECTIONS.includes(section)) throw new Error("Invalid settings section");

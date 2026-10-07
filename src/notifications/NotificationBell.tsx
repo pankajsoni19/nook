@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Bell, CheckCheck, X } from "lucide-react";
 import { trapTabKey } from "../files/Dialog";
+import { afterDialogsReleased } from "../historyDialogs";
 import { PHONE_QUERY, useDialogBackGuard, useMediaQuery } from "../calendar/hooks";
 import { badgeLabel, listNotifications, markAllRead, markRead, notificationAge, NOTIFICATIONS_POLLED, safeNotificationPath, useNotificationsContext, type NotificationItem } from "./notificationsApi";
 import "./notifications.css";
@@ -77,7 +78,11 @@ export function NotificationBell() {
       await markRead([item.id]).catch(() => undefined);
       announceNotificationsChanged();
     }
-    context!.openPath(safeNotificationPath(item.href));
+    // Bell deep links (v0.32): on the page Nook was opened on, the popover pushed a history sentinel
+    // that closing it pops; open the item once that pop has landed, or it would undo the navigation.
+    // Back from the item then returns to the page the bell was opened on.
+    const path = safeNotificationPath(item.href);
+    afterDialogsReleased(() => context!.openPath(path));
   }
 
   async function readAll() {
@@ -103,7 +108,7 @@ export function NotificationBell() {
           <button className="icon-button" onClick={close} aria-label="Close notifications" autoFocus><X /></button>
         </header>
         <NotificationList items={items} error={error} onOpen={(item) => { void openItem(item); }} />
-        <footer><button className="notification-text-button" onClick={() => { setOpen(false); context.openList(); }}>See all</button></footer>
+        <footer><button className="notification-text-button" onClick={() => { setOpen(false); afterDialogsReleased(() => context.openList()); }}>See all</button></footer>
       </section>
     </>}
   </>;

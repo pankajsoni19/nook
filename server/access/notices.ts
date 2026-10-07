@@ -4,6 +4,7 @@ import { ACCESS_KINDS, type AccessKind, type Level } from "./levels";
 import { vaultTitleFor } from "../vault/access";
 import { sharedTitleFor } from "../agents/sharing";
 import { deviceLabelFromCode } from "../deviceLabels";
+import { paths } from "../mail/links";
 
 const LEVEL_WORDS: Record<Level, string> = { view: "Can view", comment: "Can comment", edit: "Can edit", manage: "Manager" };
 
@@ -40,14 +41,18 @@ export type AccessNoticeKind = "share_removed" | "share_lowered" | "access_reset
   | "agent_changed"
   // Migration 044 (outbound email plan #9): a sign-in from a device or browser the account had not
   // used. The resource is `device` with the `browser:os` family codes (server/deviceLabels.ts), never text.
-  | "new_sign_in";
+  | "new_sign_in"
+  // Bell deep links (v0.32): an admin revoked one of your calendar feed links (the resource is the
+  // calendar, named only while you can open it) or paused one of your routines (the resource is the
+  // routine; its name is yours). From Settings → Team → a member's access page (D268).
+  | "feed_revoked" | "routine_paused";
 
 export type AccessNotice = {
   userId: string;
   kind: AccessNoticeKind;
   actorId: string | null;
   targetUserId?: string | null;
-  resource?: { kind: AccessKind | "vault" | "agent" | "chat" | "knowledge_base" | "device"; id: string } | null;
+  resource?: { kind: AccessKind | "vault" | "agent" | "chat" | "knowledge_base" | "device" | "routine"; id: string } | null;
   groupId?: string | null;
   keyId?: string | null;
   count?: number | null;
@@ -75,11 +80,101 @@ type NoticeRow = {
 };
 
 /**
- * Access notices open the notifications list: the line already names the item and the person, and
- * the list is the one path every client follows safely (T68). Linking into each module's item is
- * left for when the bell learns module deep links.
+ * Where an access notice opens (bell deep links, v0.32). Paths come from the mail link builders
+ * (`server/mail/links.ts`), so they are built from ids only and checked against the router's id
+ * pattern (T68); no title or free text ever reaches a link. An item opens only while the recipient
+ * can open it; otherwise the notice opens the module's list (or the notifications list), so a link
+ * never names an item the reader cannot reach. The client re-checks every path (`safeNotificationPath`).
  */
 export const ACCESS_NOTICE_HREF = "/notifications";
+
+/** A path from a builder, or the fallback when an id is malformed (the builders throw). */
+function built(build: () => string, fallback = ACCESS_NOTICE_HREF) {
+  try {
+    return build();
+  } catch {
+    return fallback;
+  }
+}
+
+const ITEM_LISTS: Record<AccessKind, () => string> = {
+  note: paths.notesList, folder: paths.notesList, document: paths.filesList, board: paths.boards, task_view: paths.boards, collection: paths.collections, calendar: paths.calendar
+};
+
+/** One item of an access kind, as the recipient may open it: the item, or its module's list. */
+function itemPath(kind: AccessKind, id: string, recipientId: string) {
+  const item = presentItem(kind, id, recipientId);
+  const list = ITEM_LISTS[kind]();
+  if (!item || item.titleHidden) return list;
+  switch (kind) {
+    case "note": return built(() => paths.note(id), list);
+    case "folder": return built(() => paths.noteFolder(id), list);
+    case "document": return built(() => paths.file(id), list);
+    case "board": return built(() => paths.board(id), list);
+    case "task_view": return built(() => paths.taskView(id), list);
+    case "collection": return built(() => paths.collection(id), list);
+    // Calendars have no page of their own: the calendar opens with every calendar the reader has.
+    case "calendar": return list;
+  }
+}
+
+/** A shared agent, chat, or knowledge base: its page while the recipient can open it, else its list. */
+function sharedPath(kind: "agent" | "chat" | "knowledge_base", id: string, recipientId: string, agentOpens: "chat" | "editor") {
+  const list = kind === "chat" || (kind === "agent" && agentOpens === "chat") ? paths.chats() : paths.settings(kind === "agent" ? "agents" : "knowledge");
+  if (sharedTitleFor(kind, id, recipientId) === null) return list;
+  if (kind === "chat") return built(() => paths.chat(id), list);
+  if (kind === "knowledge_base") return built(() => paths.knowledgeBase(id), list);
+  return built(() => agentOpens === "chat" ? paths.chatWithAgent(id) : paths.agent(id), list);
+}
+
+export function accessNoticeHref(row: { kind: string; resource_kind: string | null; resource_id: string | null }, recipientId: string): string {
+  const id = row.resource_id;
+  switch (row.kind) {
+    // Your access ended or changed: Settings → My access lists what you still reach, your groups, and feeds.
+    case "access_reset_self":
+    case "group_added":
+    case "group_removed":
+    case "feed_revoked":
+      return paths.settings("access");
+    case "key_revoked":
+    case "key_vault_limited":
+    case "key_vault_volume":
+      return paths.settings("keys");
+    case "routine_paused":
+      return paths.routines();
+    // Settings → Security: recognised devices, Google sign-in, and two-factor.
+    case "new_sign_in":
+    case "google_allowed":
+    case "google_relink_allowed":
+    case "google_reset":
+    case "google_unlinked":
+    case "google_relinked":
+      return paths.settings("security");
+    case "vault_shared":
+    case "vault_removed":
+    case "vault_key_rotated":
+      return id && vaultTitleFor(recipientId, id) !== null ? built(() => paths.vault(id), paths.vaults()) : paths.vaults();
+    // Wave 43: an agent opens a new chat with it; a chat opens read-only.
+    case "agent_shared": return id ? sharedPath("agent", id, recipientId, "chat") : paths.chats();
+    case "chat_shared": return id ? sharedPath("chat", id, recipientId, "chat") : paths.chats();
+    // Wave 43 fixes (review L4): the owner opens the agent's editor.
+    case "agent_changed": return id ? sharedPath("agent", id, recipientId, "editor") : paths.settings("agents");
+    // Wave 44 (AC-E): a knowledge base opens its page in Settings → Knowledge.
+    case "knowledge_base_shared": return id ? sharedPath("knowledge_base", id, recipientId, "editor") : paths.settings("knowledge");
+    // To an item's owner: an admin removed or lowered someone's access to it. The owner opens the item.
+    case "share_removed":
+    case "share_lowered":
+      if (!id) return ACCESS_NOTICE_HREF;
+      if (isAccessKind(row.resource_kind)) return itemPath(row.resource_kind, id, recipientId);
+      if (row.resource_kind === "agent" || row.resource_kind === "chat" || row.resource_kind === "knowledge_base") return sharedPath(row.resource_kind, id, recipientId, "editor");
+      if (row.resource_kind === "vault") return vaultTitleFor(recipientId, id) !== null ? built(() => paths.vault(id), paths.vaults()) : paths.vaults();
+      return ACCESS_NOTICE_HREF;
+    // About someone else and several of your items at once: there is no one item to open.
+    case "access_reset":
+    default:
+      return ACCESS_NOTICE_HREF;
+  }
+}
 
 const isAccessKind = (value: string | null): value is AccessKind => value !== null && (ACCESS_KINDS as readonly string[]).includes(value);
 
@@ -129,6 +224,11 @@ function line(row: NoticeRow, recipientId: string) {
     case "group_added": return `${actor} added you to ${group}`;
     case "group_removed": return `${actor} removed you from ${group}`;
     case "key_revoked": return `${actor} revoked your API key${row.key_name ? ` “${row.key_name}”` : ""}`;
+    case "feed_revoked": return `${actor} revoked your calendar feed link for ${item ? (item.titleHidden ? "a calendar" : `“${item.title}”`) : "a calendar that is gone"}`;
+    case "routine_paused": {
+      const name = row.resource_id ? routineName(recipientId, row.resource_id) : null;
+      return `${actor} paused your routine${name ? ` “${name}”` : ""}`;
+    }
     case "key_vault_volume": return `Your vault API key${row.key_name ? ` “${row.key_name}”` : ""} read more than 500 values today. If you did not expect this much use, revoke it in Settings → API keys.`;
     case "key_vault_limited": return `Your vault API key${row.key_name ? ` “${row.key_name}”` : ""} hit its rate limit. If you did not expect this much use, revoke it in Settings → API keys.`;
     case "google_allowed": return `${actor} allowed your account to be linked to Google at your next Google sign-in`;
@@ -145,6 +245,10 @@ function line(row: NoticeRow, recipientId: string) {
     default: return "Your access changed";
   }
 }
+
+const routineNameQuery = db.query("SELECT name FROM routines WHERE id = ? AND owner_id = ?");
+/** The recipient's own routine's name (routines are private: nobody else's is ever read). */
+const routineName = (ownerId: string, routineId: string) => (routineNameQuery.get(routineId, ownerId) as { name: string } | null)?.name ?? null;
 
 /** What a Reset removed, as bits in the notice's `count` (the notice keeps ids and numbers only). */
 const RESET_PARTS = [
@@ -212,18 +316,7 @@ export function listAccessNotices(userId: string, options: { unread: boolean; li
     WHERE n.user_id = $userId AND ($unread = 0 OR n.read_at IS NULL) ORDER BY n.created_at DESC, n.rowid DESC LIMIT $limit`)
     .all({ userId, unread: options.unread ? 1 : 0, limit: options.limit }) as NoticeRow[];
   return rows.map((row) => ({
-    id: row.id, title: line(row, userId), href: row.resource_kind === "vault" && row.resource_id && (row.kind === "vault_shared" || row.kind === "vault_key_rotated") && vaultTitleFor(userId, row.resource_id)
-      ? `/vault/${row.resource_id}`
-      // Wave 43: an agent opens a new chat with it; a chat opens read-only, while the recipient can still open it.
-      : row.kind === "agent_shared" && row.resource_id && sharedTitleFor("agent", row.resource_id, userId) !== null ? `/chat/new?agent=${row.resource_id}`
-      : row.kind === "chat_shared" && row.resource_id && sharedTitleFor("chat", row.resource_id, userId) !== null ? `/chat/${row.resource_id}`
-      // Wave 43 fixes (review L4): the owner opens the agent's editor.
-      : row.kind === "agent_changed" && row.resource_id && sharedTitleFor("agent", row.resource_id, userId) !== null ? `/settings/agents/${row.resource_id}`
-      // Wave 44 (AC-E): a knowledge base opens its page in Settings → Knowledge.
-      : row.kind === "knowledge_base_shared" && row.resource_id && sharedTitleFor("knowledge_base", row.resource_id, userId) !== null ? `/settings/knowledge/${row.resource_id}`
-      // Migration 044: a new sign-in opens Settings → Security, where the recognised devices are.
-      : row.kind === "new_sign_in" ? "/settings/security"
-      : ACCESS_NOTICE_HREF,
+    id: row.id, title: line(row, userId), href: accessNoticeHref(row, userId),
     late: false, read: row.read_at !== null, createdAt: row.created_at, occurrenceStart: null
   }));
 }

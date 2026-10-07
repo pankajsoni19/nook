@@ -1,5 +1,6 @@
 import { createContext, useContext } from "react";
 import { api } from "../api";
+import { formatRoute, parseRoute } from "../router";
 
 export type NotificationItem = { id: string; title: string; href: string; late: boolean; read: boolean; createdAt: string; occurrenceStart: string | null };
 export type NotificationList = { items: NotificationItem[]; unreadCount: number };
@@ -14,25 +15,24 @@ export const listNotifications = (options: { unread?: boolean; limit?: number } 
 export const markRead = (ids: string[]) => api<{ ok: true; updated: number }>("/notifications/read", { method: "POST", body: JSON.stringify({ ids }) });
 export const markAllRead = () => api<{ ok: true; updated: number }>("/notifications/read", { method: "POST", body: JSON.stringify({ all: true }) });
 
-const idPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+/** At most this long: the server's longest path is well under it. */
+const MAX_PATH = 200;
 
 /**
- * The in-app path a notification opens. Only the shapes the server builds are followed, and only
- * same-origin paths (T68): anything else opens the notifications list.
+ * The in-app path a notification opens (bell deep links, v0.32). The server builds every href from
+ * ids only (T68); the client follows it only when it is a same-origin path the router itself would
+ * write: parsing it and formatting it back must give the same text (so every id matches the id
+ * pattern, ids are written lowercase, and nothing else rides along), and it must name a page, not fall through to Home.
+ * Anything else opens the notifications list. The page then loads the item as usual, so an item
+ * the reader can no longer open shows that module's own "not found" state, never its content.
  */
-export function safeNotificationPath(href: string) {
-  // Proposal notifications (agent inbox D159) open the Inbox.
-  if (href === "/inbox") return "/inbox";
-  // "Shared the vault … with you" (Wave 26) opens that vault.
-  const vault = /^\/vault\/([^/?#]+)$/.exec(href);
-  if (vault && idPattern.test(vault[1]!)) return `/vault/${vault[1]!.toLowerCase()}`;
-  // Wave 43 (AC-D): "shared the chat … with you" opens it read-only; "shared the agent …" starts a chat with it.
-  const chat = /^\/chat\/([^/?#]+)$/.exec(href);
-  if (chat && idPattern.test(chat[1]!)) return `/chat/${chat[1]!.toLowerCase()}`;
-  const agent = /^\/chat\/new\?agent=([^/?#&]+)$/.exec(href);
-  if (agent && idPattern.test(agent[1]!)) return `/chat/new?agent=${agent[1]!.toLowerCase()}`;
-  const match = /^\/calendar\/event\/([^/?#]+)$/.exec(href);
-  return match && idPattern.test(match[1]!) ? `/calendar/event/${match[1]!.toLowerCase()}` : "/notifications";
+export function safeNotificationPath(href: unknown) {
+  if (typeof href !== "string" || href.length > MAX_PATH || !href.startsWith("/") || href.startsWith("//") || /[\\\s#]/.test(href)) return "/notifications";
+  const route = parseRoute(href);
+  // Ids are compared without case: the router writes them lowercase, and so does the server.
+  const path = formatRoute(route);
+  if (route.app === "home" || path.toLowerCase() !== href.toLowerCase()) return "/notifications";
+  return path;
 }
 
 /** "Just now", "5 min ago", "3 h ago", "2 days ago". */
