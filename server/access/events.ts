@@ -40,6 +40,9 @@ export type AccessAction =
   | "access.share_removed"
   | "access.share_lowered"
   | "access.reset"
+  // v0.32: an admin revoked one calendar feed link (the calendar is the resource) or paused one routine.
+  | "access.feed_revoked"
+  | "access.routine_paused"
   | "template.created"
   | "template.updated"
   | "template.deleted"

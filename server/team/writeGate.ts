@@ -55,6 +55,8 @@ export const ROLE_READ_ONLY_ALLOWED_WRITES: readonly AllowedWrite[] = [
   { method: "PATCH", path: "/api/keys/:id", why: "narrow own API keys (never widens)" },
   { method: "POST", path: "/api/keys/:id/rotate", why: "rotate own API keys (same grants, re-authenticated)" },
   { method: "DELETE", path: "/api/keys/:id", why: "revoke own API keys" },
+  // v0.32: a viewer revokes their own calendar feed links (a reduction; they cannot make new ones). Guests have none.
+  { method: "DELETE", path: "/api/feeds/:feedId", roles: ["viewer"], why: "revoke own calendar feed links" },
   { method: "POST", path: "/api/collections/:collectionId/query", why: "a read sent as POST" },
   // The Vault (Wave 25, vault plan §6.1): viewers read values; revealing several cells is a read sent as POST.
   { method: "POST", path: "/api/vault/vaults/:vaultId/reveal", roles: ["viewer"], why: "a read sent as POST (reveal batch)" },

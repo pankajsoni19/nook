@@ -10,6 +10,7 @@ import { SHARE_TABLES } from "../access/shares";
 import { pauseRoutinesOf } from "../inbox/routineHooks";
 import { AUDIENCE_ALL_USERS, type Role } from "./roles";
 import { VaultError } from "../vault/access";
+import { cadenceText, type Cadence } from "../../shared/routineSchedule";
 import { lowerSharedDirect, memberSharedRows, removeSharedDirect, resetSharedDirect, sharedDirectCount, type ShareKind } from "../agents/sharing";
 import { adminLowerVaultMember, adminRemoveVaultMember, memberVaults, resetVaultMemberships, rotateOnLostReach, snapshotVaultReach, vaultMemberCount } from "../vault/members";
 
@@ -28,7 +29,13 @@ import { adminLowerVaultMember, adminRemoveVaultMember, memberVaults, resetVault
  *   person from a group, revoke keys, and Reset access. Nothing here can add or raise a grant.
  *   Every action writes `access_events` and `audit_log` (ids and counts only) and puts a bell
  *   notice with the item's owner (§C.11).
- * - The person themself sees the same page read-only at Settings → My access (`/api/me/access`).
+ * - Calendar feed links and routines are listed one by one (v0.32): an admin may revoke a feed or
+ *   pause a routine (reductions, D268; never resume, which only the owner does). Each writes
+ *   `access_events` and `audit_log` and puts a bell notice with the person. A feed's calendar is
+ *   named only when the admin can open it (D269); a routine shows its name, schedule, and state
+ *   (configuration, like a key's name), never its instructions, targets, or scope hints.
+ * - The person themself sees the same page at Settings → My access (`/api/me/access`), where their
+ *   own feeds and routines use the owner routes (revoke a feed, pause or resume a routine).
  * - Vaults (Wave 26): the vaults the person is a member of, with their level per environment,
  *   titles and environment names hidden the same way (D269). Reductions: remove the membership
  *   (never a vault's last owner) or lower every environment to read. A vault membership counts as
@@ -148,6 +155,35 @@ function groupsOf(userId: string) {
     }));
 }
 
+type FeedRow = { id: string; calendar_id: string; detail: "busy" | "full"; token_prefix: string; created_at: string; last_used_at: string | null };
+
+/** The person's live calendar feed links, newest first (at most 200, T218); the calendar redacted for the viewer (D269). */
+function feedRows(viewerId: string, userId: string) {
+  const rows = db.query(`SELECT id, calendar_id, detail, token_prefix, created_at, last_used_at FROM calendar_feeds
+    WHERE user_id = ? AND revoked_at IS NULL ORDER BY created_at DESC, rowid DESC LIMIT ${ACCESS_PAGE}`).all(userId) as FeedRow[];
+  const readable = readabilityChecker(viewerId);
+  return rows.flatMap((row) => {
+    const calendar = presentItem("calendar", row.calendar_id, viewerId, readable);
+    if (!calendar) return [];
+    return [{
+      id: row.id, detail: row.detail, prefix: row.token_prefix, createdAt: row.created_at, lastUsedAt: row.last_used_at,
+      calendar: { title: calendar.title, titleHidden: calendar.titleHidden, owner: { displayName: calendar.owner.displayName } }
+    }];
+  });
+}
+
+type RoutineRow = { id: string; name: string; enabled: number; cadence: Cadence; at_time: string; weekday: number | null; next_due_at: string | null; last_run_at: string | null; key_name: string | null };
+
+/** The person's routines (enabled first, then by name; at most 200): name, schedule, and state only. */
+function routineRows(userId: string) {
+  const rows = db.query(`SELECT r.id, r.name, r.enabled, r.cadence, r.at_time, r.weekday, r.next_due_at, r.last_run_at, k.name AS key_name
+    FROM routines r LEFT JOIN mcp_api_keys k ON k.id = r.key_id WHERE r.owner_id = ? ORDER BY r.enabled DESC, r.name_fold, r.id LIMIT ${ACCESS_PAGE}`).all(userId) as RoutineRow[];
+  return rows.map((row) => ({
+    id: row.id, name: row.name, enabled: row.enabled === 1, schedule: cadenceText({ cadence: row.cadence, atTime: row.at_time, weekday: row.weekday }),
+    nextDueAt: row.enabled === 1 ? row.next_due_at : null, lastRunAt: row.last_run_at, keyName: row.key_name
+  }));
+}
+
 /**
  * The page head: the person, their groups, keys, feeds and routines, and per kind how many items
  * they reach directly, through groups, and through everyone-signed-in. Rows come per kind from
@@ -160,8 +196,8 @@ export function accessSummary(viewerId: string, userId: string) {
     member: { id: target.id, displayName: target.display_name, role: target.role, status: target.disabled_at === null ? "active" as const : "blocked" as const, isYou: target.id === viewerId },
     groups: groupsOf(userId),
     keys: keySummaries(viewerId, userId),
-    feeds: { live: counts.feeds },
-    routines: { enabled: counts.routines },
+    feeds: { live: counts.feeds, items: feedRows(viewerId, userId) },
+    routines: { enabled: counts.routines, items: routineRows(userId) },
     kinds: ACCESS_KINDS.map((kind) => kindCounts(kind, userId, target.role)),
     // Wave 26: vault memberships, each with an opaque handle on the admin page (D269, T204).
     vaults: memberVaults(viewerId, userId).map(({ vaultId, ...row }) => ({ ...row, ...(viewerId !== userId ? { handle: sealItemHandle(viewerId, userId, { kind: "vault", id: vaultId, via: "direct", groupId: null }) } : {}) })),
@@ -437,5 +473,46 @@ export function resetAccess(actorId: string, userId: string) {
     // Only what was actually removed (a bitmask in `count`, see RESET_PARTS in notices.ts).
     notifyAccess({ userId, kind: "access_reset_self", actorId, count: resetMask(removed) }, timestamp);
     return { removed, remaining: resetCounts(userId) };
+  })();
+}
+
+// ------------------------------------------------------------------ feeds and routines (v0.32)
+
+/**
+ * `POST …/members/:userId/feeds/:feedId/revoke`: an admin revokes one of the person's calendar feed
+ * links (D268, a reduction). The link stops at once. Recorded as `access.feed_revoked` (the calendar
+ * as the resource, so Access activity redacts it per D269) and `team.feed_revoked`; the person hears.
+ */
+export function adminRevokeFeed(actorId: string, userId: string, feedId: string) {
+  person(userId);
+  return db.transaction(() => {
+    const row = db.query("SELECT calendar_id, detail FROM calendar_feeds WHERE id = ? AND user_id = ? AND revoked_at IS NULL").get(feedId, userId) as { calendar_id: string; detail: string } | null;
+    if (!row) throw gone();
+    const timestamp = now();
+    if (!db.query("UPDATE calendar_feeds SET revoked_at = ? WHERE id = ? AND user_id = ? AND revoked_at IS NULL").run(timestamp, feedId, userId).changes) throw gone();
+    recordAccessEvent({ actorId, via: "web", action: "access.feed_revoked", targetUserId: userId, resource: { kind: "calendar", id: row.calendar_id }, meta: { by: "admin", detail: row.detail } }, timestamp);
+    audit(actorId, null, "team.feed_revoked", { targetId: userId, feedId, calendarId: row.calendar_id });
+    notifyAccess({ userId, kind: "feed_revoked", actorId, resource: { kind: "calendar", id: row.calendar_id } }, timestamp);
+    return { revoked: true as const, feedId };
+  })();
+}
+
+/**
+ * `POST …/members/:userId/routines/:routineId/pause`: an admin pauses one of the person's routines
+ * (D268, a reduction; D152's pause, one routine). Only the owner resumes it. A paused routine is 409
+ * `ALREADY_PAUSED`. Recorded as `access.routine_paused` and `team.routine_paused`; the person hears.
+ */
+export function adminPauseRoutine(actorId: string, userId: string, routineId: string) {
+  person(userId);
+  return db.transaction(() => {
+    const row = db.query("SELECT enabled FROM routines WHERE id = ? AND owner_id = ?").get(routineId, userId) as { enabled: number } | null;
+    if (!row) throw gone();
+    if (row.enabled !== 1) throw new MemberAccessError(409, "ALREADY_PAUSED", "This routine is already paused. The page now shows the latest.");
+    const timestamp = now();
+    if (!db.query("UPDATE routines SET enabled = 0, revision = revision + 1, updated_at = ? WHERE id = ? AND owner_id = ? AND enabled = 1").run(timestamp, routineId, userId).changes) throw gone();
+    recordAccessEvent({ actorId, via: "web", action: "access.routine_paused", targetUserId: userId, resource: { kind: "routine", id: routineId }, meta: { by: "admin" } }, timestamp);
+    audit(actorId, null, "team.routine_paused", { targetId: userId, routineId });
+    notifyAccess({ userId, kind: "routine_paused", actorId, resource: { kind: "routine", id: routineId } }, timestamp);
+    return { paused: true as const, routineId };
   })();
 }
