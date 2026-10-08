@@ -2,7 +2,7 @@
 
 Only open work lives here. Shipped work is in [CHANGELOG.md](CHANGELOG.md), the docs site ("What's new") and `git log`. Plans of record: `DEVELOPMENT_PLAN.md` and `docs/plan/research/`. Contracts: [API](docs/plan/API_CONTRACTS.md) · [Threat model](docs/plan/THREAT_MODEL.md) · [Test plan](docs/plan/TEST_PLAN.md).
 
-**Current state (2026-10-08):** production runs **v0.33.0** (`2831b31`: knowledge-base model change, passage previews, groups, per-key search limits; chat-role notice, cut-reply charging, push labels; backup `mynotes-20261008T070848Z.tar.gz`). Released migrations are immutable: **001–044**. Messages takes **045**.
+**Current state (2026-10-08):** production runs **v0.34.0** (admin limits on knowledge-base embedding models and sizes). Released migrations are immutable: **001–044**. Messages takes **045**.
 
 ## In flight
 
@@ -15,6 +15,10 @@ Nothing. Waiting for the operator's next pick.
 ## Known LOW leftovers
 
 None open.
+
+## Reliability watch
+
+- [ ] `tests/vault…` "custom environments, rename with CAS, add, rename, reorder, and the last environment stays" hit its 5 s timeout once in the v0.34.0 Docker verify under load (5.25 s); the re-run passed. Raise its timeout or split it if it recurs.
 
 ## Standing rules for agent briefs
 
