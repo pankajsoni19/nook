@@ -47,7 +47,7 @@
 .knowledge-chunk strong { color: #f3ce79; font-size: .8rem; overflow-wrap: anywhere; }
 .knowledge-chunk p { margin: 0; color: #c8c8cd; font-size: .82rem; line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere; }
 .knowledge-chunks .action-button { justify-self: start; }
-.knowledge-field-label { color: #c8c8cd; font-size: .86rem; font-weight: 600; }
+.knowledge-field-label { color: #8d8d94; font-size: .72rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .knowledge-model .knowledge-mode { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 760px) {
   .knowledge-actions .action-button { flex: 1 1 auto; }
