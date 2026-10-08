@@ -352,7 +352,9 @@ export function startDispatcher() {
 // ---------------------------------------------------------------------------
 // Notifications
 
-export type NotificationItem = { id: string; title: string; href: string; late: boolean; read: boolean; createdAt: string; occurrenceStart: string | null };
+/** `kind` (TODO "Push notifications"): what the line is about, so a push can say so without more content: a calendar `reminder`, Inbox `proposals`, or an `access` notice. */
+export type NotificationKind = "reminder" | "proposals" | "access";
+export type NotificationItem = { id: string; kind: NotificationKind; title: string; href: string; late: boolean; read: boolean; createdAt: string; occurrenceStart: string | null };
 
 /** Same-origin paths built from ids only (T68). */
 export function notificationHref(eventId: string | null) {
@@ -418,11 +420,11 @@ export function listNotifications(userId: string, options: { unread: boolean; li
     .all({ userId, unread: options.unread ? 1 : 0, limit: options.limit }) as NotificationRow[];
   const calendarItems = rows.map((row): NotificationItem => {
     if (row.kind === "proposals") {
-      return { id: row.id, title: proposalNotificationTitle(row.key_name, row.proposal_count ?? 1, row.routine_name), href: proposalNotificationHref(userId, row), late: false, read: row.read_at !== null, createdAt: row.created_at, occurrenceStart: null };
+      return { id: row.id, kind: "proposals", title: proposalNotificationTitle(row.key_name, row.proposal_count ?? 1, row.routine_name), href: proposalNotificationHref(userId, row), late: false, read: row.read_at !== null, createdAt: row.created_at, occurrenceStart: null };
     }
     const event = row.event_id ? readableEvent(row.event_id, userId) : null;
     const title = event ? event.event.title : row.event_id ? "An event you can no longer open" : row.reminder_title ?? "Reminder";
-    return { id: row.id, title, href: notificationHref(event ? row.event_id : null), late: row.late === 1, read: row.read_at !== null, createdAt: row.created_at, occurrenceStart: row.occurrence_start };
+    return { id: row.id, kind: "reminder", title, href: notificationHref(event ? row.event_id : null), late: row.late === 1, read: row.read_at !== null, createdAt: row.created_at, occurrenceStart: row.occurrence_start };
   });
   // Access notices (Wave 33, migration 032) share the bell: merged newest first, one page.
   const items = [...calendarItems, ...listAccessNotices(userId, options)]

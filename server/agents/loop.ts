@@ -42,9 +42,27 @@ export const partialUsage = (progress: StreamProgress): TokenUsage => progress.u
  * dropped, never shown or stored, so it is not charged. Usage of a reply within the bound is unchanged.
  */
 export function cutUsage(usage: TokenUsage, content: string): TokenUsage {
-  if (content.length <= AGENT_BOUNDS.assistantMessageChars) return usage;
-  return { ...usage, completionTokens: Math.min(usage.completionTokens, estimateTokens(content.slice(0, AGENT_BOUNDS.assistantMessageChars))), estimated: true };
+  return keptUsage(usage, content, AGENT_BOUNDS.assistantMessageChars);
 }
+
+/**
+ * A model call's usage when only its first `room` characters are kept: unchanged when the whole text
+ * fits, else the kept text ÷ 4 as output (never more than reported), marked estimated.
+ */
+export function keptUsage(usage: TokenUsage, content: string, room: number): TokenUsage {
+  if (content.length <= room) return usage;
+  return { ...usage, completionTokens: Math.min(usage.completionTokens, estimateTokens(content.slice(0, Math.max(0, room)))), estimated: true };
+}
+
+/**
+ * Cut-reply charging across steps (TODO "Cut-reply charging"). The run does not stop at the stored
+ * bound: a step that asks for tools sends its text back to the model as context, so that text was
+ * used and is charged in full (only the part past the per-call bound, which never went back, is
+ * not). The step that ends the run (or a call that ends early) sends nothing back: its text is only
+ * the stored reply's, so it is charged for the part that still fits in the stored message after the
+ * earlier steps' text (`room`), like a single cut reply.
+ */
+const storedRoom = (streamed: number) => Math.max(0, AGENT_BOUNDS.assistantMessageChars - streamed);
 
 export class ProviderError extends Error {
   /** The fuller excerpt for admin surfaces (Test, the models list); `message` is what a chat's owner sees (review L3). */
@@ -319,7 +337,7 @@ export const runWatch = { intervalMs: 2000 };
  * streams (the error is then the run's). A call that ends early after the provider answered is
  * reported to `sink.interrupted` with what it streamed and its usage (Wave 42 QA M1, M2).
  */
-async function watchedCall(input: LoopInput, step: number, stepStarted: number, tools: ModelTool[]): Promise<CompletionResult> {
+async function watchedCall(input: LoopInput, step: number, stepStarted: number, tools: ModelTool[], delta: (text: string) => void, textRoom: number): Promise<CompletionResult> {
   const progress = newProgress(input.messages);
   const controller = new AbortController();
   const forward = () => controller.abort(input.signal.reason);
@@ -336,9 +354,9 @@ async function watchedCall(input: LoopInput, step: number, stepStarted: number, 
     }
   }, runWatch.intervalMs) : null;
   try {
-    return await completeStreaming(input.connection, { messages: input.messages, temperature: input.temperature, maxOutputTokens: input.maxOutputTokens ?? undefined, tools }, controller.signal, input.sink.delta, progress);
+    return await completeStreaming(input.connection, { messages: input.messages, temperature: input.temperature, maxOutputTokens: input.maxOutputTokens ?? undefined, tools }, controller.signal, delta, progress);
   } catch (error) {
-    if (progress.started) input.sink.interrupted?.({ step, content: progress.content, toolCalls: [], usage: partialUsage(progress), model: progress.model, durationMs: Date.now() - stepStarted });
+    if (progress.started) input.sink.interrupted?.({ step, content: progress.content, toolCalls: [], usage: keptUsage(partialUsage(progress), progress.content, textRoom), model: progress.model, durationMs: Date.now() - stepStarted });
     throw lost ? (lost as { error: unknown }).error : error;
   } finally {
     if (watcher) clearInterval(watcher);
@@ -361,6 +379,12 @@ export async function runLoop(input: LoopInput): Promise<LoopResult> {
   let offeredAny = false;
   const perStep = input.limits?.perStep ?? AGENT_BOUNDS.toolCallsPerStep;
   const perRun = input.limits?.perRun ?? AGENT_BOUNDS.toolCallsPerRun;
+  // Characters streamed to the caller so far: the stored reply keeps at most the bound of them.
+  let streamed = 0;
+  const delta = (text: string) => {
+    streamed += text.length;
+    input.sink.delta(text);
+  };
   for (let step = 1; step <= input.maxSteps; step += 1) {
     const last = step === input.maxSteps;
     input.beforeStep?.(step);
@@ -368,13 +392,8 @@ export async function runLoop(input: LoopInput): Promise<LoopResult> {
     offeredAny ||= tools.length > 0;
     windowToolResults(input.messages, AGENT_BOUNDS.toolResultsWindow);
     const stepStarted = Date.now();
-    const reply = await watchedCall(input, step, stepStarted, tools);
-    input.sink.step?.({ step, content: reply.content, toolCalls: reply.toolCalls, usage: reply.usage, model: reply.model, durationMs: Date.now() - stepStarted });
-    total.promptTokens += reply.usage.promptTokens;
-    total.completionTokens += reply.usage.completionTokens;
-    total.estimated = total.estimated || reply.usage.estimated;
-    model = reply.model ?? model;
-    if (reply.content) content += (content && reply.toolCalls.length === 0 && !content.endsWith("\n") ? "\n\n" : "") + reply.content;
+    const textRoom = storedRoom(streamed);
+    const reply = await watchedCall(input, step, stepStarted, tools, delta, textRoom);
     const execute = input.execute;
     const wantedCalls = tools.length > 0 && execute ? reply.toolCalls.filter((call) => call.name) : [];
     // Per step and per run (review L4): calls past either cap are dropped here, never executed, with
@@ -385,6 +404,14 @@ export async function runLoop(input: LoopInput): Promise<LoopResult> {
     const dropped = wantedCalls.length - calls.length;
     droppedToolCalls += dropped;
     const ending = calls.length === 0 || !execute;
+    // The ending step's text never goes back to the model: it is charged only for what the stored reply keeps.
+    const usage = ending ? keptUsage(reply.usage, reply.content, textRoom) : reply.usage;
+    input.sink.step?.({ step, content: reply.content, toolCalls: reply.toolCalls, usage, model: reply.model, durationMs: Date.now() - stepStarted });
+    total.promptTokens += usage.promptTokens;
+    total.completionTokens += usage.completionTokens;
+    total.estimated = total.estimated || usage.estimated;
+    model = reply.model ?? model;
+    if (reply.content) content += (content && reply.toolCalls.length === 0 && !content.endsWith("\n") ? "\n\n" : "") + reply.content;
     // On the last step the model got no tools (D342); still wanting one after earlier steps had them is the step limit.
     const wanted = ending && last && offeredAny && reply.toolCalls.length > 0;
     // A tool call nothing could run (none offered at this step) ends the answer with a reason, never an empty reply (Wave 41 QA L9).
@@ -396,11 +423,11 @@ export async function runLoop(input: LoopInput): Promise<LoopResult> {
         : `[The model tried to use a tool, but no tools were available to it here, so the answer stops.${reason ? ` ${reason}` : ""}]`;
       const lead = content ? "\n\n" : "";
       content += lead + note;
-      input.sink.delta(lead + note);
+      delta(lead + note);
     }
-    input.sink.usage(reply.usage, reply.model);
+    input.sink.usage(usage, reply.model);
     // Charged after every step; with more steps ahead a used-up budget ends the run here (plan §2.2).
-    input.charge(reply.usage, calls.length > 0);
+    input.charge(usage, calls.length > 0);
     if (ending) {
       input.messages.push({ role: "assistant", content: reply.content });
       return { status: wanted ? "step_limit" : "stop", content, steps: step, usage: total, model, toolCalls, droppedToolCalls };

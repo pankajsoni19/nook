@@ -17,6 +17,8 @@ import { imagesSample, markdownSample } from "./markdownSamples";
  *   `tool:<name>:<json>` stream a call to `<name>` with those arguments (default `lookup({"q":"x"})`);
  *                      once a `tool` turn has come back, answer "Done: <excerpt of the result>"
  *   `loop:<name>:<json>` stream the call at every step, whatever came back (the step cap)
+ *   `toolbig:<kb1>:<kb2>` stream `<kb1>` KiB of "x" and a `lookup` call; once a `tool` turn has come
+ *                      back, stream `<kb2>` KiB of "y" (a multi-step reply past the stored bound)
  *   `md:<name>`        stream a Markdown sample (`gfm`, `long`; tests/support/markdownSamples.ts)
  *   `mdslow:<ms>:<name>` the same with `ms` between chunks (streaming performance)
  *   `mdimg:<file id>|<image URL>` stream the images sample (data:, a Nook file, an outside picture)
@@ -86,11 +88,17 @@ export function startFakeProvider(port: number, options: { models?: string[]; na
         const model = payload?.model ?? "gpt-6-luna";
         const last = [...(payload?.messages ?? [])].reverse().find((turn) => turn.role === "user")?.content ?? "";
         const lastTurn = payload?.messages?.at(-1);
-        let match = /^(echo|slow|status|nousage|stall|redirect|huge|tool|loop|md|mdslow|mdimg):(.*)$/s.exec(last);
+        let match = /^(echo|slow|status|nousage|stall|redirect|huge|tool|toolbig|loop|md|mdslow|mdimg):(.*)$/s.exec(last);
         // AC-B: after a tool result came back (`tool:` mode), the model answers with an excerpt of it;
         // `loop:` keeps calling the tool every step (the step cap). The call names a tool offered to it
         // (`tool:<name>:<json args>`; a name not offered is sent as given, to test "unknown tool").
         if (match?.[1] === "tool" && lastTurn?.role === "tool") match = ["", "echo", `Done: ${(lastTurn.content ?? "").slice(0, 200)}`] as unknown as RegExpExecArray;
+        // `toolbig:<kb1>:<kb2>`: the step after the tool result streams `<kb2>` KiB of "y".
+        let fill = "x";
+        if (match?.[1] === "toolbig" && lastTurn?.role === "tool") {
+          match = ["", "huge", String(Number(match[2]!.split(":")[1]) || 1)] as unknown as RegExpExecArray;
+          fill = "y";
+        }
         const mode = match?.[1] ?? "echo";
         const rest = match ? match[2]! : `You said: ${last}`;
         if (mode === "status") return Response.json({ error: { message: `Simulated failure sk-secret-should-not-echo-123456789012345 (${rest})`, type: "server_error" } }, { status: Number(rest) || 500 });
@@ -102,7 +110,8 @@ export function startFakeProvider(port: number, options: { models?: string[]; na
           gap = Number(ms) || 50;
           text = parts.join(":");
         }
-        if (mode === "huge") text = "x".repeat(Math.max(1, Number(rest) || 1) * 1024);
+        if (mode === "huge") text = fill.repeat(Math.max(1, Number(rest) || 1) * 1024);
+        if (mode === "toolbig") text = "x".repeat(Math.max(1, Number(rest.split(":")[0]) || 1) * 1024);
         // Chat Markdown samples (tests/support/markdownSamples.ts): `md:gfm`, `md:long`, `mdslow:<ms>:long`, `mdimg:<file id>|<image URL>`.
         if (mode === "md") text = markdownSample(rest.trim());
         if (mode === "mdslow") {
@@ -114,11 +123,19 @@ export function startFakeProvider(port: number, options: { models?: string[]; na
           const [fileId, url] = rest.split("|");
           text = imagesSample((fileId ?? "").trim(), (url ?? "").trim());
         }
-        const words = mode === "huge" ? text.match(/.{1,4096}/g) ?? [] : text.split(/(?<=\s)/);
+        const words = mode === "huge" || mode === "toolbig" ? text.match(/.{1,4096}/g) ?? [] : text.split(/(?<=\s)/);
         const promptTokens = Math.ceil((payload?.messages ?? []).reduce((sum, turn) => sum + (turn.content?.length ?? 0), 0) / 4);
         const stream = new ReadableStream<Uint8Array>({
           async start(controller) {
             try {
+              if (mode === "toolbig") {
+                for (const word of words) controller.enqueue(chunk(delta(word, model)));
+                controller.enqueue(chunk({ id: "chatcmpl-fake", object: "chat.completion.chunk", model, choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: "call_big", type: "function", function: { name: "lookup", arguments: "{\"q\":\"x\"}" } }] }, finish_reason: "tool_calls" }] }));
+                controller.enqueue(chunk({ id: "chatcmpl-fake", object: "chat.completion.chunk", model, choices: [], usage: { prompt_tokens: promptTokens, completion_tokens: Math.ceil(text.length / 4) + 8 } }));
+                controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+                controller.close();
+                return;
+              }
               if (mode === "tool" || mode === "loop") {
                 // `<name>:<json>`; the default is AC-A's `lookup({"q":"x"})`. Arguments are split across two chunks.
                 const colon = rest.indexOf(":");

@@ -6,7 +6,7 @@
 // opens only same-origin paths rebuilt from ids.
 
 const idPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const GENERIC_TITLE = "You have a reminder in Nook";
+const GENERIC_TITLE = "You have a new notification in Nook";
 const ICON = "/icons/nook-192.png";
 const MAX_SHOWN = 5;
 
@@ -23,6 +23,17 @@ const SAFE_PATHS = [
   "/vault", `/vault/${ID}`, "/chat", `/chat/${ID}`, `/chat/new\\?agent=${ID}`,
   "/settings/(?:security|keys|access|notifications|agents|knowledge)", `/settings/agents/${ID}`, `/settings/knowledge/${ID}`
 ].map((pattern) => new RegExp(`^${pattern}$`, "i"));
+
+// The push body says what kind of line it is (TODO "Push notifications"); the title is the bell's
+// own line, built by the server for this user. Nothing else from the item is shown: no ids, no
+// paths, no text the bell does not show (T63, T127, T135).
+const KIND_BODIES = { reminder: "Calendar reminder", proposals: "Suggested changes in your Inbox", access: "Sharing and access" };
+
+/** The body under a notification's title: its kind, and "delivered late" as the bell says for a late reminder. */
+function bodyFor(item) {
+  const kind = typeof item.kind === "string" && Object.prototype.hasOwnProperty.call(KIND_BODIES, item.kind) ? KIND_BODIES[item.kind] : "Notification";
+  return item.late === true ? `${kind} · delivered late` : kind;
+}
 
 /** The only paths a notification may open: one of the shapes above, lowercased; anything else opens the list. */
 function safePath(href) {
@@ -57,7 +68,7 @@ async function showUnread() {
   await Promise.all(valid.map((item) => self.registration.showNotification(item.title.slice(0, 200), {
     // tag = notification id, so a repeated push never shows the same reminder twice.
     tag: item.id,
-    body: item.late ? "Calendar reminder (delivered late)" : "Calendar reminder",
+    body: bodyFor(item),
     icon: ICON,
     data: { path: safePath(item.href) }
   })));

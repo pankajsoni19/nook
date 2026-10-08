@@ -56,7 +56,7 @@ describe("the route gate with hubGatesItself", () => {
     expect(source.match(/hubGatesItself/g)?.length).toBe(3);
     // Back/Forward onto a hidden Bin entry still go through the generic skip (onPopState keeps the Team-only exemption).
     // (wave38-fixes: a guest's Bin entry is skipped like one with the module off.)
-    expect(source).toContain('const hiddenRoute = route.app === "team" && canManageTeam(session.user.role) ? null : route.app === "bin" && !binEntryShown(session.user.role, binEnabled) ? "bin" : hiddenModuleForApp(disabledModules, route.app);');
+    expect(source).toContain('const hiddenRoute = route.app === "team" && canManageTeam(session.user.role) ? null : route.app === "bin" && !binEntryShown(session.user.role, binEnabled) ? "bin" : hiddenModuleForApp(routeDisabled, route.app);');
   });
 
   test("the hub keeps the screen when a popped Bin entry is hidden, and the Bin entry disappears for every role", () => {

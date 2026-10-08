@@ -96,7 +96,7 @@ describe("brandIndexHtml against other template shapes", () => {
     expect(brandIndexHtml(template, "Cost $$ 5")).toBe('<meta name="og:title" content="Cost $$ 5 — X" /><title>Cost $$ 5 — X</title><p>Cost $$ 5 needs JavaScript.</p>');
     expect(brandIndexHtml(template, "A$` B$' C")).toContain("<title>A$` B$&#39; C — X</title>");
     expect(JSON.parse(brandManifest('{"name":"Nook"}', "Acme $& Co")).name).toBe("Acme $& Co");
-    expect(brandServiceWorker('const GENERIC_TITLE = "You have a reminder in Nook";', "Acme $& Co")).toContain('"You have a reminder in Acme $& Co"');
+    expect(brandServiceWorker('const GENERIC_TITLE = "You have a new notification in Nook";', "Acme $& Co")).toContain('"You have a new notification in Acme $& Co"');
   });
 
   test("the manifest and the worker JSON-encode quotes, backslashes, and U+2028; unreadable JSON is served as it is", () => {
@@ -105,12 +105,12 @@ describe("brandIndexHtml against other template shapes", () => {
     expect(manifest.name).toBe(name);
     expect(manifest.icons).toHaveLength(1);
     expect(brandManifest("{not json", name)).toBe("{not json");
-    const worker = brandServiceWorker('const GENERIC_TITLE = "You have a reminder in Nook";\nself.x = "Nook";', name);
+    const worker = brandServiceWorker('const GENERIC_TITLE = "You have a new notification in Nook";\nself.x = "Nook";', name);
     expect(worker).toEndWith('self.x = "Nook";');
     // The literal is valid JavaScript and evaluates back to the name.
     // `.` skips U+2028 (a line terminator in JavaScript regexes), so the capture is spelled out.
     const literal = /const GENERIC_TITLE = ([\s\S]*?);\n/.exec(worker)![1]!;
-    expect(new Function(`return ${literal}`)()).toBe(`You have a reminder in ${name}`);
+    expect(new Function(`return ${literal}`)()).toBe(`You have a new notification in ${name}`);
   });
 });
 
@@ -141,7 +141,7 @@ describe("serving across a restart with a new name", () => {
   writeFileSync(join(root, "index.html"), html);
   writeFileSync(join(root, "index.html.gz"), Bun.gzipSync(html));
   writeFileSync(join(root, "manifest.webmanifest"), '{"name":"Nook","short_name":"Nook"}');
-  writeFileSync(join(root, "sw.js"), 'const GENERIC_TITLE = "You have a reminder in Nook";');
+  writeFileSync(join(root, "sw.js"), 'const GENERIC_TITLE = "You have a new notification in Nook";');
   const asset = join(root, "assets");
   Bun.spawnSync(["mkdir", "-p", asset]);
   writeFileSync(join(asset, "index-BvuYDGo0.js"), "console.log('Nook');");

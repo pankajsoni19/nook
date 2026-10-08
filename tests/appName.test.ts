@@ -85,8 +85,8 @@ describe("index.html, the manifest, and the service worker", () => {
   test("the service worker's generic title names the app, JSON-encoded", () => {
     const worker = readFileSync(join(repo, "public", "sw.js"), "utf8");
     const branded = brandServiceWorker(worker, `Acme "Notes"`);
-    expect(branded).toContain('const GENERIC_TITLE = "You have a reminder in Acme \\"Notes\\"";');
-    expect(branded.replace(`"You have a reminder in Acme \\"Notes\\""`, '"You have a reminder in Nook"')).toBe(worker);
+    expect(branded).toContain('const GENERIC_TITLE = "You have a new notification in Acme \\"Notes\\"";');
+    expect(branded.replace(`"You have a new notification in Acme \\"Notes\\""`, '"You have a new notification in Nook"')).toBe(worker);
   });
 });
 
@@ -136,7 +136,7 @@ describe("serving the branded files", () => {
     const manifest = await get("/manifest.webmanifest", "Acme Notes");
     expect(manifest.headers.get("Content-Type")).toBe("application/manifest+json; charset=utf-8");
     expect(await manifest.json()).toMatchObject({ name: "Acme Notes", short_name: "Acme Notes" });
-    expect(await (await get("/sw.js", "Acme Notes")).text()).toContain('"You have a reminder in Acme Notes"');
+    expect(await (await get("/sw.js", "Acme Notes")).text()).toContain('"You have a new notification in Acme Notes"');
     expect(await (await get("/manifest.webmanifest", "Nook")).json()).toMatchObject({ name: "Nook", short_name: "Nook" });
   });
 });

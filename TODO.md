@@ -14,9 +14,7 @@ Nothing. Waiting for the operator's next pick.
 
 ## Known LOW leftovers
 
-- [ ] **Chat role message:** when "Who can chat" excludes your role, opening `/chat` (or a "shared the chat with you" bell link) goes Home with "Chat is not available on this server" although Chat is on; say it is off for your role, and don't link shared-chat notices to `/chat/<id>` for a role that cannot chat (`src/App.tsx` module redirect, `sharedPath` in `server/access/notices.ts`).
-- [ ] **Cut-reply charging:** in a multi-step run whose combined text passes the stored bound across steps, later text is still charged in full (it went back to the model as context).
-- [ ] **Push notifications:** the push body says "Calendar reminder" for every kind.
+None open.
 
 ## Standing rules for agent briefs
 

@@ -76,7 +76,7 @@ describe("the hub's entries", () => {
     expect(app).toContain('useEffect(() => { if (binHidden) go(settingsRoute("security"), { replace: true }); }, [binHidden, go]);');
     // The app-wide gate (Home and a hint) leaves the Bin to the hub, which is shown for it.
     expect(app).toContain('const hubGatesItself = teamGateOpen || activeApp === "bin";');
-    expect(app).toContain("const hidden = hubGatesItself ? null : hiddenModuleForApp(disabledModules, activeApp);");
+    expect(app).toContain("const hidden = hubGatesItself ? null : hiddenModuleForApp(routeDisabled, activeApp);");
     // The hub ignores a popped Bin entry while the module is off (the route gate skips it, D92).
     expect(hubPopRoute({ app: "bin" }, true, false)).toBeNull();
     expect(hubPopRoute({ app: "bin" }, true, true)).toEqual({ app: "bin" });

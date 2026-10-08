@@ -86,6 +86,18 @@ export function unavailableModules(features: { vault?: boolean; agents?: boolean
   return [...(features?.vault === false ? ["vault" as const] : []), ...(features?.agents === false ? ["agents" as const] : [])];
 }
 
+/**
+ * The modules the route gate lets through although they are hidden (TODO "Chat role message"):
+ * Chat when it is on but the person's role may not chat (`features.chatRoleOff`). Its tile stays
+ * hidden, but /chat and its deep links open and show "Chat is off for your role" (from
+ * /api/agents/status) instead of going Home with "not available on this server". A person who turned
+ * Chat off in Settings → Modules still gets the "turned off" hint.
+ */
+export function routeGateModules(disabled: readonly ModuleId[], preferredDisabled: readonly ModuleId[], features: { chatRoleOff?: boolean } | undefined): readonly ModuleId[] {
+  if (features?.chatRoleOff !== true || preferredDisabled.includes("agents") || !disabled.includes("agents")) return disabled;
+  return disabled.filter((id) => id !== "agents");
+}
+
 /** Unique known ids in registry order; anything else (unknown ids, non-arrays) is ignored. */
 export function normalizeDisabledModules(value: unknown): ModuleId[] {
   if (!Array.isArray(value)) return [];

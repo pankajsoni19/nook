@@ -2,7 +2,7 @@ import { createContext, useContext } from "react";
 import { api } from "../api";
 import { formatRoute, parseRoute } from "../router";
 
-export type NotificationItem = { id: string; title: string; href: string; late: boolean; read: boolean; createdAt: string; occurrenceStart: string | null };
+export type NotificationItem = { id: string; kind?: "reminder" | "proposals" | "access"; title: string; href: string; late: boolean; read: boolean; createdAt: string; occurrenceStart: string | null };
 export type NotificationList = { items: NotificationItem[]; unreadCount: number };
 
 export const listNotifications = (options: { unread?: boolean; limit?: number } = {}) => {

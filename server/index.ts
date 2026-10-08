@@ -41,7 +41,7 @@ import { registerVaultRoutes } from "./vault/routes";
 import { registerAgentRoutes } from "./agents/routes";
 import { noteServer, SERVER_IDLE_TIMEOUT_SECONDS } from "./longRequests";
 import { publicShareHeaders, registerPublicChatShareApi } from "./agents/publicRoutes";
-import { agentsFeature, initAgentsStatus } from "./agents/status";
+import { agentsFeature, chatRoleOff, initAgentsStatus } from "./agents/status";
 import { markInterruptedRuns } from "./agents/runs";
 import { registerKnowledgeRoutes } from "./knowledge/routes";
 import { resumeKnowledgeIndexing } from "./knowledge/index";
@@ -273,7 +273,7 @@ app.post("/api/auth/register", async (c) => {
   return c.json({
     user: { id, email: body.email, displayName: body.displayName, role, avatarUrl: null },
     csrfToken,
-    features: { vault: vaultFeature(role), agents: agentsFeature(role) },
+    features: { vault: vaultFeature(role), agents: agentsFeature(role), chatRoleOff: chatRoleOff(role) },
     totp: { enabled: false, required: config.totpPolicy === "required", setupRequired: config.totpPolicy === "required" }
   }, 201);
 });
@@ -321,7 +321,7 @@ app.post("/api/auth/login", async (c) => {
   return c.json({
     user: { id: user.id, email: user.email, displayName: user.display_name, role: user.role, avatarUrl: avatarUrlFor(user.id) },
     csrfToken,
-    features: { vault: vaultFeature(user.role), agents: agentsFeature(user.role) },
+    features: { vault: vaultFeature(user.role), agents: agentsFeature(user.role), chatRoleOff: chatRoleOff(user.role) },
     totp: totpState(user)
   });
 });
@@ -342,7 +342,7 @@ app.get("/api/auth/me", (c) => {
     // Wave 35 review N2c: an admin reset this account; shown once, then dismissed.
     notices: { googleReset: googleResetNotice(user.id) },
     // Wave 25: whether this person sees the Vault module (server/vault/status.ts); Wave 40: the Chat module. UI only (T97).
-    features: { vault: vaultFeature(user.role), agents: agentsFeature(user.role) },
+    features: { vault: vaultFeature(user.role), agents: agentsFeature(user.role), chatRoleOff: chatRoleOff(user.role) },
     // Wave 39: APP_NAME, as /api/about has it.
     app: { name: config.appName }
   });

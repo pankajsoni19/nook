@@ -50,7 +50,7 @@ export function brandManifest(text: string, name: string) {
 
 /** The service worker with the generic notification title naming the app. */
 export function brandServiceWorker(text: string, name: string) {
-  return text.replace(/const GENERIC_TITLE = "You have a reminder in Nook";/, () => `const GENERIC_TITLE = ${JSON.stringify(`You have a reminder in ${name}`)};`);
+  return text.replace(/const GENERIC_TITLE = "You have a new notification in Nook";/, () => `const GENERIC_TITLE = ${JSON.stringify(`You have a new notification in ${name}`)};`);
 }
 
 /** The branded text of a served path, or null when it does not depend on the name. */

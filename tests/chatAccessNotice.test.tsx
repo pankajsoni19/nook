@@ -36,7 +36,9 @@ describe("ACCESS_REVOKED stays visible when the chat role is removed", () => {
     expect(source).toContain("event.data.errorCode === \"ACCESS_REVOKED\"");
     // The stream stops retrying and ends the live answer with the reason; the status reload shows the page.
     expect(source).toMatch(/if \(accessLost\(reason\)\) \{ loseAccess\(\); return; \}/);
-    expect(source.match(/if \(accessLost\(reason\)\) loseAccess\(\);/g)?.length).toBe(3);
+    expect(source.match(/if \(accessLost\(reason\)\) loseAccess\(\);/g)?.length).toBe(2);
+    // Opening a chat (a deep link) with no answer running only reloads the status: nothing stopped.
+    expect(source).toContain("if (accessLost(reason)) { if (liveRef.current) loseAccess(); else void loadStatus(); }");
     expect(source).toContain("<ChatOffNotice revoked={revoked} />");
     expect(source).toContain("ACCESS_REVOKED: ACCESS_REVOKED_TEXT");
   });
