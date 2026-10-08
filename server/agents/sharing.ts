@@ -305,6 +305,36 @@ export function memberSharedRows(viewerId: string, userId: string): SharedAccess
   return items.sort((left, right) => left.sort < right.sort ? -1 : left.sort > right.sort ? 1 : 0).slice(0, 200).map(({ sort: _sort, ...row }) => row);
 }
 
+export type GroupSharedRow = { kind: ShareKind; title: string; titleHidden: boolean; owner: { id: string; displayName: string }; id?: string; level: "view" | "manage" };
+
+/**
+ * Team → Groups (2026-10-08): the agents, chats, and knowledge bases shared with a group, for the
+ * group's page. As on the member access page (D269): a title and id only when `viewerId` can open
+ * the item now, otherwise "Knowledge base owned by Carol". Binned items are left out (they reach
+ * nobody). At most `limit`, by owner then kind then title.
+ */
+export function groupSharedItems(groupId: string, viewerId: string, limit: number): GroupSharedRow[] {
+  if (limit <= 0) return [];
+  const rows = db.query(`SELECT a.resource_kind, a.resource_id, a.level FROM agent_access a WHERE a.group_id = ? AND a.resource_kind IN ('agent','chat','knowledge_base')
+    ORDER BY a.created_at, a.resource_id LIMIT 2000`).all(groupId) as Array<{ resource_kind: ShareKind; resource_id: string; level: string }>;
+  const items: Array<GroupSharedRow & { sort: string }> = [];
+  for (const row of rows) {
+    const kind = row.resource_kind;
+    const item = db.query(`SELECT x.id, x.owner_id, x.visibility, x.deleted_at, x.${NAME[kind]} AS title, u.display_name AS owner_name FROM ${TABLE[kind]} x JOIN users u ON u.id = x.owner_id WHERE x.id = ?`)
+      .get(row.resource_id) as (Shareable & { title: string; owner_name: string }) | null;
+    if (!item || item.deleted_at !== null) continue;
+    const readable = shareLevel(kind, item, viewerId) !== "none";
+    const label = kind === "agent" ? "Agent" : kind === "knowledge_base" ? "Knowledge base" : "Chat";
+    const title = readable ? item.title : `${label} owned by ${item.owner_name}`;
+    items.push({
+      kind, title, titleHidden: !readable, owner: { id: item.owner_id, displayName: item.owner_name }, ...(readable ? { id: item.id } : {}),
+      level: row.level === "manage" && kind !== "chat" ? "manage" : "view",
+      sort: `${item.owner_name.toLocaleLowerCase("en")}\u0000${kind}\u0000${readable ? title.toLocaleLowerCase("en") : createHash("sha256").update(`${viewerId}:${item.id}`).digest("hex")}`
+    });
+  }
+  return items.sort((left, right) => left.sort < right.sort ? -1 : left.sort > right.sort ? 1 : 0).slice(0, limit).map(({ sort: _sort, ...row }) => row);
+}
+
 const ownerOfShared = (kind: ShareKind, id: string) => (db.query(`SELECT owner_id FROM ${TABLE[kind]} WHERE id = ?`).get(id) as { owner_id: string } | null)?.owner_id ?? null;
 
 /** An admin removes one person's direct row on an agent or chat (D268). Returns the item's owner, or null when the row is gone. */

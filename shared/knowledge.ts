@@ -18,7 +18,12 @@ export const KNOWLEDGE_BOUNDS = {
   /** `search_knowledge`: the query, the default and largest `k`, and the text of one hit. */
   queryChars: 500,
   k: { default: 5, max: 8 },
-  hitTextChars: 2000
+  hitTextChars: 2000,
+  /** Per-source chunk previews (2026-10-08): the first characters of each chunk, and a page's default and largest size. */
+  previewChars: 300,
+  previewPage: { default: 20, max: 50 },
+  /** Change embedding model (2026-10-08): the model id's length. */
+  modelName: 100
 } as const;
 
 /** The Files types a document source may have (plan §9). */
@@ -50,6 +55,14 @@ export type KnowledgeSummary = {
    * was removed (M3: keyword search only, nothing new indexed), or its owner is blocked (M2: paused).
    */
   notice: string | null;
+  /** The embedding provider's name, or null when it was removed (2026-10-08). */
+  providerName: string | null;
+  /**
+   * The base is moving to another embedding model (2026-10-08): its old vectors are gone and its
+   * sources are being embedded again. Search uses keywords only until that finishes (never two
+   * embedding spaces in one search).
+   */
+  changingModel: boolean;
 };
 
 /**
@@ -59,7 +72,22 @@ export type KnowledgeSummary = {
 export type KnowledgeSource = {
   id: string; kind: SourceKind; title: string | null; titleHidden: boolean; refId: string | null;
   status: SourceStatus; error: string | null; chunkCount: number; indexedAt: string | null; createdAt: string | null; bytes: number | null;
+  /** Whether the reader may preview this source's chunks (2026-10-08): the owner or a manager who can read the source now. */
+  previewable: boolean;
 };
+
+/** One chunk as a source's preview shows it (2026-10-08): its place, heading path, and first `previewChars` characters. */
+export type KnowledgeChunkPreview = { ord: number; heading: string | null; preview: string; chars: number };
+export type KnowledgeChunkPage = { chunks: KnowledgeChunkPreview[]; total: number; offset: number; limit: number };
+
+/** Change embedding model's provider list (2026-10-08): names and the embedding defaults, never an address or key. */
+export type KnowledgeEmbeddingChoice = { id: string; name: string; isDefault: boolean; embeddingModel: string; embeddingDims: number; models: string[] | null };
+
+/** Whether a model takes a `dimensions` parameter (OpenAI's text-embedding-3 family); other models answer in their own size. */
+export const takesDimensions = (model: string) => /text-embedding-3/i.test(model);
+
+/** What Change embedding model's confirm says (D91: the app's own dialog). */
+export const MODEL_CHANGE_EFFECT = "Every source is embedded again with the new model, at your token cost. Search uses keywords only until that finishes, and the old vectors are deleted now. This counts as this hour's Re-index.";
 
 export type KnowledgeDetail = KnowledgeSummary & { sources: KnowledgeSource[] };
 

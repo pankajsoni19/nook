@@ -38,6 +38,17 @@
 .knowledge-hit small { color: #8d8d94; font-size: .76rem; }
 .knowledge-hit-text { margin: 4px 0 0; color: #d4d4d8; font-size: .86rem; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 12em; overflow-y: auto; }
 .agents-knowledge-base { display: flex; align-items: center; gap: 8px; }
+/* 2026-10-08: a source's chunk previews open under its row (the row wraps); Change embedding model's labels. */
+.knowledge-source { flex-wrap: wrap; }
+.knowledge-chunks { display: grid; flex: 1 1 100%; gap: 8px; min-width: 0; border-top: 1px solid #26262b; padding-top: 8px; }
+.knowledge-chunks-count { margin: 0; }
+.knowledge-chunk-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.knowledge-chunk { display: grid; gap: 2px; min-width: 0; border-radius: 8px; padding: 6px 8px; background: #151518; }
+.knowledge-chunk strong { color: #f3ce79; font-size: .8rem; overflow-wrap: anywhere; }
+.knowledge-chunk p { margin: 0; color: #c8c8cd; font-size: .82rem; line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere; }
+.knowledge-chunks .action-button { justify-self: start; }
+.knowledge-field-label { color: #c8c8cd; font-size: .86rem; font-weight: 600; }
+.knowledge-model .knowledge-mode { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 760px) {
   .knowledge-actions .action-button { flex: 1 1 auto; }
   .knowledge-try-form { flex-direction: column; }

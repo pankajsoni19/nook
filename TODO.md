@@ -11,13 +11,6 @@ Nothing. Waiting for the operator's next pick.
 ## Next features (operator to pick)
 
 - [ ] **Messages module** (Slack-like: channels, DMs, threads, notes tab, webhooks, unfurl, reactions). The plan is ready: `docs/plan/research/2026-09-30-messages-module.md`, migration 045. Waiting for the operator's go-ahead.
-- [ ] **AC-E deferred:**
-  - changing a knowledge base's model or dimensions after creation
-  - per-source chunk previews
-  - knowledge bases in Team → Groups
-  - a search-specific rate limit for keys
-  - a hook for group-membership changes (search re-checks access today, so this is not a leak)
-  - a Re-index-all limit that survives a restart (it is kept in memory)
 
 ## Known LOW leftovers
 

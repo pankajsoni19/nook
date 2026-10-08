@@ -10,7 +10,8 @@ import { AgentError, agentsStatus } from "../agents/status";
 import { chunkText, type Chunk, type ChunkFormat } from "./chunk";
 import { embedTexts, takesDimensions, vectorToBlob } from "./embed";
 import { canReadDocument, canReadNote, canReadSource, documentFormat, isKnowledgeFile, kbProvider, ownerIsActive, PROVIDER_REMOVED, refreshKbCounts, refreshKbStatus, type KbRow, type SourceRow } from "./service";
-import { onKnowledgeProviderEvent, onNotePublished, onSourceAccessChanged, onUserUnblocked, type ProviderEvent, type SourceAccessChange } from "./hooks";
+import { onGroupMembershipChanged, onKnowledgeProviderEvent, onNotePublished, onSourceAccessChanged, onUserUnblocked, type ProviderEvent, type SourceAccessChange } from "./hooks";
+import { lastReindexAt, recordReindex, resetReindexLimitsForTests } from "./limits";
 
 /**
  * The index pipeline (plan §9, D368, D369; Wave 44 "AC-E"): a background queue that never blocks a
@@ -39,7 +40,14 @@ import { onKnowledgeProviderEvent, onNotePublished, onSourceAccessChanged, onUse
  * - **Failures:** a provider or egress error marks the source `error` (the message is the redacted
  *   one) and keeps any chunks it had; Re-index or the next change tries again.
  * - **Triggers:** adding a source; publishing a note that is a source (debounced 60 s); the hourly
- *   sweep (`sweepKnowledge`); Re-index all (at most once an hour per base, L1).
+ *   sweep (`sweepKnowledge`); Re-index all (at most once an hour per base, L1, kept in SQLite since
+ *   2026-10-08 so a restart does not forget it); Change embedding model (2026-10-08, the same hour).
+ * - **Change embedding model** (2026-10-08, owner only): one transaction records the new provider,
+ *   model, and size, marks every source `pending`, and replaces every chunk with a copy without its
+ *   vector (chunks are never updated in place), so keyword search keeps working and no vector of the
+ *   old model survives. Until every waiting source is embedded again search is keyword-only
+ *   (`kbChangingModel`). A batch in flight for the old model is dropped before its next request and
+ *   its result is never written.
  */
 
 /** Timers and bounds, on an object so tests can shorten them. */
@@ -256,14 +264,17 @@ async function indexSource(kb: KbRow, source: SourceRow): Promise<"done" | "paus
   let vectors: Float32Array[] = [];
   let tokens = 0;
   let dims = kb.dims;
+  // 2026-10-08: a model that takes no `dimensions` answers in its own size; a base with no vectors yet
+  // (new, or just moved to another model) adopts it. Vectors of another size are never stored beside them.
+  const vectored = vectoredChunks(kb.id, source.id);
   if (chunks.length > 0) {
     try {
       const connection = connectionFor(provider.id, null);
-      // A model that takes no `dimensions` answers in its own size: a base with no chunks yet adopts it.
-      const requested = takesDimensions(kb.embedding_model) || kb.chunk_count > 0 ? kb.dims : null;
+      const requested = takesDimensions(kb.embedding_model) || vectored > 0 ? kb.dims : null;
       const result = await embedTexts(connection, kb.embedding_model, requested, chunks.map(embeddingInput), {
         // Before every request (T314): over the owner's or the instance's budget nothing is sent.
-        beforeBatch: () => assertBudget(kb.owner_id),
+        // 2026-10-08: nor when the base moved to another model meanwhile (no call to the old provider after a change).
+        beforeBatch: () => { if (modelChanged(kb)) throw new SourceError("MODEL_CHANGED", "The embedding model changed"); assertBudget(kb.owner_id); },
         afterBatch: (used) => chargeUsage(kb.owner_id, `kb:${kb.id}`, { promptTokens: used, completionTokens: 0, estimated: false }, 0)
       });
       vectors = result.vectors;
@@ -271,6 +282,8 @@ async function indexSource(kb: KbRow, source: SourceRow): Promise<"done" | "paus
       dims = vectors[0]?.length ?? dims;
       if (dims < 64 || dims > 3072) throw new ProviderError("PROVIDER_ERROR", `The model returned ${dims} dimensions; 64 to 3072 are supported`);
     } catch (error) {
+      // The base moved to another model: the change already marked this source pending again.
+      if (error instanceof SourceError && error.code === "MODEL_CHANGED") return "requeued";
       if (error instanceof AgentError && error.code === "BUDGET_EXCEEDED") {
         setState(source.id, "pending", pauseMessage);
         return "paused";
@@ -285,7 +298,12 @@ async function indexSource(kb: KbRow, source: SourceRow): Promise<"done" | "paus
     // The base may have been binned, the source removed, or marked again (a new publish) while the
     // provider answered: then nothing is written and the queue takes it again.
     const live = liveKb(kb.id);
-    if (!live || live.dims !== kb.dims) return false;
+    if (!live || modelChanged(kb, live)) return false;
+    // Never two sizes in one base: a model that answered in another size than the vectors already stored is an error.
+    if (dims !== kb.dims && vectoredChunks(kb.id, source.id) > 0) {
+      setState(source.id, "error", `The model returned ${dims} dimensions; this knowledge base's vectors have ${kb.dims}`);
+      return false;
+    }
     const finished = db.query("UPDATE kb_sources SET status = 'ready', error = NULL, content_hash = ?, indexed_at = ?, chunk_count = ?, title = ?, bytes = ? WHERE id = ? AND status = 'indexing'")
       .run(hash, now(), chunks.length, content.title.slice(0, 255), content.bytes, source.id).changes;
     if (!finished) return false;
@@ -312,18 +330,24 @@ function markUnavailable(kbId: string, sourceId: string, purgedTitle?: string) {
 
 // ------------------------------------------------------------------------------ Re-index all (L1: once an hour)
 
-const lastReindex = new Map<string, number>();
+/**
+ * L1, kept in SQLite since 2026-10-08 (`agent_rate_limits`, bucket `kb_reindex:<id>`): Re-index all
+ * and Change embedding model share one hour per base, for everyone (owner included), across restarts.
+ */
+function assertReindexAllowed(kb: Pick<KbRow, "id">, at: number) {
+  const last = lastReindexAt(kb.id);
+  if (last !== null && at - last < knowledgeTimers.reindexCooldownMs && at >= last) {
+    const retryAfterSeconds = Math.max(1, Math.ceil((last + knowledgeTimers.reindexCooldownMs - at) / 1000));
+    const minutes = Math.max(1, Math.ceil(retryAfterSeconds / 60));
+    throw new AgentError(429, "REINDEX_RATE_LIMITED", `This knowledge base was re-indexed or changed model less than an hour ago. Try again in ${minutes} ${minutes === 1 ? "minute" : "minutes"}.`, { retryAfterSeconds });
+  }
+}
 
 /** Re-index all (manage): every source is embedded again, whatever its hash. At most once an hour per base, for everyone (owner included). */
 export function reindexAll(actor: { userId: string }, kb: KbRow) {
-  const last = lastReindex.get(kb.id);
   const at = Date.now();
-  if (last !== undefined && at - last < knowledgeTimers.reindexCooldownMs) {
-    const retryAfterSeconds = Math.max(1, Math.ceil((last + knowledgeTimers.reindexCooldownMs - at) / 1000));
-    const minutes = Math.max(1, Math.ceil(retryAfterSeconds / 60));
-    throw new AgentError(429, "REINDEX_RATE_LIMITED", `This knowledge base was re-indexed less than an hour ago. Try again in ${minutes} ${minutes === 1 ? "minute" : "minutes"}.`, { retryAfterSeconds });
-  }
-  lastReindex.set(kb.id, at);
+  assertReindexAllowed(kb, at);
+  recordReindex(kb.id, at);
   const changed = db.query("UPDATE kb_sources SET status = 'pending', error = NULL, content_hash = NULL WHERE kb_id = ? AND status <> 'indexing'").run(kb.id).changes;
   // A source being embedded right now finishes, then runs again with the hash cleared.
   db.query("UPDATE kb_sources SET content_hash = NULL WHERE kb_id = ? AND status = 'indexing'").run(kb.id);
@@ -331,6 +355,59 @@ export function reindexAll(actor: { userId: string }, kb: KbRow) {
   audit(actor.userId, null, "knowledge.reindex", { kbId: kb.id, sources: changed, ...(kb.owner_id !== actor.userId ? { asManager: true } : {}) });
   scheduleKnowledge(kb.id);
   return { ok: true as const, sources: changed };
+}
+
+// ------------------------------------------------------------------------------ Change embedding model (2026-10-08)
+
+/** Chunks of the base, other than `exceptSource`'s, that carry a vector. */
+const vectoredChunks = (kbId: string, exceptSource: string) =>
+  (db.query("SELECT COUNT(*) AS count FROM kb_chunks WHERE kb_id = ? AND source_id <> ? AND length(embedding) > 0").get(kbId, exceptSource) as { count: number }).count;
+
+/** Whether the base's provider or model changed since `kb` was read (its in-flight work is then dropped). */
+function modelChanged(kb: Pick<KbRow, "id" | "provider_id" | "embedding_model" | "dims">, live: Pick<KbRow, "provider_id" | "embedding_model" | "dims"> | null = liveKb(kb.id)) {
+  return !live || live.provider_id !== kb.provider_id || live.embedding_model !== kb.embedding_model || live.dims !== kb.dims;
+}
+
+export type ModelChangeInput = { providerId: string; model: string; dims?: number | null };
+
+/**
+ * Change embedding model (owner only; the way out of "provider removed" too). Every source is
+ * embedded again at the owner's token cost, under the usual budget and pause rules, and search is
+ * keyword-only until that finishes. One transaction: the new provider, model, and size; every
+ * source but the unavailable ones `pending` (errors included, so a removed provider's base
+ * recovers); every chunk replaced by a copy without its vector. Counts as the hour's Re-index (the
+ * same bucket), except when the base's provider was removed: that base has nothing to protect and
+ * must not wait an hour to recover.
+ */
+export function changeEmbeddingModel(actor: { userId: string }, kb: KbRow, input: ModelChangeInput) {
+  const provider = db.query("SELECT id, embedding_dims FROM agent_providers WHERE id = ?").get(input.providerId.toLowerCase()) as { id: string; embedding_dims: number | null } | null;
+  if (!provider) throw new AgentError(400, "INVALID", "That provider was not found", { field: "providerId" });
+  const model = input.model.trim();
+  const dims = takesDimensions(model)
+    ? input.dims ?? (provider.embedding_dims && provider.embedding_dims >= 64 && provider.embedding_dims <= 3072 ? provider.embedding_dims : 512)
+    // A model that takes no `dimensions` answers in its own size; the base adopts it at the first answer.
+    : input.dims ?? kb.dims;
+  if (provider.id === kb.provider_id && model === kb.embedding_model && dims === kb.dims) throw new AgentError(409, "UNCHANGED", "The knowledge base already uses this provider, model, and size");
+  const at = Date.now();
+  const providerRemoved = kbProvider(kb) === null;
+  if (!providerRemoved) assertReindexAllowed(kb, at);
+  const result = db.transaction(() => {
+    const live = liveKb(kb.id);
+    if (!live || modelChanged(kb, live)) throw new AgentError(409, "KB_CHANGED", "This knowledge base changed meanwhile; reload and try again");
+    db.query("UPDATE knowledge_bases SET provider_id = ?, embedding_model = ?, dims = ?, updated_at = ? WHERE id = ?").run(provider.id, model, dims, now(), kb.id);
+    const sources = db.query("UPDATE kb_sources SET status = 'pending', error = NULL, content_hash = NULL WHERE kb_id = ? AND status <> 'unavailable'").run(kb.id).changes;
+    // Chunks are replaced, never updated (042's trigger): copies without a vector keep keyword search, then the originals go.
+    const last = (db.query("SELECT COALESCE(MAX(id), 0) AS id FROM kb_chunks").get() as { id: number }).id;
+    db.query(`INSERT INTO kb_chunks (kb_id, source_id, ord, heading, text, embedding) SELECT kb_id, source_id, ord, heading, text, X'' FROM kb_chunks WHERE kb_id = ? AND id <= ? ORDER BY id`).run(kb.id, last);
+    const dropped = db.query("DELETE FROM kb_chunks WHERE kb_id = ? AND id <= ?").run(kb.id, last).changes;
+    refreshKbCounts(kb.id);
+    recordReindex(kb.id, at);
+    audit(actor.userId, null, "knowledge.model_change", { kbId: kb.id, providerId: provider.id, model, dims, sources, vectorsDropped: dropped, ...(providerRemoved ? { providerWasRemoved: true } : {}) });
+    return { ok: true as const, sources };
+  })();
+
+  scheduleKnowledge(kb.id);
+  return result;
 }
 
 // ------------------------------------------------------------------------------ the publish hook
@@ -375,7 +452,7 @@ type RecheckRow = SourceRow & { owner_id: string; kb_deleted: string | null };
  * Readable again: `pending`. A purge also replaces the source's title. Bases of a blocked owner are
  * left as they are (M2), except for a purge.
  */
-export function recheckKnowledgeSources(change: SourceAccessChange) {
+export function recheckKnowledgeSources(change: SourceAccessChange, owners?: ReadonlySet<string>) {
   const ids = JSON.stringify(change.ids.map((id) => id.toLowerCase()));
   const select = "SELECT s.*, k.owner_id, k.deleted_at AS kb_deleted FROM kb_sources s JOIN knowledge_bases k ON k.id = s.kb_id";
   const rows = change.kind === "folder"
@@ -386,6 +463,7 @@ export function recheckKnowledgeSources(change: SourceAccessChange) {
   let unavailable = 0;
   const queued = new Set<string>();
   for (const row of rows) {
+    if (owners && !owners.has(row.owner_id)) continue;
     if (purged) {
       markUnavailable(row.kb_id, row.id, row.kind === "note" ? "Deleted note" : "Deleted file");
       unavailable += 1;
@@ -406,6 +484,28 @@ export function recheckKnowledgeSources(change: SourceAccessChange) {
   return { unavailable, pending: queued.size };
 }
 onSourceAccessChanged((change) => { recheckKnowledgeSources(change); });
+
+/**
+ * 2026-10-08: people joined or left a group (or it was deleted). Every note and file source of the
+ * bases they own is checked against what they can read now, at once: unreadable → `unavailable`
+ * (chunks removed), readable again → `pending`. Bases of blocked owners are left alone (M2).
+ */
+export function recheckOwnersSources(ownerIds: readonly string[]) {
+  if (ownerIds.length === 0) return { unavailable: 0, pending: 0 };
+  const rows = db.query(`SELECT s.kind, s.ref_id FROM kb_sources s JOIN knowledge_bases k ON k.id = s.kb_id
+    WHERE k.owner_id IN (SELECT value FROM json_each(?)) AND s.kind IN ('note','document')`).all(JSON.stringify(ownerIds)) as Array<{ kind: "note" | "document"; ref_id: string }>;
+  let unavailable = 0;
+  let pending = 0;
+  for (const kind of ["note", "document"] as const) {
+    const ids = [...new Set(rows.filter((row) => row.kind === kind).map((row) => row.ref_id))];
+    if (!ids.length) continue;
+    const outcome = recheckKnowledgeSources({ kind, ids }, new Set(ownerIds));
+    unavailable += outcome.unavailable;
+    pending += outcome.pending;
+  }
+  return { unavailable, pending };
+}
+onGroupMembershipChanged((userIds) => { recheckOwnersSources(userIds); });
 
 /** Search found hits from sources their owner can no longer read (M1): marked later, never in the search's way. */
 export function recheckLater(stale: ReadonlyArray<{ kind: "note" | "document"; refId: string }>) {
@@ -518,7 +618,7 @@ export async function sweepKnowledge() {
 export function resetKnowledgeTimersForTests() {
   for (const timer of publishTimers.values()) clearTimeout(timer);
   publishTimers.clear();
-  lastReindex.clear();
+  resetReindexLimitsForTests();
   if (budgetWake) clearTimeout(budgetWake);
   budgetWake = null;
 }

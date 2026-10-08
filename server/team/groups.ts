@@ -11,6 +11,8 @@ import { can, type Role } from "./roles";
 import { readPolicies } from "./policies";
 import { GUEST_SHARE_DISABLED } from "../access/shares";
 import { rotateOnLostReach, snapshotVaultReach } from "../vault/members";
+import { groupMembershipChangedHook } from "../knowledge/hooks";
+import { groupSharedItems } from "../agents/sharing";
 
 /**
  * Groups (access plan D267, §C.6, O-A1, T200). Admins create groups and decide who is in them;
@@ -41,19 +43,28 @@ export class GroupError extends Error {
 const notFound = () => new GroupError(404, "NOT_FOUND", "Group not found");
 const changed = (revision: number) => new GroupError(409, "GROUP_CHANGED", "Someone else changed this group. Reload to see the latest.", { revision });
 
-type GroupRow = { id: string; name: string; description: string | null; created_at: string; updated_at: string; revision: number; member_count: number; guest_count: number; grant_count: number };
+type GroupRow = { id: string; name: string; description: string | null; created_at: string; updated_at: string; revision: number; member_count: number; guest_count: number; grant_count: number; shared_count: number };
 
 const groupSelect = `SELECT g.id, g.name, g.description, g.created_at, g.updated_at, g.revision,
     (SELECT COUNT(*) FROM group_members gm WHERE gm.group_id = g.id) AS member_count,
     (SELECT COUNT(*) FROM group_members gm JOIN users u ON u.id = gm.user_id WHERE gm.group_id = g.id AND u.role = 'guest') AS guest_count,
-    (SELECT COUNT(*) FROM group_grants gg WHERE gg.group_id = g.id) AS grant_count
+    (SELECT COUNT(*) FROM group_grants gg WHERE gg.group_id = g.id) AS grant_count,
+    (SELECT COUNT(*) FROM agent_access aa WHERE aa.group_id = g.id AND (
+      (aa.resource_kind = 'agent' AND EXISTS (SELECT 1 FROM agents x WHERE x.id = aa.resource_id AND x.deleted_at IS NULL))
+      OR (aa.resource_kind = 'chat' AND EXISTS (SELECT 1 FROM chats x WHERE x.id = aa.resource_id AND x.deleted_at IS NULL))
+      OR (aa.resource_kind = 'knowledge_base' AND EXISTS (SELECT 1 FROM knowledge_bases x WHERE x.id = aa.resource_id AND x.deleted_at IS NULL)))) AS shared_count
   FROM user_groups g`;
 
+/**
+ * `grantCount` counts every item shared with the group: Access sheet grants and (2026-10-08) the
+ * agents, chats, and knowledge bases shared with it. The guest rule (T213) still looks at
+ * `group_grants` alone: guests never reach the agents module, whatever its rows say (AC-O2).
+ */
 export type GroupSummary = { id: string; name: string; description: string | null; memberCount: number; guestCount: number; grantCount: number; revision: number; createdAt: string; updatedAt: string };
 
 const summary = (row: GroupRow): GroupSummary => ({
   id: row.id, name: row.name, description: row.description, memberCount: row.member_count, guestCount: row.guest_count,
-  grantCount: row.grant_count, revision: row.revision, createdAt: row.created_at, updatedAt: row.updated_at
+  grantCount: row.grant_count + row.shared_count, revision: row.revision, createdAt: row.created_at, updatedAt: row.updated_at
 });
 
 /** Team → Groups (admins): every group, by name. */
@@ -115,11 +126,16 @@ function groupItems(groupId: string, viewerId: string) {
   const page = grants.slice(0, ITEMS_LIMIT);
   // Titles and readability for the whole page in a few queries per kind, not per grant (C10b).
   const presented = presentItems(page.map((grant) => ({ kind: grant.resource_kind, id: grant.resource_id })), viewerId);
-  const items = page.flatMap((grant) => {
+  const items: Array<Record<string, unknown>> = page.flatMap((grant) => {
     const item = presented.get(`${grant.resource_kind}:${grant.resource_id}`) ?? null;
     return item && isLevel(grant.level) ? [{ ...item, level: grant.level }] : [];
   });
-  return { items, truncated: grants.length > ITEMS_LIMIT };
+  // 2026-10-08: agents, chats, and knowledge bases shared with the group (module-local `agent_access`
+  // rows) follow, redacted the same way: a title and id only when the viewing admin can open the item.
+  const room = Math.max(0, ITEMS_LIMIT - page.length);
+  const shared = groupSharedItems(groupId, viewerId, room + 1);
+  items.push(...shared.slice(0, room));
+  return { items, truncated: grants.length > ITEMS_LIMIT || shared.length > room };
 }
 
 export function getGroup(viewerId: string, groupId: string) {
@@ -172,19 +188,26 @@ export function patchGroup(actorId: string, groupId: string, input: { name?: str
 
 /** Deletes a group; its grants and memberships go with it (ON DELETE CASCADE). Returns the counts removed. */
 export function deleteGroup(actorId: string, groupId: string, revision?: number) {
-  return db.transaction(() => {
+  let members: string[] = [];
+  const result = db.transaction(() => {
     const row = groupRow(groupId);
     if (!row) throw notFound();
     if (revision !== undefined && row.revision !== revision) throw changed(row.revision);
     // Its members lose what the group reached: a vault among it rotates its data key (review M3).
-    const reach = snapshotVaultReach((db.query("SELECT user_id FROM group_members WHERE group_id = ?").all(groupId) as Array<{ user_id: string }>).map((member) => member.user_id));
+    members = (db.query("SELECT user_id FROM group_members WHERE group_id = ?").all(groupId) as Array<{ user_id: string }>).map((member) => member.user_id);
+    const reach = snapshotVaultReach(members);
+    // 2026-10-08: agents, chats, and knowledge bases shared with the group count too (their rows go by cascade).
+    const removedGrants = row.grant_count + row.shared_count;
     db.query("DELETE FROM user_groups WHERE id = ?").run(groupId);
     rotateOnLostReach(actorId, reach);
     // group_id is kept on the event (no FK), so the history stays readable in the audit.
-    recordAccessEvent({ actorId, via: "web", action: "group.deleted", groupId, meta: { memberCount: row.member_count, grantCount: row.grant_count } });
-    audit(actorId, null, "group.deleted", { groupId, memberCount: row.member_count, grantCount: row.grant_count });
-    return { ok: true as const, removedGrants: row.grant_count, removedMembers: row.member_count };
+    recordAccessEvent({ actorId, via: "web", action: "group.deleted", groupId, meta: { memberCount: row.member_count, grantCount: removedGrants } });
+    audit(actorId, null, "group.deleted", { groupId, memberCount: row.member_count, grantCount: removedGrants });
+    return { ok: true as const, removedGrants, removedMembers: row.member_count };
   })();
+  // 2026-10-08: knowledge sources the members' bases read through the group are checked again at once.
+  groupMembershipChangedHook(members);
+  return result;
 }
 
 /**
@@ -199,7 +222,8 @@ export function deleteGroup(actorId: string, groupId: string, revision?: number)
 export function putGroupMembers(actorId: string, groupId: string, input: { userIds: string[]; revision: number }) {
   const wanted = [...new Set(input.userIds.map((id) => id.toLowerCase()))];
   if (wanted.length > GROUP_MEMBERS_LIMIT) throw new GroupError(400, "INVALID_MEMBERS", `A group can have up to ${GROUP_MEMBERS_LIMIT} members`);
-  return db.transaction(() => {
+  let changedUsers: string[] = [];
+  const result = db.transaction(() => {
     const row = groupRow(groupId);
     if (!row) throw notFound();
     if (row.revision !== input.revision) throw changed(row.revision);
@@ -235,8 +259,12 @@ export function putGroupMembers(actorId: string, groupId: string, input: { userI
     // Losing read on a vault through the group rotates its data key, as on the vault's own sheet (review M3).
     rotateOnLostReach(actorId, reach);
     if (added.length || removed.length) audit(actorId, null, "group.members_changed", { groupId, added: added.length, removed: removed.length, selfAdded: added.includes(actorId) });
+    changedUsers = [...added, ...removed];
     return { added: added.length, removed: removed.length, selfAdded: added.includes(actorId) };
   })();
+  // 2026-10-08: knowledge sources these people's bases read through the group are checked again at once.
+  groupMembershipChangedHook(changedUsers);
+  return result;
 }
 
 /**

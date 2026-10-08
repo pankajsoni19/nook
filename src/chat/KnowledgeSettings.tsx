@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from "react";
-import { BookOpen, ChevronLeft, FileText, NotebookText, Plus, RefreshCw, Search, Share2, TextQuote, Trash2, UsersRound } from "lucide-react";
+import { BookOpen, ChevronDown, ChevronLeft, ChevronUp, Cpu, FileText, NotebookText, Plus, RefreshCw, Search, Share2, TextQuote, Trash2, UsersRound } from "lucide-react";
 import { ApiError } from "../api";
 import { AccessSheet } from "../access/AccessSheet";
 import { ModalDialog } from "../files/Dialog";
@@ -10,6 +10,7 @@ import { KNOWLEDGE_BOUNDS, KNOWLEDGE_SHARE_NOTE, type KnowledgeCandidate, type K
 import { agentsStatus, messageOf, type AgentsStatus } from "./chatApi";
 import { addSource, createKnowledge, deleteKnowledge, getKnowledge, hitSource, knowledgeLine, knowledgePaused, listKnowledge, pollInterval, reindexKnowledge, removeSource, searchKnowledge, sourceCandidates, sourceLabel, sourceStatusLabel, SOURCE_STATUS_LABELS, updateKnowledge } from "./knowledgeApi";
 import { HUB_TITLE_ID } from "../settings/hubModel";
+import { ModelSheet, SourceChunks } from "./KnowledgeModel";
 import "./chat.css";
 import "./knowledge.css";
 
@@ -99,7 +100,7 @@ function CreateSheet({ onClose, onCreated }: { onClose: () => void; onCreated: (
       <input id={ids.name} value={name} maxLength={KNOWLEDGE_BOUNDS.name} autoComplete="off" autoFocus onChange={(event) => setName(event.target.value)} />
       <label htmlFor={ids.description}>Description</label>
       <input id={ids.description} value={description} maxLength={KNOWLEDGE_BOUNDS.description} autoComplete="off" placeholder="What it answers (agents see this)" onChange={(event) => setDescription(event.target.value)} />
-      <p className="file-dialog-hint">It uses the default model provider's embedding model, fixed for the life of the base.</p>
+      <p className="file-dialog-hint">It uses the default model provider's embedding model. Its owner can change the model later; every source is then embedded again.</p>
       <footer className="file-dialog-actions">
         <button type="button" className="action-button secondary" onClick={onClose} disabled={busy}>Cancel</button>
         <button type="submit" className="action-button" disabled={busy}>{busy ? "Creating…" : "Create"}</button>
@@ -112,7 +113,10 @@ function CreateSheet({ onClose, onCreated }: { onClose: () => void; onCreated: (
 function KnowledgePage({ kbId, navigate, flash }: { kbId: string; navigate: Navigate; flash: (message: string) => void }) {
   const [kb, setKb] = useState<KnowledgeDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [sheet, setSheet] = useState<"add" | "share" | "rename" | null>(null);
+  const [sheet, setSheet] = useState<"add" | "share" | "rename" | "model" | null>(null);
+  // 2026-10-08: the sources whose chunk previews are open.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggle = (sourceId: string) => setExpanded((current) => { const next = new Set(current); if (next.has(sourceId)) next.delete(sourceId); else next.add(sourceId); return next; });
   const [busy, setBusy] = useState(false);
   const confirm = useConfirm();
   const toList = { app: "settings" as const, section: "knowledge" as const };
@@ -187,12 +191,13 @@ function KnowledgePage({ kbId, navigate, flash }: { kbId: string; navigate: Navi
     {kb && <>
       <p className="settings-warning knowledge-warning" role="note">{KNOWLEDGE_WARNING}</p>
       {kb.notice && <p className="settings-warning knowledge-notice" role="status">{kb.notice}</p>}
-      <p className="chat-muted">{knowledgeLine(kb)} · {kb.embeddingModel}, {kb.dims} dimensions</p>
+      <p className="chat-muted">{knowledgeLine(kb)} · {kb.providerName ? `${kb.providerName} · ` : ""}{kb.embeddingModel}, {kb.dims} dimensions</p>
       {manager && <div className="agents-actions knowledge-actions">
         <button type="button" className="action-button" onClick={() => setSheet("add")}><Plus />Add source</button>
         <button type="button" className="action-button secondary" onClick={() => { void reindex(); }} disabled={busy || kb.sourceCount === 0}><RefreshCw />Re-index all</button>
         <button type="button" className="action-button secondary" onClick={() => setSheet("share")}><Share2 />Share…</button>
         <button type="button" className="action-button secondary" onClick={() => setSheet("rename")}>Rename</button>
+        {kb.yourLevel === "owner" && <button type="button" className="action-button secondary" onClick={() => setSheet("model")}><Cpu />Change embedding model</button>}
         {kb.yourLevel === "owner" && <button type="button" className="action-button secondary" onClick={() => { void moveToBin(); }}><Trash2 />Move to Bin</button>}
       </div>}
       <h4 className="knowledge-subheading">Sources</h4>
@@ -201,6 +206,7 @@ function KnowledgePage({ kbId, navigate, flash }: { kbId: string; navigate: Navi
           {kb.sources.map((source) => {
             const label = sourceLabel(source);
             const Icon = source.kind === "note" ? NotebookText : source.kind === "document" ? FileText : TextQuote;
+            const open = expanded.has(source.id);
             return <li key={source.id} className="knowledge-source">
               <Icon aria-hidden="true" />
               <div className="knowledge-source-text">
@@ -210,13 +216,16 @@ function KnowledgePage({ kbId, navigate, flash }: { kbId: string; navigate: Navi
                 {source.status === "unavailable" && <small className="knowledge-source-error">The owner can no longer read it, so its passages were removed.</small>}
               </div>
               <StatusBadge status={source.status} label={sourceStatusLabel(source)} />
+              {source.previewable && source.chunkCount > 0 && <button type="button" className="icon-button" aria-expanded={open} onClick={() => toggle(source.id)} aria-label={`${open ? "Hide" : "Show"} passages of ${label.title}`}>{open ? <ChevronUp /> : <ChevronDown />}</button>}
               {manager && <button type="button" className="icon-button" onClick={() => { void remove(source); }} aria-label={`Remove ${label.title}`}><Trash2 /></button>}
+              {open && source.previewable && <SourceChunks kbId={kb.id} sourceId={source.id} label={label.title} />}
             </li>;
           })}
         </ul>}
       <TryIt kb={kb} />
     </>}
     {sheet === "add" && kb && <AddSourceSheet kb={kb} onClose={() => setSheet(null)} onAdded={() => { flash("Source added; indexing"); void load(); }} />}
+    {sheet === "model" && kb && <ModelSheet kb={kb} onClose={() => setSheet(null)} onChanged={(next, sources) => { setSheet(null); setKb(next); setExpanded(new Set()); flash(`Embedding ${sources} ${sources === 1 ? "source" : "sources"} again with ${next.embeddingModel}`); }} />}
     {sheet === "rename" && kb && <RenameSheet kb={kb} onClose={() => setSheet(null)} onSaved={(next) => { setSheet(null); setKb(next); flash("Saved"); }} />}
     {sheet === "share" && kb && <AccessSheet kind="knowledge_base" id={kb.id} title={kb.name} guardHistory note={KNOWLEDGE_SHARE_NOTE} onClose={() => setSheet(null)} onSaved={() => { setSheet(null); flash("Access updated"); void load(); }} />}
     {confirm.confirmElement}
@@ -376,7 +385,7 @@ function TryIt({ kb }: { kb: KnowledgeDetail }) {
     </form>
     {error && <p className="form-error" role="alert">{error}</p>}
     {hits && <div aria-live="polite">
-      {mode === "keyword" && <p className="chat-muted">{notice ? "Matched by keywords only: this knowledge base's embedding provider was removed." : "Matched by keywords only: the embedding model was not available."}</p>}
+      {mode === "keyword" && <p className="chat-muted">{notice ? `Matched by keywords only. ${notice}` : "Matched by keywords only: the embedding model was not available."}</p>}
       {hits.length === 0 ? <p className="chat-muted">No passages match.</p> : <ol className="knowledge-hits" aria-label="Top passages">
         {hits.map((hit, index) => <li key={`${hit.kb.id}-${index}`} className="knowledge-hit">
           <div className="knowledge-hit-head"><strong>{hit.heading ?? "(no heading)"}</strong><span className="ai-badge">{hit.score.toFixed(4)}</span></div>

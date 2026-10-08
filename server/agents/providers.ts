@@ -1,5 +1,6 @@
 import { audit, db, now } from "../db";
-import { AGENT_BOUNDS, DEFAULT_BASE_URL, DEFAULT_COMPAT, DEFAULT_MODEL, type AgentProviderChoice, type ProviderCompat, type ProviderSummary } from "../../shared/agents";
+import { AGENT_BOUNDS, DEFAULT_BASE_URL, DEFAULT_COMPAT, DEFAULT_EMBEDDING_DIMS, DEFAULT_EMBEDDING_MODEL, DEFAULT_MODEL, type AgentProviderChoice, type ProviderCompat, type ProviderSummary } from "../../shared/agents";
+import type { KnowledgeEmbeddingChoice } from "../../shared/knowledge";
 import { checkSavedEndpoint, EgressError } from "./egress";
 import { completeStreaming, listModels, ProviderError, type ProviderConnection } from "./loop";
 import { openSecret, sealSecret, secretHint, shownHint } from "./secrets";
@@ -172,6 +173,23 @@ export function providerChoices(): AgentProviderChoice[] {
   return (db.query("SELECT id, name, default_model FROM agent_providers ORDER BY is_default DESC, name COLLATE NOCASE, created_at").all() as Array<{ id: string; name: string; default_model: string }>).map((row) => {
     const cached = modelCache.get(row.id)?.models.filter((model) => !NOT_CHAT.test(model)) ?? null;
     return { id: row.id, name: row.name, isDefault: row.id === fallback, defaultModel: row.default_model, models: cached && cached.length ? cached.slice(0, 200) : null };
+  });
+}
+
+/**
+ * Change embedding model's provider list (2026-10-08, a knowledge base's owner): names, each
+ * provider's embedding defaults, and the embedding models an admin's Test or model list last saw (in
+ * memory). Never a base URL, a key, or a hint.
+ */
+export function providerEmbeddingChoices(): KnowledgeEmbeddingChoice[] {
+  const fallback = defaultProvider()?.id ?? null;
+  return (db.query("SELECT id, name, embedding_model, embedding_dims FROM agent_providers ORDER BY is_default DESC, name COLLATE NOCASE, created_at").all() as Array<{ id: string; name: string; embedding_model: string | null; embedding_dims: number | null }>).map((row) => {
+    const cached = modelCache.get(row.id)?.models.filter((model) => NOT_CHAT.test(model)) ?? null;
+    return {
+      id: row.id, name: row.name, isDefault: row.id === fallback, embeddingModel: row.embedding_model?.trim() || DEFAULT_EMBEDDING_MODEL,
+      embeddingDims: row.embedding_dims && row.embedding_dims >= 64 && row.embedding_dims <= 3072 ? row.embedding_dims : DEFAULT_EMBEDDING_DIMS,
+      models: cached && cached.length ? cached.slice(0, 50) : null
+    };
   });
 }
 

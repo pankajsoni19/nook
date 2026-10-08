@@ -8,9 +8,10 @@ import { KNOWLEDGE_BOUNDS } from "../../shared/knowledge";
 import { readShareAccess, writeShareAccess } from "../agents/sharing";
 import { roleMayChat } from "../agents/settings";
 import { AgentError, requireAgentsEnabled } from "../agents/status";
-import { reindexAll, scheduleKnowledge } from "./index";
+import { changeEmbeddingModel, reindexAll, scheduleKnowledge } from "./index";
+import { providerEmbeddingChoices } from "../agents/providers";
 import { presentHits, searchBases } from "./search";
-import { addSource, createKnowledge, deleteKnowledge, knowledgeDetail, listKnowledge, manageableKb, readableKb, removeSource, sourceCandidates, updateKnowledge } from "./service";
+import { addSource, createKnowledge, deleteKnowledge, knowledgeDetail, listKnowledge, manageableKb, ownedKb, readableKb, removeSource, sourceCandidates, sourceChunkPreviews, updateKnowledge } from "./service";
 import "./bin";
 
 /**
@@ -19,7 +20,8 @@ import "./bin";
  * CSRF and pass the role write gate. Guests get 404 everywhere (AC-O2), mutations included (QA LOW-1:
  * the role write gate lets a guest's write there through to this 404); with the module off every
  * route answers 503 `AGENTS_DISABLED`. Missing and forbidden are the same 404 (D73); a viewer of a
- * base who tries to change it gets 403 `READ_ONLY`.
+ * base who tries to change it gets 403 `READ_ONLY`. Since 2026-10-08: Change embedding model (owner only) and a
+ * source's chunk previews (the owner and managers who can read the source; viewers 404).
  */
 
 const line = (max: number) => z.string().trim().min(1).max(max).refine((value) => !/[\u0000-\u001f\u007f]/.test(value), "must be one line of text");
@@ -36,6 +38,16 @@ const sourceSchema = z.discriminatedUnion("kind", [
 ]);
 const searchSchema = z.object({ query: z.string().trim().min(1).max(KNOWLEDGE_BOUNDS.queryChars), k: z.number().int().min(1).max(KNOWLEDGE_BOUNDS.k.max).optional() }).strict();
 const emptySchema = z.object({}).strict();
+// 2026-10-08: Change embedding model. A model id is one token of letters, digits, and `._:/@-`.
+const modelSchema = z.object({
+  providerId: uuid,
+  model: z.string().trim().min(1).max(KNOWLEDGE_BOUNDS.modelName).regex(/^[A-Za-z0-9._:/@-]+$/, "must be a model id"),
+  dims: z.number().int().min(64).max(3072).nullable().optional()
+}).strict();
+const pageNumber = (value: string | undefined, fallback: number) => {
+  const parsed = Number(value);
+  return value !== undefined && /^\d{1,6}$/.test(value) && Number.isSafeInteger(parsed) ? parsed : fallback;
+};
 const sharePrincipal = z.object({ id: uuid, level: z.enum(["view", "manage", "comment", "edit"]) }).strict();
 const shareAccessSchema = z.object({
   audience: z.enum(["private", "selected", "all_users", "inherit"]),
@@ -114,6 +126,25 @@ export function registerKnowledgeRoutes(app: Hono<AppEnv>) {
     await parseJson(c.req.raw, emptySchema);
     const { kb } = manageableKb(kbId, c.get("user").id);
     return reindexAll(actor(c), kb);
+  }));
+
+  // 2026-10-08: Change embedding model (owner only): the providers to choose from, and the change itself.
+  app.get("/api/knowledge/:kbId/embedding-options", handle((c) => {
+    const kb = ownedKb(id(c, "kbId"), c.get("user").id, "Only the knowledge base's owner changes its embedding model");
+    return { current: { providerId: kb.provider_id, model: kb.embedding_model, dims: kb.dims }, providers: providerEmbeddingChoices() };
+  }));
+  app.post("/api/knowledge/:kbId/model", handle(async (c) => {
+    const kbId = id(c, "kbId");
+    const body = await parseJson(c.req.raw, modelSchema);
+    const kb = ownedKb(kbId, c.get("user").id, "Only the knowledge base's owner changes its embedding model");
+    const result = changeEmbeddingModel(actor(c), kb, body);
+    return { ...result, knowledgeBase: knowledgeDetail(readableKb(kbId, c.get("user").id).kb, c.get("user").id) };
+  }));
+
+  // 2026-10-08: a source's chunk previews (the owner and managers who can read the source; never viewers).
+  app.get("/api/knowledge/:kbId/sources/:sourceId/chunks", handle((c) => {
+    const page = sourceChunkPreviews(actor(c), id(c, "kbId"), id(c, "sourceId"), pageNumber(c.req.query("offset"), 0), pageNumber(c.req.query("limit"), KNOWLEDGE_BOUNDS.previewPage.default));
+    return page;
   }));
 
   // Try it (view): the ranked hits with their heading paths and scores. The query's embedding is charged to the person searching.

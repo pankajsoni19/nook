@@ -3,7 +3,8 @@
  * - Notes tells it a note was published (plan §9: a source re-indexes after a publish, debounced 60 s).
  * - Notes, Files, and folders tell it who can read an item changed: its sharing, the Bin, a restore,
  *   or a purge (Wave 44 fixes, M1). A source its base's owner can no longer read loses its chunks at once.
- * - Team tells it an account was unblocked (M2): that owner's bases resume indexing.
+ * - Team tells it an account was unblocked (M2): that owner's bases resume indexing; and (2026-10-08)
+ *   that people joined or left a group, or a group was deleted: their bases' sources are checked again.
  * - Settings → AI tells it a provider changed or was removed (M3), or the budgets were raised (LOW-3).
  * Every hook runs its listeners after the caller's own write, and never throws.
  */
@@ -54,3 +55,14 @@ const provider = hook<ProviderEvent>("provider");
 export const onKnowledgeProviderEvent = provider.on;
 /** Called by server/agents/providers.ts and server/agents/settings.ts after their write committed. Never throws. */
 export const knowledgeProviderHook = provider.fire;
+
+const groups = hook<readonly string[]>("group membership");
+export const onGroupMembershipChanged = groups.on;
+/**
+ * Called by Team (server/team/groups.ts, templates.ts, memberAccess.ts) after people joined or left
+ * a group, or a group was deleted (2026-10-08): `userIds` are the people whose reach changed. Their
+ * knowledge bases' note and file sources are checked again at once. Never throws.
+ */
+export function groupMembershipChangedHook(userIds: readonly string[]) {
+  if (userIds.length > 0) groups.fire([...new Set(userIds)]);
+}

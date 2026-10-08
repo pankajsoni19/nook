@@ -48,7 +48,7 @@ export function fakeEmbedding(text: string, dims: number): number[] {
 }
 
 /** `port` 0 picks a free port; the returned `port` and `baseUrl` are the real ones. */
-export function startFakeProvider(port: number, options: { models?: string[]; nativeDims?: number } = {}): FakeProvider {
+export function startFakeProvider(port: number, options: { models?: string[]; nativeDims?: number; embedDelayMs?: number } = {}): FakeProvider {
   const calls: ProviderCall[] = [];
   const models = options.models ?? ["gpt-6-luna", "gpt-6-mini", "text-embedding-3-small"];
   const server = Bun.serve({
@@ -72,6 +72,8 @@ export function startFakeProvider(port: number, options: { models?: string[]; na
         const payload = body as { model?: string; input?: string | string[]; dimensions?: number } | null;
         const inputs = typeof payload?.input === "string" ? [payload.input] : Array.isArray(payload?.input) ? payload!.input : [];
         if (inputs.some((text) => text.includes("fail:embed"))) return Response.json({ error: { message: "Simulated embedding failure sk-secret-should-not-echo-123456789012345", type: "server_error" } }, { status: 500 });
+        // `embedDelayMs` (2026-10-08): answer embeddings late, so a test can change a base's model mid-batch.
+        if (options.embedDelayMs) await new Promise((resolve) => setTimeout(resolve, options.embedDelayMs));
         const dims = typeof payload?.dimensions === "number" ? payload.dimensions : options.nativeDims ?? 1536;
         return Response.json({
           object: "list", model: payload?.model ?? "text-embedding-3-small",

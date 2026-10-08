@@ -3,7 +3,7 @@ import { purgeAfterFrom } from "../bin";
 import { readableNotePredicate } from "../access";
 import { readableDocumentPredicate } from "../documentAccess";
 import { DEFAULT_EMBEDDING_DIMS, DEFAULT_EMBEDDING_MODEL } from "../../shared/agents";
-import { KNOWLEDGE_BOUNDS, KNOWLEDGE_DOCUMENT_TYPES, type KnowledgeCandidate, type KnowledgeDetail, type KnowledgeLevel, type KnowledgeSource, type KnowledgeStatus, type KnowledgeSummary, type SourceKind, type SourceStatus } from "../../shared/knowledge";
+import { KNOWLEDGE_BOUNDS, KNOWLEDGE_DOCUMENT_TYPES, type KnowledgeCandidate, type KnowledgeChunkPage, type KnowledgeDetail, type KnowledgeLevel, type KnowledgeSource, type KnowledgeStatus, type KnowledgeSummary, type SourceKind, type SourceStatus } from "../../shared/knowledge";
 import { defaultProvider } from "../agents/providers";
 import { readAgentSettings, roleMayCreate } from "../agents/settings";
 import { shareLevel, shareReadableSql, type ShareLevel } from "../agents/sharing";
@@ -22,9 +22,13 @@ import { AgentError } from "../agents/status";
  *   or file can be added only when both the person adding it and the owner can read it now, so a
  *   manager can never pull an owner's private note into a base they search, nor a note of their
  *   own the owner could not read (T320). The pickers offer exactly that set.
- * - The embedding provider, model, and dimensions are fixed at creation (AC-O14): the instance's
+ * - The embedding provider, model, and dimensions are set at creation (AC-O14): the instance's
  *   default provider and its embedding model (`text-embedding-3-small`, 512 dimensions, unless the
- *   admin set others).
+ *   admin set others). Since 2026-10-08 the owner may change them (server/knowledge/index.ts
+ *   `changeEmbeddingModel`): every source is embedded again, and search uses keywords only until
+ *   that finishes (`kbChangingModel`).
+ * - **Chunk previews** (2026-10-08, `sourceChunkPreviews`): the owner and managers who can read the
+ *   source now see each chunk's heading path and first 300 characters; viewers never (T320).
  */
 
 export type KbRow = {
@@ -57,9 +61,9 @@ export function manageableKb(id: string, userId: string): { kb: KbRow; level: "o
 }
 
 /** A live base the person owns (Bin); others who can open it get 403. */
-export function ownedKb(id: string, userId: string): KbRow {
+export function ownedKb(id: string, userId: string, message = "Only the knowledge base's owner can move it to the Bin"): KbRow {
   const { kb, level } = readableKb(id, userId);
-  if (level !== "owner") throw new AgentError(403, "OWNER_ONLY", "Only the knowledge base's owner can move it to the Bin");
+  if (level !== "owner") throw new AgentError(403, "OWNER_ONLY", message);
   return kb;
 }
 
@@ -87,8 +91,22 @@ export const ownerIsActive = (ownerId: string) => Boolean(db.query("SELECT 1 FRO
 
 /** The error a source gets, and the note search adds, when the base's embedding provider was removed (M3: fail closed, never the default). */
 export const PROVIDER_REMOVED = "The embedding provider was removed";
-export const PROVIDER_REMOVED_NOTICE = "The embedding provider this knowledge base was made with was removed. Search uses keywords only, and nothing new is indexed; make a new knowledge base to use the current provider.";
+export const PROVIDER_REMOVED_NOTICE = "The embedding provider this knowledge base was made with was removed. Search uses keywords only, and nothing new is indexed, until its owner chooses another with Change embedding model.";
+/** The note while a base moves to another embedding model (2026-10-08): keyword-only search, never two embedding spaces at once. */
+export const MODEL_CHANGING_NOTICE = "This knowledge base is moving to another embedding model. Search uses keywords only until every source is embedded again.";
 export const OWNER_BLOCKED_NOTICE = "This knowledge base's owner is blocked. It is paused and answers no searches until they are unblocked.";
+
+/**
+ * Whether the base is moving to another embedding model (2026-10-08): a source still waiting
+ * (`pending` or `indexing`) holds chunks whose vectors the change deleted. Until none does, search
+ * answers from keywords alone, so vectors of two models are never ranked together. A source that
+ * ended in `error` keeps its text-only chunks for keyword search and no longer holds the base back;
+ * vector search skips chunks without a vector.
+ */
+export function kbChangingModel(kbId: string): boolean {
+  return Boolean(db.query(`SELECT 1 FROM kb_sources s WHERE s.kb_id = ? AND s.status IN ('pending','indexing')
+    AND EXISTS (SELECT 1 FROM kb_chunks c WHERE c.source_id = s.id AND length(c.embedding) = 0) LIMIT 1`).get(kbId));
+}
 
 /** The base's own provider row (no fallback to the default: M3), or null when it was removed. */
 export function kbProvider(kb: Pick<KbRow, "provider_id">): { id: string; base_url: string } | null {
@@ -144,12 +162,15 @@ const ownerName = (id: string) => (db.query("SELECT display_name FROM users WHER
 export function knowledgeSummary(kb: KbRow, userId: string, level: ShareLevel = kbLevel(kb, userId)): KnowledgeSummary {
   const counts = countsOf(kb.id);
   const yourLevel: KnowledgeLevel = level === "owner" ? "owner" : level === "manage" ? "manage" : "view";
+  const provider = kb.provider_id ? db.query("SELECT name FROM agent_providers WHERE id = ?").get(kb.provider_id) as { name: string } | null : null;
+  const changingModel = counts.pending + counts.indexing > 0 && kbChangingModel(kb.id);
   return {
     id: kb.id, name: kb.name, description: kb.description, ownerId: kb.owner_id, ownerName: ownerName(kb.owner_id), yourLevel,
     embeddingModel: kb.embedding_model, dims: kb.dims, status: statusOf(counts), chunkCount: kb.chunk_count,
     sourceCount: counts.pending + counts.indexing + counts.ready + counts.error + counts.unavailable, counts,
     audience: yourLevel === "owner" ? kb.visibility as KnowledgeSummary["audience"] : null, revision: kb.revision, createdAt: kb.created_at, updatedAt: kb.updated_at,
-    notice: !ownerIsActive(kb.owner_id) ? OWNER_BLOCKED_NOTICE : kbProvider(kb) === null ? PROVIDER_REMOVED_NOTICE : null
+    notice: !ownerIsActive(kb.owner_id) ? OWNER_BLOCKED_NOTICE : provider === null ? PROVIDER_REMOVED_NOTICE : changingModel ? MODEL_CHANGING_NOTICE : null,
+    providerName: provider?.name ?? null, changingModel
   };
 }
 
@@ -164,10 +185,12 @@ export function knowledgeDetail(kb: KbRow, userId: string, level: ShareLevel = k
   const rows = db.query("SELECT * FROM kb_sources WHERE kb_id = ? ORDER BY created_at, rowid").all(kb.id) as SourceRow[];
   const manager = level === "owner" || level === "manage";
   const sources = rows.map((row): KnowledgeSource => {
-    const shown = manager || canReadSource(userId, row.kind, row.ref_id);
+    const readable = canReadSource(userId, row.kind, row.ref_id);
+    const shown = manager || readable;
     return {
       id: row.id, kind: row.kind, title: shown ? row.title : null, titleHidden: !shown, refId: shown ? row.ref_id : null,
-      status: row.status, error: row.error, chunkCount: row.chunk_count, indexedAt: row.indexed_at, createdAt: row.created_at, bytes: row.bytes
+      status: row.status, error: row.error, chunkCount: row.chunk_count, indexedAt: row.indexed_at, createdAt: row.created_at, bytes: row.bytes,
+      previewable: manager && readable
     };
   });
   return { ...knowledgeSummary(kb, userId, level), sources };
@@ -263,7 +286,7 @@ export function addSource(actor: { userId: string }, kbId: string, input: Source
     db.query("UPDATE knowledge_bases SET updated_at = ? WHERE id = ?").run(timestamp, kbId);
     audit(actor.userId, null, "knowledge.source.add", { kbId, sourceId: id, kind: input.kind, ...(kb.owner_id !== actor.userId ? { asManager: true } : {}) });
     const row = db.query("SELECT * FROM kb_sources WHERE id = ?").get(id) as SourceRow;
-    return { id: row.id, kind: row.kind, title: row.title, titleHidden: false, refId: row.ref_id, status: row.status, error: null, chunkCount: 0, indexedAt: null, createdAt: row.created_at, bytes: row.bytes };
+    return { id: row.id, kind: row.kind, title: row.title, titleHidden: false, refId: row.ref_id, status: row.status, error: null, chunkCount: 0, indexedAt: null, createdAt: row.created_at, bytes: row.bytes, previewable: true };
   })();
 }
 
@@ -333,4 +356,28 @@ export function viewableKbIds(userId: string, ids: readonly string[]): Set<strin
   if (ids.length === 0) return new Set();
   const rows = db.query(`SELECT k.id FROM knowledge_bases k WHERE k.id IN (SELECT value FROM json_each($ids)) AND ${shareReadableSql("knowledge_base", "k")}`).all({ userId, ids: JSON.stringify(ids) }) as Array<{ id: string }>;
   return new Set(rows.map((row) => row.id));
+}
+
+// ------------------------------------------------------------------------------ chunk previews (2026-10-08)
+
+/**
+ * A page of one source's chunks as previews: each chunk's place, heading path, and first
+ * `previewChars` characters, with the source's chunk count. Only the owner and managers who can read
+ * the source now (a note or file through its own sharing; pasted text lives in the base): the same
+ * people who see its title and could open it anyway. Viewers get the 404 for every source, so the
+ * API never hands a viewer more of a source than a search hit does (T320); managers who cannot read
+ * it get 403 `PREVIEW_REFUSED`. Missing sources and other bases' sources are the same 404.
+ */
+export function sourceChunkPreviews(actor: { userId: string }, kbId: string, sourceId: string, offset: number, limit: number): KnowledgeChunkPage {
+  const { kb, level } = readableKb(kbId, actor.userId);
+  const source = db.query("SELECT kind, ref_id FROM kb_sources WHERE id = ? AND kb_id = ?").get(sourceId, kb.id) as { kind: SourceKind; ref_id: string | null } | null;
+  if (!source || level === "view") throw new AgentError(404, "NOT_FOUND", "Not found");
+  if (!canReadSource(actor.userId, source.kind, source.ref_id)) throw new AgentError(403, "PREVIEW_REFUSED", "You can't open this source, so its passages are not shown");
+  const size = Math.max(1, Math.min(KNOWLEDGE_BOUNDS.previewPage.max, Math.floor(limit) || KNOWLEDGE_BOUNDS.previewPage.default));
+  const start = Math.max(0, Math.floor(offset) || 0);
+  const total = (db.query("SELECT COUNT(*) AS count FROM kb_chunks WHERE source_id = ?").get(sourceId) as { count: number }).count;
+  // Only the preview's characters leave SQLite (substr), never a chunk's whole text.
+  const rows = db.query(`SELECT ord, heading, substr(text, 1, ${KNOWLEDGE_BOUNDS.previewChars}) AS preview, length(text) AS chars FROM kb_chunks
+    WHERE source_id = ? ORDER BY ord, id LIMIT ? OFFSET ?`).all(sourceId, size, start) as Array<{ ord: number; heading: string | null; preview: string; chars: number }>;
+  return { chunks: rows.map((row) => ({ ord: row.ord, heading: row.heading, preview: row.preview, chars: row.chars })), total, offset: start, limit: size };
 }

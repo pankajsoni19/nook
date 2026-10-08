@@ -1,5 +1,5 @@
 import { api } from "../api";
-import { isPausedSource, type KnowledgeCandidate, type KnowledgeDetail, type KnowledgeHit, type KnowledgeSource, type KnowledgeSummary, type SourceStatus } from "../../shared/knowledge";
+import { isPausedSource, type KnowledgeCandidate, type KnowledgeChunkPage, type KnowledgeDetail, type KnowledgeEmbeddingChoice, type KnowledgeHit, type KnowledgeSource, type KnowledgeSummary, type SourceStatus } from "../../shared/knowledge";
 
 /** The knowledge base API (docs/plan/API_CONTRACTS.md § Knowledge bases; Wave 44 AC-E). */
 
@@ -13,6 +13,11 @@ export const addSource = (id: string, input: SourceInput) => api<{ source: Knowl
 export const removeSource = (id: string, sourceId: string) => api<{ ok: true }>(`/knowledge/${id}/sources/${sourceId}`, { method: "DELETE", body: "{}" });
 export const reindexKnowledge = (id: string) => api<{ ok: true; sources: number }>(`/knowledge/${id}/reindex`, { method: "POST", body: "{}" });
 export const sourceCandidates = (id: string, kind: "note" | "document", q: string) => api<{ candidates: KnowledgeCandidate[] }>(`/knowledge/${id}/candidates?kind=${kind}&q=${encodeURIComponent(q)}`);
+/** 2026-10-08: Change embedding model (owner): the providers to choose from, and the change. */
+export const embeddingOptions = (id: string) => api<{ current: { providerId: string | null; model: string; dims: number }; providers: KnowledgeEmbeddingChoice[] }>(`/knowledge/${id}/embedding-options`);
+export const changeEmbeddingModel = (id: string, input: { providerId: string; model: string; dims?: number | null }) => api<{ ok: true; sources: number; knowledgeBase: KnowledgeDetail }>(`/knowledge/${id}/model`, { method: "POST", body: JSON.stringify(input) });
+/** 2026-10-08: a page of a source's chunk previews (the owner and managers who can read it). */
+export const sourceChunks = (id: string, sourceId: string, offset: number, limit = 20) => api<KnowledgeChunkPage>(`/knowledge/${id}/sources/${sourceId}/chunks?offset=${offset}&limit=${limit}`);
 export const searchKnowledge = (id: string, query: string, k?: number) => api<{ hits: KnowledgeHit[]; mode: "hybrid" | "keyword"; notice?: string }>(`/knowledge/${id}/search`, { method: "POST", body: JSON.stringify({ query, ...(k ? { k } : {}) }) });
 
 /** A source's state as its row says it (plan §13.4). */
@@ -69,4 +74,10 @@ export function hitSource(hit: Pick<KnowledgeHit, "source">) {
   if (hit.source.kind === "text") return `Pasted text · ${hit.source.title ?? "Untitled"}`;
   if (hit.source.title) return `${hit.source.kind === "note" ? "Note" : "File"} · ${hit.source.title}`;
   return hit.source.kind === "note" ? "A note you can't open" : "A file you can't open";
+}
+
+/** "Chunks 1–20 of 57" for a source's preview. */
+export function previewRange(page: { offset: number; total: number }, shown: number) {
+  if (page.total === 0) return "No chunks";
+  return `Chunks 1–${Math.min(page.total, shown)} of ${page.total.toLocaleString()}`;
 }

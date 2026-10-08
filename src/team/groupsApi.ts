@@ -28,8 +28,11 @@ export type GroupMember = {
 export type AccessLevel = "view" | "comment" | "edit" | "manage";
 export type AccessKind = "note" | "folder" | "document" | "board" | "task_view" | "collection" | "calendar";
 
+/** What a group's page lists: Access sheet items, and (2026-10-08) agents, chats, and knowledge bases. */
+export type GroupItemKind = AccessKind | "agent" | "chat" | "knowledge_base";
+
 /** An item shared with the group. `titleHidden`: the admin cannot open it, so only the kind and owner show (D269). */
-export type GroupItem = { kind: AccessKind; title: string; titleHidden: boolean; owner: { id: string; displayName: string }; id?: string; level: AccessLevel };
+export type GroupItem = { kind: GroupItemKind; title: string; titleHidden: boolean; owner: { id: string; displayName: string }; id?: string; level: AccessLevel };
 
 export type GroupHistoryRow = { id: string; action: string; createdAt: string; actor: { id: string; displayName: string } | null; target: { id: string; displayName: string } | null; self: boolean };
 
@@ -49,8 +52,9 @@ export const deleteGroup = (groupId: string, revision: number) =>
 export const putGroupMembers = (groupId: string, body: { userIds: string[]; revision: number }) =>
   api<{ added: number; removed: number; selfAdded: boolean; group: GroupDetail }>(`${groupPath(groupId)}/members`, { method: "PUT", body: JSON.stringify(body) });
 
-export const KIND_LABELS: Record<AccessKind, string> = {
-  note: "Note", folder: "Folder", document: "File", board: "Board", task_view: "Task view", collection: "Collection", calendar: "Calendar"
+export const KIND_LABELS: Record<GroupItemKind, string> = {
+  note: "Note", folder: "Folder", document: "File", board: "Board", task_view: "Task view", collection: "Collection", calendar: "Calendar",
+  agent: "Agent", chat: "Chat", knowledge_base: "Knowledge base"
 };
 
 export const LEVEL_LABELS: Record<AccessLevel, string> = { view: "Can view", comment: "Can comment", edit: "Can edit", manage: "Manager" };

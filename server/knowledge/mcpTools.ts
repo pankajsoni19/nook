@@ -8,6 +8,7 @@ import { roleMayChat } from "../agents/settings";
 import { AgentError, agentsStatus } from "../agents/status";
 import { currentAgentRun } from "../agents/depth";
 import { presentHits, searchBases } from "./search";
+import { chargeKeySearch } from "./limits";
 import type { KbRow } from "./service";
 
 /**
@@ -16,6 +17,7 @@ import type { KbRow } from "./service";
  * and a grant covering the base: "all" (every base the key's owner can open) or chosen knowledge
  * bases. It reads as the key's owner: only bases they can open now, hits naming a note or file only
  * when they can open it (T320). The query's embedding counts toward the owner's and the key's tokens.
+ * Since 2026-10-08 each key may search 60 times a minute and 2,000 times a UTC day (server/knowledge/limits.ts).
  */
 
 const uuid = z.string().uuid();
@@ -38,6 +40,10 @@ export const knowledgeTools: McpToolSpec[] = [
       if (!agentsStatus().enabled) throw notFound("Knowledge base");
       const owner = db.query("SELECT role FROM users WHERE id = ?").get(key.userId) as { role: string } | null;
       if (!owner || !roleMayChat(owner.role)) throw notFound("Knowledge base");
+      // 2026-10-08: the key's own search limit (60 a minute, 2,000 a UTC day, kept in SQLite), on
+      // top of the generic per-key limits runTool already charged; refused before any embedding.
+      const retryAfterSeconds = chargeKeySearch(key.keyId);
+      if (retryAfterSeconds) throw new McpToolError("RATE_LIMITED", "This API key has made too many knowledge searches. Try again later.", { retryAfterSeconds, limit: "search_knowledge" });
       const reach = keyReach(key, "agents:read");
       const rows = db.query(`SELECT k.* FROM knowledge_bases k WHERE ${shareReadableSql("knowledge_base", "k")} ${kb ? "AND k.id = $kb" : ""} ORDER BY k.name COLLATE NOCASE LIMIT 100`)
         .all({ userId: key.userId, ...(kb ? { kb: kb.toLowerCase() } : {}) }) as KbRow[];

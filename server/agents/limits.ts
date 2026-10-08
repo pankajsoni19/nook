@@ -17,18 +17,32 @@ export const KEY_RUN_LIMITS = {
 
 type Row = { window_start: number; count: number; previous_count: number };
 
+/** One window of a persistent limit: its bucket in `agent_rate_limits`, its size, and whether it is fixed (the UTC day) or slides. */
+export type RateWindow = { bucket: string; limit: number; windowMs: number; fixed?: boolean };
+
 /** Checks and charges one run for the key. Returns 0 when admitted, else the seconds to wait. */
 export function chargeKeyRun(keyId: string, nowMs = Date.now()): number {
+  // The day is fixed (it resets at midnight UTC); the minute slides.
+  return chargeRateWindows([
+    { bucket: `run_minute:${keyId}`, ...KEY_RUN_LIMITS.minute },
+    { bucket: `run_day:${keyId}`, ...KEY_RUN_LIMITS.day, fixed: true }
+  ], nowMs);
+}
+
+/**
+ * Checks every window, then charges them all in one transaction, so a refused call costs nothing
+ * anywhere. Shared by the per-key run limits and the knowledge-search limits (server/knowledge/limits.ts).
+ * Returns 0 when admitted, else the seconds to wait.
+ */
+export function chargeRateWindows(windows: readonly RateWindow[], nowMs = Date.now()): number {
   return db.transaction(() => {
     const planned: Array<{ bucket: string; windowStart: number; count: number; previous: number }> = [];
-    for (const [name, { limit, windowMs }] of Object.entries(KEY_RUN_LIMITS)) {
-      const bucket = `run_${name}:${keyId}`;
+    for (const { bucket, limit, windowMs, fixed } of windows) {
       const windowStart = Math.floor(nowMs / windowMs) * windowMs;
       const row = db.query("SELECT window_start, count, previous_count FROM agent_rate_limits WHERE bucket = ?").get(bucket) as Row | null;
       const count = row && row.window_start === windowStart ? row.count : 0;
       const previous = row && row.window_start === windowStart ? row.previous_count : row && row.window_start === windowStart - windowMs ? row.count : 0;
-      // The day is fixed (it resets at midnight UTC); the minute slides.
-      const estimate = name === "day" ? count : previous * (1 - (nowMs - windowStart) / windowMs) + count;
+      const estimate = fixed ? count : previous * (1 - (nowMs - windowStart) / windowMs) + count;
       if (estimate + 1 > limit) return Math.max(1, Math.ceil((windowStart + windowMs - nowMs) / 1000));
       planned.push({ bucket, windowStart, count, previous });
     }

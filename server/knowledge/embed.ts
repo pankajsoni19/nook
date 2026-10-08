@@ -1,5 +1,5 @@
 import { endianness } from "node:os";
-import { EMBEDDING_BATCH } from "../../shared/knowledge";
+import { EMBEDDING_BATCH, takesDimensions } from "../../shared/knowledge";
 import { EgressError, egressFetch, readEgressText } from "../agents/egress";
 import { excerpt, ProviderError, type ProviderConnection } from "../agents/loop";
 
@@ -24,8 +24,8 @@ export const embeddingLimits = { maxBytes: 4 * 1024 * 1024, firstByteMs: 30_000,
  */
 export const batchSizeFor = (dims: number | null) => Math.max(1, Math.min(EMBEDDING_BATCH, Math.floor((EMBEDDING_BATCH * 512) / (dims ?? 3072))));
 
-/** Whether a model takes the `dimensions` parameter (text-embedding-3 models do; ada-002 and most others do not). */
-export const takesDimensions = (model: string) => /text-embedding-3/i.test(model);
+/** Whether a model takes the `dimensions` parameter (text-embedding-3 models do; ada-002 and most others do not). Shared with the client. */
+export { takesDimensions };
 
 export type EmbeddingResult = { vectors: Float32Array[]; tokens: number; estimated: boolean };
 

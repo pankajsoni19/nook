@@ -4,6 +4,7 @@ import { recordAccessEvent } from "../access/events";
 import { notifyAccess } from "../access/notices";
 import { uuid } from "../validation";
 import { GUEST_SHARE_DISABLED } from "../access/shares";
+import { groupMembershipChangedHook } from "../knowledge/hooks";
 import { GROUP_MEMBERS_LIMIT, guestJoinRefused, guestRefusedGroups } from "./groups";
 
 /**
@@ -192,7 +193,7 @@ export function applyInviteTemplate(invite: { created_by: string | null; templat
 
 /** From the member access page: the template's groups for an existing person (never their role). */
 export function applyTemplateToMember(actorId: string, userId: string, templateId: string) {
-  return db.transaction(() => {
+  const applied = db.transaction(() => {
     // Integrations (D287) never join groups, so a template never applies to one.
     if (!db.query("SELECT 1 FROM users WHERE id = ? AND disabled_at IS NULL AND kind = 'person'").get(userId)) throw new TemplateError(404, "NOT_FOUND", "Team member not found");
     const result = applyTemplateGroups(actorId, userId, templateId, { notify: true, guests: "refuse" });
@@ -200,6 +201,9 @@ export function applyTemplateToMember(actorId: string, userId: string, templateI
     audit(actorId, null, "team.template_applied", { templateId, targetId: userId, added: result.added });
     return result;
   })();
+  // 2026-10-08: joining groups can make knowledge sources readable to the person's bases again.
+  if (applied.added > 0) groupMembershipChangedHook([userId]);
+  return applied;
 }
 
 // ---------------------------------------------------------------------------- schemas

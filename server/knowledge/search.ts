@@ -4,7 +4,7 @@ import { assertBudget, chargeUsage } from "../agents/runs";
 import { connectionFor } from "../agents/providers";
 import { AgentError } from "../agents/status";
 import { blobToVector, embedTexts, takesDimensions } from "./embed";
-import { canReadSource, kbProvider, ownerIsActive, PROVIDER_REMOVED_NOTICE, type KbRow } from "./service";
+import { canReadSource, kbChangingModel, kbProvider, MODEL_CHANGING_NOTICE, ownerIsActive, PROVIDER_REMOVED_NOTICE, type KbRow } from "./service";
 import { recheckLater } from "./index";
 
 /**
@@ -21,6 +21,11 @@ import { recheckLater } from "./index";
  * the same budget check as a run). When that fails, the budget is used up, or the base's provider
  * was removed (M3: never the default instead), that group answers from BM25 alone, and the whole
  * search reports `mode: "keyword"` (L6).
+ *
+ * 2026-10-08: a base moving to another embedding model answers from BM25 alone, with a notice, until
+ * every waiting source is embedded again (`kbChangingModel`), so the vectors of two models are never
+ * ranked together; no query embedding is made for it. Chunks without a vector (the change's copies,
+ * or a source that failed during it) are never loaded into the vector matrix.
  *
  * Wave 44 fixes: a base whose owner is blocked answers nothing (M2), and a hit whose note or file
  * the base's owner can no longer read is dropped before it is returned (M1); its source is marked
@@ -59,12 +64,13 @@ export function vectorsOf(kb: Pick<KbRow, "id" | "revision" | "dims">): Matrix {
     return hit;
   }
   evict(kb.id);
-  const rows = db.query("SELECT id, embedding FROM kb_chunks WHERE kb_id = ? ORDER BY id").all(kb.id) as Array<{ id: number; embedding: Uint8Array }>;
+  // Only vectors of the base's own size (2026-10-08: never a chunk without one, never another size).
+  const rows = db.query("SELECT id, embedding FROM kb_chunks WHERE kb_id = ? AND length(embedding) = ? ORDER BY id").all(kb.id, kb.dims * 4) as Array<{ id: number; embedding: Uint8Array }>;
   const ids = new Int32Array(rows.length);
   const vectors = new Float32Array(rows.length * kb.dims);
   rows.forEach((row, index) => {
     ids[index] = row.id;
-    if (row.embedding.byteLength === kb.dims * 4) blobToVector(row.embedding, vectors, index * kb.dims);
+    blobToVector(row.embedding, vectors, index * kb.dims);
   });
   const entry: Matrix = { kbId: kb.id, revision: kb.revision, dims: kb.dims, ids, vectors, bytes: vectors.byteLength + ids.byteLength };
   knowledgeCache.loads += 1;
@@ -146,9 +152,16 @@ export async function searchBases(all: readonly KbRow[], query: string, k: numbe
   const vectorHits: Array<{ id: number; score: number }> = [];
   let vectorFailed = false;
   let providerRemoved = false;
+  let changingModel = false;
   const groups = new Map<string, KbRow[]>();
   for (const kb of kbs) {
     if (kb.chunk_count === 0) continue;
+    // 2026-10-08: mid-change, keywords only (never two embedding spaces in one search).
+    if (kbChangingModel(kb.id)) {
+      vectorFailed = true;
+      changingModel = true;
+      continue;
+    }
     const key = `${kb.provider_id ?? ""}|${kb.embedding_model}|${kb.dims}`;
     groups.set(key, [...(groups.get(key) ?? []), kb]);
   }
@@ -181,7 +194,8 @@ export async function searchBases(all: readonly KbRow[], query: string, k: numbe
   const vectorIds = vectorHits.slice(0, CANDIDATES).map((hit) => hit.id);
   const keywordIds = keywordTop(kbs.map((kb) => kb.id), text, CANDIDATES);
   const fused = fuse([vectorIds, keywordIds]);
-  const outcome = (hits: RawHit[]): SearchOutcome => ({ hits, mode: vectorFailed ? "keyword" : "hybrid", ...(providerRemoved ? { notice: PROVIDER_REMOVED_NOTICE } : {}) });
+  const notice = providerRemoved ? PROVIDER_REMOVED_NOTICE : changingModel ? MODEL_CHANGING_NOTICE : null;
+  const outcome = (hits: RawHit[]): SearchOutcome => ({ hits, mode: vectorFailed ? "keyword" : "hybrid", ...(notice ? { notice } : {}) });
   if (fused.length === 0) return outcome([]);
   const rows = db.query(`SELECT c.id, c.kb_id, c.heading, c.text, s.id AS source_id, s.kind, s.ref_id, s.title FROM kb_chunks c JOIN kb_sources s ON s.id = c.source_id
     WHERE c.id IN (SELECT value FROM json_each($ids))`).all({ ids: JSON.stringify(fused.map((hit) => hit.id)) }) as Array<{ id: number; kb_id: string; heading: string | null; text: string; source_id: string; kind: SourceKind; ref_id: string | null; title: string }>;
