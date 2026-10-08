@@ -2,6 +2,13 @@
 
 Release notes for Nook, newest first. Upgrade steps for each release are in [docs/OPERATIONS.md](docs/OPERATIONS.md#upgrades).
 
+## v0.34.0 — 2026-10-08
+
+- **Admin limits for knowledge-base embeddings**: in **Settings → AI → Model providers**, each provider has a **Knowledge bases** section. An admin chooses whether knowledge bases may use the provider, allows any embedding model or only listed ones, and sets the largest size (64 to 3,072 dimensions).
+- **Enforced everywhere**: Change embedding model offers only allowed choices and the server refuses others; a new base takes the first allowed model and caps its size; a model that answers larger than the limit stops with an error after one call.
+- **Existing bases keep working**: a base already above a newly set limit keeps searching and indexing at its size, is never re-embedded on its own, and says the admin's limit is now lower.
+- No migration and no new settings.
+
 ## v0.33.0 — 2026-10-08
 
 - **Change a knowledge base's embedding model**: the owner can move a base to another provider, model, or size. Every source is embedded again at the owner's token cost; search is keyword-only until it finishes, and old vectors are deleted at once, so two models are never mixed. It counts as that hour's Re-index, except when the base's provider was removed, where it is the way back to full search.
