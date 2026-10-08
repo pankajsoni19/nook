@@ -2,7 +2,7 @@
 
 Only open work lives here. Shipped work is in [CHANGELOG.md](CHANGELOG.md), the docs site ("What's new") and `git log`. Plans of record: `DEVELOPMENT_PLAN.md` and `docs/plan/research/`. Contracts: [API](docs/plan/API_CONTRACTS.md) · [Threat model](docs/plan/THREAT_MODEL.md) · [Test plan](docs/plan/TEST_PLAN.md).
 
-**Current state (2026-10-07):** production runs **v0.32.0** (`2d3becf`: notification deep links, feed and routine controls on access pages, phone header, Settings, and chat polish; backup `mynotes-20261007T113841Z.tar.gz`). Released migrations are immutable: **001–044**. Messages takes **045**.
+**Current state (2026-10-08):** production runs **v0.33.0** (`2831b31`: knowledge-base model change, passage previews, groups, per-key search limits; chat-role notice, cut-reply charging, push labels; backup `mynotes-20261008T070848Z.tar.gz`). Released migrations are immutable: **001–044**. Messages takes **045**.
 
 ## In flight
 
