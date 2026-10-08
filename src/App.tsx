@@ -121,13 +121,13 @@ import { SEARCH_MAX_CHARS, type NoteSearchHit } from "./search/searchApi";
 import { useNoteSearch } from "./search/useNoteSearch";
 import { useWhiteboardSearch, WhiteboardSearchResults } from "./search/WhiteboardSearchResults";
 import { ModulesSettings } from "./ModulesSettings";
-import { hiddenEntryStep, hiddenModuleForApp, normalizeDisabledModules, recordPopDepth, isAppEnabled, isModuleEnabled, moduleOffHint, ModulesContext, parsePreferences, unavailableModules, type ModuleId, moduleDef } from "./modules";
+import { hiddenEntryStep, hiddenModuleForApp, normalizeDisabledModules, recordPopDepth, isAppEnabled, isModuleEnabled, moduleOffHint, ModulesContext, parsePreferences, routeGateModules, unavailableModules, type ModuleId, moduleDef } from "./modules";
 import { usePreferences, type PreferencesStatus } from "./usePreferences";
 
 type TotpState = { enabled: boolean; required: boolean; setupRequired: boolean };
 // `preferences` comes with /api/auth/me only (not with sign-in); see usePreferences.
 // `notices` (Wave 35 review N2c) comes with /api/auth/me only.
-type SessionResponse = { user: User; csrfToken: string; totp: TotpState; preferences?: unknown; notices?: { googleReset?: GoogleResetNotice | null }; features?: { vault?: boolean; agents?: boolean }; app?: { name?: string } };
+type SessionResponse = { user: User; csrfToken: string; totp: TotpState; preferences?: unknown; notices?: { googleReset?: GoogleResetNotice | null }; features?: { vault?: boolean; agents?: boolean; chatRoleOff?: boolean }; app?: { name?: string } };
 type ModulesSettingsProps = { disabledModules: readonly ModuleId[]; status: PreferencesStatus; onToggle: (id: ModuleId, enabled: boolean) => void; role?: Role; unavailable?: readonly ModuleId[] };
 type NoteSort = "updated-desc" | "updated-asc" | "created-desc" | "created-asc" | "title-asc" | "title-desc";
 
@@ -950,6 +950,9 @@ export function App() {
   const unavailable = useMemo(() => unavailableModules(session?.features), [session?.features]);
   const preferredDisabled = modulePreferences.preferences.disabledModules;
   const disabledModules = useMemo(() => unavailable.length ? normalizeDisabledModules([...preferredDisabled, ...unavailable]) : preferredDisabled, [preferredDisabled, unavailable]);
+  // TODO "Chat role message": the route gate lets /chat through when Chat is on but the role may
+  // not chat, so the module says "Chat is off for your role"; tiles and launchers still hide it.
+  const routeDisabled = useMemo(() => routeGateModules(disabledModules, preferredDisabled, session?.features), [disabledModules, preferredDisabled, session?.features]);
   // A sign-in path that did not say which modules the server offers (Google): ask once.
   const featuresUserId = session?.user.id ?? null;
   const featuresKnown = session?.features !== undefined;
@@ -1902,7 +1905,7 @@ export function App() {
     // D92: Back or Forward onto a module that is off skips that entry instead of replacing it
     // with a second Home entry. Depth 0 still falls through to the gate below, which replaces it.
     // A guest's Bin entry (Wave 38: no entry for them) is skipped like one with the module off.
-    const hiddenRoute = route.app === "team" && canManageTeam(session.user.role) ? null : route.app === "bin" && !binEntryShown(session.user.role, binEnabled) ? "bin" : hiddenModuleForApp(disabledModules, route.app);
+    const hiddenRoute = route.app === "team" && canManageTeam(session.user.role) ? null : route.app === "bin" && !binEntryShown(session.user.role, binEnabled) ? "bin" : hiddenModuleForApp(routeDisabled, route.app);
     const step = hiddenRoute ? hiddenEntryStep(dialogPopDirection(previousDepth, poppedDepth), poppedDepth) : "replace";
     if (hiddenRoute && step !== "replace") {
       // The Bin's hint is the hub's (it opens Security in place); the hint is for Home.
@@ -1962,11 +1965,11 @@ export function App() {
   // above depth 0 skip it in onPopState instead, see hiddenEntryStep). The server is not involved: the
   // module's API still works and keeps its own access rules (T97).
   useEffect(() => {
-    const hidden = hubGatesItself ? null : hiddenModuleForApp(disabledModules, activeApp);
+    const hidden = hubGatesItself ? null : hiddenModuleForApp(routeDisabled, activeApp);
     if (!session || session.totp.setupRequired || !hidden || leavingHiddenModuleRef.current) return;
     const app = activeApp;
     // A note that could not be saved keeps Notes open (the toast says why) until the choice changes.
-    const attempt = `${app}:${disabledModules.join(",")}`;
+    const attempt = `${app}:${routeDisabled.join(",")}`;
     if (hiddenLeaveFailedRef.current === attempt) return;
     leavingHiddenModuleRef.current = true;
     void (async () => {
@@ -2139,7 +2142,7 @@ export function App() {
     <button className="icon-button" onClick={() => setModuleHint(null)} aria-label="Dismiss"><X /></button>
   </div>}</>;
   // A hidden module's view never renders, even for the moment before the gate above replaces its route.
-  const shownApp: AppSection = activeApp !== "notes" && !hubGatesItself && !isAppEnabled(disabledModules, activeApp) ? "home" : activeApp;
+  const shownApp: AppSection = activeApp !== "notes" && !hubGatesItself && !isAppEnabled(routeDisabled, activeApp) ? "home" : activeApp;
   const account = { displayName: session.user.displayName, onSettings: () => openSettings(), onSignOut: signOut };
 
   // Notifications off (D92): no provider, so every bell renders nothing and stops polling.

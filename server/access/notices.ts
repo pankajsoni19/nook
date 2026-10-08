@@ -5,6 +5,8 @@ import { vaultTitleFor } from "../vault/access";
 import { sharedTitleFor } from "../agents/sharing";
 import { deviceLabelFromCode } from "../deviceLabels";
 import { paths } from "../mail/links";
+import { mayChatNow } from "../agents/status";
+import { userRole } from "../team/userRole";
 
 const LEVEL_WORDS: Record<Level, string> = { view: "Can view", comment: "Can comment", edit: "Can edit", manage: "Manager" };
 
@@ -118,9 +120,16 @@ function itemPath(kind: AccessKind, id: string, recipientId: string) {
   }
 }
 
-/** A shared agent, chat, or knowledge base: its page while the recipient can open it, else its list. */
+/**
+ * A shared agent, chat, or knowledge base: its page while the recipient can open it, else its list.
+ * A link into Chat (a shared chat, or a shared agent's new chat) needs the recipient to be able to
+ * chat now (TODO "Chat role message"): with Chat off or their role left out of "Who can chat", the
+ * notice opens the bell list (`/notifications`) like any other item they cannot open.
+ */
 function sharedPath(kind: "agent" | "chat" | "knowledge_base", id: string, recipientId: string, agentOpens: "chat" | "editor") {
-  const list = kind === "chat" || (kind === "agent" && agentOpens === "chat") ? paths.chats() : paths.settings(kind === "agent" ? "agents" : "knowledge");
+  const opensChat = kind === "chat" || (kind === "agent" && agentOpens === "chat");
+  if (opensChat && !mayChatNow(userRole(recipientId) ?? "guest")) return paths.notifications();
+  const list = opensChat ? paths.chats() : paths.settings(kind === "agent" ? "agents" : "knowledge");
   if (sharedTitleFor(kind, id, recipientId) === null) return list;
   if (kind === "chat") return built(() => paths.chat(id), list);
   if (kind === "knowledge_base") return built(() => paths.knowledgeBase(id), list);
@@ -305,7 +314,7 @@ export function listWords(words: readonly string[]) {
   return `${words.slice(0, -1).join(", ")}, and ${words.at(-1)}`;
 }
 
-export type AccessNoticeItem = { id: string; title: string; href: string; late: false; read: boolean; createdAt: string; occurrenceStart: null };
+export type AccessNoticeItem = { id: string; kind: "access"; title: string; href: string; late: false; read: boolean; createdAt: string; occurrenceStart: null };
 
 /** The newest `limit` notices for the bell, shaped like calendar notifications. */
 export function listAccessNotices(userId: string, options: { unread: boolean; limit: number }): AccessNoticeItem[] {
@@ -316,7 +325,7 @@ export function listAccessNotices(userId: string, options: { unread: boolean; li
     WHERE n.user_id = $userId AND ($unread = 0 OR n.read_at IS NULL) ORDER BY n.created_at DESC, n.rowid DESC LIMIT $limit`)
     .all({ userId, unread: options.unread ? 1 : 0, limit: options.limit }) as NoticeRow[];
   return rows.map((row) => ({
-    id: row.id, title: line(row, userId), href: accessNoticeHref(row, userId),
+    id: row.id, kind: "access" as const, title: line(row, userId), href: accessNoticeHref(row, userId),
     late: false, read: row.read_at !== null, createdAt: row.created_at, occurrenceStart: null
   }));
 }

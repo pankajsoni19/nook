@@ -163,7 +163,7 @@ describe("bell deep links (id-only hrefs, T68)", () => {
       VALUES (?, ?, ?, 'Bell key', 'note_draft', 'note', ?, 'One change', '{}', ?, ?)`).run(proposal, owner.userId, keyId, note, created, new Date(Date.now() + 86_400_000).toISOString());
     notifyProposals(owner.userId, keyId, 1);
     let bell = await send(owner, "GET", "/notifications");
-    expect(bell.body.items[0]).toMatchObject({ title: "Key “Bell key” suggested 1 change", href: `/inbox/p/${proposal}` });
+    expect(bell.body.items[0]).toMatchObject({ kind: "proposals", title: "Key “Bell key” suggested 1 change", href: `/inbox/p/${proposal}` });
     expectIdOnlyPath(bell.body.items[0].href);
     // Resolved: it opens beside History.
     db.query("UPDATE proposals SET status = 'rejected', resolved_at = ? WHERE id = ?").run(new Date().toISOString(), proposal);

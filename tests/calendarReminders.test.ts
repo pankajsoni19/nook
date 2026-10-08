@@ -204,7 +204,7 @@ describe("the dispatcher", () => {
     expect(reminder.nextFireAt).toBe(`${Y}-07-01T08:00:00.000Z`);
     reminders.runDispatch({ nowMs: at(`${Y}-07-01T08:00:20Z`) });
     const listed = await json<{ items: Array<{ title: string; href: string }> }>(await send(user, "GET", "/notifications"));
-    expect(listed.items).toMatchObject([{ title: "Call the plumber", href: "/notifications" }]);
+    expect(listed.items).toMatchObject([{ kind: "reminder", title: "Call the plumber", href: "/notifications" }]);
     expect(reminderRow(reminder.id)?.next_fire_at).toBeNull();
     expect((await json<{ reminders: unknown[] }>(await send(user, "GET", "/reminders"))).reminders).toEqual([]);
   });

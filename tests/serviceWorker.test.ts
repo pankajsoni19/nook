@@ -53,23 +53,45 @@ describe("public/sw.js", () => {
 
   test("a push fetches unread notifications with the session cookie and shows each with tag = id", async () => {
     const worker = loadWorker({ api: apiReturning([
-      { id: notificationId, title: "Dentist", href: `/calendar/event/${eventId}`, late: false },
-      { id: eventId, title: "Sneaky", href: "https://evil.example/x", late: true },
+      { id: notificationId, kind: "reminder", title: "Dentist", href: `/calendar/event/${eventId}`, late: false },
+      { id: eventId, kind: "reminder", title: "Sneaky", href: "https://evil.example/x", late: true },
       { id: "not-an-id", title: "Dropped", href: "/notifications" }
     ]) });
     await worker.dispatch("push");
     expect(worker.fetched).toEqual([{ url: "/api/notifications?unread=1&limit=5", init: { credentials: "same-origin", cache: "no-store", redirect: "error" } }]);
     expect(worker.shown).toEqual([
       { title: "Dentist", options: expect.objectContaining({ tag: notificationId, data: { path: `/calendar/event/${eventId}` } }) },
-      { title: "Sneaky", options: expect.objectContaining({ tag: eventId, data: { path: "/notifications" }, body: "Calendar reminder (delivered late)" }) }
+      { title: "Sneaky", options: expect.objectContaining({ tag: eventId, data: { path: "/notifications" }, body: "Calendar reminder · delivered late" }) }
     ]);
+  });
+
+  test("each push says its kind under the bell's own line, never more of the item (TODO \"Push notifications\")", async () => {
+    const ids = ["c1b2c3d4-e5f6-4a7b-9c8d-0e1f2a3b4c5d", "d1b2c3d4-e5f6-4a7b-9c8d-0e1f2a3b4c5d", "e1b2c3d4-e5f6-4a7b-9c8d-0e1f2a3b4c5d", "f1b2c3d4-e5f6-4a7b-9c8d-0e1f2a3b4c5d", "a2b2c3d4-e5f6-4a7b-9c8d-0e1f2a3b4c5d"];
+    const worker = loadWorker({ api: apiReturning([
+      { id: ids[0], kind: "reminder", title: "Dentist", href: `/calendar/event/${eventId}`, late: false, occurrenceStart: "2026-10-08T09:00:00.000Z" },
+      { id: ids[1], kind: "proposals", title: "Key “Weekly” suggested 3 changes", href: "/inbox", late: false },
+      { id: ids[2], kind: "access", title: "Ana shared the chat “Plans” with you", href: `/chat/${eventId}`, late: false },
+      { id: ids[3], kind: "__proto__", title: "Odd", href: "/notifications", late: false },
+      { id: ids[4], title: "No kind", href: "/notifications" }
+    ]) });
+    await worker.dispatch("push");
+    expect(worker.shown.map((item) => [item.title, item.options.body])).toEqual([
+      ["Dentist", "Calendar reminder"],
+      ["Key “Weekly” suggested 3 changes", "Suggested changes in your Inbox"],
+      ["Ana shared the chat “Plans” with you", "Sharing and access"],
+      ["Odd", "Notification"],
+      ["No kind", "Notification"]
+    ]);
+    // Nothing but the title, the kind's body, the tag, the icon, and the safe path.
+    for (const item of worker.shown) expect(Object.keys(item.options).sort()).toEqual(["body", "data", "icon", "tag"]);
+    expect(source).not.toContain("Calendar reminder (delivered late)");
   });
 
   test("a failed or empty fetch shows the generic notice", async () => {
     for (const api of [async () => new Response("", { status: 401 }), apiReturning([]), async () => { throw new Error("offline"); }]) {
       const worker = loadWorker({ api });
       await worker.dispatch("push");
-      expect(worker.shown).toEqual([{ title: "You have a reminder in Nook", options: expect.objectContaining({ tag: "nook-reminder", data: { path: "/notifications" } }) }]);
+      expect(worker.shown).toEqual([{ title: "You have a new notification in Nook", options: expect.objectContaining({ tag: "nook-reminder", data: { path: "/notifications" } }) }]);
     }
   });
 

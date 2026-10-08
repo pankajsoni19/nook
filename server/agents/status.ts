@@ -69,6 +69,19 @@ export function agentsFeature(role: string) {
   return db.query("SELECT 1 FROM agent_providers LIMIT 1").get() !== null;
 }
 
+/**
+ * Whether Chat is on but this person's role may not chat (`features.chatRoleOff`, TODO "Chat role
+ * message"). The tile stays hidden (`agentsFeature` is false), but /chat and its deep links show
+ * "Chat is off for your role" instead of going Home with "not available on this server". Guests never
+ * see the module at all (AC-O2). UI only (T97).
+ */
+export function chatRoleOff(role: string) {
+  return role !== "guest" && status.enabled && !roleMayChat(role);
+}
+
+/** Whether this person may open a chat now: the module is on and their role may chat. */
+export const mayChatNow = (role: string) => status.enabled && roleMayChat(role);
+
 /** 503 AGENTS_DISABLED while the module is off. */
 export function requireAgentsEnabled() {
   if (!status.enabled) throw new AgentError(503, "AGENTS_DISABLED", "Agent chat is not configured on this server");

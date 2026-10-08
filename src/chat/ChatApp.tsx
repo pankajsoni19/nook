@@ -163,10 +163,10 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
     })();
   }, [loadAgents, loadChats, loadStatus, loadUsage]);
   useEffect(() => {
-    if (!status?.enabled) return;
+    if (!status?.enabled || !status.canChat) return;
     const timer = window.setTimeout(() => { void loadChats(query); }, query ? 200 : 0);
     return () => window.clearTimeout(timer);
-  }, [loadChats, query, status?.enabled]);
+  }, [loadChats, query, status?.canChat, status?.enabled]);
 
   // The person may no longer chat: keep why, end the live answer with it, and reload the status (the "Chat is off" page).
   const loseAccess = useCallback(() => {
@@ -271,11 +271,13 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
         flash("Chat not found");
         go(chatRoute(), true);
       } else {
-        if (accessLost(reason)) loseAccess();
+        // A chat opened (a deep link, a bell link) by someone whose role may not chat: no answer
+        // stopped, so only the status reloads and the module shows "Chat is off for your role".
+        if (accessLost(reason)) { if (liveRef.current) loseAccess(); else void loadStatus(); }
         setDetailError(messageOf(reason, "Could not open this chat"));
       }
     }
-  }, [flash, follow, go, loseAccess]);
+  }, [flash, follow, go, loadStatus, loseAccess]);
 
   useEffect(() => {
     setMenuOpen(false);
