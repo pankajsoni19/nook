@@ -184,13 +184,15 @@ export function listKnowledge(userId: string): KnowledgeSummary[] {
 export function knowledgeDetail(kb: KbRow, userId: string, level: ShareLevel = kbLevel(kb, userId)): KnowledgeDetail {
   const rows = db.query("SELECT * FROM kb_sources WHERE kb_id = ? ORDER BY created_at, rowid").all(kb.id) as SourceRow[];
   const manager = level === "owner" || level === "manage";
+  const ownerActive = ownerIsActive(kb.owner_id);
   const sources = rows.map((row): KnowledgeSource => {
     const readable = canReadSource(userId, row.kind, row.ref_id);
     const shown = manager || readable;
     return {
       id: row.id, kind: row.kind, title: shown ? row.title : null, titleHidden: !shown, refId: shown ? row.ref_id : null,
       status: row.status, error: row.error, chunkCount: row.chunk_count, indexedAt: row.indexed_at, createdAt: row.created_at, bytes: row.bytes,
-      previewable: manager && readable
+      // A blocked owner's base answers nothing (M2), previews included.
+      previewable: manager && readable && ownerActive
     };
   });
   return { ...knowledgeSummary(kb, userId, level), sources };
@@ -372,12 +374,14 @@ export function sourceChunkPreviews(actor: { userId: string }, kbId: string, sou
   const { kb, level } = readableKb(kbId, actor.userId);
   const source = db.query("SELECT kind, ref_id FROM kb_sources WHERE id = ? AND kb_id = ?").get(sourceId, kb.id) as { kind: SourceKind; ref_id: string | null } | null;
   if (!source || level === "view") throw new AgentError(404, "NOT_FOUND", "Not found");
+  // M2: a blocked owner's base answers no search, so it shows no passages either.
+  if (!ownerIsActive(kb.owner_id)) throw new AgentError(404, "NOT_FOUND", "Not found");
   if (!canReadSource(actor.userId, source.kind, source.ref_id)) throw new AgentError(403, "PREVIEW_REFUSED", "You can't open this source, so its passages are not shown");
   const size = Math.max(1, Math.min(KNOWLEDGE_BOUNDS.previewPage.max, Math.floor(limit) || KNOWLEDGE_BOUNDS.previewPage.default));
   const start = Math.max(0, Math.floor(offset) || 0);
   const total = (db.query("SELECT COUNT(*) AS count FROM kb_chunks WHERE source_id = ?").get(sourceId) as { count: number }).count;
   // Only the preview's characters leave SQLite (substr), never a chunk's whole text.
-  const rows = db.query(`SELECT ord, heading, substr(text, 1, ${KNOWLEDGE_BOUNDS.previewChars}) AS preview, length(text) AS chars FROM kb_chunks
+  const rows = db.query(`SELECT ord, substr(heading, 1, ${KNOWLEDGE_BOUNDS.previewChars}) AS heading, substr(text, 1, ${KNOWLEDGE_BOUNDS.previewChars}) AS preview, length(text) AS chars FROM kb_chunks
     WHERE source_id = ? ORDER BY ord, id LIMIT ? OFFSET ?`).all(sourceId, size, start) as Array<{ ord: number; heading: string | null; preview: string; chars: number }>;
   return { chunks: rows.map((row) => ({ ord: row.ord, heading: row.heading, preview: row.preview, chars: row.chars })), total, offset: start, limit: size };
 }

@@ -11,6 +11,7 @@ Nothing. Waiting for the operator's next pick.
 ## Next features (operator to pick)
 
 - [ ] **Messages module** (Slack-like: channels, DMs, threads, notes tab, webhooks, unfurl, reactions). The plan is ready: `docs/plan/research/2026-09-30-messages-module.md`, migration 045. Waiting for the operator's go-ahead.
+- [ ] **Knowledge: admin cap on embedding models and sizes** (v0.33.0 review LOW-5): a base's owner may pick any model id and 64–3,072 dimensions with Change embedding model; let an admin limit the models and the largest size per provider.
 
 ## Known LOW leftovers
 

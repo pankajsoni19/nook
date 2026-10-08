@@ -445,6 +445,62 @@ describe("search_knowledge's own limit for keys", () => {
   });
 });
 
+describe("v0.33.0 review LOWs", () => {
+  test("LOW-1: a blocked owner's base shows no previews (404, previewable false)", async () => {
+    const blockedOwner = await createUser("KBDEF previews blocked owner");
+    const kbId = await newBase(blockedOwner, "Blocked previews");
+    const sourceId = await addText(blockedOwner, kbId, "FAQ", FAQ);
+    await settle();
+    await shareItem(blockedOwner, `/knowledge/${kbId}`, [{ id: manager.userId, level: "manage" }]);
+    expect((await send(manager, "GET", `/knowledge/${kbId}/sources/${sourceId}/chunks`)).status).toBe(200);
+    teamService.blockUser({ id: admin.userId, role: "admin" }, blockedOwner.userId, null, { via: "web" });
+    try {
+      const refused = await send(manager, "GET", `/knowledge/${kbId}/sources/${sourceId}/chunks`);
+      expect(refused.status).toBe(404);
+      expect(JSON.stringify(refused.body)).not.toContain("refunds");
+      const page = await send(manager, "GET", `/knowledge/${kbId}`);
+      expect(page.body.knowledgeBase.sources.map((item: { previewable: boolean }) => item.previewable)).toEqual([false]);
+    } finally {
+      teamService.unblockUser({ id: admin.userId, role: "admin" }, blockedOwner.userId, { via: "web" });
+    }
+  });
+
+  test("LOW-2: the member access page's group count leaves binned items out, like the group page", async () => {
+    const group = (await send(admin, "POST", "/team/groups", { name: `KBDEF count ${crypto.randomUUID().slice(0, 8)}` })).body.group;
+    expect((await send(admin, "PUT", `/team/groups/${group.id}/members`, { userIds: [friend.userId], revision: group.revision })).status).toBe(200);
+    const kbId = await newBase(owner, "Counted base");
+    await shareItem(owner, `/knowledge/${kbId}`, [], [{ id: group.id, level: "view" }]);
+    const memberCount = async () => ((await send(admin, "GET", `/team/members/${friend.userId}/access`)).body.groups as Array<{ id: string; grantCount: number }>).find((row) => row.id === group.id)!.grantCount;
+    const pageCount = async () => (await send(admin, "GET", `/team/groups/${group.id}`)).body.group.grantCount as number;
+    expect([await memberCount(), await pageCount()]).toEqual([1, 1]);
+    expect((await send(owner, "DELETE", `/knowledge/${kbId}`, {})).status).toBe(200);
+    expect([await memberCount(), await pageCount()]).toEqual([0, 0]);
+  });
+
+  test("LOW-3: the model change audit counts the vectors dropped, not the trigger writes", async () => {
+    const kbId = await newBase(owner, "Audit count");
+    await addText(owner, kbId, "FAQ", FAQ);
+    await settle();
+    const chunks = kbRow(kbId)!.chunk_count;
+    expect(chunks).toBeGreaterThan(0);
+    expect((await send(owner, "POST", `/knowledge/${kbId}/model`, { providerId: providerBId, model: "text-embedding-3-large", dims: 256 })).status).toBe(200);
+    const audit = db.query("SELECT metadata_json FROM audit_log WHERE event_type = 'knowledge.model_change' ORDER BY rowid DESC LIMIT 1").get() as { metadata_json: string };
+    expect(JSON.parse(audit.metadata_json)).toMatchObject({ kbId, vectorsDropped: chunks });
+    await settle();
+  });
+
+  test("LOW-4: a preview's heading path is cut at 300 characters too", async () => {
+    const kbId = await newBase(owner, "Long heading");
+    const heading = `${"Very long heading words ".repeat(20)}end`;
+    const sourceId = await addText(owner, kbId, "Long", `# ${heading}\n\nThe body text.`);
+    await settle();
+    const page = await send(owner, "GET", `/knowledge/${kbId}/sources/${sourceId}/chunks`);
+    expect(page.status).toBe(200);
+    expect(page.body.chunks[0].heading.length).toBe(300);
+    expect(heading.startsWith(page.body.chunks[0].heading)).toBe(true);
+  });
+});
+
 describe("Re-index hour and search limit survive a restart", () => {
   const probe = join(import.meta.dir, "support", "knowledgeLimitsProbe.ts");
   test.skipIf(!Bun.which("bun"))("a second process on the same data still refuses (429 + Retry-After) and keeps the key's count", () => {

@@ -13,6 +13,7 @@ import { VaultError } from "../vault/access";
 import { cadenceText, type Cadence } from "../../shared/routineSchedule";
 import { lowerSharedDirect, memberSharedRows, removeSharedDirect, resetSharedDirect, sharedDirectCount, type ShareKind } from "../agents/sharing";
 import { groupMembershipChangedHook } from "../knowledge/hooks";
+import { groupSharedCountSql } from "./groups";
 import { adminLowerVaultMember, adminRemoveVaultMember, memberVaults, resetVaultMemberships, rotateOnLostReach, snapshotVaultReach, vaultMemberCount } from "../vault/members";
 
 /**
@@ -146,7 +147,7 @@ function keySummaries(viewerId: string, userId: string): KeySummary[] {
 function groupsOf(userId: string) {
   return (db.query(`SELECT g.id, g.name, gm.added_at, gm.added_by, a.display_name AS added_by_name,
       (SELECT COUNT(*) FROM group_grants gg WHERE gg.group_id = g.id)
-        + (SELECT COUNT(*) FROM agent_access aa WHERE aa.group_id = g.id AND aa.resource_kind IN ('agent','chat','knowledge_base')) AS grant_count,
+        + ${groupSharedCountSql("g")} AS grant_count,
       (SELECT COUNT(*) FROM group_members x WHERE x.group_id = g.id) AS member_count
     FROM group_members gm JOIN user_groups g ON g.id = gm.group_id LEFT JOIN users a ON a.id = gm.added_by
     WHERE gm.user_id = ? ORDER BY g.name COLLATE NOCASE, g.id`).all(userId) as Array<{ id: string; name: string; added_at: string; added_by: string | null; added_by_name: string | null; grant_count: number; member_count: number }>)

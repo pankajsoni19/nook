@@ -754,3 +754,5 @@ The operator chose "start building" with every open decision at its **default**:
 - **Re-index hour in SQLite:** `agent_rate_limits` row `kb_reindex:<id>` (its `window_start` is the last re-index); 429 `REINDEX_RATE_LIMITED` + `Retry-After` as before; the hourly sweep drops rows older than two days. `tests/support/knowledgeLimitsProbe.ts` proves it, and the key's day count, across two `bun --no-env-file` processes.
 
 Tests: `tests/knowledgeDeferred.test.ts`. **Still deferred:** ranking signals beyond RRF (recency, source weights).
+
+**v0.33.0 review fixes (2026-10-08).** (LOW-1) A blocked owner's base shows no chunk previews (404, `previewable` false), as it answers no search (M2). (LOW-2) The member access page's group `grantCount` leaves binned agents, chats, and knowledge bases out, with the same SQL as the group page (`groupSharedCountSql`). (LOW-3) The `knowledge.model_change` audit counts the vectors dropped before the delete (the delete's `changes` included the FTS trigger's writes). (LOW-4) A preview's heading path is cut at 300 characters too. LOW-5 (an admin cap on embedding models and sizes) is in TODO.md.

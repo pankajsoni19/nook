@@ -399,7 +399,9 @@ export function changeEmbeddingModel(actor: { userId: string }, kb: KbRow, input
     // Chunks are replaced, never updated (042's trigger): copies without a vector keep keyword search, then the originals go.
     const last = (db.query("SELECT COALESCE(MAX(id), 0) AS id FROM kb_chunks").get() as { id: number }).id;
     db.query(`INSERT INTO kb_chunks (kb_id, source_id, ord, heading, text, embedding) SELECT kb_id, source_id, ord, heading, text, X'' FROM kb_chunks WHERE kb_id = ? AND id <= ? ORDER BY id`).run(kb.id, last);
-    const dropped = db.query("DELETE FROM kb_chunks WHERE kb_id = ? AND id <= ?").run(kb.id, last).changes;
+    // Counted first: `.changes` of the DELETE would include the FTS trigger's writes.
+    const dropped = (db.query("SELECT COUNT(*) AS count FROM kb_chunks WHERE kb_id = ? AND id <= ?").get(kb.id, last) as { count: number }).count;
+    db.query("DELETE FROM kb_chunks WHERE kb_id = ? AND id <= ?").run(kb.id, last);
     refreshKbCounts(kb.id);
     recordReindex(kb.id, at);
     audit(actor.userId, null, "knowledge.model_change", { kbId: kb.id, providerId: provider.id, model, dims, sources, vectorsDropped: dropped, ...(providerRemoved ? { providerWasRemoved: true } : {}) });

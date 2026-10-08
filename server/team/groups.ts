@@ -45,14 +45,20 @@ const changed = (revision: number) => new GroupError(409, "GROUP_CHANGED", "Some
 
 type GroupRow = { id: string; name: string; description: string | null; created_at: string; updated_at: string; revision: number; member_count: number; guest_count: number; grant_count: number; shared_count: number };
 
+/**
+ * The live (not binned) agents, chats, and knowledge bases shared with the group aliased `alias`
+ * (2026-10-08). Shared by the group pages and the member access page's groups, so both counts agree.
+ */
+export const groupSharedCountSql = (alias: string) => `(SELECT COUNT(*) FROM agent_access aa WHERE aa.group_id = ${alias}.id AND (
+      (aa.resource_kind = 'agent' AND EXISTS (SELECT 1 FROM agents x WHERE x.id = aa.resource_id AND x.deleted_at IS NULL))
+      OR (aa.resource_kind = 'chat' AND EXISTS (SELECT 1 FROM chats x WHERE x.id = aa.resource_id AND x.deleted_at IS NULL))
+      OR (aa.resource_kind = 'knowledge_base' AND EXISTS (SELECT 1 FROM knowledge_bases x WHERE x.id = aa.resource_id AND x.deleted_at IS NULL))))`;
+
 const groupSelect = `SELECT g.id, g.name, g.description, g.created_at, g.updated_at, g.revision,
     (SELECT COUNT(*) FROM group_members gm WHERE gm.group_id = g.id) AS member_count,
     (SELECT COUNT(*) FROM group_members gm JOIN users u ON u.id = gm.user_id WHERE gm.group_id = g.id AND u.role = 'guest') AS guest_count,
     (SELECT COUNT(*) FROM group_grants gg WHERE gg.group_id = g.id) AS grant_count,
-    (SELECT COUNT(*) FROM agent_access aa WHERE aa.group_id = g.id AND (
-      (aa.resource_kind = 'agent' AND EXISTS (SELECT 1 FROM agents x WHERE x.id = aa.resource_id AND x.deleted_at IS NULL))
-      OR (aa.resource_kind = 'chat' AND EXISTS (SELECT 1 FROM chats x WHERE x.id = aa.resource_id AND x.deleted_at IS NULL))
-      OR (aa.resource_kind = 'knowledge_base' AND EXISTS (SELECT 1 FROM knowledge_bases x WHERE x.id = aa.resource_id AND x.deleted_at IS NULL)))) AS shared_count
+    ${groupSharedCountSql("g")} AS shared_count
   FROM user_groups g`;
 
 /**
