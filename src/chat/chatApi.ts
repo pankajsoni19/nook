@@ -1,5 +1,5 @@
 import { api, ApiError, getCsrfToken, noteRequestOutcome } from "../api";
-import type { AgentApiUsage, AgentProviderChoice, AuditFacets, AuditRunDetail, AuditRunSummary, AgentDetail, AgentSettings, AgentSummary, AgentToolRef, ChatDetail, ChatMessage, ChatUpdateEvent, ChatSummary, DailyUsage, DeclaredStdioServer, LinkableKey, NookLink, ProviderCompat, ProviderSummary, PublicLinkState, RunEvent, ServerAuthKind, ServerAvailability, ToolCatalog, ToolPolicy, ToolServerSummary } from "../../shared/agents";
+import type { AgentApiUsage, AgentProviderChoice, AuditFacets, AuditRunDetail, AuditRunSummary, AgentDetail, AgentSettings, AgentSummary, AgentToolRef, ChatDetail, ChatMessage, ChatUpdateEvent, ChatSummary, DailyUsage, DeclaredStdioServer, LinkableKey, NookLink, ProviderCompat, ProviderKnowledgePolicy, ProviderSummary, PublicLinkState, RunEvent, ServerAuthKind, ServerAvailability, ToolCatalog, ToolPolicy, ToolServerSummary } from "../../shared/agents";
 
 /** The agent chat API (docs/plan/API_CONTRACTS.md § Agent chat), plus the SSE reader for runs. */
 
@@ -57,7 +57,7 @@ export const agentLink = (agentId: string) => api<{ link: NookLink; keys: Linkab
 export const setAgentLink = (agentId: string, nookKeyId: string | null) => api<{ link: NookLink }>(`/agents/${agentId}/link`, { method: "PUT", body: JSON.stringify({ nookKeyId }) });
 
 // Admin (Settings → AI).
-export type ProviderInput = { name: string; baseUrl?: string; apiKey?: string | null; defaultModel?: string; compat?: Partial<ProviderCompat>; isDefault?: boolean };
+export type ProviderInput = { name: string; baseUrl?: string; apiKey?: string | null; defaultModel?: string; compat?: Partial<ProviderCompat>; isDefault?: boolean; knowledge?: Partial<ProviderKnowledgePolicy> };
 export const listProviders = () => api<{ providers: ProviderSummary[] }>("/agents/admin/providers");
 export const createProvider = (input: ProviderInput) => api<{ provider: ProviderSummary }>("/agents/admin/providers", { method: "POST", body: JSON.stringify(input) });
 export const updateProvider = (id: string, input: Partial<ProviderInput> & { expectedRevision: number; removeSecret?: boolean }) => api<{ provider: ProviderSummary }>(`/agents/admin/providers/${id}`, { method: "PATCH", body: JSON.stringify(input) });

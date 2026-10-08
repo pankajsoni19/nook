@@ -10,6 +10,7 @@ import { useHistoryDialogGuard } from "../ui/useHistoryDialogGuard";
 import { AGENT_BOUNDS, AGENT_ROLE_OPTIONS, DEFAULT_BASE_URL, DEFAULT_MODEL, type AgentRole, type AgentSettings, type ProviderSummary } from "../../shared/agents";
 import { agentsStatus, createProvider, deleteProvider, listProviders, messageOf, readSettings, testProvider, updateProvider, writeSettings, errorCode, type AgentsStatus, type ProviderTest } from "./chatApi";
 import { ToolServersSection } from "./ToolServers";
+import { policyDraft, policyFromDraft, policySummary, ProviderKnowledgeFields } from "./ProviderKnowledgePolicy";
 import { HUB_TITLE_ID } from "../settings/hubModel";
 import "./chat.css";
 
@@ -125,6 +126,7 @@ export function AiSettings({ flash, tabs, tab, onSelectTab }: { flash: (message:
             <div><dt>Default model</dt><dd><code>{provider.defaultModel}</code></dd></div>
             <div><dt>Token parameter</dt><dd><code>{provider.compat.tokenParam}</code></dd></div>
             <div><dt>Context</dt><dd>{provider.compat.contextTokens.toLocaleString()} tokens{provider.compat.streamUsage ? "" : " · usage estimated"}</dd></div>
+            <div><dt>Knowledge bases</dt><dd>{policySummary(provider.knowledge)}</dd></div>
           </dl>
           {result && result !== "running" && <p className={`ai-test ${result.ok ? "ok" : "failed"}`} role="status">
             {result.models.ok ? `Models: ${result.models.count} in ${result.models.latencyMs} ms.` : `Models: ${result.models.error ?? "failed"}.`} {result.completion.ok ? `Completion: ok (${result.completion.model}) in ${result.completion.latencyMs} ms.` : `Completion: ${result.completion.error ?? "failed"}.`}
@@ -194,6 +196,7 @@ function ProviderDialog({ provider, onCancel, onSaved }: { provider: ProviderSum
   const [tokenParam, setTokenParam] = useState<"max_completion_tokens" | "max_tokens">(provider?.compat.tokenParam ?? "max_completion_tokens");
   const [streamUsage, setStreamUsage] = useState(provider?.compat.streamUsage ?? true);
   const [contextTokens, setContextTokens] = useState(provider?.compat.contextTokens ?? 128_000);
+  const [knowledge, setKnowledge] = useState(() => policyDraft(provider?.knowledge));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const ids = { name: useId(), url: useId(), key: useId(), model: useId(), context: useId(), param: useId() };
@@ -202,12 +205,14 @@ function ProviderDialog({ provider, onCancel, onSaved }: { provider: ProviderSum
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (!name.trim()) return setError("Enter a name.");
+    const policy = policyFromDraft(knowledge);
+    if ("error" in policy) return setError(policy.error);
     setBusy(true);
     setError(null);
     const compat = { tokenParam, streamUsage, contextTokens };
     try {
-      if (provider) await updateProvider(provider.id, { name: name.trim(), baseUrl: baseUrl.trim(), ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}), removeSecret, defaultModel: defaultModel.trim() || DEFAULT_MODEL, compat, expectedRevision: provider.revision });
-      else await createProvider({ name: name.trim(), baseUrl: baseUrl.trim(), apiKey: apiKey.trim() || null, defaultModel: defaultModel.trim() || DEFAULT_MODEL, compat });
+      if (provider) await updateProvider(provider.id, { name: name.trim(), baseUrl: baseUrl.trim(), ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}), removeSecret, defaultModel: defaultModel.trim() || DEFAULT_MODEL, compat, knowledge: policy.policy, expectedRevision: provider.revision });
+      else await createProvider({ name: name.trim(), baseUrl: baseUrl.trim(), apiKey: apiKey.trim() || null, defaultModel: defaultModel.trim() || DEFAULT_MODEL, compat, knowledge: policy.policy });
       setApiKey("");
       onSaved();
     } catch (reason) {
@@ -233,6 +238,7 @@ function ProviderDialog({ provider, onCancel, onSaved }: { provider: ProviderSum
       <label htmlFor={ids.context}>Context window (tokens)</label>
       <input id={ids.context} type="number" min={1024} max={10_000_000} value={contextTokens} onChange={(event) => setContextTokens(Math.min(10_000_000, Math.max(1024, Math.floor(Number(event.target.value) || 1024))))} />
       <label className="ai-check"><input type="checkbox" checked={streamUsage} onChange={(event) => setStreamUsage(event.target.checked)} />The server reports token usage while streaming (off: tokens are estimated)</label>
+      <ProviderKnowledgeFields providerId={provider?.id ?? null} draft={knowledge} onChange={setKnowledge} disabled={busy} />
       {error && <p className="form-error" role="alert">{error}</p>}
       <footer className="file-dialog-actions">
         <button type="button" className="secondary-button" onClick={onCancel} disabled={busy}>Cancel</button>

@@ -1,5 +1,5 @@
 import { audit, db, now } from "../db";
-import { AGENT_BOUNDS, DEFAULT_BASE_URL, DEFAULT_COMPAT, DEFAULT_EMBEDDING_DIMS, DEFAULT_EMBEDDING_MODEL, DEFAULT_MODEL, type AgentProviderChoice, type ProviderCompat, type ProviderSummary } from "../../shared/agents";
+import { AGENT_BOUNDS, DEFAULT_BASE_URL, DEFAULT_COMPAT, DEFAULT_EMBEDDING_DIMS, DEFAULT_EMBEDDING_MODEL, DEFAULT_KNOWLEDGE_POLICY, DEFAULT_MODEL, EMBEDDING_MODEL_ID, KNOWLEDGE_POLICY_BOUNDS, policyAllowsModel, policyMaxDims, type AgentProviderChoice, type ProviderCompat, type ProviderKnowledgePolicy, type ProviderSummary } from "../../shared/agents";
 import type { KnowledgeEmbeddingChoice } from "../../shared/knowledge";
 import { checkSavedEndpoint, EgressError } from "./egress";
 import { completeStreaming, listModels, ProviderError, type ProviderConnection } from "./loop";
@@ -31,10 +31,34 @@ export function parseCompat(json: string | null): ProviderCompat {
   };
 }
 
+/**
+ * The knowledge base policy (2026-10-08) kept on the same JSON column as `compat`, under `knowledge`
+ * (no migration). Anything malformed reads as the default (any model, up to 3,072, allowed).
+ */
+export function parseKnowledgePolicy(json: string | null): ProviderKnowledgePolicy {
+  let value: { knowledge?: Partial<ProviderKnowledgePolicy> } | null = {};
+  try { value = json ? JSON.parse(json) as typeof value : {}; } catch { value = {}; }
+  const policy: Partial<ProviderKnowledgePolicy> = value && typeof value.knowledge === "object" && value.knowledge !== null ? value.knowledge : {};
+  const models = Array.isArray(policy.models)
+    ? [...new Set(policy.models.filter((model): model is string => typeof model === "string" && model.length <= KNOWLEDGE_POLICY_BOUNDS.modelName && EMBEDDING_MODEL_ID.test(model)))].slice(0, KNOWLEDGE_POLICY_BOUNDS.models)
+    : null;
+  const maxDims = typeof policy.maxDims === "number" && Number.isInteger(policy.maxDims) && policy.maxDims >= KNOWLEDGE_POLICY_BOUNDS.minDims && policy.maxDims <= KNOWLEDGE_POLICY_BOUNDS.maxDims ? policy.maxDims : null;
+  return { enabled: policy.enabled !== false, models: models && models.length ? models : null, maxDims };
+}
+
+const samePolicy = (a: ProviderKnowledgePolicy, b: ProviderKnowledgePolicy) => JSON.stringify(a) === JSON.stringify(b);
+
+/** The knowledge base policy of a provider, or null when the provider is gone. */
+export function knowledgePolicyOf(providerId: string | null): ProviderKnowledgePolicy | null {
+  if (!providerId) return null;
+  const row = db.query("SELECT compat_json FROM agent_providers WHERE id = ?").get(providerId) as { compat_json: string } | null;
+  return row ? parseKnowledgePolicy(row.compat_json) : null;
+}
+
 export const providerSummary = (row: ProviderRow): ProviderSummary => ({
   id: row.id, name: row.name, baseUrl: row.base_url, defaultModel: row.default_model, embeddingModel: row.embedding_model, embeddingDims: row.embedding_dims,
   compat: parseCompat(row.compat_json), isDefault: row.is_default === 1, hasSecret: row.api_key_ct !== null, hint: shownHint(row.api_key_ct, row.api_key_hint),
-  revision: row.revision, createdAt: row.created_at, updatedAt: row.updated_at
+  revision: row.revision, createdAt: row.created_at, updatedAt: row.updated_at, knowledge: parseKnowledgePolicy(row.compat_json)
 });
 
 export function listProviders(): ProviderSummary[] {
@@ -50,6 +74,8 @@ export function providerRow(id: string): ProviderRow {
 export type ProviderInput = {
   name: string; baseUrl?: string; apiKey?: string | null; defaultModel?: string; embeddingModel?: string | null; embeddingDims?: number | null;
   compat?: Partial<ProviderCompat>; isDefault?: boolean;
+  /** The knowledge base policy (2026-10-08); fields left out keep their value. */
+  knowledge?: Partial<ProviderKnowledgePolicy>;
 };
 
 /**
@@ -68,7 +94,14 @@ function normalizeBaseUrl(value: string) {
   return trimmed;
 }
 
-const compatJson = (current: ProviderCompat, patch: Partial<ProviderCompat> | undefined) => JSON.stringify(parseCompat(JSON.stringify({ ...current, ...(patch ?? {}) })));
+/** The column's JSON: the compatibility options, and the knowledge policy only when it is not the default. */
+const compatJson = (current: ProviderCompat, patch: Partial<ProviderCompat> | undefined, knowledge: ProviderKnowledgePolicy) =>
+  JSON.stringify({ ...parseCompat(JSON.stringify({ ...current, ...(patch ?? {}) })), ...(samePolicy(knowledge, DEFAULT_KNOWLEDGE_POLICY) ? {} : { knowledge }) });
+/** A policy patch over the current policy, normalized as it is read back. */
+const mergedPolicy = (current: ProviderKnowledgePolicy, patch: Partial<ProviderKnowledgePolicy> | undefined) =>
+  parseKnowledgePolicy(JSON.stringify({ knowledge: { ...current, ...(patch ?? {}) } }));
+/** What the audit records of a policy (model ids are not secret; never a URL or key). */
+const policyAudit = (policy: ProviderKnowledgePolicy) => ({ enabled: policy.enabled, models: policy.models, maxDims: policy.maxDims });
 
 export function createProvider(actorId: string, input: ProviderInput): ProviderSummary {
   return db.transaction(() => {
@@ -79,13 +112,14 @@ export function createProvider(actorId: string, input: ProviderInput): ProviderS
     const makeDefault = input.isDefault === true || count === 0;
     if (makeDefault) db.query("UPDATE agent_providers SET is_default = 0 WHERE is_default = 1").run();
     const apiKey = input.apiKey?.trim() || null;
+    const policy = mergedPolicy(DEFAULT_KNOWLEDGE_POLICY, input.knowledge);
     db.query(`INSERT INTO agent_providers (id, name, base_url, api_key_ct, api_key_hint, default_model, embedding_model, embedding_dims, compat_json, is_default, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
       id, input.name.trim(), normalizeBaseUrl(input.baseUrl ?? DEFAULT_BASE_URL), apiKey ? sealSecret("provider", id, apiKey) : null, apiKey ? secretHint(apiKey) : null,
       (input.defaultModel ?? DEFAULT_MODEL).trim() || DEFAULT_MODEL, input.embeddingModel?.trim() || null, input.embeddingDims ?? null,
-      compatJson(DEFAULT_COMPAT, input.compat), makeDefault ? 1 : 0, timestamp, timestamp
+      compatJson(DEFAULT_COMPAT, input.compat, policy), makeDefault ? 1 : 0, timestamp, timestamp
     );
-    audit(actorId, null, "agents.provider.create", { providerId: id, hasSecret: apiKey !== null });
+    audit(actorId, null, "agents.provider.create", { providerId: id, hasSecret: apiKey !== null, ...(samePolicy(policy, DEFAULT_KNOWLEDGE_POLICY) ? {} : { knowledgePolicy: policyAudit(policy) }) });
     return providerSummary(providerRow(id));
   })();
 }
@@ -100,14 +134,17 @@ export function updateProvider(actorId: string, id: string, input: Partial<Provi
     const hint = input.removeSecret ? null : apiKey ? secretHint(apiKey) : row.api_key_hint;
     if (input.isDefault === true) db.query("UPDATE agent_providers SET is_default = 0 WHERE is_default = 1 AND id <> ?").run(id);
     if (input.isDefault === false && row.is_default === 1) throw new AgentError(409, "DEFAULT_REQUIRED", "Make another provider the default first");
+    const policyBefore = parseKnowledgePolicy(row.compat_json);
+    const policy = mergedPolicy(policyBefore, input.knowledge);
     db.query(`UPDATE agent_providers SET name = ?, base_url = ?, api_key_ct = ?, api_key_hint = ?, default_model = ?, embedding_model = ?, embedding_dims = ?, compat_json = ?,
       is_default = ?, revision = revision + 1, updated_at = ? WHERE id = ?`).run(
       (input.name ?? row.name).trim(), input.baseUrl !== undefined ? normalizeBaseUrl(input.baseUrl) : row.base_url, apiKeyCt, hint,
       (input.defaultModel ?? row.default_model).trim() || DEFAULT_MODEL, input.embeddingModel !== undefined ? input.embeddingModel?.trim() || null : row.embedding_model,
-      input.embeddingDims !== undefined ? input.embeddingDims : row.embedding_dims, compatJson(parseCompat(row.compat_json), input.compat),
+      input.embeddingDims !== undefined ? input.embeddingDims : row.embedding_dims, compatJson(parseCompat(row.compat_json), input.compat, policy),
       input.isDefault === true ? 1 : row.is_default, now(), id
     );
-    audit(actorId, null, "agents.provider.update", { providerId: id, secretChanged: apiKey !== null || input.removeSecret === true });
+    // 2026-10-08: a changed knowledge policy is recorded with its new value (bases over it are grandfathered, never re-embedded).
+    audit(actorId, null, "agents.provider.update", { providerId: id, secretChanged: apiKey !== null || input.removeSecret === true, ...(samePolicy(policy, policyBefore) ? {} : { knowledgePolicy: policyAudit(policy) }) });
     return providerSummary(providerRow(id));
   })();
   // Wave 44 fixes (M3): a provider pointed at another address re-embeds the knowledge bases made with it.
@@ -179,18 +216,34 @@ export function providerChoices(): AgentProviderChoice[] {
 /**
  * Change embedding model's provider list (2026-10-08, a knowledge base's owner): names, each
  * provider's embedding defaults, and the embedding models an admin's Test or model list last saw (in
- * memory). Never a base URL, a key, or a hint.
+ * memory). Never a base URL, a key, or a hint. Only providers the admin's knowledge policy allows;
+ * with a model list, `models` is that list (no free text) and the defaults are moved inside the policy.
  */
 export function providerEmbeddingChoices(): KnowledgeEmbeddingChoice[] {
   const fallback = defaultProvider()?.id ?? null;
-  return (db.query("SELECT id, name, embedding_model, embedding_dims FROM agent_providers ORDER BY is_default DESC, name COLLATE NOCASE, created_at").all() as Array<{ id: string; name: string; embedding_model: string | null; embedding_dims: number | null }>).map((row) => {
+  return (db.query("SELECT id, name, embedding_model, embedding_dims, compat_json FROM agent_providers ORDER BY is_default DESC, name COLLATE NOCASE, created_at").all() as Array<{ id: string; name: string; embedding_model: string | null; embedding_dims: number | null; compat_json: string }>).flatMap((row) => {
+    const policy = parseKnowledgePolicy(row.compat_json);
+    if (!policy.enabled) return [];
+    const defaults = embeddingDefaults(row, policy);
     const cached = modelCache.get(row.id)?.models.filter((model) => NOT_CHAT.test(model)) ?? null;
-    return {
-      id: row.id, name: row.name, isDefault: row.id === fallback, embeddingModel: row.embedding_model?.trim() || DEFAULT_EMBEDDING_MODEL,
-      embeddingDims: row.embedding_dims && row.embedding_dims >= 64 && row.embedding_dims <= 3072 ? row.embedding_dims : DEFAULT_EMBEDDING_DIMS,
-      models: cached && cached.length ? cached.slice(0, 50) : null
-    };
+    return [{
+      id: row.id, name: row.name, isDefault: row.id === fallback, embeddingModel: defaults.model, embeddingDims: defaults.dims,
+      models: policy.models ? [...policy.models] : cached && cached.length ? cached.slice(0, 50) : null,
+      anyModel: policy.models === null, maxDims: policyMaxDims(policy)
+    }];
   });
+}
+
+/**
+ * A provider's embedding model and size for a new base (and Change embedding model's defaults),
+ * inside its knowledge policy: the provider's own defaults, else the first allowed model and at most
+ * the largest allowed size (2026-10-08: adjusted to the policy the admin set, never refused for it).
+ */
+export function embeddingDefaults(row: { embedding_model: string | null; embedding_dims: number | null }, policy: ProviderKnowledgePolicy): { model: string; dims: number } {
+  const own = row.embedding_model?.trim() || DEFAULT_EMBEDDING_MODEL;
+  const model = policyAllowsModel(policy, own) || !policy.models ? own : policy.models[0]!;
+  const dims = row.embedding_dims && row.embedding_dims >= 64 && row.embedding_dims <= 3072 ? row.embedding_dims : DEFAULT_EMBEDDING_DIMS;
+  return { model, dims: Math.min(dims, policyMaxDims(policy)) };
 }
 
 const providerNameQuery = db.query("SELECT name, default_model FROM agent_providers WHERE id = ?");

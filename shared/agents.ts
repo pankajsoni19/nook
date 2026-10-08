@@ -66,6 +66,22 @@ export type ProviderCompat = {
 };
 export const DEFAULT_COMPAT: ProviderCompat = { tokenParam: "max_completion_tokens", streamUsage: true, supportsTools: true, contextTokens: 128_000 };
 
+/**
+ * A provider's knowledge base policy (2026-10-08, admins, Settings → AI → Model providers): whether
+ * new knowledge bases (and Change embedding model) may use it, which embedding models (null: any),
+ * and the largest size in dimensions (null: the current maximum, 3,072). Stored on the provider row's
+ * `compat_json` under `knowledge`, so no migration. Bases already over a newer limit are grandfathered.
+ */
+export type ProviderKnowledgePolicy = { enabled: boolean; models: string[] | null; maxDims: number | null };
+export const DEFAULT_KNOWLEDGE_POLICY: ProviderKnowledgePolicy = { enabled: true, models: null, maxDims: null };
+/** The policy's bounds: listed models, a model id's length and shape, and the size range. */
+export const KNOWLEDGE_POLICY_BOUNDS = { models: 20, modelName: 100, minDims: 64, maxDims: 3072 } as const;
+export const EMBEDDING_MODEL_ID = /^[A-Za-z0-9._:/@-]+$/;
+/** The largest size a provider's policy allows. */
+export const policyMaxDims = (policy: ProviderKnowledgePolicy) => policy.maxDims ?? KNOWLEDGE_POLICY_BOUNDS.maxDims;
+/** Whether a provider's policy allows this embedding model (case-sensitive: model ids are). */
+export const policyAllowsModel = (policy: ProviderKnowledgePolicy, model: string) => policy.models === null || policy.models.includes(model.trim());
+
 /** Run and message states (plan §2.2, §6.1). */
 export const RUN_STATUSES = ["queued", "running", "awaiting_confirmation", "ok", "error", "cancelled", "interrupted", "timeout", "step_limit", "budget"] as const;
 export type RunStatus = typeof RUN_STATUSES[number];
@@ -209,6 +225,8 @@ export type ChatUpdateEvent =
 export type ProviderSummary = {
   id: string; name: string; baseUrl: string; defaultModel: string; embeddingModel: string | null; embeddingDims: number | null;
   compat: ProviderCompat; isDefault: boolean; hasSecret: boolean; hint: string | null; revision: number; createdAt: string; updatedAt: string;
+  /** The knowledge base policy (2026-10-08). */
+  knowledge: ProviderKnowledgePolicy;
 };
 /**
  * A provider as the agent editor sees it (`GET /api/agents/providers`): anyone who may create agents

@@ -81,7 +81,14 @@ export type KnowledgeChunkPreview = { ord: number; heading: string | null; previ
 export type KnowledgeChunkPage = { chunks: KnowledgeChunkPreview[]; total: number; offset: number; limit: number };
 
 /** Change embedding model's provider list (2026-10-08): names and the embedding defaults, never an address or key. */
-export type KnowledgeEmbeddingChoice = { id: string; name: string; isDefault: boolean; embeddingModel: string; embeddingDims: number; models: string[] | null };
+export type KnowledgeEmbeddingChoice = {
+  id: string; name: string; isDefault: boolean; embeddingModel: string; embeddingDims: number; models: string[] | null;
+  /**
+   * The admin's policy for this provider: `anyModel` false means `models` is the whole allowed list
+   * (no free text); `maxDims` is the largest size allowed (3,072 with no limit).
+   */
+  anyModel: boolean; maxDims: number;
+};
 
 /** Whether a model takes a `dimensions` parameter (OpenAI's text-embedding-3 family); other models answer in their own size. */
 export const takesDimensions = (model: string) => /text-embedding-3/i.test(model);

@@ -123,9 +123,10 @@ async function embedBatch(connection: ProviderConnection, model: string, dims: n
 
 /**
  * Embeds `inputs` in batches (`batchSizeFor`: 64 at 512 dimensions, 10 at 3072). `beforeBatch` runs before each request (the budget check: a
- * refused batch costs nothing) and `afterBatch` after it (charging its tokens).
+ * refused batch costs nothing) and `afterBatch` after it (charging its tokens; since 2026-10-08 it also sees the
+ * batch's vectors, and a throw there sends no further batch).
  */
-export async function embedTexts(connection: ProviderConnection, model: string, dims: number | null, inputs: readonly string[], hooks: { beforeBatch?: (count: number) => void; afterBatch?: (tokens: number) => void; signal?: AbortSignal } = {}): Promise<EmbeddingResult> {
+export async function embedTexts(connection: ProviderConnection, model: string, dims: number | null, inputs: readonly string[], hooks: { beforeBatch?: (count: number) => void; afterBatch?: (tokens: number, vectors: readonly Float32Array[]) => void; signal?: AbortSignal } = {}): Promise<EmbeddingResult> {
   const vectors: Float32Array[] = [];
   let tokens = 0;
   let estimated = false;
@@ -134,7 +135,7 @@ export async function embedTexts(connection: ProviderConnection, model: string, 
     const batch = inputs.slice(start, start + size);
     hooks.beforeBatch?.(batch.length);
     const result = await embedBatch(connection, model, dims, batch, hooks.signal);
-    hooks.afterBatch?.(result.tokens);
+    hooks.afterBatch?.(result.tokens, result.vectors);
     vectors.push(...result.vectors);
     tokens += result.tokens;
     estimated ||= result.estimated;

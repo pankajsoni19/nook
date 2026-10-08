@@ -2,9 +2,9 @@ import { audit, db, now } from "../db";
 import { purgeAfterFrom } from "../bin";
 import { readableNotePredicate } from "../access";
 import { readableDocumentPredicate } from "../documentAccess";
-import { DEFAULT_EMBEDDING_DIMS, DEFAULT_EMBEDDING_MODEL } from "../../shared/agents";
+import { policyAllowsModel, policyMaxDims } from "../../shared/agents";
 import { KNOWLEDGE_BOUNDS, KNOWLEDGE_DOCUMENT_TYPES, type KnowledgeCandidate, type KnowledgeChunkPage, type KnowledgeDetail, type KnowledgeLevel, type KnowledgeSource, type KnowledgeStatus, type KnowledgeSummary, type SourceKind, type SourceStatus } from "../../shared/knowledge";
-import { defaultProvider } from "../agents/providers";
+import { defaultProvider, embeddingDefaults, parseKnowledgePolicy } from "../agents/providers";
 import { readAgentSettings, roleMayCreate } from "../agents/settings";
 import { shareLevel, shareReadableSql, type ShareLevel } from "../agents/sharing";
 import { AgentError } from "../agents/status";
@@ -95,6 +95,23 @@ export const PROVIDER_REMOVED_NOTICE = "The embedding provider this knowledge ba
 /** The note while a base moves to another embedding model (2026-10-08): keyword-only search, never two embedding spaces at once. */
 export const MODEL_CHANGING_NOTICE = "This knowledge base is moving to another embedding model. Search uses keywords only until every source is embedded again.";
 export const OWNER_BLOCKED_NOTICE = "This knowledge base's owner is blocked. It is paused and answers no searches until they are unblocked.";
+/** Refused at create (2026-10-08): the default provider's knowledge policy is off. */
+export const DEFAULT_PROVIDER_NOT_ALLOWED = "An admin does not allow the default model provider for knowledge bases, so new ones cannot be made. Ask an admin to allow it in Settings → AI → Model providers.";
+
+/**
+ * A base over its provider's knowledge policy (2026-10-08): made before an admin set a lower limit.
+ * It is grandfathered: it keeps searching and indexing as it is and is never embedded again on its
+ * own; its page says so, and Change embedding model offers only the allowed choices.
+ */
+export function policyNotice(kb: Pick<KbRow, "embedding_model" | "dims">, compatJson: string): string | null {
+  const policy = parseKnowledgePolicy(compatJson);
+  const tail = "It keeps working as it is; Change embedding model offers only the allowed choices.";
+  if (!policy.enabled) return `An admin no longer allows this knowledge base's provider for knowledge bases. ${tail}`;
+  if (!policyAllowsModel(policy, kb.embedding_model)) return `An admin now allows other embedding models with this provider than ${kb.embedding_model}. ${tail}`;
+  const cap = policyMaxDims(policy);
+  if (kb.dims > cap) return `This knowledge base uses ${kb.dims.toLocaleString("en-US")} dimensions; an admin's limit for this provider is now ${cap.toLocaleString("en-US")}. ${tail}`;
+  return null;
+}
 
 /**
  * Whether the base is moving to another embedding model (2026-10-08): a source still waiting
@@ -162,14 +179,14 @@ const ownerName = (id: string) => (db.query("SELECT display_name FROM users WHER
 export function knowledgeSummary(kb: KbRow, userId: string, level: ShareLevel = kbLevel(kb, userId)): KnowledgeSummary {
   const counts = countsOf(kb.id);
   const yourLevel: KnowledgeLevel = level === "owner" ? "owner" : level === "manage" ? "manage" : "view";
-  const provider = kb.provider_id ? db.query("SELECT name FROM agent_providers WHERE id = ?").get(kb.provider_id) as { name: string } | null : null;
+  const provider = kb.provider_id ? db.query("SELECT name, compat_json FROM agent_providers WHERE id = ?").get(kb.provider_id) as { name: string; compat_json: string } | null : null;
   const changingModel = counts.pending + counts.indexing > 0 && kbChangingModel(kb.id);
   return {
     id: kb.id, name: kb.name, description: kb.description, ownerId: kb.owner_id, ownerName: ownerName(kb.owner_id), yourLevel,
     embeddingModel: kb.embedding_model, dims: kb.dims, status: statusOf(counts), chunkCount: kb.chunk_count,
     sourceCount: counts.pending + counts.indexing + counts.ready + counts.error + counts.unavailable, counts,
     audience: yourLevel === "owner" ? kb.visibility as KnowledgeSummary["audience"] : null, revision: kb.revision, createdAt: kb.created_at, updatedAt: kb.updated_at,
-    notice: !ownerIsActive(kb.owner_id) ? OWNER_BLOCKED_NOTICE : provider === null ? PROVIDER_REMOVED_NOTICE : changingModel ? MODEL_CHANGING_NOTICE : null,
+    notice: !ownerIsActive(kb.owner_id) ? OWNER_BLOCKED_NOTICE : provider === null ? PROVIDER_REMOVED_NOTICE : changingModel ? MODEL_CHANGING_NOTICE : policyNotice(kb, provider.compat_json),
     providerName: provider?.name ?? null, changingModel
   };
 }
@@ -213,8 +230,12 @@ export function createKnowledge(actor: { userId: string; role: string }, input: 
     const id = crypto.randomUUID();
     const timestamp = now();
     // AC-O14: the default provider's embedding model and size, fixed for the life of the base.
-    const model = provider.embedding_model?.trim() || DEFAULT_EMBEDDING_MODEL;
-    const dims = provider.embedding_dims && provider.embedding_dims >= 64 && provider.embedding_dims <= 3072 ? provider.embedding_dims : DEFAULT_EMBEDDING_DIMS;
+    // 2026-10-08: inside the admin's knowledge policy for that provider: a model off its list becomes
+    // the first listed one, a size over its limit the limit (adjusted, never refused); a provider not
+    // allowed for knowledge bases at all refuses the create (there is no other provider to fall back to).
+    const policy = parseKnowledgePolicy(provider.compat_json);
+    if (!policy.enabled) throw new AgentError(409, "PROVIDER_NOT_ALLOWED", DEFAULT_PROVIDER_NOT_ALLOWED);
+    const { model, dims } = embeddingDefaults(provider, policy);
     db.query(`INSERT INTO knowledge_bases (id, owner_id, name, description, provider_id, embedding_model, dims, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(id, actor.userId, input.name.trim(), input.description?.trim() ?? "", provider.id, model, dims, timestamp, timestamp);
     audit(actor.userId, null, "knowledge.create", { kbId: id });

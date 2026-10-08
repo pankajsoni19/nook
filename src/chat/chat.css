@@ -152,6 +152,14 @@
 @media (max-width: 760px) { .ai-roles label, .ai-policy .ai-check { min-height: 44px; } }
 .ai-provider-form { padding-bottom: 16px; }
 .ai-provider-form label small { font-weight: 500; letter-spacing: normal; text-transform: none; }
+/* 2026-10-08: the provider editor's Knowledge bases group (Any model / Only these, a model list, the largest size). */
+.ai-knowledge-policy { display: grid; gap: 8px; margin-top: 10px; padding-top: 14px; border-top: 1px solid #26262a; min-width: 0; }
+.ai-sublabel { color: #c9c9ce; font-size: .84rem; font-weight: 600; }
+.ai-segments { display: flex; flex-wrap: wrap; gap: 6px; }
+.ai-segment { min-height: 44px; border: 1px solid #303035; border-radius: 999px; padding: 0 14px; background: #0f0f11; color: #c8c8cd; font-weight: 600; cursor: pointer; }
+.ai-segment.active { border-color: #f3ce79; background: #1f1d16; color: #f3ce79; }
+.ai-segment:disabled { opacity: .6; cursor: default; }
+.ai-knowledge-policy .ai-check { min-height: 44px; }
 .agents-list li { display: flex; align-items: center; gap: 10px; }
 .agents-row { flex: 1; min-width: 0; min-height: 56px; display: flex; align-items: center; gap: 12px; border: 1px solid #303035; border-radius: 12px; padding: 8px 12px; background: #0f0f11; color: #e1e1e3; text-align: left; cursor: pointer; }
 .agents-row:hover { background: var(--panel-hover); }

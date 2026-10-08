@@ -4,7 +4,8 @@ import { checksum, storage } from "../storage";
 import { DocumentIntegrityError, openObjectForRead } from "../documentStorage";
 import { CHUNKING, KNOWLEDGE_BOUNDS } from "../../shared/knowledge";
 import { assertBudget, chargeUsage, secondsToMidnight } from "../agents/runs";
-import { connectionFor } from "../agents/providers";
+import { connectionFor, embeddingDefaults, knowledgePolicyOf, parseKnowledgePolicy } from "../agents/providers";
+import { DEFAULT_KNOWLEDGE_POLICY, policyAllowsModel, policyMaxDims } from "../../shared/agents";
 import { ProviderError } from "../agents/loop";
 import { AgentError, agentsStatus } from "../agents/status";
 import { chunkText, type Chunk, type ChunkFormat } from "./chunk";
@@ -275,7 +276,17 @@ async function indexSource(kb: KbRow, source: SourceRow): Promise<"done" | "paus
         // Before every request (T314): over the owner's or the instance's budget nothing is sent.
         // 2026-10-08: nor when the base moved to another model meanwhile (no call to the old provider after a change).
         beforeBatch: () => { if (modelChanged(kb)) throw new SourceError("MODEL_CHANGED", "The embedding model changed"); assertBudget(kb.owner_id); },
-        afterBatch: (used) => chargeUsage(kb.owner_id, `kb:${kb.id}`, { promptTokens: used, completionTokens: 0, estimated: false }, 0)
+        afterBatch: (used, batch) => {
+          chargeUsage(kb.owner_id, `kb:${kb.id}`, { promptTokens: used, completionTokens: 0, estimated: false }, 0);
+          // 2026-10-08: a model that answers in its own size larger than the admin's limit for this
+          // provider is stopped at its first answer (no further batch). A size the base already has
+          // (grandfathered, made before the limit) is not refused.
+          const native = batch[0]?.length ?? 0;
+          if (requested === null && native !== kb.dims) {
+            const cap = policyMaxDims(knowledgePolicyOf(provider.id) ?? DEFAULT_KNOWLEDGE_POLICY);
+            if (native > cap) throw new SourceError("DIMS_TOO_LARGE", nativeTooLarge(kb.embedding_model, native, cap));
+          }
+        }
       });
       vectors = result.vectors;
       tokens = result.tokens;
@@ -284,6 +295,12 @@ async function indexSource(kb: KbRow, source: SourceRow): Promise<"done" | "paus
     } catch (error) {
       // The base moved to another model: the change already marked this source pending again.
       if (error instanceof SourceError && error.code === "MODEL_CHANGED") return "requeued";
+      // Every waiting source of the base would get the same answer: all go to error at once, with no further call.
+      if (error instanceof SourceError && error.code === "DIMS_TOO_LARGE") {
+        setState(source.id, "error", error.message);
+        db.query("UPDATE kb_sources SET status = 'error', error = ? WHERE kb_id = ? AND status = 'pending'").run(error.message, kb.id);
+        return "done";
+      }
       if (error instanceof AgentError && error.code === "BUDGET_EXCEEDED") {
         setState(source.id, "pending", pauseMessage);
         return "paused";
@@ -370,6 +387,10 @@ function modelChanged(kb: Pick<KbRow, "id" | "provider_id" | "embedding_model" |
 
 export type ModelChangeInput = { providerId: string; model: string; dims?: number | null };
 
+/** A source's error when a model's own size is over the admin's limit (2026-10-08). */
+export const nativeTooLarge = (model: string, dims: number, cap: number) =>
+  `${model} answers in ${dims.toLocaleString("en-US")} dimensions; an admin allows at most ${cap.toLocaleString("en-US")} with this provider. Choose another model with Change embedding model.`;
+
 /**
  * Change embedding model (owner only; the way out of "provider removed" too). Every source is
  * embedded again at the owner's token cost, under the usual budget and pause rules, and search is
@@ -380,13 +401,20 @@ export type ModelChangeInput = { providerId: string; model: string; dims?: numbe
  * must not wait an hour to recover.
  */
 export function changeEmbeddingModel(actor: { userId: string }, kb: KbRow, input: ModelChangeInput) {
-  const provider = db.query("SELECT id, embedding_dims FROM agent_providers WHERE id = ?").get(input.providerId.toLowerCase()) as { id: string; embedding_dims: number | null } | null;
+  const provider = db.query("SELECT id, embedding_model, embedding_dims, compat_json FROM agent_providers WHERE id = ?").get(input.providerId.toLowerCase()) as { id: string; embedding_model: string | null; embedding_dims: number | null; compat_json: string } | null;
   if (!provider) throw new AgentError(400, "INVALID", "That provider was not found", { field: "providerId" });
   const model = input.model.trim();
+  // 2026-10-08: the admin's knowledge policy for the chosen provider (Settings → AI → Model providers).
+  const policy = parseKnowledgePolicy(provider.compat_json);
+  if (!policy.enabled) throw new AgentError(400, "PROVIDER_NOT_ALLOWED", "An admin does not allow this provider for knowledge bases", { field: "providerId" });
+  if (!policyAllowsModel(policy, model)) throw new AgentError(400, "MODEL_NOT_ALLOWED", `An admin allows only these embedding models with this provider: ${policy.models!.join(", ")}`, { field: "model", allowed: policy.models });
+  const cap = policyMaxDims(policy);
+  if (input.dims != null && input.dims > cap) throw new AgentError(400, "DIMS_TOO_LARGE", `An admin allows at most ${cap.toLocaleString("en-US")} dimensions with this provider`, { field: "dims", maxDims: cap });
   const dims = takesDimensions(model)
-    ? input.dims ?? (provider.embedding_dims && provider.embedding_dims >= 64 && provider.embedding_dims <= 3072 ? provider.embedding_dims : 512)
-    // A model that takes no `dimensions` answers in its own size; the base adopts it at the first answer.
-    : input.dims ?? kb.dims;
+    ? input.dims ?? embeddingDefaults(provider, policy).dims
+    // A model that takes no `dimensions` answers in its own size; the base adopts it at the first answer
+    // (a size over the limit then puts the sources in error). The stored size stays within the limit.
+    : Math.min(input.dims ?? kb.dims, cap);
   if (provider.id === kb.provider_id && model === kb.embedding_model && dims === kb.dims) throw new AgentError(409, "UNCHANGED", "The knowledge base already uses this provider, model, and size");
   const at = Date.now();
   const providerRemoved = kbProvider(kb) === null;
