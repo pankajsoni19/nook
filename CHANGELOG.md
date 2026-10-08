@@ -2,6 +2,17 @@
 
 Release notes for Nook, newest first. Upgrade steps for each release are in [docs/OPERATIONS.md](docs/OPERATIONS.md#upgrades).
 
+## v0.33.0 — 2026-10-08
+
+- **Change a knowledge base's embedding model**: the owner can move a base to another provider, model, or size. Every source is embedded again at the owner's token cost; search is keyword-only until it finishes, and old vectors are deleted at once, so two models are never mixed. It counts as that hour's Re-index, except when the base's provider was removed, where it is the way back to full search.
+- **Passage previews**: expand a source on a knowledge base to see each passage's heading and first 300 characters, 20 at a time. Only the owner and managers who can read that source see them.
+- **Team → Groups** lists the knowledge bases, agents, and chats shared with a group, with titles only where the admin can open the item.
+- **Search limit for keys**: `search_knowledge` through API and MCP keys is limited to 60 a minute and 2,000 a day per key. Re-index all's once-an-hour limit now survives restarts.
+- **Group changes take effect at once**: joining or leaving a group re-checks the knowledge sources that depended on it immediately.
+- **Chat is off for your role**: when your role can't chat, Chat says so instead of "not available on this server", and shared-chat notifications no longer link to a chat you can't open.
+- **Fairer charging and clearer pushes**: in multi-step agent runs, text past the stored reply is no longer charged; push notifications say what kind of notice they are instead of always "Calendar reminder".
+- No migration and no new settings.
+
 ## v0.32.0 — 2026-10-07
 
 - **Notifications open what they are about**: a removed or lowered share opens that note, folder, file, board, collection, agent, chat, or knowledge base; one Inbox proposal opens that proposal; group, key, sign-in, and Google notices open the right Settings page. Links are built from ids only, and an item you can no longer open shows its list instead. A click in the bell on the first page you opened is no longer undone.

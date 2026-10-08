@@ -102,7 +102,7 @@ You need Git, Docker Engine, and Docker Compose.
 git clone https://github.com/pankajsoni19/nook.git && cd nook
 cp .env.example .env            # set ALLOWED_EMAILS, TOTP_POLICY, APP_ORIGINS as needed
 sudo mkdir -p /srv/mynotes && sudo chown 1000:1000 /srv/mynotes   # or set MYNOTES_DATA_DIR
-APP_VERSION=0.32.0 GIT_SHA=$(git rev-parse --short HEAD) docker compose up -d --build
+APP_VERSION=0.33.0 GIT_SHA=$(git rev-parse --short HEAD) docker compose up -d --build
 curl http://localhost:2026/api/health   # then open http://localhost:2026 and create the first account (the admin)
 ```
 
@@ -114,11 +114,11 @@ Back up first (`./scripts/backup.sh --force`), pull, rebuild, and let migrations
 
 ## What's new
 
-Release notes for every version are in [CHANGELOG.md](CHANGELOG.md). Latest (v0.32.0):
+Release notes for every version are in [CHANGELOG.md](CHANGELOG.md). Latest (v0.33.0):
 
-- **Notifications open what they are about**, from the bell and the Notifications page.
-- **Admins can revoke a member's calendar feed link or pause their routine**; My access lists your own.
-- **Phone headers, Settings, and chat polish**; no migration.
+- **Knowledge bases**: change the embedding model, preview passages per source, and see shared bases in Team → Groups.
+- **Per-key search limits**, a restart-proof Re-index limit, and instant re-checks when group membership changes.
+- **Chat off for your role** says so; fairer charging for long multi-step runs; clearer push notifications. No migration.
 
 ## Documentation
 
