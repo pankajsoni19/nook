@@ -16,10 +16,6 @@ Nothing. Waiting for the operator's next pick.
 
 None open.
 
-## Reliability watch
-
-- [ ] `tests/vault…` "custom environments, rename with CAS, add, rename, reorder, and the last environment stays" hit its 5 s timeout once in the v0.34.0 Docker verify under load (5.25 s); the re-run passed. Raise its timeout or split it if it recurs.
-
 ## Standing rules for agent briefs
 
 - Subagents run on Opus 5.5 at medium effort, each in its own worktree with pre-assigned ports and migration ids. Releases are serial.
