@@ -64,11 +64,12 @@ export function ResultTable({ columns, rows, show, formats, highlight, raw = fal
           const column = columns[index]!;
           const role = highlight?.[column.name];
           const sorted = view?.sort?.column === column.name ? view.sort : null;
-          const head = <><span>{column.name}{role && <em className="report-role">{role}</em>}{sorted && (sorted.desc ? <ArrowDown className="report-sort-icon" aria-hidden="true" /> : <ArrowUp className="report-sort-icon" aria-hidden="true" />)}</span><small>{column.type}</small></>;
+          const name = <span>{column.name}{role && <em className="report-role">{role}</em>}{sorted && (sorted.desc ? <ArrowDown className="report-sort-icon" aria-hidden="true" /> : <ArrowUp className="report-sort-icon" aria-hidden="true" />)}</span>;
           return <th key={`${column.name}-${index}`} scope="col" className={role ? "report-mapped" : undefined}
             aria-sort={view ? sorted ? (sorted.desc ? "descending" : "ascending") : "none" : undefined}>
             {view ? <button type="button" className={`report-th-sort${sorted ? " sorted" : ""}`} onClick={() => view.onSort(nextSort(view.sort, column.name))}
-              title={!sorted ? `Sort by ${column.name}` : sorted.desc ? "Back to the query's order" : `Sort by ${column.name}, largest first`}>{head}</button> : head}
+              title={!sorted ? `Sort by ${column.name}` : sorted.desc ? "Back to the query's order" : `Sort by ${column.name}, largest first`}>{name}</button> : name}
+            <small>{column.type}</small>
           </th>;
         })}</tr></thead>
         <tbody>{visible.map((row, rowIndex) => {

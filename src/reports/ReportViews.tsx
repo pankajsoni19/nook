@@ -96,10 +96,10 @@ export function ViewsSheet({ reportId, parameters, values, views, canSaveDefault
         {views.map((view) => {
           const on = active?.id === view.id;
           return <li key={view.id} className={`report-views-row${on ? " active" : ""}`}>
-            <button type="button" className="report-views-apply" aria-current={on ? "true" : undefined} disabled={busy !== null} onClick={() => { onApply(viewValues(parameters, view)); onClose(); }}>
+            <div className="report-views-main"><button type="button" className="report-views-apply" aria-current={on ? "true" : undefined} disabled={busy !== null} onClick={() => { onApply(viewValues(parameters, view)); onClose(); }}>
               <span className="report-views-name">{on && <Check aria-hidden="true" />}{view.name}</span>
-              <small>{viewSummary(parameters, viewValues(parameters, view))}</small>
             </button>
+              <small>{viewSummary(parameters, viewValues(parameters, view))}</small></div>
             <button type="button" className={`icon-button report-views-star${view.isDefault ? " on" : ""}`} aria-pressed={view.isDefault} disabled={busy !== null}
               aria-label={view.isDefault ? `${view.name} is your default view; stop opening the report with it` : `Open the report with ${view.name}`} title={view.isDefault ? "Your default view" : "Make it your default view"}
               onClick={() => void run(`star:${view.id}`, () => updateView(reportId, view.id, { isDefault: !view.isDefault }), view.isDefault ? "The report opens with its defaults" : `The report opens with ${view.name}`)}>
