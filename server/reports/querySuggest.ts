@@ -11,7 +11,7 @@ import { getInstruction, kick } from "./instructions";
 import { reportToday } from "./paramZone";
 import { parameterErrors, resolveSet } from "./params";
 import { applyPatch, changedBlockIds, changedQueryKeys, diffSpecs } from "./patch";
-import { takeRunLock } from "./refresh";
+import { queryResults, takeRunLock } from "./refresh";
 import { adHocQueryId, runGuarded } from "./runner";
 import { parseSpec } from "./service";
 import { forValidation, reattach, specHash } from "./specCheck";
@@ -86,15 +86,22 @@ function onlyReaders(checked: ReportSpec, current: ReportSpec, key: string): Rep
 /** The parameters a suggestion's queries ran with (their SHA-256): its stored rows hold only while they stay. */
 const parametersHash = (spec: ReportSpec) => sha(JSON.stringify(spec.parameters ?? []));
 
-/** Column problems for the blocks that read `key`, from one result (checkColumns, the save's own check). */
-function blockChecks(spec: ReportSpec, key: string, outcome: QueryEditPreview["outcome"]): { blocks: PreviewBlockCheck[]; problems: string[] } {
+/**
+ * Column problems for every block that reads `key` (its own query, a KPI's comparison, or a sparkline),
+ * as Save's `checkColumns` reports them: the new result for `key`, the stored results for the other
+ * queries those blocks read (lane EDIT follow-up: preview and Save agree).
+ */
+function blockChecks(reportId: string, spec: ReportSpec, key: string, outcome: QueryEditPreview["outcome"]): { blocks: PreviewBlockCheck[]; problems: string[] } {
   const readers = spec.blocks.filter((block) => readsKey(block, key));
-  const problems = checkColumns({ blocks: readers }, new Map([[key, outcome]]));
-  const columns = new Set(outcome.columns.map((column) => column.name));
+  const others = new Set(readers.flatMap(blockKeys).filter((other) => other !== key));
+  const results = new Map<string, Pick<QueryEditPreview["outcome"], "columns" | "rows">>();
+  if (others.size) for (const item of queryResults(reportId, spec)) if (others.has(item.queryKey) && item.result) results.set(item.queryKey, item.result);
+  results.set(key, outcome);
+  const problems = checkColumns({ blocks: readers }, results);
   const blocks = readers.map((block) => {
     const missing = problems.filter((line) => line.startsWith(`block ${block.id}:`)).flatMap((line) => {
-      const name = /^block \S+: .+? (\S+) is not a column of /.exec(line)?.[1];
-      return name && !columns.has(name) ? [name] : [];
+      const found = /^block \S+: .+? (\S+) is not a column of (\S+) /.exec(line);
+      return found && found[2] === key ? [found[1]!] : [];
     });
     return { blockId: block.id, title: blockTitle(block), missing: [...new Set(missing)] };
   });
@@ -118,7 +125,7 @@ export async function previewQueryEdit(actor: Actor, reportId: string, input: { 
   const meta = { reportId, queryKey: input.queryKey, level, queryId, sha256: sha(sql), ...(actor.keyId ? { via: "mcp", keyId: actor.keyId } : {}) };
   try {
     const outcome = await runGuarded(datasource, sql, { classes: ["select"], maxRows: Math.min(datasource.max_rows, REPORT_LIMITS.consoleRows), queryId, userId: actor.userId, signal, params: set.bound });
-    const checks = blockChecks(spec, input.queryKey, outcome);
+    const checks = blockChecks(reportId, spec, input.queryKey, outcome);
     audit(actor.userId, null, "reports.query.preview", { ...meta, rows: outcome.rows.length, problems: checks.problems.length });
     return { queryKey: input.queryKey, outcome, ...checks };
   } catch (error) {

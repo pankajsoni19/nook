@@ -33,6 +33,7 @@ const RECENT_10 = "SELECT order_id, country, revenue, created_at FROM analytics.
 
 function answer(sql: string, req: FakeRequest) {
   if (sql.includes("count() AS orders FROM analytics.orders GROUP BY country")) return { meta: [{ name: "country", type: "String" }, { name: "orders", type: "UInt64" }], data: [["US", "4"], ["DE", "3"]] };
+  if (sql.includes("AS refunds_only")) return { meta: [{ name: "day", type: "Date" }, { name: "refunds_only", type: "Float64" }], data: [["2026-10-01", 1.5]] };
   if (sql.includes("{period_from:Date}")) return { meta: [{ name: "orders", type: "UInt64" }], data: [[req.params.param_period_from ? "70" : "0"]] };
   if (sql.includes("SELECT DISTINCT country")) return { meta: [{ name: "country", type: "String" }], data: [["DE"], ["US"]] };
   return sampleAnswer(sql);
@@ -111,6 +112,22 @@ describe("Run preview", () => {
     expect((await send(teamViewer, "POST", `/reports/${reportId}/queries/by_country/preview`, { sql: BY_COUNTRY_3 })).status).toBe(403);
     expect((await send(stranger, "POST", `/reports/${reportId}/queries/by_country/preview`, { sql: BY_COUNTRY_3 })).status).toBe(404);
     expect((await send(owner, "POST", `/reports/${reportId}/queries/no_such/preview`, { sql: BY_COUNTRY_3 })).status).toBe(404);
+  });
+
+  test("preview checks a KPI's sparkline that reads the query from another block, as Save does", async () => {
+    const spec = sampleSpec();
+    spec.blocks = spec.blocks.map((block) => block.id === "kpi-orders" ? { ...block, sparkline: { queryKey: "daily", x: "day", y: "revenue" } } as typeof block : block);
+    const reportId = await seededReport(spec);
+    const sql = "SELECT day, sum(refunds) AS refunds_only FROM analytics.orders GROUP BY day ORDER BY day";
+    const preview = await send(owner, "POST", `/reports/${reportId}/queries/daily/preview`, { sql });
+    expect(preview.status).toBe(200);
+    expect(preview.body.preview.blocks).toEqual([
+      { blockId: "kpi-orders", title: "Orders", missing: ["revenue"] },
+      { blockId: "daily-line", title: "Revenue and refunds per day", missing: ["revenue", "refunds"] }
+    ]);
+    const saved = await send(owner, "POST", `/reports/${reportId}/spec/edit`, { ops: [{ op: "update_query", key: "daily", sql }], expectedRevision: (await send(owner, "GET", `/reports/${reportId}`)).body.report.revision });
+    expect(saved.status).toBe(400);
+    for (const line of preview.body.preview.problems as string[]) expect(saved.body.details).toContain(line);
   });
 
   test("previews are rate-limited per person", async () => {

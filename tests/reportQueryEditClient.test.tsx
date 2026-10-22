@@ -165,6 +165,24 @@ describe("Edit SQL and Suggest an edit", () => {
     }
   });
 
+  test("the typed SQL is kept per report and query in sessionStorage (Forward after Back left the page), and Cancel drops it", async () => {
+    const key = `mynotes:reports-query-draft:${REPORT_ID}:by_country`;
+    window.sessionStorage.setItem(key, "SELECT 'draft' AS country");
+    const { view } = await page("owner");
+    await view.click(document.querySelector('button[aria-label="How was Top countries built"]')!);
+    const inspect = await view.waitFor(() => document.querySelector(".report-inspect"));
+    await view.click(await view.waitFor(() => view.button("Edit SQL", inspect)));
+    const sheet = await view.waitFor(() => document.querySelector(".report-query-edit"));
+    const textarea = sheet.querySelector<HTMLTextAreaElement>("textarea.report-sql")!;
+    expect(textarea.value).toBe("SELECT 'draft' AS country");
+    await type(textarea, NEW_SQL);
+    expect(window.sessionStorage.getItem(key)).toBe(NEW_SQL);
+    await view.click(view.button("Cancel", sheet)!);
+    await view.waitFor(() => !document.querySelector(".report-query-edit"));
+    expect(window.sessionStorage.getItem(key)).toBeNull();
+    await settle(view);
+  });
+
   test("a commenter suggests an edit (with a note) instead; a refusal shows its reasons and keeps the sheet open", async () => {
     let refuse = true;
     const { api, view } = await page("comment", {

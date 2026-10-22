@@ -27,8 +27,6 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 
 ## Small fixes
 
-- [ ] Edit SQL / Suggest an edit (lane EDIT): Run preview checks the columns of blocks whose own query it is; a KPI's comparison or sparkline that reads the query from another block is checked only on Save/Suggest. The typed SQL survives Back/Forward while Inspect stays open, but Forward after Back left the page reopens the saved SQL.
-- [ ] Inspect → Query at 390 px: Edit SQL, Open in console, and Copy wrap to two rows under "SQL as saved" (Copy alone on the second).
 - [ ] "Pick from Nook": before the Files index's first backfill after boot, the fallback scan can offer a scanned PDF by name (picking it gives the "no text layer" error).
 
 ## Watch (no work unless it shows up)

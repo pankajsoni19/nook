@@ -192,6 +192,11 @@ ul.report-block-problem { display: block; padding-left: 18px; }
 .report-inspect-head:has(> .report-inspect-head-actions) h3 { white-space: nowrap; }
 .report-copy { min-height: 44px; display: inline-flex; align-items: center; gap: 6px; }
 .report-copy svg, .report-inspect-actions svg { width: 15px; height: 15px; }
+/* Lane EDIT: Edit SQL, Open in console, and Copy keep one row on a phone; Copy becomes a 44 px icon. */
+@media (max-width: 560px) {
+  .report-copy-compact { width: 44px; padding: 0; justify-content: center; }
+  .report-copy-compact .report-copy-label { display: none; }
+}
 .report-code { margin: 0; max-height: 260px; overflow: auto; border-radius: 10px; padding: 10px 12px; background: var(--report-code-bg); color: var(--report-soft); font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .report-option { max-height: 420px; white-space: pre; }
 .report-facts-list { margin: 0; display: grid; gap: 6px; font-size: .84rem; }

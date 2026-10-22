@@ -14,6 +14,22 @@ import { codeOf, countLabel, messageOf } from "./reportsApi";
 
 export type QueryEditMode = "save" | "suggest";
 
+/**
+ * The SQL typed so far, per report and query, in sessionStorage (lane EDIT follow-up): Back closes the
+ * panel and Forward reopens it with the draft, even after Back left the page. Save, Suggest, Cancel,
+ * ×, and Escape drop it. Storage that throws (a private window, blocked site data) keeps nothing.
+ */
+export const queryDraftKey = (reportId: string, queryKey: string) => `mynotes:reports-query-draft:${reportId}:${queryKey}`;
+export function readQueryDraft(key: string): string | null {
+  try { return window.sessionStorage.getItem(key); } catch { return null; }
+}
+export function writeQueryDraft(key: string, sql: string | null) {
+  try {
+    if (sql === null) window.sessionStorage.removeItem(key);
+    else window.sessionStorage.setItem(key, sql);
+  } catch { /* the draft is a convenience */ }
+}
+
 type Props = {
   report: Pick<ReportDetail, "id" | "revision" | "spec">;
   /** The block it was opened from (named in the eyebrow; a suggestion is about it). */
@@ -24,9 +40,6 @@ type Props = {
   mode: QueryEditMode;
   /** The columns the block maps (highlighted in the preview's table). */
   highlight: Record<string, string>;
-  /** The SQL typed so far (kept by the Inspect sheet, so Forward after Back shows it again). */
-  draft: string | null;
-  onDraft: (sql: string | null) => void;
   onClose: () => void;
   reopen?: () => void;
   layerKey?: string;
@@ -54,8 +67,9 @@ const failureOf = (reason: unknown, fallback: string): Failure => {
  * blocks still find their columns), then Check and save (a new version, with Undo) or Suggest to the
  * owner (a proposal in Changes). A wide panel at the right, full screen on a phone; Back closes it.
  */
-export function QueryEditSheet({ report, blockId, blockTitle, query, mode, highlight, draft, onDraft, onClose, reopen, layerKey, onChanged, openChanges }: Props) {
-  const [sql, setSqlState] = useState(draft ?? query.sql);
+export function QueryEditSheet({ report, blockId, blockTitle, query, mode, highlight, onClose, reopen, layerKey, onChanged, openChanges }: Props) {
+  const draftKey = queryDraftKey(report.id, query.key);
+  const [sql, setSqlState] = useState(() => readQueryDraft(draftKey) ?? query.sql);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState<"preview" | "save" | null>(null);
   const [preview, setPreview] = useState<{ sql: string; result: QueryEditPreview } | null>(null);
@@ -74,7 +88,7 @@ export function QueryEditSheet({ report, blockId, blockTitle, query, mode, highl
 
   const setSql = (next: string) => {
     setSqlState(next);
-    onDraft(next === query.sql ? null : next);
+    writeQueryDraft(draftKey, next === query.sql ? null : next);
     setSaveError(null);
   };
   const changed = sql.trim() !== query.sql.trim() && sql.trim().length > 0;
@@ -105,7 +119,7 @@ export function QueryEditSheet({ report, blockId, blockTitle, query, mode, highl
     try {
       if (mode === "save") {
         const saved = await editSpec(report.id, [{ op: "update_query", key: query.key, sql }], report.revision);
-        onDraft(null);
+        writeQueryDraft(draftKey, null);
         onChanged();
         notify.success(`Saved ${query.key} (version ${saved.version})`, {
           id: `report-query-saved:${report.id}`,
@@ -114,7 +128,7 @@ export function QueryEditSheet({ report, blockId, blockTitle, query, mode, highl
         if (saved.warnings?.length) notify.warning(`Saved, but Nook's checks noticed: ${saved.warnings.slice(0, 2).join("; ")}`);
       } else {
         await suggestQuery(report.id, query.key, { sql, note: note.trim() || null, blockId, expectedRevision: report.revision });
-        onDraft(null);
+        writeQueryDraft(draftKey, null);
         notify.success("Sent to the owner: it waits in Changes until they apply or reject it", openChanges ? { action: { label: "Open Changes", onClick: () => openChanges(blockId) } } : undefined);
       }
       setBusy(null);
@@ -125,9 +139,10 @@ export function QueryEditSheet({ report, blockId, blockTitle, query, mode, highl
     }
   }
 
+  const cancel = () => { writeQueryDraft(draftKey, null); abort.current?.abort(); onClose(); };
   const result = preview?.result ?? null;
   const missing = result?.blocks.filter((item) => item.missing.length) ?? [];
-  return <ModalDialog title={mode === "save" ? "Edit SQL" : "Suggest an edit"} eyebrow={`${blockTitle} · ${query.key}`} onClose={onClose} busy={busy === "save"} variant="sheet" className="reports-dialog report-edit-sheet report-query-edit">
+  return <ModalDialog title={mode === "save" ? "Edit SQL" : "Suggest an edit"} eyebrow={`${blockTitle} · ${query.key}`} onClose={cancel} busy={busy === "save"} variant="sheet" className="reports-dialog report-edit-sheet report-query-edit">
     <div className="report-edit-sheet-body">
       <p className="file-dialog-hint report-query-edit-lead">{mode === "save"
         ? "Nook checks the new SQL before saving it: the guard, a run of every query, and the columns each block maps. The save is a new version."
@@ -165,7 +180,7 @@ export function QueryEditSheet({ report, blockId, blockTitle, query, mode, highl
       {saveError && <div className="form-error report-query-edit-error" role="alert"><p>{saveError.message}</p>{saveError.details.length > 0 && <ul>{saveError.details.map((line) => <li key={line}>{line}</li>)}</ul>}</div>}
     </div>
     <footer className="file-dialog-actions report-edit-sheet-actions">
-      <button type="button" className="secondary-button" onClick={onClose} disabled={busy === "save"}>Cancel</button>
+      <button type="button" className="secondary-button" onClick={cancel} disabled={busy === "save"}>Cancel</button>
       <button type="button" className="primary-button" onClick={() => { void submit(); }} disabled={busy !== null || !changed} aria-busy={busy === "save" || undefined}>
         {busy === "save" ? <LoaderCircle className="spin" aria-hidden="true" /> : mode === "suggest" ? <Send aria-hidden="true" /> : null}
         {busy === "save" ? "Checking…" : mode === "save" ? "Check and save" : "Suggest to the owner"}

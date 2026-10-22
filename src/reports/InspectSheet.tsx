@@ -103,10 +103,13 @@ export function docLink(ref: string | null | undefined): string | null {
   }
 }
 
-function CopyButton({ text, label }: { text: string; label: string }) {
+/** `compact` (lane EDIT): on a phone the label hides and the button is a 44 px icon with an aria-label and a tooltip. */
+function CopyButton({ text, label, compact }: { text: string; label: string; compact?: string }) {
   const [copied, setCopied] = useState<boolean | null>(null);
-  return <button type="button" className="secondary-button report-copy" onClick={() => { void copy(text).then(setCopied); }}>
-    <Copy aria-hidden="true" />{copied === true ? "Copied" : copied === false ? "Copy failed" : label}
+  const shown = copied === true ? "Copied" : copied === false ? "Copy failed" : label;
+  return <button type="button" className={`secondary-button report-copy${compact ? " report-copy-compact" : ""}`} onClick={() => { void copy(text).then(setCopied); }}
+    aria-label={compact ? (copied === null ? compact : shown) : undefined} title={compact}>
+    <Copy aria-hidden="true" />{compact ? <span className="report-copy-label">{shown}</span> : shown}
   </button>;
 }
 
@@ -147,7 +150,6 @@ export function InspectSheet({ report, block, query, view, palette, canRerun, bu
   const editing = useReportEditing();
   const editMode: QueryEditMode | null = !query || report.revision === undefined || !report.spec ? null : editing?.canEdit ? "save" : editing?.canSuggest ? "suggest" : null;
   const [queryEdit, setQueryEdit] = useState(false);
-  const [draft, setDraft] = useState<string | null>(null);
   useLayerOpener("reports.query-edit", (blockId) => { if (blockId === block.id && editMode) setQueryEdit(true); });
 
   const first = shownTab.step === 0;
@@ -175,7 +177,7 @@ export function InspectSheet({ report, block, query, view, palette, canRerun, bu
     </div>
   </ModalDialog>
   {queryEdit && editMode && query && report.revision !== undefined && report.spec && <QueryEditSheet report={{ id: report.id, revision: report.revision, spec: report.spec }}
-    blockId={block.id} blockTitle={title} query={query} mode={editMode} highlight={mapping} draft={draft} onDraft={setDraft}
+    blockId={block.id} blockTitle={title} query={query} mode={editMode} highlight={mapping}
     onClose={() => setQueryEdit(false)} reopen={() => setQueryEdit(true)} layerKey={`reports.query-edit:${block.id}`}
     onChanged={() => editing?.onChanged()} openChanges={editing?.openChanges} />}
   </>;
@@ -192,7 +194,7 @@ function QueryTab({ block, query, result, failed, canRerun, busy, onRerun, editM
       {/* D527: the owner edits here; the comment level suggests an edit to the owner. Readers only read. */}
       {editMode && <button type="button" className="secondary-button" onClick={onEdit}><PencilLine aria-hidden="true" />{editMode === "save" ? "Edit SQL" : "Suggest an edit"}</button>}
       {openConsole && <button type="button" className="secondary-button" onClick={() => openConsole(query.sql, latest?.params)}><FileTerminal aria-hidden="true" />Open in console</button>}
-      <CopyButton text={query.sql} label="Copy" />
+      <CopyButton text={query.sql} label="Copy" compact="Copy the SQL" />
     </span>}</div>
     <pre className="report-code"><code>{query?.sql ?? "—"}</code></pre>
     <div className="report-inspect-head"><h3>SQL as sent</h3>{latest?.sentSql && <CopyButton text={latest.sentSql} label="Copy" />}</div>
