@@ -100,6 +100,19 @@ export function readsOf(sql: string, params: ReadonlyArray<Pick<ReportParameter,
   return params.filter((param) => placeholdersOf(param).some((item) => names.has(item.name))).map((param) => param.id);
 }
 
+/**
+ * D560 (linked filters): the parameters a select's options query reads. Only parameters declared before
+ * it count (array order, so there is never a cycle); spec checks refuse a placeholder of any other.
+ */
+export function optionParentsOf(param: ReportParameter, params: readonly ReportParameter[]): string[] {
+  if (param.type !== "select" && param.type !== "multi_select") return [];
+  const at = params.findIndex((item) => item.id === param.id);
+  return at <= 0 ? [] : readsOf(param.optionsQuery, params.slice(0, at));
+}
+
+/** D560: linked lists cached per report (the most recently used are kept). */
+export const LINKED_OPTIONS = { listsPerReport: 50 } as const;
+
 /** Which queries each parameter reaches (D533): `{ paramId: queryKey[] }`, every parameter listed. */
 export function reachOf(params: ReadonlyArray<Pick<ReportParameter, "id" | "type" | "chType">>, queries: ReadonlyArray<{ key: string; sql: string }>): Record<string, string[]> {
   const reach: Record<string, string[]> = Object.fromEntries(params.map((param) => [param.id, [] as string[]]));
@@ -488,4 +501,5 @@ export type ParamSetInfo = {
 };
 
 /** A select's options (GET …/parameters/:id/options); with `query`, the values that hold it (D491 search). */
-export type ParamOptions = { paramId: string; options: string[]; truncated: boolean; error: string | null; at: string | null; query?: string };
+/** D560: a linked select's list names the parents' values it was read for (`parents`). */
+export type ParamOptions = { paramId: string; options: string[]; truncated: boolean; error: string | null; at: string | null; query?: string; parents?: ParamValues };

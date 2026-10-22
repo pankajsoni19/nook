@@ -62,6 +62,7 @@ import { reportParametersMigration } from "./063_report_parameters";
 import { reportDocsMigration } from "./064_report_docs";
 import { reportQuerySuggestionsMigration } from "./065_report_query_suggestions";
 import { reportFiltersMigration } from "./066_report_filters";
+import { reportFilterViewsMigration } from "./069_report_filter_views";
 
 const migrations = [initialMigration, folderSharingMigration, totpMigration, totpRecoveryCodesMigration, mcpApiKeysMigration, documentsMigration, binMigration, noteSearchMigration, taskBoardsMigration, mcpKeyScopesMigration, taskDatesMigration, collectionsMigration, calendarMigration, eventNextOccurrenceMigration, taskCardUxMigration, userPreferencesMigration, teamRolesMigration,
   // 018 (Team invites) may reach existing installs after 019 (task hierarchy) and 020 (task views); none depends on another.
@@ -170,7 +171,10 @@ const migrations = [initialMigration, folderSharingMigration, totpMigration, tot
   reportQuerySuggestionsMigration,
   // 066 (lane FILTERS, D532/D534: report_param_results.query_hash, per-query result keys; and
   // report_instructions.request_json, the owner's Add filter / Remove filter request) needs 052 and 063.
-  reportFiltersMigration
+  reportFiltersMigration,
+  // 069 (lane FILT2, D560/D565: report_param_linked_options, a linked filter's choices per parents'
+  // values; report_param_views, a reader's saved views) needs 050 and 063.
+  reportFilterViewsMigration
 ];
 
 /** Every registered migration in order (read-only), for tests that build an older database shape. */

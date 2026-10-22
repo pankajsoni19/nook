@@ -136,9 +136,11 @@ export function registerReportViewRoutes(app: Hono<AppEnv>) {
     const paramId = c.req.param("paramId") ?? "";
     if (!/^[a-z][a-z0-9_]{0,29}$/.test(paramId)) throw new ReportError(404, "NOT_FOUND", "Not found");
     // D491: `q` searches the options query past its first 200 values (empty: the cached list).
+    // D560: `values` (a JSON object, as GET …/results takes) are a linked select's parents' values.
     const query = c.req.query("q");
-    if (query !== undefined && query.trim()) return { options: await searchParamOptions(id(c, "reportId"), c.get("user").id, paramId, query.slice(0, 400)) };
-    return { options: await reportParamOptions(id(c, "reportId"), c.get("user").id, paramId) };
+    const values = queryValues(c.req.query("values"));
+    if (query !== undefined && query.trim()) return { options: await searchParamOptions(id(c, "reportId"), c.get("user").id, paramId, query.slice(0, 400), values) };
+    return { options: await reportParamOptions(id(c, "reportId"), c.get("user").id, paramId, undefined, values) };
   }));
   app.post("/api/reports/:reportId/refresh", handle(async (c) => {
     const reportId = id(c, "reportId");

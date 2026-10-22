@@ -1,6 +1,6 @@
 # Report filters (dynamic filters): plan
 
-Lane FILTERS, 2026-10-22. Builds on D489–D491 and D507 (spec v3 parameters). Operator: "in the report, how can we add dynamic filters. research and build". Status: **slice 1 built** (lane FILTERS, 2026-10-22, migration 066). The plan's decisions are recorded as **DF1 = D532, DF2 = D533, DF3 = D534, DF4 = D535, DF5 = D536, DF6 = D537** (docs/plan/WAVES_45-48_REPORTS.md, "Lane FILTERS") and its threats as **TF1–TF6 = T408–T413** (docs/plan/THREAT_MODEL.md). Later slices stay as ranked below.
+Lane FILTERS, 2026-10-22. Builds on D489–D491 and D507 (spec v3 parameters). Operator: "in the report, how can we add dynamic filters. research and build". Status: **slice 1 built** (lane FILTERS, 2026-10-22, migration 066). The plan's decisions are recorded as **DF1 = D532, DF2 = D533, DF3 = D534, DF4 = D535, DF5 = D536, DF6 = D537** (docs/plan/WAVES_45-48_REPORTS.md, "Lane FILTERS") and its threats as **TF1–TF6 = T408–T413** (docs/plan/THREAT_MODEL.md). Later slices stay as ranked below; lane FILT2 builds them in order (D560–D574, migration 069, threats from T414), each marked **Shipped** as it lands.
 
 ## What other tools do
 
@@ -66,7 +66,7 @@ Parameters stay the only mechanism: every filter is a spec v3 parameter bound as
 
 ## Later (ranked)
 
-1. **Linked filters:** an options query may read earlier parameters (array order, no cycles); options cached per (param, parents' values hash), ≤ 50 lists a report; child values not in the new options drop with a note.
+1. **Linked filters:** an options query may read earlier parameters (array order, no cycles); options cached per (param, parents' values hash), ≤ 50 lists a report; child values not in the new options drop with a note. **Shipped** (lane FILT2, D560–D562, migration 069; Add filter's "Narrow by" builds one).
 2. **Table sort and contains, client side:** over loaded rows, state in the URL (`?t.<block>=col.desc`, replace), "within the first N rows" when truncated; personal.
 3. **Saved views:** per-viewer named value sets and "my default view" (`report_param_views`); only the owner's "Save as report default" changes the spec.
 4. **More types:** `number_range`, multi-select exclude, text contains, Add filter on Date/DateTime as a date_range (reviewed by hand, no identity check).

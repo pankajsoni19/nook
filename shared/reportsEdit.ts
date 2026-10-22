@@ -245,7 +245,9 @@ export type FilterColumn = {
 };
 export type FilterColumnsView = { columns: FilterColumn[]; /** The report's used queries. */ queries: number; /** Parameters left before the limit of 8. */ slotsLeft: number };
 /** D534: the options Nook would give the filter (POST /api/reports/:id/filters/preview). */
-export type FilterPreview = { column: FilterColumn; optionsQuery: string; sample: string[]; optionCount: number; truncated: boolean; distinct: number; suggested: { id: string; label: string } };
+/** D562: an existing filter on the same table whose picks a new filter's choices may follow ("Narrow by Country"). */
+export type FilterNarrowChoice = { paramId: string; label: string; column: string; picked: boolean };
+export type FilterPreview = { column: FilterColumn; optionsQuery: string; sample: string[]; optionCount: number; truncated: boolean; distinct: number; suggested: { id: string; label: string }; narrowBy: FilterNarrowChoice[] };
 
 export const FILTER_LIMITS = {
   /** A column with more distinct values than this is refused (T409). */

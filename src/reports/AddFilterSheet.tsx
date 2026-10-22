@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from "react";
 import { Eye, ListFilter, LoaderCircle, TriangleAlert } from "lucide-react";
 import { ModalDialog } from "../files/Dialog";
 import { notify } from "../ui/notify";
@@ -40,16 +40,29 @@ export function AddFilterSheet({ reportId, onClose, reopen, onRequested }: { rep
     return () => { alive = false; };
   }, [reportId]);
 
+  // D562: "Narrow by" existing filters on the same table; toggling one reads the narrowed choices again (the sheet keeps its place).
+  const [narrowBy, setNarrowBy] = useState<string[]>([]);
+  const [narrowing, setNarrowing] = useState(false);
+  const labelFor = useRef<string | null>(null);
+  const narrowKey = narrowBy.join(",");
   useEffect(() => {
     if (!picked) return undefined;
     let alive = true;
-    setPreview("loading");
-    previewFilter(reportId, picked.table, picked.column).then(
-      ({ preview: next }) => { if (alive) { setPreview(next); setLabel(next.suggested.label); } },
-      (reason) => { if (alive) setPreview({ error: messageOf(reason, "Could not read the column's values") }); }
+    const key = columnKey(picked);
+    setPreview((current) => current && current !== "loading" && "sample" in current && columnKey(current.column) === key ? current : "loading");
+    setNarrowing(true);
+    previewFilter(reportId, picked.table, picked.column, narrowKey ? narrowKey.split(",") : []).then(
+      ({ preview: next }) => {
+        if (!alive) return;
+        setPreview(next);
+        setNarrowing(false);
+        if (labelFor.current !== key) setLabel(next.suggested.label);
+        labelFor.current = key;
+      },
+      (reason) => { if (alive) { setPreview({ error: messageOf(reason, "Could not read the column's values") }); setNarrowing(false); } }
     );
     return () => { alive = false; };
-  }, [reportId, picked]);
+  }, [reportId, picked, narrowKey]);
 
   const hidden = view?.columns.filter((column) => column.sensitive).length ?? 0;
   const shown = useMemo(() => {
@@ -64,7 +77,7 @@ export function AddFilterSheet({ reportId, onClose, reopen, onRequested }: { rep
     setBusy(true);
     setError(null);
     try {
-      await requestFilter(reportId, { table: picked.table, column: picked.column, label: label.trim() || ready.suggested.label });
+      await requestFilter(reportId, { table: picked.table, column: picked.column, label: label.trim() || ready.suggested.label, ...(narrowBy.length ? { narrowBy } : {}) });
       notify.success("Filter requested; Nook proposes it in Changes");
       onRequested();
     } catch (reason) {
@@ -84,7 +97,7 @@ export function AddFilterSheet({ reportId, onClose, reopen, onRequested }: { rep
           <div className="report-add-filter-columns" role="radiogroup" aria-label="Columns">
             {shown.map((column) => {
               const selected = picked !== null && columnKey(picked) === columnKey(column);
-              return <button key={columnKey(column)} type="button" role="radio" aria-checked={selected} aria-label={`${column.table}.${column.column}, ${column.type}`} className={`report-add-filter-column${selected ? " selected" : ""}`} onClick={() => setPicked(column)}>
+              return <button key={columnKey(column)} type="button" role="radio" aria-checked={selected} aria-label={`${column.table}.${column.column}, ${column.type}`} className={`report-add-filter-column${selected ? " selected" : ""}`} onClick={() => { if (!selected) { setPicked(column); setNarrowBy([]); } }}>
                 <span className="report-add-filter-name"><code>{column.column}</code>{column.sensitive && <span className="reports-status">Looks personal</span>}</span>
                 <span className="report-add-filter-meta">{column.table} · {column.type} · {readByText(column.readBy.length, view.queries)}</span>
               </button>;
@@ -103,6 +116,14 @@ export function AddFilterSheet({ reportId, onClose, reopen, onRequested }: { rep
             <p className="report-add-filter-values-head">{ready.truncated ? `${ready.optionCount}+ values` : `${ready.optionCount} ${ready.optionCount === 1 ? "value" : "values"}`}, the most common first</p>
             <ul className="report-add-filter-values" aria-label="Sample values">{ready.sample.map((value) => <li key={value}>{value || "(blank)"}</li>)}{ready.optionCount > ready.sample.length && <li className="report-add-filter-more">and {ready.truncated ? "more" : ready.optionCount - ready.sample.length} more</li>}</ul>
             <p className="report-add-filter-exposure" role="note"><Eye aria-hidden="true" /><span>Readers will see the values of <code>{picked.table}.{picked.column}</code>.</span></p>
+            {(ready.narrowBy ?? []).length > 0 && <div className="report-add-filter-narrow" role="group" aria-label="Linked choices" aria-busy={narrowing || undefined}>
+              <p className="report-add-filter-values-head">Linked choices</p>
+              {ready.narrowBy.map((choice) => <label key={choice.paramId} className="report-add-filter-toggle">
+                <input type="checkbox" checked={narrowBy.includes(choice.paramId)} disabled={narrowing}
+                  onChange={(event) => { const on = event.target.checked; setNarrowBy((current) => on ? [...current, choice.paramId] : current.filter((item) => item !== choice.paramId)); }} />
+                <span>Narrow by {choice.label}<small>Only the {picked.column} values of the picked {choice.label.toLowerCase()} are offered</small></span>
+              </label>)}
+            </div>}
           </>}
         </section>}
         <p className="file-dialog-hint">Nook's edit agent adds it to the queries that read the table, as a filter that starts at All. Nook checks that every block shows the same as now with All before the change waits for you in Changes.</p>
@@ -110,7 +131,7 @@ export function AddFilterSheet({ reportId, onClose, reopen, onRequested }: { rep
       </div>
       <footer className="file-dialog-actions">
         <button type="button" className="secondary-button" onClick={onClose} disabled={busy}>Cancel</button>
-        <button type="submit" className="primary-button" disabled={busy || !ready || view?.slotsLeft === 0}>{busy ? <LoaderCircle className="spin" aria-hidden="true" /> : <ListFilter aria-hidden="true" />}{busy ? "Asking…" : "Ask for the filter"}</button>
+        <button type="submit" className="primary-button" disabled={busy || !ready || narrowing || view?.slotsLeft === 0}>{busy ? <LoaderCircle className="spin" aria-hidden="true" /> : <ListFilter aria-hidden="true" />}{busy ? "Asking…" : "Ask for the filter"}</button>
       </footer>
     </form>
   </ModalDialog>;

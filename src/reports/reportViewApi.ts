@@ -13,7 +13,11 @@ export const getParamResults = (id: string, values: ParamValues) => api<ParamRes
 /** Runs a parameter set's missing queries (read access is enough) and answers with its results. */
 export const runParamSet = (id: string, values: ParamValues, force = false) => api<ParamResultsView>(`/reports/${id}/param-runs`, { method: "POST", body: JSON.stringify(force ? { values, force } : { values }) });
 /** A select's cached options; with `query`, ClickHouse's values that hold it (D491, past the first 200). */
-export const getParamOptions = (id: string, paramId: string, query?: string) => api<{ options: ParamOptions }>(`/reports/${id}/parameters/${paramId}/options${query ? `?q=${encodeURIComponent(query)}` : ""}`);
+/** D560: `parents` are a linked select's parents' values (its list follows them). */
+export const getParamOptions = (id: string, paramId: string, query?: string, parents?: ParamValues) => {
+  const search = [query ? `q=${encodeURIComponent(query)}` : "", parents && Object.keys(parents).length ? `values=${encodeURIComponent(JSON.stringify(parents))}` : ""].filter(Boolean).join("&");
+  return api<{ options: ParamOptions }>(`/reports/${id}/parameters/${paramId}/options${search ? `?${search}` : ""}`);
+};
 export const refreshReport = (id: string, queryKey?: string) => api<{ run: ReportRun }>(`/reports/${id}/refresh`, { method: "POST", body: JSON.stringify(queryKey ? { queryKey } : {}) });
 export const getRun = (id: string, runId: string) => api<{ run: ReportRun }>(`/reports/${id}/runs/${runId}`);
 export const listRuns = (id: string) => api<RunHistoryView>(`/reports/${id}/runs`);

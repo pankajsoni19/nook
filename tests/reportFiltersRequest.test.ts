@@ -329,3 +329,35 @@ describe("D536: the owner sets what a click filters by (set_click_filter)", () =
     expect((await edit([{ op: "set_click_filter", id: "routes", clickFilter: { param: "nope", column: "route" } }])).body.error).toContain("not one of the report's parameters");
   });
 });
+
+describe("D562: Add filter narrowed by an existing filter on the same table (a linked filter)", () => {
+  test("the preview offers Narrow by Status; the request's options query reads it, and the agent adds the filter after it", async () => {
+    const STATUS_BY = "(empty({status:Array(UInt32)}) OR status IN {status:Array(UInt32)})";
+    const status = { id: "status", label: "Status", type: "multi_select" as const, chType: "Array(UInt32)", default: [], optionsQuery: optionsQueryFor("eval_top_routes.requests", "status") };
+    const report = await send(owner, "POST", "/reports", { title: "API traffic by status", datasourceId });
+    const reportId = report.body.report.id as string;
+    const spec = goldenSpec();
+    db.query("UPDATE reports SET spec_json = ?, status = 'ready' WHERE id = ?").run(JSON.stringify({ ...spec, parameters: [status], queries: spec.queries.map((query) => query.key === "errors" ? { ...query, sql: withCondition(query.sql, STATUS_BY) } : query) }), reportId);
+    await refresh.startRefresh(owner.userId, reportId, { trigger: "user" }).done;
+
+    const plain = await send(owner, "POST", `/reports/${reportId}/filters/preview`, { table: "eval_top_routes.requests", column: "route" });
+    expect(plain.body.preview.narrowBy).toEqual([{ paramId: "status", label: "Status", column: "status", picked: false }]);
+    const narrowed = await send(owner, "POST", `/reports/${reportId}/filters/preview`, { table: "eval_top_routes.requests", column: "route", narrowBy: ["status"] });
+    const linkedQuery = "SELECT toString(`route`) AS value FROM `eval_top_routes`.`requests` WHERE (empty({status:Array(UInt32)}) OR `status` IN {status:Array(UInt32)}) GROUP BY value ORDER BY count() DESC LIMIT 200";
+    expect(narrowed.body.preview).toMatchObject({ optionsQuery: linkedQuery, narrowBy: [{ paramId: "status", picked: true }], sample: ["healthz", "digest", "search", "orders"] });
+    // The options query ran with the parent bound (All).
+    expect(fake.requests.some((item) => item.sql.includes("`status` IN {status:Array(UInt32)}") && item.params.param_status === "[]")).toBe(true);
+    // Only an offered filter can narrow.
+    expect((await send(owner, "POST", `/reports/${reportId}/filters/preview`, { table: "eval_top_routes.requests", column: "route", narrowBy: ["nope"] })).status).toBe(400);
+
+    const asked = await send(owner, "POST", `/reports/${reportId}/filters`, { table: "eval_top_routes.requests", column: "route", narrowBy: ["status"] });
+    expect(asked.status).toBe(201);
+    expect(asked.body.instruction).toMatchObject({ text: "Add a filter: Route (eval_top_routes.requests.route), narrowed by Status", request: { optionsQuery: linkedQuery } });
+    expect(await waitStatus(asked.body.instruction.id, ["proposed", "failed"])).toEqual({ status: "proposed", error: null });
+    expect(String(provider.calls.at(-1)!.messages![0]!.content)).toContain('Pass after: "status"');
+    await send(owner, "POST", `/reports/${reportId}/instructions/${asked.body.instruction.id}/apply`, {});
+    expect(specOf(reportId).parameters.map((param) => param.id)).toEqual(["status", "route"]);
+    const options = await send(owner, "GET", `/reports/${reportId}/parameters/route/options?values=${encodeURIComponent(JSON.stringify({ status: ["500"] }))}`);
+    expect(options.body.options.parents).toEqual({ status: ["500"] });
+  });
+});

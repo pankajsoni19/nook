@@ -19,7 +19,8 @@ import { ResultTable } from "./ResultTable";
 import { PAGE_METRICS_RUN_MARKER } from "../../shared/reportsMetrics";
 import { getParamOptions, previewVersionOf, getParamResults, getResults, getRun, listRuns, refreshReport, runParamSet, RUN_STATUS_TEXT, timeAgo } from "./reportViewApi";
 import { ReportParamsBar, ReportParamsContext, type ParamReach } from "./ReportParamsBar";
-import { canonicalValues, isDefaultSet, reachOf, valuesFromSearch, valuesToSearch, type ParamValues, type ReportParameter } from "../../shared/reportParams";
+import { canonicalValues, isDefaultSet, optionParentsOf, reachOf, valuesFromSearch, valuesToSearch, type ParamValues, type ReportParameter } from "../../shared/reportParams";
+import { dropUnlinked, parentsKey, parentValuesOf } from "./linkedFilters";
 import { codeOf, messageOf } from "./reportsApi";
 import { scheduleBadge, ScheduleSheet } from "./ScheduleSheet";
 import { CommentOnBlockButton } from "./reportComment";
@@ -146,6 +147,9 @@ export function ReportView({ report, canWrite, generating = false, initial, read
   const setKey = withParams && !isDefaultSet(parameters, values) ? canonicalValues(parameters, values) : "";
   const valuesRef = useRef<ParamValues>(values);
   valuesRef.current = values;
+  const parametersRef = useRef(parameters);
+  parametersRef.current = parameters;
+  const pushRef = useRef<(next: ParamValues, options?: { replace?: boolean }) => void>(() => undefined);
   /** The queries a parameter set is still running (their blocks show spinners); null when none. */
   const [pending, setPending] = useState<string[] | null>(null);
   const ticket = useRef(0);
@@ -188,6 +192,17 @@ export function ReportView({ report, canWrite, generating = false, initial, read
         }
       }
     } catch (reason) {
+      // D561: a link (or an old URL) whose linked filter holds a value its parents' choices do not: drop it, with a note.
+      const refused = codeOf(reason) as { code?: string; paramId?: unknown };
+      const params = parametersRef.current;
+      if (current() && refused.code === "INVALID" && params.some((param) => param.id === refused.paramId && optionParentsOf(param, params).length > 0)) {
+        const { values: cleaned, notes } = await dropUnlinked(report.id, params, null, valuesRef.current);
+        if (current() && notes.length) {
+          for (const note of notes) notify.info(note);
+          pushRef.current(cleaned, { replace: true });
+          return null;
+        }
+      }
       if (current()) {
         setPending(null);
         setLoadError(messageOf(reason, "Could not load the results"));
@@ -195,10 +210,22 @@ export function ReportView({ report, canWrite, generating = false, initial, read
       return null;
     }
   }, [report.id, setKey]);
-  const changeParams = useCallback((next: ParamValues) => {
+  const pushValues = useCallback((next: ParamValues, options?: { replace?: boolean }) => {
     const search = valuesToSearch(parameters, next);
-    paramsContext?.onChange(Object.keys(search).length ? search : undefined);
+    paramsContext?.onChange(Object.keys(search).length ? search : undefined, options);
   }, [parameters, paramsContext]);
+  // D561: a parent's change drops the linked children's picks its new choices do not hold, with a note, before the URL changes.
+  const linked = useMemo(() => parameters.some((param) => optionParentsOf(param, parameters).length > 0), [parameters]);
+  const changeParams = useCallback((next: ParamValues) => {
+    if (!linked) { pushValues(next); return; }
+    const before = valuesRef.current;
+    void dropUnlinked(report.id, parameters, before, next).then(({ values: cleaned, notes }) => {
+      if (!alive.current || valuesRef.current !== before) return;
+      for (const note of notes) notify.info(note);
+      pushValues(cleaned);
+    });
+  }, [linked, parameters, pushValues, report.id]);
+  pushRef.current = pushValues;
   const loadRuns = useCallback(async () => {
     try {
       const history = await listRuns(report.id);
@@ -327,12 +354,14 @@ export function ReportView({ report, canWrite, generating = false, initial, read
     if (next === null) { notify.warning(`At most 50 values can be picked for ${param.label}`); return; }
     const adding = param.type === "multi_select" ? !(current as string[]).includes(value) : next !== param.default;
     if (adding) {
-      if (!optionCache.current.has(param.id)) optionCache.current.set(param.id, getParamOptions(report.id, param.id).then(({ options }) => options, () => null));
-      const options = await optionCache.current.get(param.id);
+      // D560: a linked filter's choices are those of its parents' current values.
+      const cacheKey = `${param.id}\u0000${parentsKey(param, parameters, valuesRef.current)}`;
+      if (!optionCache.current.has(cacheKey)) optionCache.current.set(cacheKey, getParamOptions(report.id, param.id, undefined, parentValuesOf(param, parameters, valuesRef.current)).then(({ options }) => options, () => null));
+      const options = await optionCache.current.get(cacheKey);
       if (options && !options.truncated && !options.options.includes(value)) { notify.error(`${value.slice(0, 60) || "(blank)"} is not one of the choices for ${param.label}`); return; }
     }
     changeParams({ ...valuesRef.current, [param.id]: next });
-  }, [changeParams, report.id]);
+  }, [changeParams, parameters, report.id]);
   const clickFor = (block: DataBlock): ClickState | undefined => {
     if (!withParams || !isClickable(block) || !block.clickFilter) return undefined;
     const param = parameters.find((item) => item.id === block.clickFilter!.param && (item.type === "select" || item.type === "multi_select"));

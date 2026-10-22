@@ -1,14 +1,15 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, ListFilter, LoaderCircle, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { ModalDialog } from "../files/Dialog";
 import type { ReportParamsSearch } from "../router";
 import { Select } from "../ui/Select";
 import { useHistoryDialogGuard } from "../ui/useHistoryDialogGuard";
 import {
-  DATE_PRESET_LABELS, DATE_PRESETS, defaultValues, isDefaultSet, PARAM_LIMITS, resolveDateRange, todayIn, validDay, valueLabel, valueProblem, zoneLabel,
+  DATE_PRESET_LABELS, DATE_PRESETS, defaultValues, isDefaultSet, optionParentsOf, PARAM_LIMITS, resolveDateRange, todayIn, validDay, valueLabel, valueProblem, zoneLabel,
   type DatePreset, type DateRangeValue, type MultiSelectParameter, type ParamOptions, type ParamValue, type ParamValues, type ReportParameter
 } from "../../shared/reportParams";
 import { getParamOptions } from "./reportViewApi";
+import { parentsKey, parentValuesOf } from "./linkedFilters";
 import { messageOf } from "./reportsApi";
 
 /**
@@ -25,24 +26,35 @@ export const ReportParamsContext = createContext<ReportParamsContextValue | null
 
 export type OptionsState = Record<string, ParamOptions | "loading" | { error: string }>;
 
-/** Each select's options, read once when the report opens (the server caches them per report). */
-export function useParamOptions(reportId: string, parameters: readonly ReportParameter[], enabled: boolean): OptionsState {
+/**
+ * Each select's options, read once when the report opens (the server caches them per report). D560: a
+ * linked select's list is read again whenever its parents' values change (the latest answer wins).
+ */
+export function useParamOptions(reportId: string, parameters: readonly ReportParameter[], enabled: boolean, values: ParamValues = NO_VALUES): OptionsState {
   const [state, setState] = useState<OptionsState>({});
-  const ids = parameters.filter((param) => param.type === "select" || param.type === "multi_select").map((param) => param.id).join(",");
+  const asked = useRef(new Map<string, string>());
+  const keys = parameters.filter((param) => param.type === "select" || param.type === "multi_select").map((param) => `${param.id}\u0000${parentsKey(param, parameters, values)}`).join("\n");
+  const valuesRef = useRef(values);
+  valuesRef.current = values;
+  useEffect(() => () => { asked.current = new Map(); }, [reportId]);
   useEffect(() => {
-    if (!enabled || !ids) return undefined;
-    let alive = true;
-    for (const id of ids.split(",")) {
+    if (!enabled || !keys) return;
+    const mine = asked.current;
+    for (const line of keys.split("\n")) {
+      const [id, key] = line.split("\u0000") as [string, string];
+      if (mine.get(id) === key) continue;
+      mine.set(id, key);
+      const param = parameters.find((item) => item.id === id)!;
       setState((current) => ({ ...current, [id]: "loading" }));
-      getParamOptions(reportId, id).then(
-        ({ options }) => { if (alive) setState((current) => ({ ...current, [id]: options })); },
-        (reason) => { if (alive) setState((current) => ({ ...current, [id]: { error: messageOf(reason, "Could not load the choices") } })); }
+      getParamOptions(reportId, id, undefined, parentValuesOf(param, parameters, valuesRef.current)).then(
+        ({ options }) => { if (mine.get(id) === key) setState((current) => ({ ...current, [id]: options })); },
+        (reason) => { if (mine.get(id) === key) setState((current) => ({ ...current, [id]: { error: messageOf(reason, "Could not load the choices") } })); }
       );
     }
-    return () => { alive = false; };
-  }, [reportId, ids, enabled]);
+  }, [reportId, keys, enabled, parameters]);
   return state;
 }
+const NO_VALUES: ParamValues = {};
 
 const optionList = (state: OptionsState[string] | undefined): string[] => state && state !== "loading" && "options" in state ? state.options : [];
 /** Whether a select's list stopped at 200 (its options query has more): then the search asks the server (D491). */
@@ -56,23 +68,33 @@ const ReportIdContext = createContext<string>("");
  * the latest answer is kept while the next one loads, so the list never empties under the pointer. An
  * empty box is the cached list (nothing is asked).
  */
-export function useOptionSearch(reportId: string, paramId: string, enabled: boolean, query: string) {
+export function useOptionSearch(reportId: string, paramId: string, enabled: boolean, query: string, parents?: ParamValues) {
   const [found, setFound] = useState<{ query: string; options: string[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const term = query.trim();
+  // D560: a linked select searches within its parents' values.
+  const parentsJson = parents ? JSON.stringify(parents) : "";
+  const asked = `${parentsJson}\u0000${term}`;
   useEffect(() => {
     if (!enabled || !term || !reportId) { setError(null); return undefined; }
     let alive = true;
     const timer = setTimeout(() => {
-      getParamOptions(reportId, paramId, term).then(
-        ({ options }) => { if (alive) { setFound({ query: term, options: options.options }); setError(null); } },
+      getParamOptions(reportId, paramId, term, parentsJson ? JSON.parse(parentsJson) as ParamValues : undefined).then(
+        ({ options }) => { if (alive) { setFound({ query: asked, options: options.options }); setError(null); } },
         (reason) => { if (alive) setError(messageOf(reason, "Could not search the choices")); }
       );
     }, 250);
     return () => { alive = false; clearTimeout(timer); };
-  }, [reportId, paramId, enabled, term]);
+  }, [reportId, paramId, enabled, term, parentsJson, asked]);
   const active = enabled && term !== "";
-  return { found: active ? found?.options ?? [] : [], searching: active && found?.query !== term && !error, error: active ? error : null };
+  return { found: active ? found?.options ?? [] : [], searching: active && found?.query !== asked && !error, error: active ? error : null };
+}
+
+/** D560: the parameters and the values a linked select's list and search follow (the bar's, or the phone sheet's draft). */
+const LinkContext = createContext<{ parameters: readonly ReportParameter[]; values: ParamValues }>({ parameters: [], values: {} });
+function useParents(param: ReportParameter): ParamValues | undefined {
+  const { parameters, values } = useContext(LinkContext);
+  return parentValuesOf(param, parameters, values);
 }
 
 /** The listed choices, then the server's matches not listed (D491), each once. */
@@ -158,7 +180,7 @@ function SelectParamControl({ param, value, state, variant, disabled, onChange }
   const reportId = useContext(ReportIdContext);
   const [query, setQuery] = useState("");
   const cut = optionsCut(state);
-  const search = useOptionSearch(reportId, param.id, cut, query);
+  const search = useOptionSearch(reportId, param.id, cut, query, useParents(param));
   const choices = withFound(optionList(state), search.found);
   const all = choices.includes(value) ? choices : [value, ...choices];
   return <Select<string> variant={variant} label={param.label} value={value} searchable={cut ? true : "auto"} disabled={disabled}
@@ -199,7 +221,7 @@ type BarProps = {
 
 /** The control bar: pills from 761 px, the Filters button and sheet on a phone. */
 export function ReportParamsBar({ reportId, parameters, values, busy, onChange, timeZone = "UTC", reach = NO_REACH, onAddFilter, onRemoveFilter }: BarProps) {
-  const options = useParamOptions(reportId, parameters, true);
+  const options = useParamOptions(reportId, parameters, true, values);
   const [sheet, setSheet] = useState<Sheet>(null);
   const [phoneOpen, setPhoneOpen] = useState(false);
   const isDefault = isDefaultSet(parameters, values);
@@ -208,7 +230,7 @@ export function ReportParamsBar({ reportId, parameters, values, busy, onChange, 
   const reset = () => onChange(defaultValues(parameters));
   const summary = (param: ReportParameter) => param.type === "date_range" ? rangeText((values[param.id] ?? param.default) as DateRangeValue, timeZone) : valueLabel(param, values[param.id] ?? param.default);
   const addButton = (className: string) => onAddFilter ? <button type="button" className={`report-params-add ${className}`} onClick={onAddFilter} aria-haspopup="dialog"><Plus aria-hidden="true" />Filter</button> : null;
-  return <ReportIdContext.Provider value={reportId}><ZoneContext.Provider value={timeZone}><ReachContext.Provider value={reach}><div className="report-params" role="group" aria-label="Report filters">
+  return <ReportIdContext.Provider value={reportId}><ZoneContext.Provider value={timeZone}><ReachContext.Provider value={reach}><LinkContext.Provider value={{ parameters, values }}><div className="report-params" role="group" aria-label="Report filters">
     <div className="report-params-chips">
       {parameters.map((param) => <ParamField key={param.id} param={param} value={values[param.id] ?? param.default} options={options} variant="chip" disabled={false}
         onChange={(value) => set(param, value)} onSheet={setSheet} />)}
@@ -230,7 +252,7 @@ export function ReportParamsBar({ reportId, parameters, values, busy, onChange, 
       onApply={(value) => { setSheet(null); set(sheet.param, value); }} onRemove={onRemoveFilter ? () => { const param = sheet.param; setSheet(null); onRemoveFilter(param); } : undefined} />}
     {phoneOpen && <ParamsSheet parameters={parameters} values={values} options={options} onClose={() => setPhoneOpen(false)} reopen={() => setPhoneOpen(true)}
       onApply={(next) => { setPhoneOpen(false); onChange(next); }} onRemove={onRemoveFilter ? (param) => { setPhoneOpen(false); onRemoveFilter(param); } : undefined} />}
-  </div></ReachContext.Provider></ZoneContext.Provider></ReportIdContext.Provider>;
+  </div></LinkContext.Provider></ReachContext.Provider></ZoneContext.Provider></ReportIdContext.Provider>;
 }
 
 /** Custom from–to days (both included); Apply keeps a valid range only. */
@@ -263,7 +285,7 @@ function MultiSelectSheet({ param, value, options, onApply, onClose, onRemove }:
   useHistoryDialogGuard(true, onClose, { reopen: null });
   // D491: a list cut at 200 searches ClickHouse too.
   const cut = optionsCut(options);
-  const search = useOptionSearch(useContext(ReportIdContext), param.id, cut, query);
+  const search = useOptionSearch(useContext(ReportIdContext), param.id, cut, query, useParents(param));
   // The options in their order (a pick never moves under the pointer), then any picked value no longer listed.
   const listed = optionList(options);
   const choices = [...listed, ...picked.filter((item) => !listed.includes(item))];
@@ -294,9 +316,13 @@ function ParamsSheet({ parameters, values, options, onApply, onClose, reopen, on
   const [sheet, setSheet] = useState<Sheet>(null);
   useHistoryDialogGuard(true, onClose, { reopen, layerKey: "reports.params" });
   const set = (param: ReportParameter, value: ParamValue) => setDraft((current) => ({ ...current, [param.id]: value }));
-  return <ModalDialog title="Filters" eyebrow="Report" onClose={onClose} variant="sheet" className="reports-dialog report-params-sheet">
+  // D560: linked selects list their choices for the draft's parents.
+  const linked = parameters.some((param) => optionParentsOf(param, parameters).length > 0);
+  const own = useParamOptions(useContext(ReportIdContext), parameters, linked, draft);
+  const shown = linked ? { ...options, ...own } : options;
+  return <LinkContext.Provider value={{ parameters, values: draft }}><ModalDialog title="Filters" eyebrow="Report" onClose={onClose} variant="sheet" className="reports-dialog report-params-sheet">
     <div className="report-params-fields">
-      {parameters.map((param) => <ParamField key={param.id} param={param} value={draft[param.id] ?? param.default} options={options} variant="field" disabled={false}
+      {parameters.map((param) => <ParamField key={param.id} param={param} value={draft[param.id] ?? param.default} options={shown} variant="field" disabled={false}
         onChange={(value) => set(param, value)} onSheet={setSheet} />)}
     </div>
     <footer className="file-dialog-actions">
@@ -304,7 +330,7 @@ function ParamsSheet({ parameters, values, options, onApply, onClose, reopen, on
       <button type="button" className="primary-button" onClick={() => onApply(draft)}><Check aria-hidden="true" />Show results</button>
     </footer>
     {sheet?.kind === "range" && <CustomRangeSheet param={sheet.param} value={draft[sheet.param.id] as DateRangeValue} onClose={() => setSheet(null)} onApply={(value) => { setSheet(null); set(sheet.param, value); }} />}
-    {sheet?.kind === "multi" && <MultiSelectSheet param={sheet.param} value={draft[sheet.param.id] as string[]} options={options[sheet.param.id]} onClose={() => setSheet(null)} onApply={(value) => { setSheet(null); set(sheet.param, value); }}
+    {sheet?.kind === "multi" && <MultiSelectSheet param={sheet.param} value={draft[sheet.param.id] as string[]} options={shown[sheet.param.id]} onClose={() => setSheet(null)} onApply={(value) => { setSheet(null); set(sheet.param, value); }}
       onRemove={onRemove ? () => { const param = sheet.param; setSheet(null); onRemove(param); } : undefined} />}
-  </ModalDialog>;
+  </ModalDialog></LinkContext.Provider>;
 }

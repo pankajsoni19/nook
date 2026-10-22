@@ -40,7 +40,7 @@ const instructionCreate = z.object({
 }).strict();
 /** D534: a catalog column, as `db.table` and its name (checked against the report's tables and the catalog). */
 const catalogName = z.string().min(1).max(260).refine((value) => !/[\u0000-\u001f\u007f`]/.test(value), "must be a plain name");
-const filterColumnSchema = z.object({ table: catalogName.refine((value) => value.includes("."), "must be db.table"), column: catalogName }).strict();
+const filterColumnSchema = z.object({ table: catalogName.refine((value) => value.includes("."), "must be db.table"), column: catalogName, narrowBy: z.array(z.string().regex(PARAM_ID)).max(PARAM_LIMITS.parameters).optional() }).strict();
 const filterCreateSchema = filterColumnSchema.extend({ label: z.string().trim().min(1).max(PARAM_LIMITS.label).optional(), id: z.string().regex(PARAM_ID).optional() }).strict();
 const reorderSchema = z.object({ ids: z.array(uuid).max(INSTRUCTION_LIMITS.queued * 2) }).strict();
 const autoApplySchema = z.object({ autoApply: z.boolean() }).strict();

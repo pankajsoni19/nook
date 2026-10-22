@@ -69,6 +69,6 @@ describe("migration 064 report_docs", () => {
 
     reportDocsMigration.up(db);
     expect(db.query("SELECT COUNT(*) AS count FROM report_docs").get()).toEqual({ count: 1 });
-    expect((db.query("SELECT id FROM schema_migrations WHERE id >= 63 ORDER BY id").all() as Array<{ id: number }>).map((row) => row.id)).toEqual([63, 64, 65, 66]);
+    expect((db.query("SELECT id FROM schema_migrations WHERE id >= 63 ORDER BY id").all() as Array<{ id: number }>).map((row) => row.id)).toEqual([63, 64, 65, 66, 69]);
   });
 });

@@ -189,6 +189,10 @@
 .report-add-filter-empty { margin: 0; padding: 10px; color: var(--muted); font-size: .86rem; }
 .report-add-filter-toggle { display: flex; align-items: center; gap: 10px; min-height: 40px; cursor: pointer; }
 .report-add-filter-toggle input { width: 18px; height: 18px; min-height: 0; flex: none; }
+.report-add-filter-narrow { display: grid; gap: 2px; min-width: 0; }
+.report-add-filter-narrow input { accent-color: var(--yellow); }
+.report-add-filter-narrow .report-add-filter-toggle span { display: grid; gap: 1px; min-width: 0; }
+.report-add-filter-narrow small { color: var(--muted); font-size: .76rem; overflow-wrap: anywhere; }
 .report-add-filter-preview { display: grid; gap: 8px; min-width: 0; border-top: 1px solid var(--border); padding-top: 10px; }
 .report-add-filter-preview .reports-loading, .report-add-filter-preview .form-error { display: flex; align-items: center; gap: 8px; margin: 0; }
 .report-add-filter-preview svg { width: 16px; height: 16px; flex: none; }

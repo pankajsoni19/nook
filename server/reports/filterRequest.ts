@@ -1,6 +1,6 @@
 import { audit } from "../db";
 import type { ReportSpec } from "../../shared/reports";
-import { PARAM_ID, PARAM_LIMITS } from "../../shared/reportParams";
+import { bindValues, defaultValues, PARAM_ID, PARAM_LIMITS } from "../../shared/reportParams";
 import { FILTER_LIMITS, type AddFilterRequest, type FilterColumn, type FilterColumnsView, type FilterPreview, type ReportInstruction } from "../../shared/reportsEdit";
 import { ownedReport } from "./access";
 import { tableAllowed } from "./allowlist";
@@ -14,6 +14,7 @@ import { runGuarded } from "./runner";
 import { describeTables } from "./schemaCatalog";
 import { parseSpec } from "./service";
 import { sqlIdentifier } from "./sqlGuard";
+import { reportToday } from "./paramZone";
 
 
 /**
@@ -46,10 +47,48 @@ export function filterChType(type: string): string | null {
   return null;
 }
 
-/** The options query for a column, from catalog identifiers only. */
-export function optionsQueryFor(table: string, column: string): string {
+/** D562: an existing select or multi-select a new filter's choices may follow ("Narrow by Country"). */
+export type NarrowParent = { paramId: string; label: string; column: string; type: "select" | "multi_select"; chType: string };
+
+/**
+ * The options query for a column, from catalog identifiers only. D562: narrowed by existing filters on
+ * the same table, it reads them (a linked filter, D560): a multi-select as `(empty(p) OR col IN p)` (All
+ * keeps every value), a select as `col = p`.
+ */
+export function optionsQueryFor(table: string, column: string, narrow: readonly NarrowParent[] = []): string {
   const [db, name] = table.split(".") as [string, string];
-  return `SELECT toString(${sqlIdentifier(column)}) AS value FROM ${sqlIdentifier(db)}.${sqlIdentifier(name)} GROUP BY value ORDER BY count() DESC LIMIT ${PARAM_LIMITS.options}`;
+  const where = narrow.map((parent) => {
+    const placeholder = `{${parent.paramId}:${parent.chType}}`;
+    return parent.type === "multi_select" ? `(empty(${placeholder}) OR ${sqlIdentifier(parent.column)} IN ${placeholder})` : `${sqlIdentifier(parent.column)} = ${placeholder}`;
+  });
+  return `SELECT toString(${sqlIdentifier(column)}) AS value FROM ${sqlIdentifier(db)}.${sqlIdentifier(name)}${where.length ? ` WHERE ${where.join(" AND ")}` : ""} GROUP BY value ORDER BY count() DESC LIMIT ${PARAM_LIMITS.options}`;
+}
+
+/** The column an options query lists, when its first column is one plain column (or `toString` of one) of a single table. */
+const OPTION_COLUMN = /^\s*SELECT\s+(?:DISTINCT\s+)?(?:toString\(\s*)?(`(?:[^`\\]|\\.)+`|[A-Za-z_][A-Za-z0-9_]*)\s*\)?\s+(?:AS\s+`?[A-Za-z_][A-Za-z0-9_]*`?\s+)?FROM\s/i;
+export function optionColumnOf(sql: string): string | null {
+  const match = OPTION_COLUMN.exec(sql);
+  if (!match) return null;
+  const raw = match[1]!;
+  return raw.startsWith("`") ? raw.slice(1, -1).replace(/\\(.)/g, "$1") : raw;
+}
+
+/**
+ * D562: the report's selects and multi-selects whose options query lists one column of `table` (the
+ * only table it reads) that binds as the parameter's type, so a new filter on the table can follow them.
+ */
+export function narrowParents(spec: Pick<ReportSpec, "parameters">, table: string, columns: readonly FilterColumn[], database: string, except?: string): NarrowParent[] {
+  const out: NarrowParent[] = [];
+  for (const param of spec.parameters) {
+    if (param.type !== "select" && param.type !== "multi_select") continue;
+    const tables = queryTables(param.optionsQuery, database);
+    const column = optionColumnOf(param.optionsQuery);
+    if (tables.length !== 1 || tables[0] !== table || !column || column === except) continue;
+    const found = columns.find((item) => item.table === table && item.column === column);
+    if (!found || found.chType !== (param.type === "multi_select" ? param.chType : `Array(${param.chType})`)) continue;
+    out.push({ paramId: param.id, label: param.label, column, type: param.type, chType: param.chType });
+  }
+  return out;
 }
 
 /** A parameter id and label from a column name ("plan_tier" → plan_tier, "Plan tier"), unique among the report's. */
@@ -92,23 +131,41 @@ export async function filterColumns(reportId: string, userId: string): Promise<F
   return { columns, queries: queries.length, slotsLeft: Math.max(0, PARAM_LIMITS.parameters - spec.parameters.length) };
 }
 
-async function findColumn(reportId: string, userId: string, table: string, column: string): Promise<{ found: FilterColumn; spec: ReportSpec; datasource: DatasourceRow }> {
+type Found = { found: FilterColumn; spec: ReportSpec; datasource: DatasourceRow; columns: FilterColumn[] };
+
+async function findColumn(reportId: string, userId: string, table: string, column: string): Promise<Found> {
   const view = await filterColumns(reportId, userId);
   const found = view.columns.find((item) => item.table === table && item.column === column);
   if (!found) throw new ReportError(400, "INVALID", "Pick a text or whole-number column of a table this report's queries read");
   const report = ownedReport(reportId, userId);
-  return { found, spec: parseSpec(report.spec_json), datasource: usableDatasource(report.datasource_id) };
+  return { found, spec: parseSpec(report.spec_json), datasource: usableDatasource(report.datasource_id), columns: view.columns };
 }
 
-/** Runs the options query and counts the distinct values (refused past FILTER_LIMITS.distinct or with no rows). */
-async function readOptions(datasource: DatasourceRow, found: FilterColumn, userId: string, reportId: string): Promise<{ optionsQuery: string; options: string[]; truncated: boolean; distinct: number }> {
-  const optionsQuery = optionsQueryFor(found.table, found.column);
+/** D562: the parents a request names (`narrowBy`, parameter ids), each one an offered Narrow by choice (400 otherwise). */
+function pickedParents(context: Found, narrowBy: readonly string[] | undefined): NarrowParent[] {
+  if (!narrowBy?.length) return [];
+  const offered = narrowParents(context.spec, context.found.table, context.columns, context.datasource.database, context.found.column);
+  return [...new Set(narrowBy)].map((paramId) => {
+    const parent = offered.find((item) => item.paramId === paramId);
+    if (!parent) throw new ReportError(400, "INVALID", `${paramId.slice(0, 30)} is not a filter on ${context.found.table} this one can follow`);
+    return parent;
+  });
+}
+
+/**
+ * Runs the options query and counts the distinct values (refused past FILTER_LIMITS.distinct or with no
+ * rows). D562: a narrowed options query runs with its parents at their defaults (All for a multi-select).
+ */
+async function readOptions(context: Found, userId: string, reportId: string, narrow: readonly NarrowParent[] = []): Promise<{ optionsQuery: string; options: string[]; truncated: boolean; distinct: number }> {
+  const { datasource, found, spec } = context;
+  const optionsQuery = optionsQueryFor(found.table, found.column, narrow);
   const short = reportId.replace(/-/g, "").slice(0, 12);
   try {
     const counted = await runGuarded(datasource, `SELECT uniq(${sqlIdentifier(found.column)}) AS distinct_values FROM ${found.table.split(".").map(sqlIdentifier).join(".")}`, { classes: ["select"], maxRows: 1, queryId: queryIdFor("fltn", short, crypto.randomUUID().slice(0, 8)), userId });
     const distinct = Number(counted.rows[0]?.[0] ?? 0);
     if (distinct > FILTER_LIMITS.distinct) throw new ReportError(400, "INVALID", `${found.column} has about ${distinct.toLocaleString("en-US")} different values; a filter takes columns with at most ${FILTER_LIMITS.distinct.toLocaleString("en-US")}`);
-    const read = await runOptionsQuery(datasource, optionsQuery, { userId, queryId: queryIdFor("fltopt", short, crypto.randomUUID().slice(0, 8)) });
+    const bound = bindValues(spec.parameters, defaultValues(spec.parameters), reportToday(reportId));
+    const read = await runOptionsQuery(datasource, optionsQuery, { userId, queryId: queryIdFor("fltopt", short, crypto.randomUUID().slice(0, 8)), params: bound });
     if (!read.options.length) throw new ReportError(400, "INVALID", `${found.table} has no values in ${found.column} to filter by`);
     return { optionsQuery, options: read.options, truncated: read.truncated, distinct };
   } catch (error) {
@@ -116,13 +173,19 @@ async function readOptions(datasource: DatasourceRow, found: FilterColumn, userI
   }
 }
 
-/** POST …/filters/preview (the owner): the options the filter would have, and a suggested id and label. */
-export async function previewFilter(reportId: string, userId: string, input: { table: string; column: string }): Promise<FilterPreview> {
-  const { found, spec, datasource } = await findColumn(reportId, userId, input.table, input.column);
-  const read = await readOptions(datasource, found, userId, reportId);
+/**
+ * POST …/filters/preview (the owner): the options the filter would have, a suggested id and label, and
+ * (D562) the existing filters on the same table it can follow (`narrowBy`), with `narrowBy` the ones picked.
+ */
+export async function previewFilter(reportId: string, userId: string, input: { table: string; column: string; narrowBy?: string[] }): Promise<FilterPreview> {
+  const context = await findColumn(reportId, userId, input.table, input.column);
+  const narrow = pickedParents(context, input.narrowBy);
+  const read = await readOptions(context, userId, reportId, narrow);
+  const { found, spec, datasource, columns } = context;
   return {
     column: found, optionsQuery: read.optionsQuery, sample: read.options.slice(0, FILTER_LIMITS.sample), optionCount: read.options.length, truncated: read.truncated, distinct: read.distinct,
-    suggested: suggestedFilter(found.column, spec.parameters.flatMap((param) => param.type === "date_range" ? [param.id, `${param.id}_from`, `${param.id}_to`] : [param.id]))
+    suggested: suggestedFilter(found.column, spec.parameters.flatMap((param) => param.type === "date_range" ? [param.id, `${param.id}_from`, `${param.id}_to`] : [param.id])),
+    narrowBy: narrowParents(spec, found.table, columns, datasource.database, found.column).map((parent) => ({ paramId: parent.paramId, label: parent.label, column: parent.column, picked: narrow.some((item) => item.paramId === parent.paramId) }))
   };
 }
 
@@ -139,11 +202,13 @@ function ownerActor(actor: Actor, reportId: string) {
 /**
  * POST …/filters (the owner; MCP `add_report_filter`): checks the column and the id, runs the options
  * query (it must return a row), and queues an instruction carrying the structured request. The edit
- * agent's proposal waits in Changes (never auto-applied).
+ * agent's proposal waits in Changes (never auto-applied). D562: `narrowBy` names existing filters on the
+ * same table whose picks narrow this one's choices (its options query reads them; the agent adds it after them).
  */
-export async function requestAddFilter(actor: Actor, reportId: string, input: { table: string; column: string; label?: string; id?: string }): Promise<ReportInstruction> {
+export async function requestAddFilter(actor: Actor, reportId: string, input: { table: string; column: string; label?: string; id?: string; narrowBy?: string[] }): Promise<ReportInstruction> {
   ownerActor(actor, reportId);
-  const { found, spec, datasource } = await findColumn(reportId, actor.userId, input.table, input.column);
+  const context = await findColumn(reportId, actor.userId, input.table, input.column);
+  const { found, spec } = context;
   if (spec.parameters.length >= PARAM_LIMITS.parameters) throw new ReportError(409, "LIMIT_REACHED", `A report has at most ${PARAM_LIMITS.parameters} filters`);
   if (!spec.blocks.length) throw new ReportError(409, "INVALID", "The report has no blocks to filter yet");
   const taken = spec.parameters.flatMap((param) => param.type === "date_range" ? [param.id, `${param.id}_from`, `${param.id}_to`] : [param.id]);
@@ -152,10 +217,11 @@ export async function requestAddFilter(actor: Actor, reportId: string, input: { 
   if (!PARAM_ID.test(id)) throw new ReportError(400, "INVALID", "The filter id must match [a-z][a-z0-9_]{0,29}");
   if (taken.includes(id)) throw new ReportError(409, "INVALID", `The report already has a parameter ${id}`);
   const label = cleanLabel(input.label ?? suggested.label) || suggested.label;
-  const read = await readOptions(datasource, found, actor.userId, reportId);
+  const narrow = pickedParents(context, input.narrowBy);
+  const read = await readOptions(context, actor.userId, reportId, narrow);
   const request: AddFilterRequest = { kind: "add_filter", id, label, table: found.table, column: found.column, chType: found.chType, optionsQuery: read.optionsQuery };
-  const instruction = await addInstruction(actor, reportId, { text: `Add a filter: ${label} (${found.table}.${found.column})`, request });
-  audit(actor.userId, null, "reports.filter.request", { reportId, instructionId: instruction.id, kind: "add_filter", paramId: id, table: found.table, column: found.column, sensitive: found.sensitive || undefined, ...(actor.keyId ? { via: "mcp", keyId: actor.keyId } : {}) });
+  const instruction = await addInstruction(actor, reportId, { text: `Add a filter: ${label} (${found.table}.${found.column})${narrow.length ? `, narrowed by ${narrow.map((parent) => parent.label).join(" and ")}` : ""}`, request });
+  audit(actor.userId, null, "reports.filter.request", { reportId, instructionId: instruction.id, kind: "add_filter", paramId: id, table: found.table, column: found.column, sensitive: found.sensitive || undefined, ...(narrow.length ? { narrowBy: narrow.map((parent) => parent.paramId) } : {}), ...(actor.keyId ? { via: "mcp", keyId: actor.keyId } : {}) });
   return instruction;
 }
 

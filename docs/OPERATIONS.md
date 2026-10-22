@@ -611,6 +611,16 @@ curl http://localhost:2026/api/health
 
 Every image carries immutable numbered migrations under `server/migrations`. They run transactionally and are recorded in SQLite's `schema_migrations` table before the HTTP server accepts requests. New schema changes are always added as a new migration; released migrations are never edited.
 
+### Upgrading to 0.44.0
+
+0.44.0's migrations run once on the first boot, in order, before the HTTP server answers; they are recorded in `schema_migrations` and cannot be undone except by restoring a backup. **Back up first:** `./scripts/backup.sh --force`.
+
+| Migration | What it does | Cost |
+| --- | --- | --- |
+| **069** `report_filter_views` | Adds two tables (lane FILT2, report filters' later slices): `report_param_linked_options` (a linked filter's choices per its parents' values, at most 50 lists a report, the most recently used kept) and `report_param_views` (a reader's saved filter views: a name, the values as JSON of at most 16 KiB, and at most one "my default view" per person and report; names unique per person and report regardless of case). Both go with their report; views also go with their person. It copies nothing and rewrites no table. | Quick at any size. |
+
+If it fails, the server logs `Migration failed` with id 69 and does not start; it is transactional, so nothing is half applied. No new settings.
+
 ### Upgrading to 0.43.0 (several docs per report, report edits, and report filters, migrations 064–066)
 
 0.43.0 lets a report be built from up to 8 docs (Nook notes and files mixed with docs behind a tool server such as Outline), adds "Add a new section" to Changes and lets a change carry doc links (lane DOCS, D515–D520); and it lets a report's owner remove a block or a section from its header (with Undo) and edit a query's SQL from Inspect → Query with a preview, and lets people at the comment level suggest a query edit that the owner applies or rejects in Changes (D525–D531); and a filter change re-runs only the queries that read it, blocks say which filters reach them, and the date range gains more presets (lane FILTERS, D532–D537). Its migrations run once on the first boot, in order, before the HTTP server answers; they are recorded in `schema_migrations` and cannot be undone except by restoring a backup.

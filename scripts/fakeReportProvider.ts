@@ -328,7 +328,8 @@ export function filterRequestPatch(system: string) {
   return {
     summary: `Add a ${request.label} filter to ${filtered.map((query) => query.key).join(", ")}`,
     ops: [
-      { op: "add_parameter", parameter: { id: request.id, label: request.label, type: "multi_select", chType: request.chType, default: [], optionsQuery: request.optionsQuery } },
+      // D562: a narrowed filter goes after the filters it reads (the prompt says after: "<id>").
+      { op: "add_parameter", parameter: { id: request.id, label: request.label, type: "multi_select", chType: request.chType, default: [], optionsQuery: request.optionsQuery }, ...(/Pass after: "([a-z0-9_]+)"/.exec(system) ? { after: /Pass after: "([a-z0-9_]+)"/.exec(system)![1] } : {}) },
       ...filtered.map((query) => ({ op: "update_query", key: query.key, sql: withCondition(query.sql, condition) })),
       ...clickable.map((block) => ({ op: "set_click_filter", id: block.id, clickFilter: { param: request.id, column: request.column } }))
     ],

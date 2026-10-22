@@ -169,7 +169,7 @@ export const SECTION_JSON_SCHEMA: Record<string, unknown> = { type: "object", ad
 
 const paramIdProp = { type: "string", pattern: PARAM_ID.source };
 const paramLabelProp = { type: "string", maxLength: PARAM_LIMITS.label, description: "Shown on the control: Period, Route" };
-const optionsQueryProp = { type: "string", maxLength: PARAM_LIMITS.optionsSql, description: "A SELECT whose first column lists the choices (at most 200), e.g. SELECT DISTINCT route FROM db.t ORDER BY route LIMIT 200; no parameters in it" };
+const optionsQueryProp = { type: "string", maxLength: PARAM_LIMITS.optionsSql, description: "A SELECT whose first column lists the choices (at most 200), e.g. SELECT DISTINCT route FROM db.t ORDER BY route LIMIT 200; it may read only parameters declared before it (a linked filter)" };
 /** One parameter as JSON Schema (submit_report's parameters, submit_patch's add_parameter). */
 export const PARAMETER_JSON_SCHEMA: Record<string, unknown> = {
   anyOf: [
@@ -744,10 +744,12 @@ export async function validateSpec(row: DatasourceRow, raw: unknown, context: { 
   // Spec v3 (D489): each select's options query runs through the guard first (its values pick the
   // second set below); then every query runs with the default set, and once more with one non-default set.
   const options = new Map<string, string[]>();
+  // D560: a linked options query reads earlier parameters; it runs with their defaults.
+  const defaultsBound = bindValues(spec.parameters, defaultValues(spec.parameters), runToday(context.runId));
   for (const param of spec.parameters) {
     if (param.type !== "select" && param.type !== "multi_select") continue;
     try {
-      options.set(param.id, (await runOptionsQuery(row, param.optionsQuery, { userId: context.userId, queryId: queryIdFor("genopt", context.runId.replace(/-/g, "").slice(0, 12), param.id), signal: context.signal })).options);
+      options.set(param.id, (await runOptionsQuery(row, param.optionsQuery, { userId: context.userId, queryId: queryIdFor("genopt", context.runId.replace(/-/g, "").slice(0, 12), param.id), signal: context.signal, params: defaultsBound })).options);
     } catch (error) {
       if (context.signal?.aborted) throw error;
       errors.push(`parameter ${param.id}: its optionsQuery failed: ${failure(error)}`);

@@ -3,7 +3,7 @@ import { audit, db, now } from "../db";
 import { logger } from "../log";
 import { REPORT_LIMITS, type QueryOutcome, type ReportQuery, type ReportResult, type ReportSpec, type ResultColumn, type RunTrigger } from "../../shared/reports";
 import {
-  bindValues, boundRecord, canonicalValues, declaredPlaceholders, defaultValues, escapeParamString, isDefaultSet, PARAM_LIMITS, placeholdersIn, quotedElement, readsOf, resolveValues, todayUtc, valueLabel,
+  bindValues, boundRecord, canonicalValues, declaredPlaceholders, defaultValues, escapeParamString, isDefaultSet, LINKED_OPTIONS, optionParentsOf, PARAM_LIMITS, placeholdersIn, placeholdersOf, quotedElement, readsOf, resolveValues, todayUtc, valueLabel,
   type BoundParam, type ParamOptions, type ParamSetInfo, type ParamValues, type ReportParameter
 } from "../../shared/reportParams";
 import type { QueryResultView, ReportResultsView } from "../../shared/reportsView";
@@ -70,6 +70,14 @@ export function parameterErrors(params: readonly ReportParameter[], queries: Rea
     if (resolved.problems.length) errors.push(`parameter ${param.id}: default ${resolved.problems[0]!.slice(param.id.length + 2)}`);
     if (param.type === "number" && param.min !== undefined && param.max !== undefined && param.min > param.max) errors.push(`parameter ${param.id}: min is more than max`);
   }
+  const names = new Map<string, string>();
+  for (const param of params) {
+    for (const item of placeholdersOf(param)) {
+      const other = names.get(item.name);
+      if (other !== undefined && other !== param.id) errors.push(`parameter ${param.id}: its placeholder {${item.name}} is also parameter ${other}'s; rename one`);
+      names.set(item.name, param.id);
+    }
+  }
   const declared = declaredPlaceholders(params);
   const used = new Set<string>();
   for (const query of queries) {
@@ -89,6 +97,24 @@ export function parameterErrors(params: readonly ReportParameter[], queries: Rea
       else used.add(known.param);
     }
   }
+  // D560: an options query may read parameters declared before it (linked filters), each with its exact type.
+  params.forEach((param, at) => {
+    if (param.type !== "select" && param.type !== "multi_select") return;
+    let placeholders: Array<{ name: string; type: string }>;
+    try {
+      placeholders = classify(param.optionsQuery, { params: true }).placeholders;
+    } catch (error) {
+      if (!(error instanceof GuardError)) throw error;
+      if (/query parameter/i.test(error.message)) errors.push(`parameter ${param.id}: its optionsQuery: ${error.message}`);
+      return;
+    }
+    const earlier = declaredPlaceholders(params.slice(0, at));
+    for (const placeholder of placeholders) {
+      const known = earlier.get(placeholder.name);
+      if (!known) errors.push(`parameter ${param.id}: its optionsQuery reads {${placeholder.name}:${placeholder.type}}, which no parameter declared before it provides (an options query may read only earlier parameters; move ${param.id} after the one it reads)`);
+      else if (known.type !== placeholder.type) errors.push(`parameter ${param.id}: its optionsQuery must write {${placeholder.name}:${known.type}} (the type of parameter ${known.param})`);
+    }
+  });
   for (const param of params) if (!used.has(param.id)) errors.push(`parameter ${param.id}: no query reads it; use ${param.type === "date_range" ? `{${param.id}_from:Date} and {${param.id}_to:Date}` : `{${param.id}:${param.chType}}`} in a query's WHERE, or remove it`);
   return errors;
 }
@@ -120,9 +146,14 @@ export function paramSetsToCheck(params: readonly ReportParameter[], options: Re
 
 // ----------------------------------------------------------------------------------- options
 
-/** Runs a select's options query through the guard (a SELECT, no placeholders): its first column, at most 200 distinct values. */
-export async function runOptionsQuery(row: DatasourceRow, sql: string, context: { userId: string; queryId: string; signal?: AbortSignal }): Promise<{ options: string[]; truncated: boolean }> {
-  const outcome = await runGuarded(row, sql, { classes: ["select"], maxRows: PARAM_LIMITS.options, queryId: context.queryId, userId: context.userId, signal: context.signal });
+/**
+ * Runs a select's options query through the guard (a SELECT): its first column, at most 200 distinct
+ * values. D560: a linked options query reads earlier parameters; `params` binds them (only the
+ * placeholders it holds are sent, and every one it holds must be bound).
+ */
+export async function runOptionsQuery(row: DatasourceRow, sql: string, context: { userId: string; queryId: string; signal?: AbortSignal; params?: readonly BoundParam[] }): Promise<{ options: string[]; truncated: boolean }> {
+  const linked = placeholdersIn(sql).length > 0;
+  const outcome = await runGuarded(row, sql, { classes: ["select"], maxRows: PARAM_LIMITS.options, queryId: context.queryId, userId: context.userId, signal: context.signal, ...(linked ? { params: context.params ?? [] } : {}) });
   if (!outcome.columns.length) throw new ReportError(400, "INVALID", "An options query must select at least one column");
   rememberOptionColumn(sql, outcome.columns[0]!.name);
   const options = optionTexts(outcome.rows);
@@ -166,7 +197,7 @@ function rememberOptionColumn(sql: string, column: string) {
  * reaches every value. Anything else after LIMIT (`BY`, `WITH TIES`) keeps the query as written.
  */
 export function unlimitedOptionsSql(sql: string): string {
-  const classified = classify(sql);
+  const classified = classify(sql, { params: true });
   if (classified.class !== "select") throw new GuardError("NOT_SELECT", "An options query is one SELECT");
   const tokens = classified.tokens;
   let depth = 0;
@@ -211,10 +242,10 @@ function searchRateLimit(userId: string, nowMs = Date.now()) {
 export const resetOptionSearchLimit = () => searches.clear();
 
 /** The options query's first column: remembered from its last run, else read with a one-row run. */
-async function optionColumn(row: DatasourceRow, sql: string, inner: string, context: { userId: string; queryId: string }): Promise<string> {
+async function optionColumn(row: DatasourceRow, sql: string, inner: string, context: { userId: string; queryId: string; params?: readonly BoundParam[] }): Promise<string> {
   const known = optionColumns.get(sql);
   if (known) return known;
-  const outcome = await runGuarded(row, inner, { classes: ["select"], maxRows: 1, queryId: `${context.queryId}-c`, userId: context.userId });
+  const outcome = await runGuarded(row, inner, { classes: ["select"], maxRows: 1, queryId: `${context.queryId}-c`, userId: context.userId, ...(context.params ? { params: context.params } : {}) });
   const column = outcome.columns[0]?.name;
   if (!column) throw new ReportError(400, "INVALID", "An options query must select at least one column");
   rememberOptionColumn(sql, column);
@@ -229,96 +260,152 @@ function selectParam(spec: ReportSpec, paramId: string): SelectParam {
   return param;
 }
 
+/** A linked filter's parents as bound for its options query (D560). */
+export type ParentBinding = { ids: string[]; values: ParamValues; bound: BoundParam[]; hash: string };
+
+/**
+ * D560: the parents a select's options query reads, with the reader's values for them (each checked
+ * against its parameter: 400 when one does not fit; a missing one is its default), bound on the
+ * report's today. Null for a select whose options query reads no parameter.
+ */
+export function parentBinding(reportId: string, spec: Pick<ReportSpec, "parameters">, param: SelectParam, given: Record<string, unknown> | null | undefined): ParentBinding | null {
+  const ids = optionParentsOf(param, spec.parameters);
+  if (!ids.length) return null;
+  const parents = spec.parameters.filter((item) => ids.includes(item.id));
+  const picked = Object.fromEntries(Object.entries(given ?? {}).filter(([key]) => ids.includes(key)));
+  const { values, problems } = resolveValues(parents, picked);
+  if (problems.length) throw new ReportError(400, "INVALID", `Parameter values refused: ${problems.slice(0, 3).join("; ")}`, { problems: problems.slice(0, 10) });
+  const bound = bindValues(parents, values, reportToday(reportId));
+  return { ids, values, bound, hash: queryHashOf(param.optionsQuery, bound) };
+}
+
 /**
  * GET …/parameters/:paramId/options?q=… (D491): the values of a select's options query whose text holds
- * `q` (case-insensitive), at most 200. An empty `q` is the cached list (reportParamOptions).
+ * `q` (case-insensitive), at most 200. An empty `q` is the cached list (reportParamOptions). D560: a
+ * linked select's search binds its parents' values (`given`), like its list.
  */
-export async function searchParamOptions(reportId: string, userId: string, paramId: string, query: string): Promise<ParamOptions> {
+export async function searchParamOptions(reportId: string, userId: string, paramId: string, query: string, given?: Record<string, unknown> | null): Promise<ParamOptions> {
   const report = readableReport(reportId, userId);
   const term = query.trim().slice(0, OPTION_SEARCH.chars);
-  if (!term) return reportParamOptions(reportId, userId, paramId, report);
-  const param = selectParam(parseSpec(report.spec_json), paramId);
+  if (!term) return reportParamOptions(reportId, userId, paramId, report, given);
+  const spec = parseSpec(report.spec_json);
+  const param = selectParam(spec, paramId);
+  const parents = parentBinding(reportId, spec, param, given);
   const datasource = usableDatasource(report.datasource_id);
   searchRateLimit(userId);
   const queryId = queryIdFor("opts", reportId.replace(/-/g, "").slice(0, 12), paramId, crypto.randomUUID().slice(0, 8));
   try {
     const inner = unlimitedOptionsSql(param.optionsQuery);
-    const column = await optionColumn(datasource, param.optionsQuery, inner, { userId, queryId });
+    const column = await optionColumn(datasource, param.optionsQuery, inner, { userId, queryId, ...(parents ? { params: parents.bound } : {}) });
     const outcome = await runGuarded(datasource, optionsFilterSql(inner, column, (col) => `${col} ILIKE {nook_search:String}`), {
-      classes: ["select"], maxRows: PARAM_LIMITS.options, queryId, userId, params: [{ name: "nook_search", type: "String", value: escapeParamString(likePattern(term)) }]
+      classes: ["select"], maxRows: PARAM_LIMITS.options, queryId, userId, params: [...(parents?.bound ?? []), { name: "nook_search", type: "String", value: escapeParamString(likePattern(term)) }]
     });
-    return { paramId, options: optionTexts(outcome.rows), truncated: outcome.truncated, error: null, at: now(), query: term };
+    return { paramId, options: optionTexts(outcome.rows), truncated: outcome.truncated, error: null, at: now(), query: term, ...(parents ? { parents: parents.values } : {}) };
   } catch (failure) {
     throw asReportError(failure);
   }
 }
 
 /** The picked values that are real choices, read past the first 200 (D491): the wrap with `IN {nook_values:Array(String)}`. */
-async function existingOptionValues(datasource: DatasourceRow, param: SelectParam, values: readonly string[], userId: string): Promise<Set<string>> {
+async function existingOptionValues(datasource: DatasourceRow, param: SelectParam, values: readonly string[], userId: string, parents: readonly BoundParam[] = []): Promise<Set<string>> {
   const queryId = queryIdFor("optx", param.id, crypto.randomUUID().slice(0, 8));
   const inner = unlimitedOptionsSql(param.optionsQuery);
-  const column = await optionColumn(datasource, param.optionsQuery, inner, { userId, queryId });
+  const column = await optionColumn(datasource, param.optionsQuery, inner, { userId, queryId, ...(parents.length ? { params: parents } : {}) });
   const outcome = await runGuarded(datasource, optionsFilterSql(inner, column, (col) => `${col} IN {nook_values:Array(String)}`), {
-    classes: ["select"], maxRows: PARAM_LIMITS.selected, queryId, userId, params: [{ name: "nook_values", type: "Array(String)", value: `[${values.map(quotedElement).join(",")}]` }]
+    classes: ["select"], maxRows: PARAM_LIMITS.selected, queryId, userId, params: [...parents, { name: "nook_values", type: "Array(String)", value: `[${values.map(quotedElement).join(",")}]` }]
   });
   return new Set(optionTexts(outcome.rows));
 }
 
 type OptionsRow = { sql: string; values_json: string; truncated: number; error: string | null; created_at: string };
 
-const optionsView = (paramId: string, row: OptionsRow | null): ParamOptions => {
+const optionsView = (paramId: string, row: OptionsRow | null, parents?: ParamValues): ParamOptions => {
   let options: string[] = [];
   try { options = row ? (JSON.parse(row.values_json) as unknown[]).filter((item): item is string => typeof item === "string") : []; } catch { options = []; }
-  return { paramId, options, truncated: row?.truncated === 1, error: row?.error ?? null, at: row?.created_at ?? null };
+  return { paramId, options, truncated: row?.truncated === 1, error: row?.error ?? null, at: row?.created_at ?? null, ...(parents ? { parents } : {}) };
 };
 
-/**
- * A select's options for a reader (GET …/parameters/:paramId/options): the cached list while its SQL
- * is the saved one, it is newer than the last default run, and younger than optionsMaxAgeMs; else the
- * options query runs again (the caller's query slots; a failure is cached as its error).
- */
-export async function reportParamOptions(reportId: string, userId: string, paramId: string, report = readableReport(reportId, userId)): Promise<ParamOptions> {
-  const spec = parseSpec(report.spec_json);
-  const param = spec.parameters.find((item) => item.id === paramId);
-  if (!param || (param.type !== "select" && param.type !== "multi_select")) throw new ReportError(404, "NOT_FOUND", "This report has no select parameter with that id");
-  const cached = db.query("SELECT sql, values_json, truncated, error, created_at FROM report_param_options WHERE report_id = ? AND param_id = ?").get(reportId, paramId) as OptionsRow | null;
-  const fresh = cached && cached.sql === param.optionsQuery && (!report.last_run_at || cached.created_at >= report.last_run_at) && Date.now() - Date.parse(cached.created_at) < PARAM_RUNS.optionsMaxAgeMs;
-  if (fresh) return optionsView(paramId, cached);
+/** Runs an options query for the cache: its list, or its error as text (a busy person's refusal is thrown, never cached). */
+async function readOptionsList(report: ReportRow, param: SelectParam, userId: string, bound?: readonly BoundParam[]): Promise<{ values: string[]; truncated: boolean; error: string | null }> {
   const datasource = usableDatasource(report.datasource_id);
-  let values: string[] = [];
-  let truncated = false;
-  let error: string | null = null;
   try {
-    const read = await runOptionsQuery(datasource, param.optionsQuery, { userId, queryId: queryIdFor("opt", reportId.replace(/-/g, "").slice(0, 12), paramId) });
-    values = read.options;
-    truncated = read.truncated;
+    const read = await runOptionsQuery(datasource, param.optionsQuery, { userId, queryId: queryIdFor("opt", report.id.replace(/-/g, "").slice(0, 12), param.id), ...(bound ? { params: bound } : {}) });
+    return { values: read.options, truncated: read.truncated, error: null };
   } catch (failure) {
-    try { error = asReportError(failure).message.slice(0, 1000); } catch { error = "The options query failed"; }
     // A busy person keeps the last list rather than caching the refusal.
     if (failure instanceof ReportError && failure.code === "BUSY") throw failure;
+    let error: string;
+    try { error = asReportError(failure).message.slice(0, 1000); } catch { error = "The options query failed"; }
+    return { values: [], truncated: false, error };
   }
+}
+
+/** Whether a cached list may answer: its SQL is the saved one, newer than the last default run, and younger than optionsMaxAgeMs. */
+const freshList = (report: ReportRow, row: OptionsRow | null, sql: string) => Boolean(row && row.sql === sql && (!report.last_run_at || row.created_at >= report.last_run_at) && Date.now() - Date.parse(row.created_at) < PARAM_RUNS.optionsMaxAgeMs);
+
+/**
+ * A select's options for a reader (GET …/parameters/:paramId/options): the cached list while it is
+ * fresh (freshList); else the options query runs again (the caller's query slots; a failure is cached
+ * as its error). D560: a linked select's list is per its parents' values (`given`; a missing one is its
+ * default), cached in report_param_linked_options by the options query and those bound values, the
+ * LINKED_OPTIONS.listsPerReport most recently used kept. A list not cached yet counts against the
+ * person's option searches (OPTION_SEARCH.perMinute).
+ */
+export async function reportParamOptions(reportId: string, userId: string, paramId: string, report = readableReport(reportId, userId), given?: Record<string, unknown> | null): Promise<ParamOptions> {
+  const spec = parseSpec(report.spec_json);
+  const param = selectParam(spec, paramId);
+  const parents = parentBinding(reportId, spec, param, given);
+  if (parents) return linkedOptions(report, param, parents, userId);
+  const cached = db.query("SELECT sql, values_json, truncated, error, created_at FROM report_param_options WHERE report_id = ? AND param_id = ?").get(reportId, paramId) as OptionsRow | null;
+  if (freshList(report, cached, param.optionsQuery)) return optionsView(paramId, cached);
+  const read = await readOptionsList(report, param, userId);
   const at = now();
   db.query(`INSERT INTO report_param_options (report_id, param_id, sql, values_json, truncated, error, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT (report_id, param_id) DO UPDATE SET sql = excluded.sql, values_json = excluded.values_json, truncated = excluded.truncated, error = excluded.error, created_at = excluded.created_at`)
-    .run(reportId, paramId, param.optionsQuery, JSON.stringify(values), truncated ? 1 : 0, error, at);
-  return optionsView(paramId, { sql: param.optionsQuery, values_json: JSON.stringify(values), truncated: truncated ? 1 : 0, error, created_at: at });
+    .run(reportId, paramId, param.optionsQuery, JSON.stringify(read.values), read.truncated ? 1 : 0, read.error, at);
+  return optionsView(paramId, { sql: param.optionsQuery, values_json: JSON.stringify(read.values), truncated: read.truncated ? 1 : 0, error: read.error, created_at: at });
 }
 
-/** Refuses a select value that is not one of its options (when they could be read): no set is cached for values nobody can pick. */
+/** D560: a linked select's list for its parents' values (cached per report, parameter, and parents' hash). */
+async function linkedOptions(report: ReportRow, param: SelectParam, parents: ParentBinding, userId: string): Promise<ParamOptions> {
+  const cached = db.query("SELECT sql, values_json, truncated, error, created_at FROM report_param_linked_options WHERE report_id = ? AND param_id = ? AND parents_hash = ?")
+    .get(report.id, param.id, parents.hash) as OptionsRow | null;
+  const at = now();
+  if (freshList(report, cached, param.optionsQuery)) {
+    db.query("UPDATE report_param_linked_options SET last_used_at = ? WHERE report_id = ? AND param_id = ? AND parents_hash = ?").run(at, report.id, param.id, parents.hash);
+    return optionsView(param.id, cached, parents.values);
+  }
+  searchRateLimit(userId);
+  const read = await readOptionsList(report, param, userId, parents.bound);
+  db.query(`INSERT INTO report_param_linked_options (report_id, param_id, parents_hash, sql, values_json, truncated, error, created_at, last_used_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT (report_id, param_id, parents_hash) DO UPDATE SET sql = excluded.sql, values_json = excluded.values_json, truncated = excluded.truncated, error = excluded.error,
+    created_at = excluded.created_at, last_used_at = excluded.last_used_at`)
+    .run(report.id, param.id, parents.hash, param.optionsQuery, JSON.stringify(read.values), read.truncated ? 1 : 0, read.error, at, at);
+  db.query(`DELETE FROM report_param_linked_options WHERE report_id = $reportId AND rowid NOT IN (
+    SELECT rowid FROM report_param_linked_options WHERE report_id = $reportId ORDER BY last_used_at DESC, rowid DESC LIMIT $kept)`).run({ reportId: report.id, kept: LINKED_OPTIONS.listsPerReport });
+  return optionsView(param.id, { sql: param.optionsQuery, values_json: JSON.stringify(read.values), truncated: read.truncated ? 1 : 0, error: read.error, created_at: at }, parents.values);
+}
+
+/**
+ * Refuses a select value that is not one of its options (when they could be read): no set is cached
+ * for values nobody can pick. D560: a linked select's values are checked against its list for the
+ * set's own parent values.
+ */
 async function assertOptionValues(report: ReportRow, spec: ReportSpec, values: ParamValues, userId: string) {
   for (const param of spec.parameters) {
     if (param.type !== "select" && param.type !== "multi_select") continue;
     const value = values[param.id];
     const picked = param.type === "select" ? (value === param.default ? [] : [value as string]) : (value as string[]).filter((item) => !param.default.includes(item));
     if (!picked.length) continue;
-    const options = await reportParamOptions(report.id, userId, param.id, report);
+    const options = await reportParamOptions(report.id, userId, param.id, report, values);
     if (options.error) continue;
     const known = new Set(options.options);
     // D491: a list cut at 200 may not hold a value found by search; ask ClickHouse whether it is a choice.
     const beyond = picked.filter((item) => !known.has(item));
     if (beyond.length && options.truncated) {
       try {
-        for (const item of await existingOptionValues(usableDatasource(report.datasource_id), param, beyond, userId)) known.add(item);
+        const parents = parentBinding(report.id, spec, param, values);
+        for (const item of await existingOptionValues(usableDatasource(report.datasource_id), param, beyond, userId, parents?.bound)) known.add(item);
       } catch (failure) {
         const error = asReportError(failure);
         if (error.code === "BUSY") throw error;
@@ -328,6 +415,7 @@ async function assertOptionValues(report: ReportRow, spec: ReportSpec, values: P
     if (unknown !== undefined) throw new ReportError(400, "INVALID", `${unknown.slice(0, 60)} is not one of the choices for ${param.label}`, { paramId: param.id });
   }
 }
+
 
 // ----------------------------------------------------------------------------------- sets
 
