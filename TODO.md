@@ -22,6 +22,10 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
   - [ ] Anthropic-only instances (operator, 2026-10-22): knowledge bases in **keyword-only mode** (BM25 over the existing chunk FTS, no embeddings API), chosen automatically when no provider embeds; Change embedding model moves a base to vectors later.
   - [ ] **Local embedding model** (operator: "complete todo.md", 2026-10-22; lane LOCALEMB after lane CLAUDE lands, migration 071 if needed) (transformers.js + a small model, CPU) for meaning-based search with no outside provider.
 
+- [ ] **API keys: editing a key's permissions** (operator, 2026-10-22; lane KEYS), at `/settings/keys/general`:
+  - [ ] Editing a created key can only remove permission rows; it must also be able to **add** rows.
+  - [ ] On some rows the permission dropdown is disabled and can't be clicked; find why and fix it.
+
 ## Waiting on the operator
 
 - [ ] **Real-model eval of report generation** (D488 chart kinds, D489 parameters): only the scripted provider has run. Run `bun --no-env-file scripts/reportEval.ts --clickhouse <test ClickHouse>` on a host whose Nook has a working model provider (it falls back to Settings → AI; the local instance's OpenAI key is a placeholder), or set `REPORT_EVAL_*`, or regenerate reports on the VM (docs/OPERATIONS.md "Report generation eval"). Check: the five kind cases (`onboarding_funnel`, `cohort_retention`, `quota_attainment`, `latency_spread`, `plan_flow`) get fitting chart kinds, and a doc that names a window or a dimension gets a date range or filter. Tune the prompts from the scores.
