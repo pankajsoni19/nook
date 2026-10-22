@@ -1,7 +1,7 @@
 import { endianness } from "node:os";
 import { EMBEDDING_BATCH, takesDimensions } from "../../shared/knowledge";
 import { EgressError, egressFetch, readEgressText } from "../agents/egress";
-import { excerpt, ProviderError, type ProviderConnection } from "../agents/loop";
+import { excerpt, ProviderError, providerHeaders, type ProviderConnection } from "../agents/loop";
 
 /**
  * Embeddings (plan §9, D368; Wave 44 "AC-E"): `POST {baseUrl}/embeddings` on the configured
@@ -77,13 +77,26 @@ function rethrow(error: unknown): never {
  * One request of at most `batchSizeFor(dims)` inputs. The vectors come back in input order (by `index`), each of
  * `dims` numbers when `dims` is given.
  */
-async function embedBatch(connection: ProviderConnection, model: string, dims: number | null, inputs: readonly string[], signal?: AbortSignal): Promise<EmbeddingResult> {
-  const body = JSON.stringify({ model, input: inputs, encoding_format: "float", ...(dims !== null && takesDimensions(model) ? { dimensions: dims } : {}) });
+/**
+ * The request body (D542): OpenAI's `dimensions` and `encoding_format: "float"`; with a provider that
+ * sizes by `output_dimension` (Voyage AI) that field instead, no `encoding_format` (Voyage takes only
+ * null or base64; its default is floats), and `input_type` (document when indexing, query when searching).
+ */
+export function embeddingBody(connection: Pick<ProviderConnection, "compat" | "flavor">, model: string, dims: number | null, inputs: readonly string[], inputType?: "document" | "query"): Record<string, unknown> {
+  const voyage = connection.compat.dimensionsParam === "output_dimension" || connection.flavor === "voyage";
+  const sized = dims !== null && takesDimensions(model, { dimensionsParam: connection.compat.dimensionsParam, flavor: connection.flavor ?? undefined });
+  if (voyage) return { model, input: inputs, ...(sized ? { output_dimension: dims } : {}), ...(inputType ? { input_type: inputType } : {}) };
+  return { model, input: inputs, encoding_format: "float", ...(sized ? { dimensions: dims } : {}) };
+}
+
+async function embedBatch(connection: ProviderConnection, model: string, dims: number | null, inputs: readonly string[], signal?: AbortSignal, inputType?: "document" | "query"): Promise<EmbeddingResult> {
+  const body = JSON.stringify(embeddingBody(connection, model, dims, inputs, inputType));
   let response: Awaited<ReturnType<typeof egressFetch>>;
   try {
     response = await egressFetch(`${connection.baseUrl}/embeddings`, {
       method: "POST",
-      headers: { Accept: "application/json", "Content-Type": "application/json", ...(connection.apiKey ? { Authorization: `Bearer ${connection.apiKey}` } : {}) },
+      // D539: the same headers as every other call to the provider (Anthropic's when it is Anthropic).
+      headers: providerHeaders(connection, "application/json"),
       body,
       signal
     }, embeddingLimits);
@@ -126,7 +139,7 @@ async function embedBatch(connection: ProviderConnection, model: string, dims: n
  * refused batch costs nothing) and `afterBatch` after it (charging its tokens; since 2026-10-08 it also sees the
  * batch's vectors, and a throw there sends no further batch).
  */
-export async function embedTexts(connection: ProviderConnection, model: string, dims: number | null, inputs: readonly string[], hooks: { beforeBatch?: (count: number) => void; afterBatch?: (tokens: number, vectors: readonly Float32Array[]) => void; signal?: AbortSignal } = {}): Promise<EmbeddingResult> {
+export async function embedTexts(connection: ProviderConnection, model: string, dims: number | null, inputs: readonly string[], hooks: { beforeBatch?: (count: number) => void; afterBatch?: (tokens: number, vectors: readonly Float32Array[]) => void; signal?: AbortSignal; inputType?: "document" | "query" } = {}): Promise<EmbeddingResult> {
   const vectors: Float32Array[] = [];
   let tokens = 0;
   let estimated = false;
@@ -134,7 +147,7 @@ export async function embedTexts(connection: ProviderConnection, model: string, 
   for (let start = 0; start < inputs.length; start += size) {
     const batch = inputs.slice(start, start + size);
     hooks.beforeBatch?.(batch.length);
-    const result = await embedBatch(connection, model, dims, batch, hooks.signal);
+    const result = await embedBatch(connection, model, dims, batch, hooks.signal, hooks.inputType);
     hooks.afterBatch?.(result.tokens, result.vectors);
     vectors.push(...result.vectors);
     tokens += result.tokens;

@@ -76,10 +76,77 @@ export type ProviderCompat = {
    * Completions; `none` is the workaround (Test tool calling and a live 400 set it).
    */
   reasoningEffort?: ReasoningEffort;
+  /**
+   * 2026-10-22 (D539): the endpoint's kind when its host does not say it (a proxy in front of
+   * Anthropic). `api.anthropic.com` is Anthropic and `api.voyageai.com` is Voyage AI by host alone
+   * (`providerFlavor`); anything else is plain OpenAI-compatible unless this says otherwise.
+   */
+  flavor?: ProviderFlavor;
+  /** D541: whether the provider makes embeddings (absent or true: it does). False: never offered for knowledge bases ("Embeddings: none"). */
+  embeddings?: boolean;
+  /** D542: whether the provider answers chat completions (absent or true: it does). False: embeddings only, never a chat or report model. */
+  chat?: boolean;
+  /** D542: the embeddings request's size field: `dimensions` (OpenAI, the default) or `output_dimension` (Voyage AI). */
+  dimensionsParam?: "dimensions" | "output_dimension";
+  /** D542: the only sizes the provider's embedding models take (Voyage AI: 256, 512, 1,024, 2,048); absent: any from 64 to 3,072. */
+  embeddingSizes?: number[];
 };
 export const REASONING_EFFORTS = ["omit", "none", "minimal", "low", "medium", "high"] as const;
 export type ReasoningEffort = typeof REASONING_EFFORTS[number];
 export const DEFAULT_COMPAT: ProviderCompat = { tokenParam: "max_completion_tokens", streamUsage: true, supportsTools: true, contextTokens: 128_000 };
+
+/** D539: the kinds of endpoint Nook knows apart; null is a plain OpenAI-compatible one. */
+export const PROVIDER_FLAVORS = ["anthropic", "voyage"] as const;
+export type ProviderFlavor = typeof PROVIDER_FLAVORS[number];
+/** The `anthropic-version` Nook sends to Anthropic (the Messages API's only stable version). */
+export const ANTHROPIC_VERSION = "2023-06-01";
+export const ANTHROPIC_HOST = "api.anthropic.com";
+export const VOYAGE_HOST = "api.voyageai.com";
+/** Voyage AI's sizes for `output_dimension` (voyage-3.5, voyage-3-large, voyage-code-3, voyage-4 family). */
+export const VOYAGE_SIZES = [256, 512, 1024, 2048] as const;
+export const VOYAGE_DEFAULT_MODEL = "voyage-3.5";
+
+const hostOf = (baseUrl: string) => { try { return new URL(baseUrl).hostname.toLowerCase(); } catch { return ""; } };
+
+/** D539: which kind of endpoint a provider is: by host first (Anthropic, Voyage AI), else its explicit `compat.flavor`. */
+export function providerFlavor(baseUrl: string, compat?: { flavor?: ProviderFlavor | null } | null): ProviderFlavor | null {
+  const host = hostOf(baseUrl);
+  if (host === ANTHROPIC_HOST) return "anthropic";
+  if (host === VOYAGE_HOST) return "voyage";
+  return compat?.flavor ?? null;
+}
+
+/** How the provider card names a known endpoint (null: a plain OpenAI-compatible one). */
+export const FLAVOR_LABELS: Record<ProviderFlavor, string> = { anthropic: "Anthropic (OpenAI-compatible endpoint)", voyage: "Voyage AI (embeddings only)" };
+
+/**
+ * D539/D542: the compatibility defaults a new provider of a known kind starts with (the form's and the
+ * request's own values win). Anthropic's OpenAI-compatible endpoint takes `max_tokens` and
+ * `stream_options`, has no embeddings, and refuses forced tool choice on its current models (Claude
+ * Opus 5.5, Sonnet 5.5, Fable 5.1), so Nook asks with `auto`. Voyage AI only makes embeddings, sized by
+ * `output_dimension` in four sizes.
+ */
+export function flavorDefaults(flavor: ProviderFlavor | null): Partial<ProviderCompat> {
+  if (flavor === "anthropic") return { tokenParam: "max_tokens", streamUsage: true, requiredToolChoice: false, namedToolChoice: false, embeddings: false, contextTokens: 200_000 };
+  if (flavor === "voyage") return { chat: false, supportsTools: false, dimensionsParam: "output_dimension", embeddingSizes: [...VOYAGE_SIZES] };
+  return {};
+}
+
+/** D539: a known host's base URL entered without its version path gets `/v1` (`https://api.anthropic.com` → `https://api.anthropic.com/v1`). */
+export function normalizeKnownBaseUrl(baseUrl: string): string {
+  const trimmed = baseUrl.trim().replace(/\/+$/, "");
+  try {
+    const url = new URL(trimmed);
+    const host = url.hostname.toLowerCase();
+    if ((host === ANTHROPIC_HOST || host === VOYAGE_HOST) && (url.pathname === "" || url.pathname === "/") && !url.search && !url.hash) return `${url.origin}/v1`;
+  } catch { /* the shape check reports it */ }
+  return trimmed;
+}
+
+/** D541: whether a provider makes embeddings (and so may serve knowledge bases). */
+export const providerEmbeds = (compat: Pick<ProviderCompat, "embeddings">) => compat.embeddings !== false;
+/** D542: whether a provider answers chat (agents, chats, reports). */
+export const providerChats = (compat: Pick<ProviderCompat, "chat">) => compat.chat !== false;
 
 /**
  * A provider's knowledge base policy (2026-10-08, admins, Settings → AI → Model providers): whether

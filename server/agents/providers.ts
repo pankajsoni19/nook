@@ -1,10 +1,12 @@
 import { audit, db, now } from "../db";
 import { logger } from "../log";
-import { AGENT_BOUNDS, DEFAULT_BASE_URL, DEFAULT_COMPAT, REASONING_EFFORTS, DEFAULT_EMBEDDING_DIMS, DEFAULT_EMBEDDING_MODEL, DEFAULT_KNOWLEDGE_POLICY, DEFAULT_MODEL, DEFAULT_VISION_POLICY, EMBEDDING_MODEL_ID, KNOWLEDGE_POLICY_BOUNDS, policyAllowsModel, policyMaxDims, VISION_POLICY_BOUNDS, visionAllowsModel, type AgentProviderChoice, type ProviderCompat, type ReasoningEffort, type ProviderKnowledgePolicy, type ProviderSummary, type ProviderVisionPolicy } from "../../shared/agents";
+import { AGENT_BOUNDS, DEFAULT_BASE_URL, DEFAULT_COMPAT, flavorDefaults, normalizeKnownBaseUrl, PROVIDER_FLAVORS, providerChats, providerEmbeds, providerFlavor, VOYAGE_DEFAULT_MODEL, REASONING_EFFORTS, DEFAULT_EMBEDDING_DIMS, DEFAULT_EMBEDDING_MODEL, DEFAULT_KNOWLEDGE_POLICY, DEFAULT_MODEL, DEFAULT_VISION_POLICY, EMBEDDING_MODEL_ID, KNOWLEDGE_POLICY_BOUNDS, policyAllowsModel, policyMaxDims, VISION_POLICY_BOUNDS, visionAllowsModel, type AgentProviderChoice, type ProviderCompat, type ReasoningEffort, type ProviderKnowledgePolicy, type ProviderSummary, type ProviderVisionPolicy } from "../../shared/agents";
 import type { KnowledgeEmbeddingChoice } from "../../shared/knowledge";
 import type { ToolCallingProbe } from "../../shared/reportsModel";
 import { checkSavedEndpoint, EgressError } from "./egress";
-import { completeStreaming, listModels, ProviderError, refusesToolsAtReasoning, setCompatLearner, type ProviderConnection } from "./loop";
+import { completeStreaming, listModels, ProviderError, refusesForcedToolChoice, refusesToolsAtReasoning, setCompatLearner, type ProviderConnection } from "./loop";
+import { embedTexts } from "../knowledge/embed";
+import { takesDimensions } from "../../shared/knowledge";
 import { openSecret, sealSecret, secretHint, shownHint } from "./secrets";
 import { readAgentSettings } from "./settings";
 import { AgentError } from "./status";
@@ -32,8 +34,56 @@ export function parseCompat(json: string | null): ProviderCompat {
     ...(value.namedToolChoice === false ? { namedToolChoice: false } : {}),
     ...(value.requiredToolChoice === false ? { requiredToolChoice: false } : {}),
     contextTokens: typeof value.contextTokens === "number" && value.contextTokens >= 1024 && value.contextTokens <= 10_000_000 ? Math.floor(value.contextTokens) : DEFAULT_COMPAT.contextTokens,
-    ...(typeof value.reasoningEffort === "string" && value.reasoningEffort !== "omit" && (REASONING_EFFORTS as readonly string[]).includes(value.reasoningEffort) ? { reasoningEffort: value.reasoningEffort } : {})
+    ...(typeof value.reasoningEffort === "string" && value.reasoningEffort !== "omit" && (REASONING_EFFORTS as readonly string[]).includes(value.reasoningEffort) ? { reasoningEffort: value.reasoningEffort } : {}),
+    // 2026-10-22 (D539–D542): the endpoint's kind, and what it can do; only non-default values are kept.
+    ...(typeof value.flavor === "string" && (PROVIDER_FLAVORS as readonly string[]).includes(value.flavor) ? { flavor: value.flavor } : {}),
+    // Stored only when it differs from the endpoint's kind (`storedCompat`); `effectiveCompat` fills the rest.
+    ...(typeof value.embeddings === "boolean" ? { embeddings: value.embeddings } : {}),
+    ...(typeof value.chat === "boolean" ? { chat: value.chat } : {}),
+    ...(value.dimensionsParam === "output_dimension" ? { dimensionsParam: "output_dimension" as const } : {}),
+    ...(Array.isArray(value.embeddingSizes) ? sizesOf(value.embeddingSizes) : {})
   };
+}
+
+/**
+ * D541/D542: a provider's compat as Nook uses it: what is stored, with what its kind implies filled
+ * in. Anthropic (by host or flavor) makes no embeddings and Voyage AI answers no chat unless an admin
+ * said otherwise, so a provider saved before these flags existed reads right at once; Voyage AI sizes
+ * by `output_dimension` in its four sizes. `embeddings` and `chat` appear only when false.
+ */
+export function effectiveCompat(json: string | null, baseUrl: string): ProviderCompat {
+  const compat = parseCompat(json);
+  const flavor = providerFlavor(baseUrl, compat);
+  const embeds = compat.embeddings ?? flavor !== "anthropic";
+  const chats = compat.chat ?? flavor !== "voyage";
+  const { embeddings: _embeddings, chat: _chat, ...rest } = compat;
+  return {
+    ...rest,
+    ...(flavor === "voyage" && !rest.dimensionsParam ? { dimensionsParam: "output_dimension" as const } : {}),
+    ...(flavor === "voyage" && !rest.embeddingSizes ? { embeddingSizes: [...flavorDefaults("voyage").embeddingSizes!] } : {}),
+    ...(embeds ? {} : { embeddings: false }),
+    ...(chats ? {} : { chat: false })
+  };
+}
+
+/** D541/D542: what is saved: `embeddings` and `chat` only when they differ from what the endpoint's kind implies. */
+function storedCompat(compat: ProviderCompat, baseUrl: string): ProviderCompat {
+  const flavor = providerFlavor(baseUrl, compat);
+  const { embeddings, chat, ...rest } = compat;
+  return {
+    ...rest,
+    ...(embeddings !== undefined && embeddings !== (flavor !== "anthropic") ? { embeddings } : {}),
+    ...(chat !== undefined && chat !== (flavor !== "voyage") ? { chat } : {})
+  };
+}
+
+/** A provider row's effective compat (D541/D542). */
+export const rowCompat = (row: { compat_json: string; base_url: string }) => effectiveCompat(row.compat_json, row.base_url);
+
+/** A provider's allowed embedding sizes, kept only when they are 1 to 8 distinct whole numbers from 64 to 3,072. */
+function sizesOf(list: unknown[]): { embeddingSizes?: number[] } {
+  const sizes = [...new Set(list.filter((size): size is number => typeof size === "number" && Number.isInteger(size) && size >= 64 && size <= 3072))].sort((a, b) => a - b).slice(0, 8);
+  return sizes.length ? { embeddingSizes: sizes } : {};
 }
 
 /**
@@ -93,7 +143,7 @@ export function knowledgePolicyOf(providerId: string | null): ProviderKnowledgeP
 
 export const providerSummary = (row: ProviderRow): ProviderSummary => ({
   id: row.id, name: row.name, baseUrl: row.base_url, defaultModel: row.default_model, embeddingModel: row.embedding_model, embeddingDims: row.embedding_dims,
-  compat: parseCompat(row.compat_json), isDefault: row.is_default === 1, hasSecret: row.api_key_ct !== null, hint: shownHint(row.api_key_ct, row.api_key_hint),
+  compat: rowCompat(row), isDefault: row.is_default === 1, hasSecret: row.api_key_ct !== null, hint: shownHint(row.api_key_ct, row.api_key_hint),
   revision: row.revision, createdAt: row.created_at, updatedAt: row.updated_at, knowledge: parseKnowledgePolicy(row.compat_json), vision: parseVisionPolicy(row.compat_json)
 });
 
@@ -107,9 +157,13 @@ export function providerRow(id: string): ProviderRow {
   return row;
 }
 
+/** A compat patch: any field left out keeps its value; null clears `flavor` or `embeddingSizes`. */
+export type ProviderCompatPatch = { [K in keyof ProviderCompat]?: ProviderCompat[K] | null };
+
 export type ProviderInput = {
   name: string; baseUrl?: string; apiKey?: string | null; defaultModel?: string; embeddingModel?: string | null; embeddingDims?: number | null;
-  compat?: Partial<ProviderCompat>; isDefault?: boolean;
+  /** Compatibility options; `flavor` and `embeddingSizes` take null to clear them (D539, D542). */
+  compat?: ProviderCompatPatch; isDefault?: boolean;
   /** The knowledge base policy (2026-10-08); fields left out keep their value. */
   knowledge?: Partial<ProviderKnowledgePolicy>;
   /** U5: which models may be sent images; fields left out keep their value. */
@@ -122,7 +176,8 @@ export type ProviderInput = {
  * names are resolved and checked before every call.
  */
 function normalizeBaseUrl(value: string) {
-  const trimmed = value.trim().replace(/\/+$/, "");
+  // D539: Anthropic's and Voyage AI's address entered without `/v1` gets it.
+  const trimmed = normalizeKnownBaseUrl(value);
   try {
     checkSavedEndpoint(trimmed);
   } catch (error) {
@@ -133,8 +188,8 @@ function normalizeBaseUrl(value: string) {
 }
 
 /** The column's JSON: the compatibility options, and the knowledge and vision policies only when they are not the default. */
-const compatJson = (current: ProviderCompat, patch: Partial<ProviderCompat> | undefined, knowledge: ProviderKnowledgePolicy, vision: ProviderVisionPolicy) =>
-  JSON.stringify({ ...parseCompat(JSON.stringify({ ...current, ...(patch ?? {}) })), ...(samePolicy(knowledge, DEFAULT_KNOWLEDGE_POLICY) ? {} : { knowledge }), ...(samePolicy(vision, DEFAULT_VISION_POLICY) ? {} : { vision }) });
+const compatJson = (current: ProviderCompat, patch: ProviderCompatPatch | undefined, knowledge: ProviderKnowledgePolicy, vision: ProviderVisionPolicy, baseUrl: string) =>
+  JSON.stringify({ ...storedCompat(parseCompat(JSON.stringify({ ...current, ...(patch ?? {}) })), baseUrl), ...(samePolicy(knowledge, DEFAULT_KNOWLEDGE_POLICY) ? {} : { knowledge }), ...(samePolicy(vision, DEFAULT_VISION_POLICY) ? {} : { vision }) });
 /** A vision patch over the current policy, normalized as it is read back. */
 const mergedVision = (current: ProviderVisionPolicy, patch: Partial<ProviderVisionPolicy> | undefined) =>
   parseVisionPolicy(JSON.stringify({ vision: { ...current, ...(patch ?? {}) } }));
@@ -150,16 +205,24 @@ export function createProvider(actorId: string, input: ProviderInput): ProviderS
     if (count >= AGENT_BOUNDS.providers) throw new AgentError(409, "LIMIT_REACHED", `At most ${AGENT_BOUNDS.providers} providers can be configured`);
     const id = crypto.randomUUID();
     const timestamp = now();
-    const makeDefault = input.isDefault === true || count === 0;
+    const baseUrl = normalizeBaseUrl(input.baseUrl ?? DEFAULT_BASE_URL);
+    // D539/D542: a known endpoint (by host, or the form's explicit flavor) starts from its own defaults; the request's values win.
+    const flavor = providerFlavor(baseUrl, input.compat ?? null);
+    const compat = effectiveCompat(JSON.stringify({ ...DEFAULT_COMPAT, ...flavorDefaults(flavor), ...(input.compat ?? {}) }), baseUrl);
+    // D542: an embeddings-only provider is never the default (chat and reports use the default); the first chat provider is.
+    const chatCount = chatProviderCount();
+    if (input.isDefault === true && !providerChats(compat)) throw new AgentError(409, "CHAT_NONE", "An embeddings-only provider cannot be the default; the default answers chats and reports", { field: "isDefault" });
+    const makeDefault = providerChats(compat) && (input.isDefault === true || chatCount === 0);
     if (makeDefault) db.query("UPDATE agent_providers SET is_default = 0 WHERE is_default = 1").run();
     const apiKey = input.apiKey?.trim() || null;
     const policy = mergedPolicy(DEFAULT_KNOWLEDGE_POLICY, input.knowledge);
     const vision = mergedVision(DEFAULT_VISION_POLICY, input.vision);
+    const voyage = flavor === "voyage";
     db.query(`INSERT INTO agent_providers (id, name, base_url, api_key_ct, api_key_hint, default_model, embedding_model, embedding_dims, compat_json, is_default, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-      id, input.name.trim(), normalizeBaseUrl(input.baseUrl ?? DEFAULT_BASE_URL), apiKey ? sealSecret("provider", id, apiKey) : null, apiKey ? secretHint(apiKey) : null,
-      (input.defaultModel ?? DEFAULT_MODEL).trim() || DEFAULT_MODEL, input.embeddingModel?.trim() || null, input.embeddingDims ?? null,
-      compatJson(DEFAULT_COMPAT, input.compat, policy, vision), makeDefault ? 1 : 0, timestamp, timestamp
+      id, input.name.trim(), baseUrl, apiKey ? sealSecret("provider", id, apiKey) : null, apiKey ? secretHint(apiKey) : null,
+      (input.defaultModel ?? (voyage ? VOYAGE_DEFAULT_MODEL : DEFAULT_MODEL)).trim() || DEFAULT_MODEL, input.embeddingModel?.trim() || (voyage ? VOYAGE_DEFAULT_MODEL : null), input.embeddingDims ?? null,
+      compatJson(compat, undefined, policy, vision, baseUrl), makeDefault ? 1 : 0, timestamp, timestamp
     );
     audit(actorId, null, "agents.provider.create", { providerId: id, hasSecret: apiKey !== null, ...(samePolicy(policy, DEFAULT_KNOWLEDGE_POLICY) ? {} : { knowledgePolicy: policyAudit(policy) }), ...(samePolicy(vision, DEFAULT_VISION_POLICY) ? {} : { visionPolicy: vision }) });
     return providerSummary(providerRow(id));
@@ -174,6 +237,12 @@ export function updateProvider(actorId: string, id: string, input: Partial<Provi
     const apiKey = input.apiKey?.trim() || null;
     const apiKeyCt = input.removeSecret ? null : apiKey ? sealSecret("provider", id, apiKey) : row.api_key_ct;
     const hint = input.removeSecret ? null : apiKey ? secretHint(apiKey) : row.api_key_hint;
+    // D542: the default answers chats and reports, so it is never embeddings-only.
+    const nextUrl = input.baseUrl !== undefined ? normalizeBaseUrl(input.baseUrl) : row.base_url;
+    const nextCompat = effectiveCompat(JSON.stringify({ ...parseCompat(row.compat_json), ...(input.compat ?? {}) }), nextUrl);
+    if (!providerChats(nextCompat) && (input.isDefault === true || (row.is_default === 1 && input.isDefault !== false))) {
+      throw new AgentError(409, "CHAT_NONE", row.is_default === 1 ? "Make another provider the default before turning chat off here" : "An embeddings-only provider cannot be the default; the default answers chats and reports", { field: input.isDefault === true ? "isDefault" : "compat" });
+    }
     if (input.isDefault === true) db.query("UPDATE agent_providers SET is_default = 0 WHERE is_default = 1 AND id <> ?").run(id);
     if (input.isDefault === false && row.is_default === 1) throw new AgentError(409, "DEFAULT_REQUIRED", "Make another provider the default first");
     const policyBefore = parseKnowledgePolicy(row.compat_json);
@@ -182,9 +251,9 @@ export function updateProvider(actorId: string, id: string, input: Partial<Provi
     const vision = mergedVision(visionBefore, input.vision);
     db.query(`UPDATE agent_providers SET name = ?, base_url = ?, api_key_ct = ?, api_key_hint = ?, default_model = ?, embedding_model = ?, embedding_dims = ?, compat_json = ?,
       is_default = ?, revision = revision + 1, updated_at = ? WHERE id = ?`).run(
-      (input.name ?? row.name).trim(), input.baseUrl !== undefined ? normalizeBaseUrl(input.baseUrl) : row.base_url, apiKeyCt, hint,
+      (input.name ?? row.name).trim(), nextUrl, apiKeyCt, hint,
       (input.defaultModel ?? row.default_model).trim() || DEFAULT_MODEL, input.embeddingModel !== undefined ? input.embeddingModel?.trim() || null : row.embedding_model,
-      input.embeddingDims !== undefined ? input.embeddingDims : row.embedding_dims, compatJson(parseCompat(row.compat_json), input.compat, policy, vision),
+      input.embeddingDims !== undefined ? input.embeddingDims : row.embedding_dims, compatJson(parseCompat(row.compat_json), input.compat, policy, vision, nextUrl),
       input.isDefault === true ? 1 : row.is_default, now(), id
     );
     // 2026-10-08: a changed knowledge policy is recorded with its new value (bases over it are grandfathered, never re-embedded).
@@ -201,7 +270,8 @@ export function deleteProvider(actorId: string, id: string) {
     const row = providerRow(id);
     db.query("DELETE FROM agent_providers WHERE id = ?").run(id);
     if (row.is_default === 1) {
-      const next = db.query("SELECT id FROM agent_providers ORDER BY created_at LIMIT 1").get() as { id: string } | null;
+      // D542: the next provider that answers chat (never an embeddings-only one).
+      const next = (db.query("SELECT id, base_url, compat_json FROM agent_providers ORDER BY created_at").all() as Array<{ id: string; base_url: string; compat_json: string }>).find(rowChats);
       if (next) db.query("UPDATE agent_providers SET is_default = 1 WHERE id = ?").run(next.id);
     }
     audit(actorId, null, "agents.provider.delete", { providerId: id });
@@ -211,32 +281,47 @@ export function deleteProvider(actorId: string, id: string) {
   knowledgeProviderHook({ kind: "removed", providerId: id });
 }
 
-/** The default provider row, or null when none is configured. */
+/** Whether a provider row answers chat (D542). */
+const rowChats = (row: { compat_json: string; base_url: string }) => providerChats(rowCompat(row));
+/** Providers that answer chat (D542: embeddings-only ones are left out). */
+const chatProviderCount = () => (db.query("SELECT base_url, compat_json FROM agent_providers").all() as Array<{ base_url: string; compat_json: string }>).filter(rowChats).length;
+
+/** The default provider row (one that answers chat, D542), or null when none is configured. */
 export function defaultProvider(): ProviderRow | null {
   const settings = readAgentSettings();
   if (settings.defaultProviderId) {
     const chosen = db.query("SELECT * FROM agent_providers WHERE id = ?").get(settings.defaultProviderId) as ProviderRow | null;
-    if (chosen) return chosen;
+    if (chosen && rowChats(chosen)) return chosen;
   }
-  return (db.query("SELECT * FROM agent_providers WHERE is_default = 1").get() as ProviderRow | null)
-    ?? (db.query("SELECT * FROM agent_providers ORDER BY created_at LIMIT 1").get() as ProviderRow | null);
+  const marked = db.query("SELECT * FROM agent_providers WHERE is_default = 1").get() as ProviderRow | null;
+  if (marked && rowChats(marked)) return marked;
+  return (db.query("SELECT * FROM agent_providers ORDER BY created_at").all() as ProviderRow[]).find(rowChats) ?? null;
 }
 
 /**
  * The connection a run uses: the agent's provider when set and still present, else the default.
- * The API key is opened here and lives on the returned object for one request only.
+ * The API key is opened here and lives on the returned object for one request only. `purpose`
+ * (D542): a chat run never goes to an embeddings-only provider (it falls back to the default, as a
+ * removed one does); knowledge bases ask for `embeddings` and get their own provider whatever it chats.
  */
-export function connectionFor(providerId: string | null, model: string | null): ProviderConnection {
-  const row = (providerId ? db.query("SELECT * FROM agent_providers WHERE id = ?").get(providerId) as ProviderRow | null : null) ?? defaultProvider();
+export function connectionFor(providerId: string | null, model: string | null, purpose: "chat" | "embeddings" = "chat"): ProviderConnection {
+  const own = providerId ? db.query("SELECT * FROM agent_providers WHERE id = ?").get(providerId) as ProviderRow | null : null;
+  const row = (own && (purpose === "embeddings" || rowChats(own)) ? own : null) ?? defaultProvider();
   if (!row) throw new AgentError(409, "NO_PROVIDER", "No model provider is configured; an admin sets one in Settings → AI");
+  const compat = rowCompat(row);
   return {
     id: row.id,
     baseUrl: row.base_url,
     apiKey: row.api_key_ct ? openSecret("provider", row.id, row.api_key_ct) : null,
-    model: model?.trim() || row.default_model,
-    compat: parseCompat(row.compat_json)
+    // An embeddings-only provider's model (D542) is not sent to the default that answers instead.
+    model: (own && row !== own ? "" : model?.trim()) || row.default_model,
+    compat,
+    flavor: providerFlavor(row.base_url, compat)
   };
 }
+
+/** A provider's connection for embeddings (D542), by id: no fallback to the default (knowledge bases pin their provider, M3). */
+export const embeddingConnection = (providerId: string) => connectionFor(providerId, null, "embeddings");
 
 const modelCache = new Map<string, { at: number; models: string[] }>();
 const MODEL_CACHE_MS = 10 * 60_000;
@@ -251,7 +336,8 @@ const NOT_CHAT = /embed/i;
  */
 export function providerChoices(): AgentProviderChoice[] {
   const fallback = defaultProvider()?.id ?? null;
-  return (db.query("SELECT id, name, default_model FROM agent_providers ORDER BY is_default DESC, name COLLATE NOCASE, created_at").all() as Array<{ id: string; name: string; default_model: string }>).map((row) => {
+  // D542: embeddings-only providers are never offered as a chat or report model.
+  return (db.query("SELECT id, name, default_model, base_url, compat_json FROM agent_providers ORDER BY is_default DESC, name COLLATE NOCASE, created_at").all() as Array<{ id: string; name: string; default_model: string; base_url: string; compat_json: string }>).filter(rowChats).map((row) => {
     const cached = modelCache.get(row.id)?.models.filter((model) => !NOT_CHAT.test(model)) ?? null;
     return { id: row.id, name: row.name, isDefault: row.id === fallback, defaultModel: row.default_model, models: cached && cached.length ? cached.slice(0, 200) : null };
   });
@@ -265,29 +351,54 @@ export function providerChoices(): AgentProviderChoice[] {
  */
 export function providerEmbeddingChoices(): KnowledgeEmbeddingChoice[] {
   const fallback = defaultProvider()?.id ?? null;
-  return (db.query("SELECT id, name, embedding_model, embedding_dims, compat_json FROM agent_providers ORDER BY is_default DESC, name COLLATE NOCASE, created_at").all() as Array<{ id: string; name: string; embedding_model: string | null; embedding_dims: number | null; compat_json: string }>).flatMap((row) => {
+  return (db.query("SELECT id, name, base_url, embedding_model, embedding_dims, compat_json FROM agent_providers ORDER BY is_default DESC, name COLLATE NOCASE, created_at").all() as Array<{ id: string; name: string; base_url: string; embedding_model: string | null; embedding_dims: number | null; compat_json: string }>).flatMap((row) => {
     const policy = parseKnowledgePolicy(row.compat_json);
-    if (!policy.enabled) return [];
-    const defaults = embeddingDefaults(row, policy);
+    // D541: a provider marked "Embeddings: none" (Anthropic's default) is never offered, whatever its policy says.
+    const compat = rowCompat(row);
+    if (!policy.enabled || !providerEmbeds(compat)) return [];
+    const sizes = allowedSizes(compat, policy);
+    if (sizes && sizes.length === 0) return [];
+    const defaults = embeddingDefaults(row, policy, compat);
     const cached = modelCache.get(row.id)?.models.filter((model) => NOT_CHAT.test(model)) ?? null;
     return [{
       id: row.id, name: row.name, isDefault: row.id === fallback, embeddingModel: defaults.model, embeddingDims: defaults.dims,
       models: policy.models ? [...policy.models] : cached && cached.length ? cached.slice(0, 50) : null,
-      anyModel: policy.models === null, maxDims: policyMaxDims(policy)
+      anyModel: policy.models === null, maxDims: policyMaxDims(policy),
+      ...(sizes ? { sizes } : {}), ...(providerFlavor(row.base_url, compat) === "voyage" ? { flavor: "voyage" as const } : {})
     }];
   });
+}
+
+/** D542: the sizes a provider takes inside its policy's limit (null: any from 64 to the limit). */
+export function allowedSizes(compat: Pick<ProviderCompat, "embeddingSizes">, policy: ProviderKnowledgePolicy): number[] | null {
+  return compat.embeddingSizes ? compat.embeddingSizes.filter((size) => size <= policyMaxDims(policy)) : null;
+}
+
+/**
+ * D541: the provider a new knowledge base uses by default: the default provider when it makes
+ * embeddings and its policy allows knowledge bases, else the first such provider (in the providers'
+ * list order), else null (the base is keyword-only).
+ */
+export function firstEmbeddingProvider(): ProviderRow | null {
+  const usable = (row: ProviderRow) => parseKnowledgePolicy(row.compat_json).enabled && providerEmbeds(rowCompat(row)) && allowedSizes(rowCompat(row), parseKnowledgePolicy(row.compat_json))?.length !== 0;
+  const fallback = defaultProvider();
+  if (fallback && usable(fallback)) return fallback;
+  return (db.query("SELECT * FROM agent_providers ORDER BY is_default DESC, name COLLATE NOCASE, created_at").all() as ProviderRow[]).find(usable) ?? null;
 }
 
 /**
  * A provider's embedding model and size for a new base (and Change embedding model's defaults),
  * inside its knowledge policy: the provider's own defaults, else the first allowed model and at most
  * the largest allowed size (2026-10-08: adjusted to the policy the admin set, never refused for it).
+ * D542: a provider with a fixed list of sizes (Voyage AI) gets the largest listed size not over that.
  */
-export function embeddingDefaults(row: { embedding_model: string | null; embedding_dims: number | null }, policy: ProviderKnowledgePolicy): { model: string; dims: number } {
+export function embeddingDefaults(row: { embedding_model: string | null; embedding_dims: number | null }, policy: ProviderKnowledgePolicy, compat?: Pick<ProviderCompat, "embeddingSizes">): { model: string; dims: number } {
   const own = row.embedding_model?.trim() || DEFAULT_EMBEDDING_MODEL;
   const model = policyAllowsModel(policy, own) || !policy.models ? own : policy.models[0]!;
-  const dims = row.embedding_dims && row.embedding_dims >= 64 && row.embedding_dims <= 3072 ? row.embedding_dims : DEFAULT_EMBEDDING_DIMS;
-  return { model, dims: Math.min(dims, policyMaxDims(policy)) };
+  const dims = Math.min(row.embedding_dims && row.embedding_dims >= 64 && row.embedding_dims <= 3072 ? row.embedding_dims : DEFAULT_EMBEDDING_DIMS, policyMaxDims(policy));
+  const sizes = compat ? allowedSizes(compat, policy) : null;
+  if (sizes && sizes.length) return { model, dims: [...sizes].reverse().find((size) => size <= dims) ?? sizes[0]! };
+  return { model, dims };
 }
 
 const providerNameQuery = db.query("SELECT name, default_model FROM agent_providers WHERE id = ?");
@@ -312,8 +423,12 @@ export async function providerModels(id: string, options: { fresh?: boolean } = 
 
 export type ProviderTest = {
   ok: boolean;
-  models: { ok: boolean; count: number | null; latencyMs: number | null; error: string | null };
-  completion: { ok: boolean; model: string | null; latencyMs: number | null; error: string | null };
+  /** `skipped` (D542): Voyage AI lists no models. */
+  models: { ok: boolean; count: number | null; latencyMs: number | null; error: string | null; skipped?: boolean };
+  /** `skipped` (D542): an embeddings-only provider is not asked for a completion. */
+  completion: { ok: boolean; model: string | null; latencyMs: number | null; error: string | null; skipped?: boolean };
+  /** D542: an embeddings-only provider is asked for one embedding instead (its model and the size it answered in). */
+  embeddings?: { ok: boolean; model: string; dims: number | null; latencyMs: number | null; error: string | null } | null;
 };
 
 /** Admin-only surfaces (Settings → AI → Test), so the fuller excerpt (review L3). */
@@ -321,19 +436,41 @@ const describe = (error: unknown) => error instanceof ProviderError ? `${error.c
 
 /** Test (plan §4.1): the model list and a one-token completion, reported as latency and counts only. */
 export async function testProvider(id: string): Promise<ProviderTest> {
-  const connection = connectionFor(id, null);
+  const row = providerRow(id);
+  // D542: the provider itself, whatever it answers (an embeddings-only one never falls back to the default here).
+  const connection = connectionFor(id, null, "embeddings");
+  const chats = providerChats(connection.compat);
   const result: ProviderTest = { ok: false, models: { ok: false, count: null, latencyMs: null, error: null }, completion: { ok: false, model: null, latencyMs: null, error: null } };
   const started = Date.now();
-  try {
-    const models = await listModels(connection);
-    modelCache.set(id, { at: Date.now(), models });
-    result.models = { ok: true, count: models.length, latencyMs: Date.now() - started, error: null };
-  } catch (error) {
-    result.models.error = describe(error);
+  if (connection.flavor === "voyage") {
+    result.models = { ok: true, count: null, latencyMs: null, error: null, skipped: true };
+  } else {
+    try {
+      const models = await listModels(connection);
+      modelCache.set(id, { at: Date.now(), models });
+      result.models = { ok: true, count: models.length, latencyMs: Date.now() - started, error: null };
+    } catch (error) {
+      result.models.error = describe(error);
+    }
+  }
+  if (!chats) {
+    result.completion = { ok: false, model: null, latencyMs: null, error: null, skipped: true };
+    const policy = parseKnowledgePolicy(row.compat_json);
+    const { model, dims } = embeddingDefaults(row, policy, connection.compat);
+    const again = Date.now();
+    try {
+      const answer = await embedTexts(connection, model, takesDimensions(model, connection.compat) ? dims : null, ["ok"]);
+      result.embeddings = { ok: true, model, dims: answer.vectors[0]?.length ?? null, latencyMs: Date.now() - again, error: null };
+    } catch (error) {
+      result.embeddings = { ok: false, model, dims: null, latencyMs: null, error: describe(error) };
+    }
+    result.ok = result.embeddings.ok;
+    return result;
   }
   const again = Date.now();
   try {
-    const reply = await completeStreaming(connection, { messages: [{ role: "user", content: "Reply with the single word: ok" }], maxOutputTokens: 1 }, new AbortController().signal, () => undefined);
+    // D539: Anthropic's models think before they answer, so its test asks for a few tokens, not one.
+    const reply = await completeStreaming(connection, { messages: [{ role: "user", content: "Reply with the single word: ok" }], maxOutputTokens: connection.flavor === "anthropic" ? 16 : 1 }, new AbortController().signal, () => undefined);
     result.completion = { ok: true, model: reply.model ?? connection.model, latencyMs: Date.now() - again, error: null };
   } catch (error) {
     result.completion.error = describe(error);
@@ -358,14 +495,15 @@ const probeError = (error: unknown) => error instanceof ProviderError ? { status
  */
 export async function probeToolCalling(actorId: string, id: string): Promise<ToolCallingProbe> {
   // Review M2: an unknown id is a 404, never the default provider (connectionFor falls back).
-  providerRow(id);
+  const probed = providerRow(id);
+  if (!providerChats(rowCompat(probed))) throw new AgentError(409, "CHAT_NONE", "This provider only makes embeddings, so it is never asked to call tools");
   const connection = connectionFor(id, null);
   const started = Date.now();
   // 2026-10-14: the effort the probes send; a model that refuses tools at its default reasoning is tried with none, then minimal, then low.
   let effort: ReasoningEffort | undefined = undefined;
   let learnedEffort: ReasoningEffort | null = null;
   const refusedAtReasoning = (error: unknown) => error instanceof ProviderError && error.status === 400 && refusesToolsAtReasoning(error.adminMessage ?? error.message);
-  const ask = async (choice: "required" | { name: string }): Promise<ToolCallingProbe["required"]> => {
+  const ask = async (choice: "required" | "auto" | { name: string }): Promise<ToolCallingProbe["required"]> => {
     const once = (reasoningEffort?: ReasoningEffort) => completeStreaming(connection, {
       messages: [{ role: "user", content: "This is a connection test. Call the nook_probe tool with ok set to true." }],
       tools: [PROBE_TOOL, DECOY_TOOL], toolChoice: choice, maxOutputTokens: 64, probeChoice: true, ...(reasoningEffort ? { reasoningEffort } : {})
@@ -396,11 +534,17 @@ export async function probeToolCalling(actorId: string, id: string): Promise<Too
       const failed = probeError(error);
       // Only a 400 says the choice itself is refused; a timeout, a network error, 429, 5xx, or an auth
       // error says nothing about tool choice, so the stored flag stays as it was.
-      return { ok: false, outcome: failed.status === 400 ? "unsupported" : "inconclusive", ...failed };
+      // D540: a 400 saying forced choice is not supported for the model is the finding, not a failure.
+      const forcedRefused = failed.status === 400 && choice !== "auto" && refusesForcedToolChoice(failed.error);
+      return { ok: false, outcome: failed.status === 400 ? "unsupported" : "inconclusive", ...failed, ...(forcedRefused ? { forcedRefused: true } : {}) };
     }
   };
   const required = await ask("required");
   const named = await ask({ name: PROBE_TOOL.name });
+  // D540: neither forced choice works, so the third probe asks with `auto`: does the model call tools at all?
+  const forcedWorks = required.outcome === "supported" || named.outcome === "supported";
+  const auto = forcedWorks ? null : await ask("auto");
+  const toolCalling: ToolCallingProbe["toolCalling"] = forcedWorks ? "forced" : auto!.outcome === "supported" ? "auto" : auto!.outcome === "inconclusive" || required.outcome === "inconclusive" || named.outcome === "inconclusive" ? "inconclusive" : "none";
   const flag = (result: ToolCallingProbe["required"]) => result.outcome === "inconclusive" ? undefined : result.ok;
   const learned = learnedEffort as ReasoningEffort | null;
   const compat = db.transaction(() => {
@@ -419,11 +563,11 @@ export async function probeToolCalling(actorId: string, id: string): Promise<Too
     }
     db.query("UPDATE agent_providers SET compat_json = ?, revision = revision + 1, updated_at = ? WHERE id = ?").run(JSON.stringify(next), now(), id);
     const saved = parseCompat(JSON.stringify(next));
-    audit(actorId, null, "agents.provider.probe_tools", { providerId: id, required: required.outcome, named: named.outcome, ...(learned ? { reasoningEffort: learned } : {}), requiredToolChoice: saved.requiredToolChoice !== false, namedToolChoice: saved.namedToolChoice !== false, before: { requiredToolChoice: current.requiredToolChoice !== false, namedToolChoice: current.namedToolChoice !== false } });
+    audit(actorId, null, "agents.provider.probe_tools", { providerId: id, required: required.outcome, named: named.outcome, ...(auto ? { auto: auto.outcome } : {}), toolCalling, ...(learned ? { reasoningEffort: learned } : {}), requiredToolChoice: saved.requiredToolChoice !== false, namedToolChoice: saved.namedToolChoice !== false, before: { requiredToolChoice: current.requiredToolChoice !== false, namedToolChoice: current.namedToolChoice !== false } });
     return { requiredToolChoice: saved.requiredToolChoice !== false, namedToolChoice: saved.namedToolChoice !== false, ...(saved.reasoningEffort ? { reasoningEffort: saved.reasoningEffort } : {}) };
   })();
   const reasoning = learned ? { effort: learned, note: `This model refuses tools with its default reasoning; Nook now sends reasoning_effort=${learned}.` } : null;
-  return { required, named, compat, reasoning, inconclusive: required.outcome === "inconclusive" || named.outcome === "inconclusive", model: connection.model, ms: Date.now() - started };
+  return { required, named, auto, toolCalling, compat, reasoning, inconclusive: required.outcome === "inconclusive" || named.outcome === "inconclusive", model: connection.model, ms: Date.now() - started };
 }
 
 
@@ -433,7 +577,18 @@ export async function probeToolCalling(actorId: string, id: string): Promise<Too
  */
 setCompatLearner((providerId, patch) => {
   const row = db.query("SELECT compat_json FROM agent_providers WHERE id = ?").get(providerId) as { compat_json: string } | null;
-  if (!row || parseCompat(row.compat_json).reasoningEffort) return;
+  if (!row) return;
+  if ("forcedToolChoice" in patch) {
+    // D540: a live 400 refusing this forced choice, then a working `auto`: the flag is saved false (audited).
+    const flag = patch.forcedToolChoice === "required" ? "requiredToolChoice" : "namedToolChoice";
+    if (parseCompat(row.compat_json)[flag] === false) return;
+    const stored = JSON.parse(row.compat_json || "{}") as Record<string, unknown>;
+    db.query("UPDATE agent_providers SET compat_json = ?, revision = revision + 1, updated_at = ? WHERE id = ?").run(JSON.stringify({ ...stored, [flag]: false }), now(), providerId);
+    logger("agents").info("Provider compat learned: forced tool choice unsupported", { provider: providerId.slice(0, 8), choice: patch.forcedToolChoice });
+    audit(null, null, "agents.provider.compat_learned", { providerId, [flag]: false, reason: "The model does not support forced tool choice; Nook asks with auto" });
+    return;
+  }
+  if (parseCompat(row.compat_json).reasoningEffort) return;
   const stored = JSON.parse(row.compat_json || "{}") as Record<string, unknown>;
   db.query("UPDATE agent_providers SET compat_json = ?, revision = revision + 1, updated_at = ? WHERE id = ?").run(JSON.stringify({ ...stored, reasoningEffort: patch.reasoningEffort }), now(), providerId);
   logger("agents").info("Provider compat learned: reasoning_effort", { provider: providerId.slice(0, 8), reasoningEffort: patch.reasoningEffort });

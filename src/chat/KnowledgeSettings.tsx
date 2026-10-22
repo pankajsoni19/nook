@@ -6,9 +6,9 @@ import { ModalDialog } from "../files/Dialog";
 import { hubDocumentTitle, type Route } from "../router";
 import { useConfirm } from "../ui/useConfirm";
 import { useHistoryDialogGuard } from "../ui/useHistoryDialogGuard";
-import { KNOWLEDGE_BOUNDS, KNOWLEDGE_SHARE_NOTE, type KnowledgeCandidate, type KnowledgeDetail, type KnowledgeHit, type KnowledgeSource, type KnowledgeSummary } from "../../shared/knowledge";
+import { KEYWORD_ONLY_HINT, KNOWLEDGE_BOUNDS, KNOWLEDGE_SHARE_NOTE, NO_EMBEDDINGS_PROVIDER, type KnowledgeCandidate, type KnowledgeCreateOptions, type KnowledgeDetail, type KnowledgeHit, type KnowledgeSource, type KnowledgeSummary } from "../../shared/knowledge";
 import { agentsStatus, messageOf, type AgentsStatus } from "./chatApi";
-import { addSource, createKnowledge, deleteKnowledge, getKnowledge, hitSource, knowledgeLine, knowledgePaused, listKnowledge, pollInterval, reindexKnowledge, removeSource, searchKnowledge, sourceCandidates, sourceLabel, sourceStatusLabel, SOURCE_STATUS_LABELS, updateKnowledge } from "./knowledgeApi";
+import { addSource, createKnowledge, deleteKnowledge, getKnowledge, hitSource, knowledgeCreateOptions, knowledgeLine, knowledgePaused, listKnowledge, pollInterval, reindexKnowledge, removeSource, searchKnowledge, sourceCandidates, sourceLabel, sourceStatusLabel, SOURCE_STATUS_LABELS, updateKnowledge } from "./knowledgeApi";
 import { HUB_TITLE_ID } from "../settings/hubModel";
 import { ModelSheet, SourceChunks } from "./KnowledgeModel";
 import "./chat.css";
@@ -77,21 +77,39 @@ function StatusBadge({ status, label }: { status: KnowledgeSource["status"] | nu
   return <span className={`ai-badge${tone} knowledge-status`} data-status={status}>{label ?? SOURCE_STATUS_LABELS[status]}</span>;
 }
 
-/** New knowledge base: a name and a description. */
+/**
+ * New knowledge base: a name, a description, and how it searches (D541): one of the providers that
+ * make embeddings (the first is preselected) or keyword search. With no provider that embeds (only
+ * Claude, say) keyword search is the only choice, and the sheet says an admin can add one.
+ */
 function CreateSheet({ onClose, onCreated }: { onClose: () => void; onCreated: (kb: KnowledgeDetail) => void }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [options, setOptions] = useState<KnowledgeCreateOptions | null>(null);
+  // A provider id, or "keyword".
+  const [choice, setChoice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const ids = { name: useId(), description: useId() };
+  const ids = { name: useId(), description: useId(), search: useId() };
   useHistoryDialogGuard(true, onClose, { blocked: busy });
+  useEffect(() => {
+    let cancelled = false;
+    knowledgeCreateOptions().then((result) => {
+      if (cancelled) return;
+      setOptions(result);
+      setChoice(result.defaultProviderId ?? "keyword");
+    }, () => { if (!cancelled) { setOptions({ providers: [], defaultProviderId: null }); setChoice(null); } });
+    return () => { cancelled = true; };
+  }, []);
+  const chosen = options?.providers.find((provider) => provider.id === choice) ?? null;
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (!name.trim()) return setError("Enter a name.");
     setBusy(true);
     setError(null);
     try {
-      onCreated((await createKnowledge({ name: name.trim(), description: description.trim() })).knowledgeBase);
+      // Before the choices load (or when they failed), the server picks as it would by default.
+      onCreated((await createKnowledge({ name: name.trim(), description: description.trim(), ...(choice === "keyword" ? { keywordOnly: true } : choice ? { providerId: choice } : {}) })).knowledgeBase);
     } catch (reason) {
       setError(messageOf(reason, "Could not create the knowledge base"));
       setBusy(false);
@@ -104,7 +122,17 @@ function CreateSheet({ onClose, onCreated }: { onClose: () => void; onCreated: (
       <input id={ids.name} value={name} maxLength={KNOWLEDGE_BOUNDS.name} autoComplete="off" autoFocus onChange={(event) => setName(event.target.value)} />
       <label htmlFor={ids.description}>Description</label>
       <input id={ids.description} value={description} maxLength={KNOWLEDGE_BOUNDS.description} autoComplete="off" placeholder="What it answers (agents see this)" onChange={(event) => setDescription(event.target.value)} />
-      <p className="file-dialog-hint">It uses the default model provider's embedding model. Its owner can change the model later; every source is then embedded again.</p>
+      <span className="knowledge-field-label" id={ids.search}>Search</span>
+      {options === null ? <p className="chat-muted" role="status">Loading…</p> : <>
+        {options.providers.length === 0 && <p className="settings-warning knowledge-notice" role="note">{NO_EMBEDDINGS_PROVIDER}</p>}
+        <div className="knowledge-modes" role="group" aria-labelledby={ids.search}>
+          {options.providers.map((provider) => <button key={provider.id} type="button" className={`knowledge-mode${provider.id === choice ? " active" : ""}`} aria-pressed={provider.id === choice} onClick={() => setChoice(provider.id)}>{provider.name}</button>)}
+          <button type="button" className={`knowledge-mode${choice === "keyword" ? " active" : ""}`} aria-pressed={choice === "keyword"} onClick={() => setChoice("keyword")}>Keyword search (no embeddings)</button>
+        </div>
+        <p className="file-dialog-hint">{chosen
+          ? `Searches by meaning and keywords with ${chosen.name} · ${chosen.embeddingModel}, ${chosen.embeddingDims.toLocaleString("en-US")} dimensions. Its owner can change the model later; every source is then embedded again.`
+          : "Searches by keywords only; nothing is sent for embeddings. Its owner can move it to an embeddings provider later with Change embedding model."}</p>
+      </>}
       <footer className="file-dialog-actions">
         <button type="button" className="action-button secondary" onClick={onClose} disabled={busy}>Cancel</button>
         <button type="submit" className="action-button" disabled={busy}>{busy ? "Creating…" : "Create"}</button>
@@ -112,6 +140,10 @@ function CreateSheet({ onClose, onCreated }: { onClose: () => void; onCreated: (
     </form>
   </ModalDialog>;
 }
+
+/** How a base searches, for its page's line (D541): keyword search, or the provider, model, and size. */
+export const searchLine = (kb: Pick<KnowledgeSummary, "keywordOnly" | "providerName" | "embeddingModel" | "dims">) =>
+  kb.keywordOnly ? "Keyword search (no embeddings)" : `${kb.providerName ? `${kb.providerName} · ` : ""}${kb.embeddingModel}, ${kb.dims} dimensions`;
 
 /** A base's page: its sources and their state, actions for managers, and Try it. */
 function KnowledgePage({ kbId, navigate, flash }: { kbId: string; navigate: Navigate; flash: (message: string) => void }) {
@@ -196,7 +228,8 @@ function KnowledgePage({ kbId, navigate, flash }: { kbId: string; navigate: Navi
     {kb && <>
       <p className="settings-warning knowledge-warning" role="note">{KNOWLEDGE_WARNING}</p>
       {kb.notice && <p className="settings-warning knowledge-notice" role="status">{kb.notice}</p>}
-      <p className="chat-muted">{knowledgeLine(kb)} · {kb.providerName ? `${kb.providerName} · ` : ""}{kb.embeddingModel}, {kb.dims} dimensions</p>
+      <p className="chat-muted">{knowledgeLine(kb)} · {searchLine(kb)}</p>
+      {kb.keywordOnly && <p className="chat-muted knowledge-keyword-hint">{KEYWORD_ONLY_HINT}{kb.yourLevel === "owner" ? " Change embedding model moves it to one when an admin has added it." : ""}</p>}
       {manager && <div className="agents-actions knowledge-actions">
         <button type="button" className="action-button" onClick={() => setSheet("add")}><Plus />Add source</button>
         <button type="button" className="action-button secondary" onClick={() => { void reindex(); }} disabled={busy || kb.sourceCount === 0}><RefreshCw />Re-index all</button>
@@ -230,7 +263,7 @@ function KnowledgePage({ kbId, navigate, flash }: { kbId: string; navigate: Navi
       <TryIt kb={kb} />
     </>}
     {sheet === "add" && kb && <AddSourceSheet kb={kb} onClose={() => setSheet(null)} onAdded={() => { notify.success("Source added; indexing"); void load(); }} />}
-    {sheet === "model" && kb && <ModelSheet kb={kb} onClose={() => setSheet(null)} onChanged={(next, sources) => { setSheet(null); setKb(next); setExpanded(new Set()); notify.success(`Embedding ${sources} ${sources === 1 ? "source" : "sources"} again with ${next.embeddingModel}`); }} />}
+    {sheet === "model" && kb && <ModelSheet kb={kb} onClose={() => setSheet(null)} onChanged={(next, sources) => { setSheet(null); setKb(next); setExpanded(new Set()); notify.success(next.keywordOnly ? "Now searching by keywords only" : `Embedding ${sources} ${sources === 1 ? "source" : "sources"} again with ${next.embeddingModel}`); }} />}
     {sheet === "rename" && kb && <RenameSheet kb={kb} onClose={() => setSheet(null)} onSaved={(next) => { setSheet(null); setKb(next); notify.success("Saved"); }} />}
     {sheet === "share" && kb && <AccessSheet kind="knowledge_base" id={kb.id} title={kb.name} guardHistory note={KNOWLEDGE_SHARE_NOTE} onClose={() => setSheet(null)} onSaved={() => { setSheet(null); notify.success("Access updated"); void load(); }} />}
     {confirm.confirmElement}
@@ -362,6 +395,8 @@ function TryIt({ kb }: { kb: KnowledgeDetail }) {
   const [hits, setHits] = useState<KnowledgeHit[] | null>(null);
   const [mode, setMode] = useState<"hybrid" | "keyword">("hybrid");
   const [notice, setNotice] = useState<string | null>(null);
+  // D541: keyword mode because the base has no embeddings (not because they failed).
+  const [byDesign, setByDesign] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const id = useId();
@@ -375,6 +410,7 @@ function TryIt({ kb }: { kb: KnowledgeDetail }) {
       setHits(result.hits);
       setMode(result.mode);
       setNotice(result.notice ?? null);
+      setByDesign(result.keywordOnly === true);
     } catch (reason) {
       setError(messageOf(reason, "Could not search"));
     } finally {
@@ -390,7 +426,7 @@ function TryIt({ kb }: { kb: KnowledgeDetail }) {
     </form>
     <FormError message={error} />
     {hits && <div aria-live="polite">
-      {mode === "keyword" && <p className="chat-muted">{notice ? `Matched by keywords only. ${notice}` : "Matched by keywords only: the embedding model was not available."}</p>}
+      {mode === "keyword" && <p className="chat-muted">{byDesign ? "Matched by keywords: this knowledge base has no embeddings." : notice ? `Matched by keywords only. ${notice}` : "Matched by keywords only: the embedding model was not available."}</p>}
       {hits.length === 0 ? <p className="chat-muted">No passages match.</p> : <ol className="knowledge-hits" aria-label="Top passages">
         {hits.map((hit, index) => <li key={`${hit.kb.id}-${index}`} className="knowledge-hit">
           <div className="knowledge-hit-head"><strong>{hit.heading ?? "(no heading)"}</strong><span className="ai-badge">{hit.score.toFixed(4)}</span></div>

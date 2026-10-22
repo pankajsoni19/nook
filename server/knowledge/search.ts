@@ -1,9 +1,9 @@
 import { db } from "../db";
-import { KNOWLEDGE_BOUNDS, RRF_K, type KnowledgeHit, type SourceKind } from "../../shared/knowledge";
+import { isKeywordOnly, KNOWLEDGE_BOUNDS, RRF_K, takesDimensions, type KnowledgeHit, type SourceKind } from "../../shared/knowledge";
 import { assertBudget, chargeUsage } from "../agents/runs";
-import { connectionFor } from "../agents/providers";
+import { embeddingConnection } from "../agents/providers";
 import { AgentError } from "../agents/status";
-import { blobToVector, embedTexts, takesDimensions } from "./embed";
+import { blobToVector, embedTexts } from "./embed";
 import { canReadSource, kbChangingModel, kbProvider, MODEL_CHANGING_NOTICE, ownerIsActive, PROVIDER_REMOVED_NOTICE, type KbRow } from "./service";
 import { recheckLater } from "./index";
 import { logger } from "../log";
@@ -136,7 +136,8 @@ export type RawHit = {
   chunkId: number; kbId: string; heading: string | null; text: string; score: number; ranks: { vector: number | null; keyword: number | null };
   source: { id: string; kind: SourceKind; refId: string | null; title: string };
 };
-export type SearchOutcome = { hits: RawHit[]; mode: "hybrid" | "keyword"; notice?: string };
+/** `keywordOnly` (D541): keyword mode because every base searched is keyword-only by design, not because embedding failed. */
+export type SearchOutcome = { hits: RawHit[]; mode: "hybrid" | "keyword"; notice?: string; keywordOnly?: true };
 /** Who pays for the query's embedding: the person searching (and the calling key over MCP or the API). */
 export type SearchPayer = { userId: string; keyId?: string };
 
@@ -157,8 +158,14 @@ export async function searchBases(all: readonly KbRow[], query: string, k: numbe
   let providerRemoved = false;
   let changingModel = false;
   const groups = new Map<string, KbRow[]>();
+  // D541: keyword-only bases answer from BM25 by design: no query embedding, and no "not available" note.
+  let keywordBases = 0;
   for (const kb of kbs) {
     if (kb.chunk_count === 0) continue;
+    if (isKeywordOnly(kb)) {
+      keywordBases += 1;
+      continue;
+    }
     // 2026-10-08: mid-change, keywords only (never two embedding spaces in one search).
     if (kbChangingModel(kb.id)) {
       vectorFailed = true;
@@ -178,8 +185,9 @@ export async function searchBases(all: readonly KbRow[], query: string, k: numbe
       continue;
     }
     try {
-      const connection = connectionFor(provider.id, null);
-      const result = await embedTexts(connection, first.embedding_model, takesDimensions(first.embedding_model) ? first.dims : null, [text], {
+      const connection = embeddingConnection(provider.id);
+      const result = await embedTexts(connection, first.embedding_model, takesDimensions(first.embedding_model, { dimensionsParam: connection.compat.dimensionsParam, flavor: connection.flavor ?? undefined }) ? first.dims : null, [text], {
+        inputType: "query",
         beforeBatch: () => assertBudget(payer.userId),
         afterBatch: (tokens) => chargeUsage(payer.userId, `kb:${first.id}`, { promptTokens: tokens, completionTokens: 0, estimated: false }, 0, payer.keyId ?? ""),
         signal
@@ -198,7 +206,9 @@ export async function searchBases(all: readonly KbRow[], query: string, k: numbe
   const keywordIds = keywordTop(kbs.map((kb) => kb.id), text, CANDIDATES);
   const fused = fuse([vectorIds, keywordIds]);
   const notice = providerRemoved ? PROVIDER_REMOVED_NOTICE : changingModel ? MODEL_CHANGING_NOTICE : null;
-  const outcome = (hits: RawHit[]): SearchOutcome => ({ hits, mode: vectorFailed ? "keyword" : "hybrid", ...(notice ? { notice } : {}) });
+  // D541: every base searched is keyword-only (none had vectors to use): keyword mode, flagged as by design.
+  const byDesign = !vectorFailed && keywordBases > 0 && groups.size === 0;
+  const outcome = (hits: RawHit[]): SearchOutcome => ({ hits, mode: vectorFailed || byDesign ? "keyword" : "hybrid", ...(notice ? { notice } : {}), ...(byDesign ? { keywordOnly: true } : {}) });
   if (fused.length === 0) return outcome([]);
   const rows = db.query(`SELECT c.id, c.kb_id, c.heading, c.text, s.id AS source_id, s.kind, s.ref_id, s.title FROM kb_chunks c JOIN kb_sources s ON s.id = c.source_id
     WHERE c.id IN (SELECT value FROM json_each($ids))`).all({ ids: JSON.stringify(fused.map((hit) => hit.id)) }) as Array<{ id: number; kb_id: string; heading: string | null; text: string; source_id: string; kind: SourceKind; ref_id: string | null; title: string }>;

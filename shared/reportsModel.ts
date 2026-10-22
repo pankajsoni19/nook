@@ -30,8 +30,13 @@ export type ProbeOutcome = "supported" | "unsupported" | "inconclusive";
  * timeout, network error, 429, 5xx, or auth error) leaves the stored flag as it was. `compat` is what is stored now.
  */
 export type ToolCallingProbe = {
-  required: { ok: boolean; outcome: ProbeOutcome; status: number | null; error: string | null };
-  named: { ok: boolean; outcome: ProbeOutcome; status: number | null; error: string | null };
+  /** `forcedRefused` (D540): the 400 said the model does not support forced tool choice (Anthropic's current models); Nook then asks with `auto`, which is fine. */
+  required: { ok: boolean; outcome: ProbeOutcome; status: number | null; error: string | null; forcedRefused?: boolean };
+  named: { ok: boolean; outcome: ProbeOutcome; status: number | null; error: string | null; forcedRefused?: boolean };
+  /** D540: the third probe, `tool_choice: "auto"`, sent only when neither forced choice worked: does the model call tools at all? */
+  auto?: { ok: boolean; outcome: ProbeOutcome; status: number | null; error: string | null } | null;
+  /** D540: the overall finding: tools work with forced choice, work with `auto` only, do not work, or could not be told. */
+  toolCalling?: "forced" | "auto" | "none" | "inconclusive";
   compat: { requiredToolChoice: boolean; namedToolChoice: boolean; reasoningEffort?: string };
   /** 2026-10-14: set when the model refused tools at its default reasoning and Nook found an effort that works (now saved). */
   reasoning?: { effort: string; note: string } | null;

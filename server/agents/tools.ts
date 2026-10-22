@@ -397,7 +397,7 @@ export function resolveTools(agent: AgentRow, runner: { userId: string; role: st
     const picked = new Set(refs.flatMap((ref) => ref.source === "knowledge" ? [ref.kbId] : []));
     const bases = liveAttachedBases(agent).filter((kb) => picked.has(kb.id));
     if (bases.length > 0) {
-      const spec: KnowledgeToolSpec = { kbs: bases.map((kb) => ({ id: kb.id, name: kb.name, description: kb.description })) };
+      const spec: KnowledgeToolSpec = { kbs: bases.map((kb) => ({ id: kb.id, name: kb.name, description: kb.description, ...(kb.embedding_model === "" ? { keywordOnly: true } : {}) })) };
       resolved.push({
         modelName: uniqueName(KNOWLEDGE_TOOL.modelName, taken), kind: "knowledge", serverId: null, server: KNOWLEDGE_TOOL.server, serverName: "Knowledge", toolName: KNOWLEDGE_TOOL.tool,
         description: knowledgeToolDescription(spec), parameters: knowledgeToolParameters(spec), policy: "auto", openWorld: false, resultCapBytes: 16_384, timeoutMs: 30_000, serverRow: null, nook: null, knowledge: spec

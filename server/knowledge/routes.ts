@@ -4,14 +4,14 @@ import type { AppEnv } from "../auth";
 import { audit } from "../db";
 import { keepRequestOpen } from "../longRequests";
 import { parseJson, uuid } from "../validation";
-import { KNOWLEDGE_BOUNDS } from "../../shared/knowledge";
+import { isKeywordOnly, KNOWLEDGE_BOUNDS } from "../../shared/knowledge";
 import { readShareAccess, writeShareAccess } from "../agents/sharing";
 import { roleMayChat } from "../agents/settings";
 import { AgentError, requireAgentsEnabled } from "../agents/status";
 import { changeEmbeddingModel, reindexAll, scheduleKnowledge } from "./index";
 import { providerEmbeddingChoices } from "../agents/providers";
 import { presentHits, searchBases } from "./search";
-import { addSource, createKnowledge, deleteKnowledge, knowledgeDetail, listKnowledge, manageableKb, ownedKb, readableKb, removeSource, sourceCandidates, sourceChunkPreviews, updateKnowledge } from "./service";
+import { addSource, createKnowledge, deleteKnowledge, knowledgeCreateOptions, knowledgeDetail, listKnowledge, manageableKb, ownedKb, readableKb, removeSource, sourceCandidates, sourceChunkPreviews, updateKnowledge } from "./service";
 import "./bin";
 
 /**
@@ -25,7 +25,9 @@ import "./bin";
  */
 
 const line = (max: number) => z.string().trim().min(1).max(max).refine((value) => !/[\u0000-\u001f\u007f]/.test(value), "must be one line of text");
-const createSchema = z.object({ name: line(KNOWLEDGE_BOUNDS.name), description: z.string().trim().max(KNOWLEDGE_BOUNDS.description).optional() }).strict();
+// D541: the embedding provider a new base uses (default: the first that makes embeddings), or keyword search on purpose.
+const createSchema = z.object({ name: line(KNOWLEDGE_BOUNDS.name), description: z.string().trim().max(KNOWLEDGE_BOUNDS.description).optional(), providerId: uuid.nullish(), keywordOnly: z.boolean().optional() }).strict()
+  .refine((value) => !(value.keywordOnly === true && value.providerId), "choose a provider or keyword search, not both");
 const patchSchema = z.object({ name: line(KNOWLEDGE_BOUNDS.name).optional(), description: z.string().trim().max(KNOWLEDGE_BOUNDS.description).optional() }).strict();
 const sourceSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("note"), noteId: uuid }).strict(),
@@ -39,11 +41,15 @@ const sourceSchema = z.discriminatedUnion("kind", [
 const searchSchema = z.object({ query: z.string().trim().min(1).max(KNOWLEDGE_BOUNDS.queryChars), k: z.number().int().min(1).max(KNOWLEDGE_BOUNDS.k.max).optional() }).strict();
 const emptySchema = z.object({}).strict();
 // 2026-10-08: Change embedding model. A model id is one token of letters, digits, and `._:/@-`.
-const modelSchema = z.object({
-  providerId: uuid,
-  model: z.string().trim().min(1).max(KNOWLEDGE_BOUNDS.modelName).regex(/^[A-Za-z0-9._:/@-]+$/, "must be a model id"),
-  dims: z.number().int().min(64).max(3072).nullable().optional()
-}).strict();
+// D541: or `{ keywordOnly: true }`, keyword search with no embeddings.
+const modelSchema = z.union([
+  z.object({
+    providerId: uuid,
+    model: z.string().trim().min(1).max(KNOWLEDGE_BOUNDS.modelName).regex(/^[A-Za-z0-9._:/@-]+$/, "must be a model id"),
+    dims: z.number().int().min(64).max(3072).nullable().optional()
+  }).strict(),
+  z.object({ keywordOnly: z.literal(true) }).strict()
+]);
 const pageNumber = (value: string | undefined, fallback: number) => {
   const parsed = Number(value);
   return value !== undefined && /^\d{1,6}$/.test(value) && Number.isSafeInteger(parsed) ? parsed : fallback;
@@ -97,6 +103,8 @@ export function registerKnowledgeRoutes(app: Hono<AppEnv>) {
 
   app.get("/api/knowledge", handle((c) => ({ knowledgeBases: listKnowledge(c.get("user").id) })));
   app.post("/api/knowledge", handle(async (c) => c.json({ knowledgeBase: createKnowledge(actor(c), await parseJson(c.req.raw, createSchema)) }, 201)));
+  // D541: New knowledge base's choices: the providers that make embeddings and the default (null: keyword search). Names only.
+  app.get("/api/knowledge/embedding-options", handle(() => knowledgeCreateOptions()));
   app.get("/api/knowledge/:kbId", handle((c) => {
     const { kb, level } = readableKb(id(c, "kbId"), c.get("user").id);
     return { knowledgeBase: knowledgeDetail(kb, c.get("user").id, level) };
@@ -131,7 +139,7 @@ export function registerKnowledgeRoutes(app: Hono<AppEnv>) {
   // 2026-10-08: Change embedding model (owner only): the providers to choose from, and the change itself.
   app.get("/api/knowledge/:kbId/embedding-options", handle((c) => {
     const kb = ownedKb(id(c, "kbId"), c.get("user").id, "Only the knowledge base's owner changes its embedding model");
-    return { current: { providerId: kb.provider_id, model: kb.embedding_model, dims: kb.dims }, providers: providerEmbeddingChoices() };
+    return { current: { providerId: isKeywordOnly(kb) ? null : kb.provider_id, model: kb.embedding_model, dims: kb.dims, keywordOnly: isKeywordOnly(kb) }, providers: providerEmbeddingChoices() };
   }));
   app.post("/api/knowledge/:kbId/model", handle(async (c) => {
     const kbId = id(c, "kbId");
@@ -156,7 +164,7 @@ export function registerKnowledgeRoutes(app: Hono<AppEnv>) {
     keepRequestOpen(c.req.raw);
     const outcome = await searchBases([kb], body.query, body.k ?? KNOWLEDGE_BOUNDS.k.default, { userId: c.get("user").id });
     audit(c.get("user").id, null, "knowledge.search", { via: "web", kbId, hits: outcome.hits.length, mode: outcome.mode });
-    return { hits: presentHits(outcome.hits, c.get("user").id, new Map([[kb.id, kb.name]])), mode: outcome.mode, ...(outcome.notice ? { notice: outcome.notice } : {}) };
+    return { hits: presentHits(outcome.hits, c.get("user").id, new Map([[kb.id, kb.name]])), mode: outcome.mode, ...(outcome.notice ? { notice: outcome.notice } : {}), ...(outcome.keywordOnly ? { keywordOnly: true } : {}) };
   }));
 
   // The Access sheet (owner and managers; managers share at view only), as for agents.

@@ -1,4 +1,4 @@
-import { AGENT_BOUNDS, CHAT_IMAGE_BOUNDS, MODEL_TIMEOUTS, type ProviderCompat, type ReasoningEffort, type TokenUsage } from "../../shared/agents";
+import { AGENT_BOUNDS, ANTHROPIC_VERSION, CHAT_IMAGE_BOUNDS, MODEL_TIMEOUTS, type ProviderCompat, type ProviderFlavor, type ReasoningEffort, type TokenUsage } from "../../shared/agents";
 import { EgressError, egressFetch, readEgressText, type EgressResponse } from "./egress";
 import { logger } from "../log";
 
@@ -15,7 +15,8 @@ const modelLog = logger("agents");
  * `error.message` (a key never appears there), and never the API key (T309).
  */
 
-export type ProviderConnection = { id: string; baseUrl: string; apiKey: string | null; model: string; compat: ProviderCompat };
+/** `flavor` (D539): the endpoint's kind (`providerFlavor`), set by `connectionFor`; absent or null is plain OpenAI-compatible. */
+export type ProviderConnection = { id: string; baseUrl: string; apiKey: string | null; model: string; compat: ProviderCompat; flavor?: ProviderFlavor | null };
 /** A tool call as the model emitted it (plan §2.1): `arguments` is the raw JSON text. */
 export type ModelToolCall = { id: string; name: string; arguments: string; /** Set by the loop when it took the call from a text answer (a run's final tool, `finalTool`). */ recovered?: "text" };
 /** The wire turns (OpenAI Chat Completions): an assistant turn may carry `tool_calls`; a `tool` turn answers one. */
@@ -52,7 +53,14 @@ export const refusesToolsAtReasoning = (text: string) => /reasoning[_ ]?effort/i
  * Where a learned compat flag is saved (providers.ts registers it): a live request that had to retry
  * with `reasoning_effort: "none"` records it on the provider, so later requests send it at once.
  */
-let compatLearner: ((providerId: string, patch: { reasoningEffort: ReasoningEffort }) => void) | null = null;
+let compatLearner: ((providerId: string, patch: { reasoningEffort: ReasoningEffort } | { forcedToolChoice: "required" | "named" }) => void) | null = null;
+
+/**
+ * D540: whether a provider's 400 says forced tool choice (`required` or a named tool) is not supported
+ * for the model, as Anthropic's current models answer ("tool_choice: type tool and any are not
+ * supported for this model").
+ */
+export const refusesForcedToolChoice = (text: string) => /tool_?choice/i.test(text) && /not supported|unsupported|not allowed|must be/i.test(text);
 export const setCompatLearner = (learner: typeof compatLearner) => { compatLearner = learner; };
 export type CompletionResult = { content: string; finishReason: string | null; usage: TokenUsage; model: string | null; toolCalls: ModelToolCall[] };
 /**
@@ -130,11 +138,20 @@ export const MODEL_STREAM_MAX_BYTES = 8 * 1024 * 1024;
 export const MODELS_LIST_MAX_BYTES = 1024 * 1024;
 const ERROR_BODY_MAX_BYTES = 64 * 1024;
 
-const headersFor = (connection: ProviderConnection, accept: string) => ({
-  Accept: accept,
-  "Content-Type": "application/json",
-  ...(connection.apiKey ? { Authorization: `Bearer ${connection.apiKey}` } : {})
-});
+/**
+ * The headers of every request to a provider (models, chat, probes, embeddings): the key as Bearer,
+ * and for Anthropic (D539, by host or `compat.flavor`) also `x-api-key` and `anthropic-version`, which
+ * its native `/v1/models` requires (its OpenAI-compatible `/chat/completions` takes either).
+ */
+export function providerHeaders(connection: Pick<ProviderConnection, "apiKey" | "flavor">, accept: string): Record<string, string> {
+  return {
+    Accept: accept,
+    "Content-Type": "application/json",
+    ...(connection.apiKey ? { Authorization: `Bearer ${connection.apiKey}` } : {}),
+    ...(connection.flavor === "anthropic" ? { "anthropic-version": ANTHROPIC_VERSION, ...(connection.apiKey ? { "x-api-key": connection.apiKey } : {}) } : {})
+  };
+}
+const headersFor = providerHeaders;
 
 /** Characters ÷ 4, the estimate used when a server sends no usage chunk (plan §2.1). */
 export const estimateTokens = (text: string) => Math.ceil(text.length / 4);
@@ -186,24 +203,39 @@ async function failedResponse(response: EgressResponse, readBody?: string): Prom
   throw new ProviderError("PROVIDER_ERROR", `${base} (HTTP ${status})${detail ? `: ${detail.redacted}` : ""}`, status, `${base} (HTTP ${status})${detail ? `: ${detail.admin}` : ""}`);
 }
 
-/** `GET {baseUrl}/models` → model ids (at most 500, sorted). */
+/** Pages of Anthropic's native model list Nook reads at most (D539: 1,000 a page, so 5,000 ids; more than any account has). */
+export const MODEL_LIST_PAGES = 5;
+
+/**
+ * `GET {baseUrl}/models` → model ids (at most 500, sorted). OpenAI's shape (`data[].id`) and
+ * Anthropic's native one (D539: `data[].id` too, plus `has_more` and `last_id`, read a page of 1,000
+ * at a time with `after_id`, at most `MODEL_LIST_PAGES` pages).
+ */
 export async function listModels(connection: ProviderConnection): Promise<string[]> {
-  let response: Awaited<ReturnType<typeof egressFetch>>;
-  try {
-    response = await egressFetch(`${connection.baseUrl}/models`, { method: "GET", headers: headersFor(connection, "application/json") }, { maxBytes: MODELS_LIST_MAX_BYTES, firstByteMs: modelTimeouts.firstByteMs, idleMs: modelTimeouts.idleMs, totalMs: modelTimeouts.totalMs });
-  } catch (error) {
-    rethrow(error);
+  const ids: string[] = [];
+  const anthropic = connection.flavor === "anthropic";
+  let after: string | null = null;
+  for (let page = 0; page < (anthropic ? MODEL_LIST_PAGES : 1); page += 1) {
+    const query = anthropic ? `?limit=1000${after ? `&after_id=${encodeURIComponent(after)}` : ""}` : "";
+    let response: Awaited<ReturnType<typeof egressFetch>>;
+    try {
+      response = await egressFetch(`${connection.baseUrl}/models${query}`, { method: "GET", headers: headersFor(connection, "application/json") }, { maxBytes: MODELS_LIST_MAX_BYTES, firstByteMs: modelTimeouts.firstByteMs, idleMs: modelTimeouts.idleMs, totalMs: modelTimeouts.totalMs });
+    } catch (error) {
+      rethrow(error);
+    }
+    if (response.status < 200 || response.status >= 300) await failedResponse(response);
+    let text: string;
+    try {
+      text = await readEgressText(response, MODELS_LIST_MAX_BYTES);
+    } catch (error) {
+      rethrow(error);
+    }
+    let parsed: { data?: Array<{ id?: unknown }>; has_more?: unknown; last_id?: unknown };
+    try { parsed = JSON.parse(text) as typeof parsed; } catch { throw new ProviderError("PROVIDER_ERROR", "The provider's model list was not JSON"); }
+    ids.push(...(Array.isArray(parsed.data) ? parsed.data : []).map((item) => typeof item?.id === "string" ? item.id : null).filter((id): id is string => id !== null && id.length <= 128));
+    if (parsed.has_more !== true || typeof parsed.last_id !== "string" || !parsed.last_id || parsed.last_id === after) break;
+    after = parsed.last_id;
   }
-  if (response.status < 200 || response.status >= 300) await failedResponse(response);
-  let text: string;
-  try {
-    text = await readEgressText(response, MODELS_LIST_MAX_BYTES);
-  } catch (error) {
-    rethrow(error);
-  }
-  let parsed: { data?: Array<{ id?: unknown }> };
-  try { parsed = JSON.parse(text) as { data?: Array<{ id?: unknown }> }; } catch { throw new ProviderError("PROVIDER_ERROR", "The provider's model list was not JSON"); }
-  const ids = (Array.isArray(parsed.data) ? parsed.data : []).map((item) => typeof item?.id === "string" ? item.id : null).filter((id): id is string => id !== null && id.length <= 128);
   return [...new Set(ids)].sort().slice(0, 500);
 }
 
@@ -274,10 +306,21 @@ export async function completeStreaming(connection: ProviderConnection, request:
     // Review L2 (Wave 46): a provider that refuses `required` or a named choice with a 400 is asked once
     // more with `auto` (under a named choice only that tool is still offered, so it is the only call to make).
     if (response.status === 400 && body.tool_choice !== undefined && body.tool_choice !== "auto") {
+      // D540: a 400 that says this forced choice is not supported (Anthropic's current models) is
+      // learned once `auto` works: the provider's compat stops asking for that kind (`required`, or a
+      // named tool), saved and audited, so later requests go out with what the provider takes at once.
+      const refusedKind = readBody !== undefined && refusesForcedToolChoice(readBody) ? (body.tool_choice === "required" ? "required" : "named") : null;
       if (readBody === undefined) response.cancel();
       body.tool_choice = "auto";
       response = await send();
       readBody = undefined;
+      if (refusedKind && response.status >= 200 && response.status < 300) {
+        const flag = refusedKind === "required" ? "requiredToolChoice" : "namedToolChoice";
+        if (connection.compat[flag] !== false) {
+          connection.compat = { ...connection.compat, [flag]: false };
+          try { compatLearner?.(connection.id, { forcedToolChoice: refusedKind }); } catch { /* the request still goes on */ }
+        }
+      }
     }
   }
   if (response.status < 200 || response.status >= 300) await failedResponse(response, readBody);

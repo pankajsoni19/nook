@@ -12,7 +12,7 @@ const { kbRow } = await import("../server/knowledge/service");
  * The admin's knowledge policy per provider (2026-10-08, v0.33.0 review LOW-5): saved on the
  * provider row and audited, admin-only; Change embedding model's options filtered and its POST
  * refused off the policy (400 MODEL_NOT_ALLOWED / DIMS_TOO_LARGE / PROVIDER_NOT_ALLOWED); a new base
- * adjusted into a restrictive default provider's policy (or refused when the provider is not allowed);
+ * adjusted into a restrictive default provider's policy (or, D541, the next allowed provider when it is not allowed);
  * a model's own size over the limit stops at its first answer; bases over a newer limit grandfathered.
  */
 
@@ -193,10 +193,14 @@ describe("enforcement", () => {
     const sent = fakeP.calls.filter((call) => call.path === "/v1/embeddings").at(-1)!.body as { model: string; dimensions: number };
     expect(sent).toMatchObject({ model: "text-embedding-3-large", dimensions: 256 });
     expect((await setPolicy(admin, pId, { enabled: false })).status).toBe(200);
-    const refused = await send(owner, "POST", "/knowledge", { name: "Refused" });
-    expect(refused.status).toBe(409);
+    // D541: the default no longer allowed: a new base takes the next provider that makes embeddings (never P).
+    const next = await send(owner, "POST", "/knowledge", { name: "Next provider" });
+    expect(next.status).toBe(201);
+    expect(kbRow(next.body.knowledgeBase.id)!.provider_id).not.toBe(pId);
+    // Choosing P on purpose is refused.
+    const refused = await send(owner, "POST", "/knowledge", { name: "Refused", providerId: pId });
+    expect(refused.status).toBe(400);
     expect(refused.body.code).toBe("PROVIDER_NOT_ALLOWED");
-    expect(refused.body.error).toContain("Settings → AI");
     await resetPolicy(pId);
   });
 

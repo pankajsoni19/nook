@@ -3,14 +3,14 @@ import { audit, db, now } from "../db";
 import { checksum, storage } from "../storage";
 import { DocumentIntegrityError, openObjectForRead } from "../documentStorage";
 import { StorageUnavailableError } from "../objectStore";
-import { CHUNKING, KNOWLEDGE_BOUNDS } from "../../shared/knowledge";
+import { CHUNKING, isKeywordOnly, KEYWORD_ONLY_MODEL, KNOWLEDGE_BOUNDS, takesDimensions } from "../../shared/knowledge";
 import { assertBudget, chargeUsage, secondsToMidnight } from "../agents/runs";
-import { connectionFor, embeddingDefaults, knowledgePolicyOf, parseKnowledgePolicy } from "../agents/providers";
-import { DEFAULT_KNOWLEDGE_POLICY, policyAllowsModel, policyMaxDims } from "../../shared/agents";
+import { allowedSizes, embeddingConnection, embeddingDefaults, knowledgePolicyOf, parseKnowledgePolicy, rowCompat } from "../agents/providers";
+import { DEFAULT_KNOWLEDGE_POLICY, policyAllowsModel, policyMaxDims, providerEmbeds } from "../../shared/agents";
 import { ProviderError } from "../agents/loop";
 import { AgentError, agentsStatus } from "../agents/status";
 import { chunkText, type Chunk, type ChunkFormat } from "./chunk";
-import { embedTexts, takesDimensions, vectorToBlob } from "./embed";
+import { embedTexts, vectorToBlob } from "./embed";
 import { canReadDocument, canReadNote, canReadSource, documentFormat, isKnowledgeFile, kbProvider, ownerIsActive, PROVIDER_REMOVED, refreshKbCounts, refreshKbStatus, type KbRow, type SourceRow } from "./service";
 import { onGroupMembershipChanged, onKnowledgeProviderEvent, onNotePublished, onSourceAccessChanged, onUserUnblocked, type ProviderEvent, type SourceAccessChange } from "./hooks";
 import { lastReindexAt, recordReindex, resetReindexLimitsForTests } from "./limits";
@@ -259,13 +259,15 @@ async function indexSource(kb: KbRow, source: SourceRow): Promise<"done" | "paus
     markUnavailable(kb.id, source.id);
     return "done";
   }
+  // D541: a keyword-only base chunks its sources for BM25 and never calls an embeddings API.
+  const keywordOnly = isKeywordOnly(kb);
   // M3: the base's own provider or nothing (never the current default).
-  const provider = kbProvider(kb);
-  if (!provider) {
+  const provider = keywordOnly ? null : kbProvider(kb);
+  if (!provider && !keywordOnly) {
     setState(source.id, "error", PROVIDER_REMOVED);
     return "done";
   }
-  const hash = contentHash(kb, provider.base_url, content.format, content.fingerprint);
+  const hash = contentHash(kb, provider?.base_url ?? null, content.format, content.fingerprint);
   if (hash === source.content_hash && source.indexed_at !== null) {
     // Unchanged: nothing is embedded again (the sweep and the publish hook mark sources freely).
     db.query("UPDATE kb_sources SET status = 'ready', error = NULL, title = ? WHERE id = ? AND status = 'indexing'").run(content.title.slice(0, 255), source.id);
@@ -283,11 +285,12 @@ async function indexSource(kb: KbRow, source: SourceRow): Promise<"done" | "paus
   // 2026-10-08: a model that takes no `dimensions` answers in its own size; a base with no vectors yet
   // (new, or just moved to another model) adopts it. Vectors of another size are never stored beside them.
   const vectored = vectoredChunks(kb.id, source.id);
-  if (chunks.length > 0) {
+  if (chunks.length > 0 && provider) {
     try {
-      const connection = connectionFor(provider.id, null);
-      const requested = takesDimensions(kb.embedding_model) || vectored > 0 ? kb.dims : null;
+      const connection = embeddingConnection(provider.id);
+      const requested = takesDimensions(kb.embedding_model, { dimensionsParam: connection.compat.dimensionsParam, flavor: connection.flavor ?? undefined }) || vectored > 0 ? kb.dims : null;
       const result = await embedTexts(connection, kb.embedding_model, requested, chunks.map(embeddingInput), {
+        inputType: "document",
         // Before every request (T314): over the owner's or the instance's budget nothing is sent.
         // 2026-10-08: nor when the base moved to another model meanwhile (no call to the old provider after a change).
         beforeBatch: () => { if (modelChanged(kb)) throw new SourceError("MODEL_CHANGED", "The embedding model changed"); assertBudget(kb.owner_id); },
@@ -298,7 +301,7 @@ async function indexSource(kb: KbRow, source: SourceRow): Promise<"done" | "paus
           // (grandfathered, made before the limit) is not refused.
           const native = batch[0]?.length ?? 0;
           if (requested === null && native !== kb.dims) {
-            const cap = policyMaxDims(knowledgePolicyOf(provider.id) ?? DEFAULT_KNOWLEDGE_POLICY);
+            const cap = policyMaxDims(knowledgePolicyOf(provider!.id) ?? DEFAULT_KNOWLEDGE_POLICY);
             if (native > cap) throw new SourceError("DIMS_TOO_LARGE", nativeTooLarge(kb.embedding_model, native, cap));
           }
         }
@@ -342,7 +345,8 @@ async function indexSource(kb: KbRow, source: SourceRow): Promise<"done" | "paus
     if (dims !== kb.dims) db.query("UPDATE knowledge_bases SET dims = ? WHERE id = ?").run(dims, kb.id);
     db.query("DELETE FROM kb_chunks WHERE source_id = ?").run(source.id);
     const insert = db.query("INSERT INTO kb_chunks (kb_id, source_id, ord, heading, text, embedding) VALUES (?, ?, ?, ?, ?, ?)");
-    chunks.forEach((chunk, ord) => insert.run(kb.id, source.id, ord, chunk.heading, chunk.text, vectorToBlob(vectors[ord]!)));
+    // D541: a keyword-only base's chunks carry no vector (the empty BLOB the model change's copies use).
+    chunks.forEach((chunk, ord) => insert.run(kb.id, source.id, ord, chunk.heading, chunk.text, keywordOnly ? new Uint8Array(0) : vectorToBlob(vectors[ord]!)));
     refreshKbCounts(kb.id);
     return true;
   })();
@@ -400,7 +404,35 @@ function modelChanged(kb: Pick<KbRow, "id" | "provider_id" | "embedding_model" |
   return !live || live.provider_id !== kb.provider_id || live.embedding_model !== kb.embedding_model || live.dims !== kb.dims;
 }
 
-export type ModelChangeInput = { providerId: string; model: string; dims?: number | null };
+export type ModelChangeInput = { providerId: string; model: string; dims?: number | null } | { keywordOnly: true };
+
+/**
+ * The provider, model, and size a change to an embedding provider records, inside the admin's policy
+ * for it (2026-10-08) and what the provider can do (D541: never one marked "Embeddings: none"; D542:
+ * only the sizes it takes, such as Voyage AI's four).
+ */
+function embeddingTarget(kb: KbRow, input: { providerId: string; model: string; dims?: number | null }) {
+  const provider = db.query("SELECT id, base_url, embedding_model, embedding_dims, compat_json FROM agent_providers WHERE id = ?").get(input.providerId.toLowerCase()) as { id: string; base_url: string; embedding_model: string | null; embedding_dims: number | null; compat_json: string } | null;
+  if (!provider) throw new AgentError(400, "INVALID", "That provider was not found", { field: "providerId" });
+  const model = input.model.trim();
+  const compat = rowCompat(provider);
+  if (!providerEmbeds(compat)) throw new AgentError(400, "NO_EMBEDDINGS", "This provider does not make embeddings", { field: "providerId" });
+  // 2026-10-08: the admin's knowledge policy for the chosen provider (Settings → AI → Model providers).
+  const policy = parseKnowledgePolicy(provider.compat_json);
+  if (!policy.enabled) throw new AgentError(400, "PROVIDER_NOT_ALLOWED", "An admin does not allow this provider for knowledge bases", { field: "providerId" });
+  if (!policyAllowsModel(policy, model)) throw new AgentError(400, "MODEL_NOT_ALLOWED", `An admin allows only these embedding models with this provider: ${policy.models!.join(", ")}`, { field: "model", allowed: policy.models });
+  const cap = policyMaxDims(policy);
+  if (input.dims != null && input.dims > cap) throw new AgentError(400, "DIMS_TOO_LARGE", `An admin allows at most ${cap.toLocaleString("en-US")} dimensions with this provider`, { field: "dims", maxDims: cap });
+  const sizes = allowedSizes(compat, policy);
+  const sized = takesDimensions(model, compat);
+  if (sized && sizes && input.dims != null && !sizes.includes(input.dims)) throw new AgentError(400, "DIMS_NOT_OFFERED", `This provider takes only these sizes: ${sizes.map((size) => size.toLocaleString("en-US")).join(", ")}`, { field: "dims", sizes });
+  const dims = sized
+    ? input.dims ?? embeddingDefaults(provider, policy, compat).dims
+    // A model that takes no `dimensions` answers in its own size; the base adopts it at the first answer
+    // (a size over the limit then puts the sources in error). The stored size stays within the limit.
+    : Math.min(input.dims ?? kb.dims, cap);
+  return { provider, model, dims };
+}
 
 /** A source's error when a model's own size is over the admin's limit (2026-10-08). */
 export const nativeTooLarge = (model: string, dims: number, cap: number) =>
@@ -416,28 +448,20 @@ export const nativeTooLarge = (model: string, dims: number, cap: number) =>
  * must not wait an hour to recover.
  */
 export function changeEmbeddingModel(actor: { userId: string }, kb: KbRow, input: ModelChangeInput) {
-  const provider = db.query("SELECT id, embedding_model, embedding_dims, compat_json FROM agent_providers WHERE id = ?").get(input.providerId.toLowerCase()) as { id: string; embedding_model: string | null; embedding_dims: number | null; compat_json: string } | null;
-  if (!provider) throw new AgentError(400, "INVALID", "That provider was not found", { field: "providerId" });
-  const model = input.model.trim();
-  // 2026-10-08: the admin's knowledge policy for the chosen provider (Settings → AI → Model providers).
-  const policy = parseKnowledgePolicy(provider.compat_json);
-  if (!policy.enabled) throw new AgentError(400, "PROVIDER_NOT_ALLOWED", "An admin does not allow this provider for knowledge bases", { field: "providerId" });
-  if (!policyAllowsModel(policy, model)) throw new AgentError(400, "MODEL_NOT_ALLOWED", `An admin allows only these embedding models with this provider: ${policy.models!.join(", ")}`, { field: "model", allowed: policy.models });
-  const cap = policyMaxDims(policy);
-  if (input.dims != null && input.dims > cap) throw new AgentError(400, "DIMS_TOO_LARGE", `An admin allows at most ${cap.toLocaleString("en-US")} dimensions with this provider`, { field: "dims", maxDims: cap });
-  const dims = takesDimensions(model)
-    ? input.dims ?? embeddingDefaults(provider, policy).dims
-    // A model that takes no `dimensions` answers in its own size; the base adopts it at the first answer
-    // (a size over the limit then puts the sources in error). The stored size stays within the limit.
-    : Math.min(input.dims ?? kb.dims, cap);
-  if (provider.id === kb.provider_id && model === kb.embedding_model && dims === kb.dims) throw new AgentError(409, "UNCHANGED", "The knowledge base already uses this provider, model, and size");
+  // D541: "Keyword search (no embeddings)": no provider, the empty model id, the size kept (unused).
+  const target = "keywordOnly" in input ? { provider: null, model: KEYWORD_ONLY_MODEL, dims: kb.dims } : embeddingTarget(kb, input);
+  const { provider, model, dims } = target;
+  if ((provider?.id ?? null) === (isKeywordOnly(kb) ? null : kb.provider_id) && model === kb.embedding_model && dims === kb.dims) {
+    throw new AgentError(409, "UNCHANGED", provider ? "The knowledge base already uses this provider, model, and size" : "The knowledge base already uses keyword search");
+  }
   const at = Date.now();
-  const providerRemoved = kbProvider(kb) === null;
+  // A base with no provider (removed, or keyword-only) has no vectors to protect: it never waits for the hour.
+  const providerRemoved = isKeywordOnly(kb) || kbProvider(kb) === null;
   if (!providerRemoved) assertReindexAllowed(kb, at);
   const result = db.transaction(() => {
     const live = liveKb(kb.id);
     if (!live || modelChanged(kb, live)) throw new AgentError(409, "KB_CHANGED", "This knowledge base changed meanwhile; reload and try again");
-    db.query("UPDATE knowledge_bases SET provider_id = ?, embedding_model = ?, dims = ?, updated_at = ? WHERE id = ?").run(provider.id, model, dims, now(), kb.id);
+    db.query("UPDATE knowledge_bases SET provider_id = ?, embedding_model = ?, dims = ?, updated_at = ? WHERE id = ?").run(provider?.id ?? null, model, dims, now(), kb.id);
     const sources = db.query("UPDATE kb_sources SET status = 'pending', error = NULL, content_hash = NULL WHERE kb_id = ? AND status <> 'unavailable'").run(kb.id).changes;
     // Chunks are replaced, never updated (042's trigger): copies without a vector keep keyword search, then the originals go.
     const last = (db.query("SELECT COALESCE(MAX(id), 0) AS id FROM kb_chunks").get() as { id: number }).id;
@@ -447,7 +471,7 @@ export function changeEmbeddingModel(actor: { userId: string }, kb: KbRow, input
     db.query("DELETE FROM kb_chunks WHERE kb_id = ? AND id <= ?").run(kb.id, last);
     refreshKbCounts(kb.id);
     recordReindex(kb.id, at);
-    audit(actor.userId, null, "knowledge.model_change", { kbId: kb.id, providerId: provider.id, model, dims, sources, vectorsDropped: dropped, ...(providerRemoved ? { providerWasRemoved: true } : {}) });
+    audit(actor.userId, null, "knowledge.model_change", { kbId: kb.id, providerId: provider?.id ?? null, ...(provider ? { model, dims } : { keywordOnly: true }), sources, vectorsDropped: dropped, ...(isKeywordOnly(kb) ? { fromKeywordOnly: true } : providerRemoved ? { providerWasRemoved: true } : {}) });
     return { ok: true as const, sources };
   })();
 
@@ -585,7 +609,8 @@ export function onProviderEvent(event: ProviderEvent) {
     return;
   }
   if (event.kind === "removed") {
-    const bases = db.query("SELECT id FROM knowledge_bases k WHERE NOT EXISTS (SELECT 1 FROM agent_providers p WHERE p.id = k.provider_id)").all() as Array<{ id: string }>;
+    // D541: a keyword-only base has no provider on purpose; it is never failed for it.
+    const bases = db.query("SELECT id FROM knowledge_bases k WHERE k.embedding_model <> '' AND NOT EXISTS (SELECT 1 FROM agent_providers p WHERE p.id = k.provider_id)").all() as Array<{ id: string }>;
     for (const { id } of bases) {
       db.query("UPDATE kb_sources SET status = 'error', error = ? WHERE kb_id = ? AND status IN ('pending','indexing','ready')").run(PROVIDER_REMOVED, id);
       refreshKbStatus(id);
@@ -643,7 +668,7 @@ export async function sweepKnowledge() {
       continue;
     }
     if (row.status === "pending") continue;
-    if (row.provider_url === null) {
+    if (row.provider_url === null && !isKeywordOnly(row)) {
       if (row.status !== "error" && row.status !== "unavailable" && setState(row.id, "error", PROVIDER_REMOVED, row.status)) refreshKbStatus(row.kb_id);
       continue;
     }

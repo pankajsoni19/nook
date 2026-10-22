@@ -144,7 +144,7 @@ describe("Change embedding model", () => {
     // The owner's options: names and embedding defaults, never an address or key.
     const options = await send(owner, "GET", `/knowledge/${kbId}/embedding-options`);
     expect(options.status).toBe(200);
-    expect(options.body.current).toEqual({ providerId: providerAId, model: "text-embedding-3-small", dims: 512 });
+    expect(options.body.current).toEqual({ providerId: providerAId, model: "text-embedding-3-small", dims: 512, keywordOnly: false });
     expect(options.body.providers.find((item: { id: string }) => item.id === providerBId)).toMatchObject({ name: "Fake B (knowledge deferred)", embeddingModel: "text-embedding-3-large", embeddingDims: 256 });
     expect(JSON.stringify(options.body)).not.toContain(providerB.baseUrl);
     expect(JSON.stringify(options.body)).not.toContain("sk-test");

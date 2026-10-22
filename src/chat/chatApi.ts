@@ -61,12 +61,18 @@ export const agentLink = (agentId: string) => api<{ link: NookLink; keys: Linkab
 export const setAgentLink = (agentId: string, nookKeyId: string | null) => api<{ link: NookLink }>(`/agents/${agentId}/link`, { method: "PUT", body: JSON.stringify({ nookKeyId }) });
 
 // Admin (Settings → AI).
-export type ProviderInput = { name: string; baseUrl?: string; apiKey?: string | null; defaultModel?: string; compat?: Partial<ProviderCompat>; isDefault?: boolean; knowledge?: Partial<ProviderKnowledgePolicy>; vision?: Partial<ProviderVisionPolicy> };
+export type ProviderInput = { name: string; baseUrl?: string; apiKey?: string | null; defaultModel?: string; compat?: { [K in keyof ProviderCompat]?: ProviderCompat[K] | null }; isDefault?: boolean; knowledge?: Partial<ProviderKnowledgePolicy>; vision?: Partial<ProviderVisionPolicy> };
 export const listProviders = () => api<{ providers: ProviderSummary[] }>("/agents/admin/providers");
 export const createProvider = (input: ProviderInput) => api<{ provider: ProviderSummary }>("/agents/admin/providers", { method: "POST", body: JSON.stringify(input) });
 export const updateProvider = (id: string, input: Partial<ProviderInput> & { expectedRevision: number; removeSecret?: boolean }) => api<{ provider: ProviderSummary }>(`/agents/admin/providers/${id}`, { method: "PATCH", body: JSON.stringify(input) });
 export const deleteProvider = (id: string) => api<{ ok: true }>(`/agents/admin/providers/${id}`, { method: "DELETE", body: "{}" });
-export type ProviderTest = { ok: boolean; models: { ok: boolean; count: number | null; latencyMs: number | null; error: string | null }; completion: { ok: boolean; model: string | null; latencyMs: number | null; error: string | null } };
+export type ProviderTest = {
+  ok: boolean;
+  models: { ok: boolean; count: number | null; latencyMs: number | null; error: string | null; skipped?: boolean };
+  completion: { ok: boolean; model: string | null; latencyMs: number | null; error: string | null; skipped?: boolean };
+  /** D542: an embeddings-only provider's one embedding. */
+  embeddings?: { ok: boolean; model: string; dims: number | null; latencyMs: number | null; error: string | null } | null;
+};
 export const testProvider = (id: string) => api<{ test: ProviderTest }>(`/agents/admin/providers/${id}/test`, { method: "POST", body: "{}" });
 /** Wave 48b: "Test tool calling" (stored in the provider's compat flags). */
 export const probeProviderTools = (id: string) => api<{ probe: ToolCallingProbe; provider: ProviderSummary }>(`/agents/admin/providers/${id}/test-tools`, { method: "POST", body: "{}" });

@@ -1,11 +1,14 @@
 import { api } from "../api";
-import { isPausedSource, type KnowledgeCandidate, type KnowledgeChunkPage, type KnowledgeDetail, type KnowledgeEmbeddingChoice, type KnowledgeHit, type KnowledgeSource, type KnowledgeSummary, type SourceStatus } from "../../shared/knowledge";
+import { isPausedSource, type KnowledgeCandidate, type KnowledgeChunkPage, type KnowledgeCreateOptions, type KnowledgeDetail, type KnowledgeEmbeddingChoice, type KnowledgeHit, type KnowledgeSource, type KnowledgeSummary, type SourceStatus } from "../../shared/knowledge";
 
 /** The knowledge base API (docs/plan/API_CONTRACTS.md § Knowledge bases; Wave 44 AC-E). */
 
 export const listKnowledge = () => api<{ knowledgeBases: KnowledgeSummary[] }>("/knowledge");
 export const getKnowledge = (id: string) => api<{ knowledgeBase: KnowledgeDetail }>(`/knowledge/${id}`);
-export const createKnowledge = (input: { name: string; description?: string }) => api<{ knowledgeBase: KnowledgeDetail }>("/knowledge", { method: "POST", body: JSON.stringify(input) });
+/** D541: `providerId` picks the embedding provider; `keywordOnly` keyword search on purpose; neither: the first that makes embeddings. */
+export const createKnowledge = (input: { name: string; description?: string; providerId?: string | null; keywordOnly?: boolean }) => api<{ knowledgeBase: KnowledgeDetail }>("/knowledge", { method: "POST", body: JSON.stringify(input) });
+/** D541: New knowledge base's choices. */
+export const knowledgeCreateOptions = () => api<KnowledgeCreateOptions>("/knowledge/embedding-options");
 export const updateKnowledge = (id: string, input: { name?: string; description?: string }) => api<{ knowledgeBase: KnowledgeDetail }>(`/knowledge/${id}`, { method: "PATCH", body: JSON.stringify(input) });
 export const deleteKnowledge = (id: string) => api<{ ok: true }>(`/knowledge/${id}`, { method: "DELETE", body: "{}" });
 export type SourceInput = { kind: "note"; noteId: string } | { kind: "document"; documentId: string } | { kind: "text"; title: string; text: string };
@@ -14,11 +17,11 @@ export const removeSource = (id: string, sourceId: string) => api<{ ok: true }>(
 export const reindexKnowledge = (id: string) => api<{ ok: true; sources: number }>(`/knowledge/${id}/reindex`, { method: "POST", body: "{}" });
 export const sourceCandidates = (id: string, kind: "note" | "document", q: string) => api<{ candidates: KnowledgeCandidate[] }>(`/knowledge/${id}/candidates?kind=${kind}&q=${encodeURIComponent(q)}`);
 /** 2026-10-08: Change embedding model (owner): the providers to choose from, and the change. */
-export const embeddingOptions = (id: string) => api<{ current: { providerId: string | null; model: string; dims: number }; providers: KnowledgeEmbeddingChoice[] }>(`/knowledge/${id}/embedding-options`);
-export const changeEmbeddingModel = (id: string, input: { providerId: string; model: string; dims?: number | null }) => api<{ ok: true; sources: number; knowledgeBase: KnowledgeDetail }>(`/knowledge/${id}/model`, { method: "POST", body: JSON.stringify(input) });
+export const embeddingOptions = (id: string) => api<{ current: { providerId: string | null; model: string; dims: number; keywordOnly?: boolean }; providers: KnowledgeEmbeddingChoice[] }>(`/knowledge/${id}/embedding-options`);
+export const changeEmbeddingModel = (id: string, input: { providerId: string; model: string; dims?: number | null } | { keywordOnly: true }) => api<{ ok: true; sources: number; knowledgeBase: KnowledgeDetail }>(`/knowledge/${id}/model`, { method: "POST", body: JSON.stringify(input) });
 /** 2026-10-08: a page of a source's chunk previews (the owner and managers who can read it). */
 export const sourceChunks = (id: string, sourceId: string, offset: number, limit = 20) => api<KnowledgeChunkPage>(`/knowledge/${id}/sources/${sourceId}/chunks?offset=${offset}&limit=${limit}`);
-export const searchKnowledge = (id: string, query: string, k?: number) => api<{ hits: KnowledgeHit[]; mode: "hybrid" | "keyword"; notice?: string }>(`/knowledge/${id}/search`, { method: "POST", body: JSON.stringify({ query, ...(k ? { k } : {}) }) });
+export const searchKnowledge = (id: string, query: string, k?: number) => api<{ hits: KnowledgeHit[]; mode: "hybrid" | "keyword"; notice?: string; keywordOnly?: boolean }>(`/knowledge/${id}/search`, { method: "POST", body: JSON.stringify({ query, ...(k ? { k } : {}) }) });
 
 /** A source's state as its row says it (plan §13.4). */
 export const SOURCE_STATUS_LABELS: Record<SourceStatus, string> = { pending: "Waiting", indexing: "Indexing", ready: "Ready", error: "Error", unavailable: "Unavailable" };

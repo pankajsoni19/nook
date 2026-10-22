@@ -2,9 +2,9 @@ import { audit, db, now } from "../db";
 import { purgeAfterFrom } from "../bin";
 import { readableNotePredicate } from "../access";
 import { readableDocumentPredicate } from "../documentAccess";
-import { policyAllowsModel, policyMaxDims } from "../../shared/agents";
-import { KNOWLEDGE_BOUNDS, KNOWLEDGE_DOCUMENT_TYPES, type KnowledgeCandidate, type KnowledgeChunkPage, type KnowledgeDetail, type KnowledgeLevel, type KnowledgeSource, type KnowledgeStatus, type KnowledgeSummary, type SourceKind, type SourceStatus } from "../../shared/knowledge";
-import { defaultProvider, embeddingDefaults, parseKnowledgePolicy } from "../agents/providers";
+import { DEFAULT_EMBEDDING_DIMS, policyAllowsModel, policyMaxDims, providerEmbeds } from "../../shared/agents";
+import { isKeywordOnly, KEYWORD_ONLY_MODEL, KNOWLEDGE_BOUNDS, KNOWLEDGE_DOCUMENT_TYPES, type KnowledgeCandidate, type KnowledgeCreateOptions, type KnowledgeChunkPage, type KnowledgeDetail, type KnowledgeLevel, type KnowledgeSource, type KnowledgeStatus, type KnowledgeSummary, type SourceKind, type SourceStatus } from "../../shared/knowledge";
+import { embeddingDefaults, firstEmbeddingProvider, parseKnowledgePolicy, providerEmbeddingChoices, rowCompat, type ProviderRow } from "../agents/providers";
 import { readAgentSettings, roleMayCreate } from "../agents/settings";
 import { shareLevel, shareReadableSql, type ShareLevel } from "../agents/sharing";
 import { AgentError } from "../agents/status";
@@ -179,15 +179,17 @@ const ownerName = (id: string) => (db.query("SELECT display_name FROM users WHER
 export function knowledgeSummary(kb: KbRow, userId: string, level: ShareLevel = kbLevel(kb, userId)): KnowledgeSummary {
   const counts = countsOf(kb.id);
   const yourLevel: KnowledgeLevel = level === "owner" ? "owner" : level === "manage" ? "manage" : "view";
-  const provider = kb.provider_id ? db.query("SELECT name, compat_json FROM agent_providers WHERE id = ?").get(kb.provider_id) as { name: string; compat_json: string } | null : null;
-  const changingModel = counts.pending + counts.indexing > 0 && kbChangingModel(kb.id);
+  const keywordOnly = isKeywordOnly(kb);
+  const provider = kb.provider_id && !keywordOnly ? db.query("SELECT name, compat_json FROM agent_providers WHERE id = ?").get(kb.provider_id) as { name: string; compat_json: string } | null : null;
+  const changingModel = !keywordOnly && counts.pending + counts.indexing > 0 && kbChangingModel(kb.id);
   return {
     id: kb.id, name: kb.name, description: kb.description, ownerId: kb.owner_id, ownerName: ownerName(kb.owner_id), yourLevel,
     embeddingModel: kb.embedding_model, dims: kb.dims, status: statusOf(counts), chunkCount: kb.chunk_count,
     sourceCount: counts.pending + counts.indexing + counts.ready + counts.error + counts.unavailable, counts,
     audience: yourLevel === "owner" ? kb.visibility as KnowledgeSummary["audience"] : null, revision: kb.revision, createdAt: kb.created_at, updatedAt: kb.updated_at,
-    notice: !ownerIsActive(kb.owner_id) ? OWNER_BLOCKED_NOTICE : provider === null ? PROVIDER_REMOVED_NOTICE : changingModel ? MODEL_CHANGING_NOTICE : policyNotice(kb, provider.compat_json),
-    providerName: provider?.name ?? null, changingModel
+    // D541: a keyword-only base has no provider on purpose: no notice for it (its page says how to get meaning-based search).
+    notice: !ownerIsActive(kb.owner_id) ? OWNER_BLOCKED_NOTICE : keywordOnly ? null : provider === null ? PROVIDER_REMOVED_NOTICE : changingModel ? MODEL_CHANGING_NOTICE : policyNotice(kb, provider.compat_json),
+    providerName: provider?.name ?? null, changingModel, keywordOnly
   };
 }
 
@@ -217,30 +219,47 @@ export function knowledgeDetail(kb: KbRow, userId: string, level: ShareLevel = k
 
 // ------------------------------------------------------------------------------ the record
 
-export type KnowledgeInput = { name: string; description?: string };
+/**
+ * `providerId` (D541): the embedding provider a new base uses (one that makes embeddings and that an
+ * admin allows); `keywordOnly`: keyword search on purpose. Neither: the first provider that embeds
+ * (`firstEmbeddingProvider`), else keyword-only.
+ */
+export type KnowledgeInput = { name: string; description?: string; providerId?: string | null; keywordOnly?: boolean };
 
 export function createKnowledge(actor: { userId: string; role: string }, input: KnowledgeInput): KnowledgeDetail {
   const settings = readAgentSettings();
   if (!roleMayCreate(actor.role, settings)) throw new AgentError(403, "ROLE_REFUSED", "Your role cannot create knowledge bases");
-  const provider = defaultProvider();
-  if (!provider) throw new AgentError(409, "NO_PROVIDER", "No model provider is configured; an admin sets one in Settings → AI");
+  // D541: the chosen provider, else the first that makes embeddings (the default only when it does), else keyword search only.
+  let provider: ProviderRow | null = null;
+  if (input.keywordOnly !== true) {
+    if (input.providerId) {
+      provider = db.query("SELECT * FROM agent_providers WHERE id = ?").get(input.providerId.toLowerCase()) as ProviderRow | null;
+      if (!provider) throw new AgentError(400, "INVALID", "That provider was not found", { field: "providerId" });
+      if (!providerEmbeds(rowCompat(provider))) throw new AgentError(400, "NO_EMBEDDINGS", "This provider does not make embeddings", { field: "providerId" });
+      if (!parseKnowledgePolicy(provider.compat_json).enabled) throw new AgentError(400, "PROVIDER_NOT_ALLOWED", "An admin does not allow this provider for knowledge bases", { field: "providerId" });
+    } else {
+      provider = firstEmbeddingProvider();
+    }
+  }
   return db.transaction(() => {
     const owned = (db.query("SELECT COUNT(*) AS count FROM knowledge_bases WHERE owner_id = ? AND deleted_at IS NULL").get(actor.userId) as { count: number }).count;
     if (owned >= settings.kbsPerUser) throw new AgentError(409, "LIMIT_REACHED", `You can have up to ${settings.kbsPerUser} knowledge bases`);
     const id = crypto.randomUUID();
     const timestamp = now();
-    // AC-O14: the default provider's embedding model and size, fixed for the life of the base.
+    // AC-O14: the provider's embedding model and size, fixed until its owner changes them.
     // 2026-10-08: inside the admin's knowledge policy for that provider: a model off its list becomes
-    // the first listed one, a size over its limit the limit (adjusted, never refused); a provider not
-    // allowed for knowledge bases at all refuses the create (there is no other provider to fall back to).
-    const policy = parseKnowledgePolicy(provider.compat_json);
-    if (!policy.enabled) throw new AgentError(409, "PROVIDER_NOT_ALLOWED", DEFAULT_PROVIDER_NOT_ALLOWED);
-    const { model, dims } = embeddingDefaults(provider, policy);
+    // the first listed one, a size over its limit the limit (adjusted, never refused).
+    const { model, dims } = provider ? embeddingDefaults(provider, parseKnowledgePolicy(provider.compat_json), rowCompat(provider)) : { model: KEYWORD_ONLY_MODEL, dims: DEFAULT_EMBEDDING_DIMS };
     db.query(`INSERT INTO knowledge_bases (id, owner_id, name, description, provider_id, embedding_model, dims, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(id, actor.userId, input.name.trim(), input.description?.trim() ?? "", provider.id, model, dims, timestamp, timestamp);
-    audit(actor.userId, null, "knowledge.create", { kbId: id });
+      .run(id, actor.userId, input.name.trim(), input.description?.trim() ?? "", provider?.id ?? null, model, dims, timestamp, timestamp);
+    audit(actor.userId, null, "knowledge.create", { kbId: id, ...(provider ? {} : { keywordOnly: true }) });
     return knowledgeDetail(liveKb(id)!, actor.userId);
   })();
+}
+
+/** New knowledge base's choices (D541): the providers that make embeddings, and the one it uses by default (null: keyword search). */
+export function knowledgeCreateOptions(): KnowledgeCreateOptions {
+  return { providers: providerEmbeddingChoices(), defaultProviderId: firstEmbeddingProvider()?.id ?? null };
 }
 
 export function updateKnowledge(actor: { userId: string }, id: string, input: Partial<KnowledgeInput>): KnowledgeDetail {

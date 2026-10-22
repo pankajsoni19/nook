@@ -22,7 +22,8 @@
  * `showcase2Answer(sql)` is what a fake ClickHouse answers to its queries.
  *
  * Run: `bun --no-env-file scripts/fakeReportProvider.ts` (env FAKE_PROVIDER_PORT, default 22153;
- * FAKE_PROVIDER_DELAY_MS pauses before each reply; FAKE_PROVIDER_SCRIPT=showcase or showcase-2).
+ * FAKE_PROVIDER_DELAY_MS pauses before each reply; FAKE_PROVIDER_SCRIPT=showcase, showcase-2, or probe;
+ * FAKE_PROVIDER_FLAVOR=anthropic behaves like Anthropic's OpenAI-compatible endpoint, D539).
  */
 
 type Turn = { role: string; content?: unknown; tool_calls?: Array<{ function?: { name?: string } }>; tool_call_id?: string };
@@ -39,7 +40,11 @@ export type ScriptContext = {
 };
 export type ScriptReply = { content?: string; toolCalls?: Array<{ name: string; arguments: unknown }>; status?: number };
 export type Script = (context: ScriptContext) => ScriptReply;
-export type ScriptedProvider = { baseUrl: string; port: number; calls: Array<ScriptContext["body"]>; /** E6: the metric extraction requests (kept apart from `calls`). */ extractions: Array<ScriptContext["body"]>; setScript: (script: Script) => void; stop: () => void };
+export type ScriptedProvider = {
+  baseUrl: string; port: number; calls: Array<ScriptContext["body"]>; /** E6: the metric extraction requests (kept apart from `calls`). */ extractions: Array<ScriptContext["body"]>; setScript: (script: Script) => void; stop: () => void;
+  /** D539: every request's method, path with query, and headers (lower-case names), so tests can prove what left Nook. */
+  requests: Array<{ method: string; path: string; headers: Record<string, string> }>;
+};
 
 const text = (content: unknown) => typeof content === "string" ? content : "";
 
@@ -399,21 +404,63 @@ export function withAutoPlan(script: Script, context: ScriptContext): ScriptRepl
     ? { ...call, arguments: { title: SCRIPTED_TITLE, ...(call.arguments as object) } } : call) };
 }
 
-export type ToolChoiceMode = { rejectRequired?: boolean; rejectNamed?: boolean; toolsNeedEffort?: string[] };
+/**
+ * `anthropic` (D539, D540): behave like Anthropic's OpenAI-compatible endpoint. `GET /v1/models` is the
+ * native Models API: it needs `anthropic-version` (400 without) and `x-api-key` (401 without), answers
+ * `{data: [{type: "model", id, display_name, created_at}], has_more, first_id, last_id}`, `pageSize` a
+ * page, continued with `after_id`; chat refuses forced tool choice (`required` or a named tool) with
+ * Anthropic's 400; `/v1/embeddings` does not exist (404).
+ */
+export type AnthropicMode = { models?: string[]; pageSize?: number };
+export const ANTHROPIC_FAKE_MODELS = ["claude-fable-5-1", "claude-haiku-4-5", "claude-opus-4-8", "claude-opus-5", "claude-opus-5-5", "claude-sonnet-5", "claude-sonnet-5-5"];
+export const ANTHROPIC_FORCED_REFUSAL = "tool_choice: type tool and any are not supported for this model.";
+export type ToolChoiceMode = { rejectRequired?: boolean; rejectNamed?: boolean; toolsNeedEffort?: string[]; anthropic?: AnthropicMode };
+
+/** The anthropic mode's answer to a request it handles before the script (the models list, refusals), or null. */
+function anthropicAnswer(mode: AnthropicMode, request: Request, url: URL, body: { tool_choice?: unknown; tools?: unknown[] } | null): Response | null {
+  const anthropicError = (status: number, type: string, message: string) => Response.json({ type: "error", error: { type, message } }, { status });
+  if (request.method === "GET" && url.pathname === "/v1/models") {
+    if (!request.headers.get("anthropic-version")) return anthropicError(400, "invalid_request_error", "anthropic-version: header is required");
+    if (!request.headers.get("x-api-key")) return anthropicError(401, "authentication_error", "x-api-key header is required");
+    const all = mode.models ?? ANTHROPIC_FAKE_MODELS;
+    const limit = Math.min(Number(url.searchParams.get("limit") ?? 20) || 20, mode.pageSize ?? 1000);
+    const after = url.searchParams.get("after_id");
+    const start = after ? all.indexOf(after) + 1 : 0;
+    const page = all.slice(start, start + limit);
+    return Response.json({ data: page.map((id) => ({ type: "model", id, display_name: id, created_at: "2026-09-25T00:00:00Z" })), has_more: start + limit < all.length, first_id: page[0] ?? null, last_id: page.at(-1) ?? null });
+  }
+  if (request.method === "POST" && url.pathname === "/v1/embeddings") return anthropicError(404, "not_found_error", "Not found");
+  if (request.method === "POST" && url.pathname === "/v1/chat/completions" && body?.tools?.length && body.tool_choice !== undefined && body.tool_choice !== "auto" && body.tool_choice !== "none") {
+    return Response.json({ error: { type: "invalid_request_error", message: ANTHROPIC_FORCED_REFUSAL } }, { status: 400 });
+  }
+  return null;
+}
 
 export function startScriptedProvider(port: number, initial: Script = qaScript, options: { delayMs?: number } & ToolChoiceMode = {}): ScriptedProvider {
   let script = initial;
   const calls: Array<ScriptContext["body"]> = [];
   const extractions: Array<ScriptContext["body"]> = [];
+  const requests: ScriptedProvider["requests"] = [];
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port,
     idleTimeout: 60,
     async fetch(request) {
       const url = new URL(request.url);
+      const headers: Record<string, string> = {};
+      request.headers.forEach((value, key) => { headers[key.toLowerCase()] = value; });
+      requests.push({ method: request.method, path: `${url.pathname}${url.search}`, headers });
+      const posted = request.method === "POST" ? await request.json().catch(() => ({})) as ScriptContext["body"] & { reasoning_effort?: string } : null;
+      if (options.anthropic) {
+        const answer = anthropicAnswer(options.anthropic, request, url, posted);
+        if (answer) {
+          if (posted && url.pathname === "/v1/chat/completions") calls.push(posted);
+          return answer;
+        }
+      }
       if (request.method === "GET" && url.pathname === "/v1/models") return Response.json({ object: "list", data: [{ id: "scripted-report-model", object: "model" }] });
       if (request.method !== "POST" || url.pathname !== "/v1/chat/completions") return Response.json({ error: { message: "not found" } }, { status: 404 });
-      const body = await request.json().catch(() => ({})) as ScriptContext["body"] & { reasoning_effort?: string };
+      const body = posted ?? {};
       // E4: the metric catalog's extraction (only record_metrics offered) answers the script's `metrics`
       // (none by default) and is not recorded, so scripts and their tests see only the report's own run.
       const extraction = body.tools?.length === 1 && body.tools[0]!.function.name === "record_metrics";
@@ -462,17 +509,21 @@ export function startScriptedProvider(port: number, initial: Script = qaScript, 
     }
   });
   const bound = server.port ?? port;
-  return { baseUrl: `http://127.0.0.1:${bound}/v1`, port: bound, calls, extractions, setScript: (next) => { script = next; }, stop: () => server.stop(true) };
+  return { baseUrl: `http://127.0.0.1:${bound}/v1`, port: bound, calls, extractions, requests, setScript: (next) => { script = next; }, stop: () => server.stop(true) };
 }
 
 if (import.meta.main) {
   const port = Number(process.env.FAKE_PROVIDER_PORT ?? 22153);
   const mode = process.env.FAKE_PROVIDER_TOOL_CHOICE ?? "";
-  const scripts: Record<string, Script> = { showcase: showcaseScript, "showcase-2": showcase2Script };
+  // `probe` (D540 QA): calls nook_probe when offered (Test tool calling), else answers "ok" (Test).
+  const probe: Script = unplanned((context) => context.tools.includes("nook_probe") ? { toolCalls: [{ name: "nook_probe", arguments: { ok: true } }] } : { content: "ok" });
+  const scripts: Record<string, Script> = { showcase: showcaseScript, "showcase-2": showcase2Script, probe };
   const provider = startScriptedProvider(port, scripts[process.env.FAKE_PROVIDER_SCRIPT ?? ""] ?? qaScript, {
     delayMs: Number(process.env.FAKE_PROVIDER_DELAY_MS ?? 0) || 0,
     rejectRequired: mode === "no-required" || mode === "none", rejectNamed: mode === "no-named" || mode === "none",
-    ...(process.env.FAKE_PROVIDER_TOOLS_NEED_EFFORT ? { toolsNeedEffort: process.env.FAKE_PROVIDER_TOOLS_NEED_EFFORT.split(",") } : {})
+    ...(process.env.FAKE_PROVIDER_TOOLS_NEED_EFFORT ? { toolsNeedEffort: process.env.FAKE_PROVIDER_TOOLS_NEED_EFFORT.split(",") } : {}),
+    // D539 QA: FAKE_PROVIDER_FLAVOR=anthropic behaves like Anthropic's OpenAI-compatible endpoint.
+    ...(process.env.FAKE_PROVIDER_FLAVOR === "anthropic" ? { anthropic: {} } : {})
   });
   console.log(`Scripted report provider on ${provider.baseUrl}`);
 }

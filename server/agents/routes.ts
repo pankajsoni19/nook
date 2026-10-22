@@ -6,14 +6,14 @@ import type { AppEnv } from "../auth";
 import { db } from "../db";
 import { ensureInternalAgentKey } from "../apiKeys";
 import { parseJson, uuid } from "../validation";
-import { AGENT_BOUNDS, AGENT_ROLE_OPTIONS, REASONING_EFFORTS, CHAT_IMAGE_BOUNDS, DEFAULT_MODEL, EMBEDDING_MODEL_ID, KNOWLEDGE_POLICY_BOUNDS, SERVER_AUTH_KINDS, SERVER_AVAILABILITIES, TOOL_POLICIES, VISION_POLICY_BOUNDS, type ChatUpdateEvent } from "../../shared/agents";
+import { AGENT_BOUNDS, AGENT_ROLE_OPTIONS, PROVIDER_FLAVORS, providerChats, REASONING_EFFORTS, CHAT_IMAGE_BOUNDS, DEFAULT_MODEL, EMBEDDING_MODEL_ID, KNOWLEDGE_POLICY_BOUNDS, SERVER_AUTH_KINDS, SERVER_AVAILABILITIES, TOOL_POLICIES, VISION_POLICY_BOUNDS, type ChatUpdateEvent } from "../../shared/agents";
 import { createAgent, deleteAgent, agentDetail, listUsableAgents, manageableAgent, updateAgent, usableAgent } from "./agentsService";
 import { chatDetail, createChat, deleteChat, forkChat, listChats, listSharedChats, messageOf, pathTo, readableChat, updateChat, withAttachments } from "./chats";
 import { chatAttachmentsFor } from "./chatImages";
 import { publicLinkFor, publicLinksOn, publicLinkState, revokePublicLink, roleMayPublish, upsertPublicLink } from "./publicShares";
 import { readShareAccess, shareLevel, writeShareAccess, type ShareKind } from "./sharing";
 import { subscribeChatUpdates } from "./chatUpdates";
-import { createProvider, deleteProvider, listProviders, probeToolCalling, providerChoices, providerModels, providerRow, providerSummary, testProvider, updateProvider } from "./providers";
+import { createProvider, deleteProvider, listProviders, probeToolCalling, rowCompat, providerChoices, providerModels, providerRow, providerSummary, testProvider, updateProvider } from "./providers";
 import { activeRunForChat, cancelChatRuns, cancelRun, confirmRun, dailyUsage, pendingConfirmationFor, runReadableBy, runSnapshot, startChatRun } from "./runs";
 import { readAgentSettings, roleMayChat, roleMayCreate, writeAgentSettings } from "./settings";
 import { AgentError, adminRecoveryAllowed, agentsStatus, recheckAgentsStatus, requireAgentsEnabled } from "./status";
@@ -45,7 +45,13 @@ const compat = z.object({
   requiredToolChoice: z.boolean().optional(),
   contextTokens: z.number().int().min(1024).max(10_000_000).optional(),
   // 2026-10-14: sent as reasoning_effort on every request to this provider; omit sends none.
-  reasoningEffort: z.enum(REASONING_EFFORTS).optional()
+  reasoningEffort: z.enum(REASONING_EFFORTS).optional(),
+  // 2026-10-22 (D539–D542): the endpoint's kind for a proxy (null: by host alone), and what the provider can do.
+  flavor: z.enum(PROVIDER_FLAVORS).nullable().optional(),
+  embeddings: z.boolean().optional(),
+  chat: z.boolean().optional(),
+  dimensionsParam: z.enum(["dimensions", "output_dimension"]).optional(),
+  embeddingSizes: z.array(z.number().int().min(64).max(3072)).min(1).max(8).nullable().optional()
 }).strict();
 // 2026-10-08: the knowledge base policy. `models: null` is "Any"; a list has 1 to 20 model ids; `maxDims: null` is 3,072.
 const embeddingModelId = z.string().trim().min(1).max(KNOWLEDGE_POLICY_BOUNDS.modelName).regex(EMBEDDING_MODEL_ID, "must be a model id");
@@ -275,9 +281,10 @@ export function registerAgentRoutes(app: Hono<AppEnv>) {
   app.get("/api/agents/admin/settings", handle(adminOnly(() => ({ settings: readAgentSettings() }))));
   app.put("/api/agents/admin/settings", handle(adminOnly(async (c) => {
     const { expectedRevision, ...patch } = await parseJson(c.req.raw, settingsSchema);
-    if (patch.defaultProviderId) providerRow(patch.defaultProviderId);
-    if (patch.reportProviderId) providerRow(patch.reportProviderId);
-    if (patch.reportFallbackProviderId) providerRow(patch.reportFallbackProviderId);
+    // D542: chats and reports go only to a provider that answers chat (never an embeddings-only one).
+    for (const [field, providerId] of [["defaultProviderId", patch.defaultProviderId], ["reportProviderId", patch.reportProviderId], ["reportFallbackProviderId", patch.reportFallbackProviderId]] as const) {
+      if (providerId && !providerChats(rowCompat(providerRow(providerId)))) throw new AgentError(400, "CHAT_NONE", "That provider only makes embeddings; choose one that answers chat", { field });
+    }
     return { settings: writeAgentSettings(c.get("user").id, patch, expectedRevision) };
   })));
   app.get("/api/agents/admin/providers", handleRecovery(adminOnly(() => ({ providers: listProviders() }))));

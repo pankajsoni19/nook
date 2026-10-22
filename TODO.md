@@ -7,19 +7,14 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 
 **Current state (2026-10-22).**
 - **v0.43.0** is released (2026-10-22): several docs per report, Add a new section and doc links in Changes, delete from the header, edit and suggest SQL, dynamic filters (slice 1).
-- Migrations: **001–066** are released and immutable (045 and 054 unused; 054 is reserved for Messages). Next free: **067** (lane CLAUDE), **068** LISTS (built), **069** FILT2, **070** SMALL, **071** LOCALEMB.
+- Migrations: **001–066** are released and immutable (045 and 054 unused; 054 is reserved for Messages). Next free: **067** (lane CLAUDE needed none), **068** LISTS (built), **069** FILT2, **070** SMALL, **071** LOCALEMB.
 - Development happens directly on `main`, pushed as each change passes its gates.
 
 ## In flight
 
 - [ ] **Report filters, later slices** (lane FILT2, migration 069) (slice 1 shipped, D532–D537): linked filters, client-side table sort and contains, saved personal views, more filter types (number range, exclude, text contains, Add filter on dates), and concurrent parameter runs, ranked in [REPORT_FILTERS.md](docs/plan/REPORT_FILTERS.md) "Later". Started 2026-10-22.
 - [ ] **Reports: a personal copy of a report?** (lane EDIT research, D531): Metabase, Redash, and Tableau let people without edit rights save a copy and change that; Nook offers Suggest an edit instead. Lane SMALL builds **Duplicate report** (operator: "complete todo.md").
-- [ ] **Claude (Anthropic) as a model provider** (operator, 2026-10-22; lane CLAUDE):
-  - [ ] Test says "anthropic-version header required": send `anthropic-version` (and `x-api-key`) automatically when the endpoint is Anthropic's.
-  - [ ] Test tool calling reports "tool_choice type tool and any are not supported for this model" as a failure: record it as "forced choice unsupported, Nook uses auto" and confirm tools work with auto.
-  - [ ] Knowledge bases: Anthropic has no embeddings API. Mark such providers as chat-only, default new bases to a provider that embeds (e.g. the OpenAI one), and say so clearly; evaluate Voyage AI (Anthropic's recommended embeddings) as an embeddings-only provider.
-  - [ ] Anthropic-only instances (operator, 2026-10-22): knowledge bases in **keyword-only mode** (BM25 over the existing chunk FTS, no embeddings API), chosen automatically when no provider embeds; Change embedding model moves a base to vectors later.
-  - [ ] **Local embedding model** (operator: "complete todo.md", 2026-10-22; lane LOCALEMB after lane CLAUDE lands, migration 071 if needed) (transformers.js + a small model, CPU) for meaning-based search with no outside provider.
+- [ ] **Local embedding model** (operator: "complete todo.md", 2026-10-22; lane LOCALEMB; lane CLAUDE landed: add it as another provider kind beside `compat.embeddings`, keyword-only bases (D541) move to it with Change embedding model, migration 071 if needed) (transformers.js + a small model, CPU) for meaning-based search with no outside provider.
 
 - [ ] **API keys: editing a key's permissions** (operator, 2026-10-22; lane KEYS), at `/settings/keys/general`:
   - [ ] Editing a created key can only remove permission rows; it must also be able to **add** rows.
@@ -42,6 +37,13 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 - [ ] "Pick from Nook": before the Files index's first backfill after boot, the fallback scan can offer a scanned PDF by name (picking it gives the "no text layer" error).
 
 - [ ] Report lists (lane LISTS leftovers, D550–D559): the docs site describes report organization only in release notes, so lists go into "What's new" at the 0.44.0 release; Team → member access pages list a person's report shares but not their list shares (group pages count them); "New report" inside a list view does not add the new report to the list.
+
+## Leftovers (lane CLAUDE)
+
+- [ ] Claude, checked only against a fake (lane CLAUDE, D539): on the VM, confirm Anthropic accepts `x-api-key` and `Authorization: Bearer` together on `/v1/chat/completions` and `/v1/models`, and Test tool calling reads "Tool calling works (auto)"; keys not scoped to a workspace also need `anthropic-workspace-id`, which Nook cannot send yet.
+- [ ] Agents on Claude 4.7+: a `temperature` below 1 is a 400 there; the agent editor could say so (or leave temperature out) when the agent's provider is Anthropic.
+- [ ] Voyage AI behind a proxy: `compat.flavor: "voyage"` and `dimensionsParam` are API-only (the editor offers only Anthropic's headers); and a provider's embedding model and size have no field in the editor (API `embeddingModel`, `embeddingDims`).
+- [ ] Button lint (found by lane CLAUDE, not new): at 390 px a Knowledge list row with a long status ("1 source · 0 chunks · 1 source has an error") wraps; at 1280 px a provider card's `max_completion_tokens` breaks mid-word (`overflow-wrap: anywhere` in a 160 px column).
 
 ## Watch (no work unless it shows up)
 

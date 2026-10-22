@@ -8,7 +8,7 @@ import { SettingsTabs, settingsTabIds, type SettingsTab } from "../settings/Sett
 import { Select } from "../ui/Select";
 import { useConfirm } from "../ui/useConfirm";
 import { useHistoryDialogGuard } from "../ui/useHistoryDialogGuard";
-import { AGENT_BOUNDS, AGENT_ROLE_OPTIONS, DEFAULT_BASE_URL, DEFAULT_MODEL, REASONING_EFFORTS, type AgentRole, type ReasoningEffort, type AgentSettings, type ProviderSummary } from "../../shared/agents";
+import { AGENT_BOUNDS, AGENT_ROLE_OPTIONS, DEFAULT_BASE_URL, DEFAULT_COMPAT, DEFAULT_MODEL, FLAVOR_LABELS, flavorDefaults, normalizeKnownBaseUrl, providerChats, providerEmbeds, providerFlavor, REASONING_EFFORTS, type AgentRole, type ProviderCompat, type ProviderFlavor, type ReasoningEffort, type AgentSettings, type ProviderSummary } from "../../shared/agents";
 import { agentsStatus, createProvider, deleteProvider, listProviders, messageOf, probeProviderTools, readSettings, testProvider, updateProvider, writeSettings, errorCode, type AgentsStatus, type ProviderTest } from "./chatApi";
 import type { ToolCallingProbe } from "../../shared/reportsModel";
 import { ToolServersSection } from "./ToolServers";
@@ -130,33 +130,35 @@ export function AiSettings({ flash, tabs, tab, onSelectTab }: { flash: (message:
       {providers?.map((provider) => {
         const result = tests[provider.id];
         const probe = probes[provider.id];
+        // D542: an embeddings-only provider (Voyage AI) is never a chat model: no tool test, no default, no chat facts.
+        const chats = providerChats(provider.compat);
+        const embeds = providerEmbeds(provider.compat);
         return <li key={provider.id} className="security-card ai-provider">
           <div className="ai-provider-head">
             <div><span className="ai-provider-name"><strong>{provider.name}</strong>{provider.isDefault && <span className="ai-badge">Default</span>}</span><small>{provider.baseUrl}</small></div>
             <div className="ai-provider-actions">
               <button type="button" className="secondary-button" onClick={() => { void test(provider); }} disabled={result === "running"}>{result === "running" ? "Testing…" : "Test"}</button>
-              <button type="button" className="secondary-button" onClick={() => { void probeTools(provider); }} disabled={probe === "running"}>{probe === "running" ? "Testing tools…" : "Test tool calling"}</button>
+              {chats && <button type="button" className="secondary-button" onClick={() => { void probeTools(provider); }} disabled={probe === "running"}>{probe === "running" ? "Testing tools…" : "Test tool calling"}</button>}
               <button type="button" className="secondary-button" onClick={() => setEditing(provider)}>Edit</button>
-              {!provider.isDefault && <button type="button" className="secondary-button" onClick={() => { void makeDefault(provider); }}>Make default</button>}
+              {!provider.isDefault && chats && <button type="button" className="secondary-button" onClick={() => { void makeDefault(provider); }}>Make default</button>}
               <button type="button" className="secondary-button" onClick={() => { void remove(provider); }}>Remove</button>
             </div>
           </div>
           <dl className="ai-provider-facts">
+            <div><dt>Endpoint</dt><dd>{endpointLabel(provider)}</dd></div>
+            <div><dt>Capabilities</dt><dd>{capabilitiesSummary(provider.compat)}</dd></div>
             <div><dt>API key</dt><dd>{provider.hasSecret ? <code>{provider.hint ?? "Saved"}</code> : <span className="chat-muted">none</span>}</dd></div>
-            <div><dt>Default model</dt><dd><code>{provider.defaultModel}</code></dd></div>
-            <div><dt>Token parameter</dt><dd><code>{provider.compat.tokenParam}</code></dd></div>
-            <div><dt>Context</dt><dd>{provider.compat.contextTokens.toLocaleString()} tokens{provider.compat.streamUsage ? "" : " · usage estimated"}</dd></div>
-            <div><dt>Knowledge bases</dt><dd>{policySummary(provider.knowledge)}</dd></div>
-            <div><dt>Images</dt><dd>{visionSummary(provider.vision)}</dd></div>
-            <div><dt>Tool choice</dt><dd>{toolChoiceSummary(provider.compat)}</dd></div>
-            {provider.compat.reasoningEffort && <div><dt>Reasoning effort</dt><dd><code>{provider.compat.reasoningEffort}</code></dd></div>}
+            {chats && <div><dt>Default model</dt><dd><code>{provider.defaultModel}</code></dd></div>}
+            {chats && <div><dt>Token parameter</dt><dd><code>{provider.compat.tokenParam}</code></dd></div>}
+            {chats && <div><dt>Context</dt><dd>{provider.compat.contextTokens.toLocaleString()} tokens{provider.compat.streamUsage ? "" : " · usage estimated"}</dd></div>}
+            {embeds && <div><dt>Knowledge bases</dt><dd>{policySummary(provider.knowledge)}</dd></div>}
+            {embeds && provider.embeddingModel && <div><dt>Embedding model</dt><dd><code>{provider.embeddingModel}</code>{provider.compat.embeddingSizes ? ` · ${provider.compat.embeddingSizes.map((size) => size.toLocaleString("en-US")).join(", ")} dimensions` : ""}</dd></div>}
+            {chats && <div><dt>Images</dt><dd>{visionSummary(provider.vision)}</dd></div>}
+            {chats && <div><dt>Tool choice</dt><dd>{toolChoiceSummary(provider.compat)}</dd></div>}
+            {chats && provider.compat.reasoningEffort && <div><dt>Reasoning effort</dt><dd><code>{provider.compat.reasoningEffort}</code></dd></div>}
           </dl>
-          {result && result !== "running" && <p className={`ai-test ${result.ok ? "ok" : "failed"}`} role="status">
-            {result.models.ok ? `Models: ${result.models.count} in ${result.models.latencyMs} ms.` : `Models: ${result.models.error ?? "failed"}.`} {result.completion.ok ? `Completion: ok (${result.completion.model}) in ${result.completion.latencyMs} ms.` : `Completion: ${result.completion.error ?? "failed"}.`}
-          </p>}
-          {probe && probe !== "running" && <p className={`ai-test ${probe.compat.requiredToolChoice && probe.compat.namedToolChoice ? "ok" : "failed"}`} role="status">
-            Tool calling ({probe.model}): required {probeText(probe.required)}; a named tool {probeText(probe.named)}. {probe.inconclusive ? "Inconclusive results leave the saved setting as it was; " : "Saved to the provider; "}Nook {probe.compat.namedToolChoice ? "names the tool it needs" : probe.compat.requiredToolChoice ? "sends required with only that tool" : "asks with auto and only that tool"}.{probe.reasoning ? ` ${probe.reasoning.note}` : ""}
-          </p>}
+          {result && result !== "running" && <p className={`ai-test ${result.ok ? "ok" : "failed"}`} role="status">{testText(result)}</p>}
+          {probe && probe !== "running" && <p className={`ai-test ${probe.toolCalling === "forced" || probe.toolCalling === "auto" || (probe.toolCalling === undefined && probe.compat.requiredToolChoice && probe.compat.namedToolChoice) ? "ok" : "failed"}`} role="status">{probeSummary(probe)}</p>}
         </li>;
       })}
     </ul>
@@ -178,6 +180,8 @@ function PolicyForm({ settings, providers, flash, onSaved }: { settings: AgentSe
   const [draft, setDraft] = useState(settings);
   const [busy, setBusy] = useState(false);
   useEffect(() => setDraft(settings), [settings]);
+  // D542: chats and reports go only to providers that answer chat.
+  const chatProviders = providers.filter((provider) => providerChats(provider.compat));
   const toggleRole = (field: "createRoles" | "chatRoles", role: AgentRole) => setDraft((current) => ({ ...current, [field]: current[field].includes(role) ? current[field].filter((item) => item !== role) : [...current[field], role] }));
   async function save(event: FormEvent) {
     event.preventDefault();
@@ -203,13 +207,13 @@ function PolicyForm({ settings, providers, flash, onSaved }: { settings: AgentSe
       <label>Tokens per person per day<input type="number" min={0} max={1_000_000_000} value={draft.dailyTokensUser} onChange={(event) => setDraft({ ...draft, dailyTokensUser: Math.max(0, Math.floor(Number(event.target.value) || 0)) })} /><small>0 = unlimited</small></label>
       <label>Tokens for the whole Nook per day<input type="number" min={0} max={10_000_000_000} value={draft.dailyTokensInstance} onChange={(event) => setDraft({ ...draft, dailyTokensInstance: Math.max(0, Math.floor(Number(event.target.value) || 0)) })} /><small>0 = unlimited</small></label>
       <label>Agents per person<input type="number" min={1} max={500} value={draft.agentsPerUser} onChange={(event) => setDraft({ ...draft, agentsPerUser: Math.min(500, Math.max(1, Math.floor(Number(event.target.value) || 1))) })} /></label>
-      <div><span className="ai-label" id="ai-default-provider">Default provider</span><Select<string> labelledBy="ai-default-provider" label="Default provider" value={draft.defaultProviderId ?? providers.find((provider) => provider.isDefault)?.id ?? null} onChange={(value) => setDraft({ ...draft, defaultProviderId: value })} options={providers.map((provider) => ({ value: provider.id, label: provider.name, description: provider.defaultModel }))} placeholder="The provider marked default" disabled={providers.length === 0} /></div>
+      <div><span className="ai-label" id="ai-default-provider">Default provider</span><Select<string> labelledBy="ai-default-provider" label="Default provider" value={draft.defaultProviderId ?? providers.find((provider) => provider.isDefault)?.id ?? null} onChange={(value) => setDraft({ ...draft, defaultProviderId: value })} options={chatProviders.map((provider) => ({ value: provider.id, label: provider.name, description: provider.defaultModel }))} placeholder="The provider marked default" disabled={chatProviders.length === 0} /></div>
     </div>
     <fieldset className="ai-report-model">
       <legend className="ai-label">Report generation model</legend>
       <p className="chat-muted">The provider and model that write analytics reports. Chat keeps its default; a report's owner may choose another for one report.</p>
       <div className="ai-policy-grid">
-        <div><span className="ai-label" id="ai-report-provider">Provider</span><Select<string> labelledBy="ai-report-provider" label="Report generation provider" value={draft.reportProviderId ?? ""} onChange={(value) => setDraft({ ...draft, reportProviderId: value || null })} options={[{ value: "", label: "Chat's default provider" }, ...providers.map((provider) => ({ value: provider.id, label: provider.name, description: provider.defaultModel }))]} disabled={providers.length === 0} /></div>
+        <div><span className="ai-label" id="ai-report-provider">Provider</span><Select<string> labelledBy="ai-report-provider" label="Report generation provider" value={draft.reportProviderId ?? ""} onChange={(value) => setDraft({ ...draft, reportProviderId: value || null })} options={[{ value: "", label: "Chat's default provider" }, ...chatProviders.map((provider) => ({ value: provider.id, label: provider.name, description: provider.defaultModel }))]} disabled={chatProviders.length === 0} /></div>
         <label>Model<input value={draft.reportModel ?? ""} maxLength={AGENT_BOUNDS.model} placeholder="The provider's default model" autoComplete="off" onChange={(event) => setDraft({ ...draft, reportModel: event.target.value || null })} /><small>For example glm-5.3; empty uses the provider's default</small></label>
       </div>
       <label className="ai-check"><input type="checkbox" checked={draft.reportModelFreeText} onChange={(event) => setDraft({ ...draft, reportModelFreeText: event.target.checked })} />Report owners may type any model name</label>
@@ -219,7 +223,7 @@ function PolicyForm({ settings, providers, flash, onSaved }: { settings: AgentSe
       <legend className="ai-label">Fallback model for reports</legend>
       <p className="chat-muted">When a report's model uses up its tries or nudges without saving a report, the generation is retried once on this model. Each block records the model that wrote it.</p>
       <div className="ai-policy-grid">
-        <div><span className="ai-label" id="ai-report-fallback-provider">Provider</span><Select<string> labelledBy="ai-report-fallback-provider" label="Fallback provider for reports" value={draft.reportFallbackProviderId ?? ""} onChange={(value) => setDraft({ ...draft, reportFallbackProviderId: value || null })} options={[{ value: "", label: "Off (no fallback)" }, ...providers.map((provider) => ({ value: provider.id, label: provider.name, description: provider.defaultModel }))]} disabled={providers.length === 0} /></div>
+        <div><span className="ai-label" id="ai-report-fallback-provider">Provider</span><Select<string> labelledBy="ai-report-fallback-provider" label="Fallback provider for reports" value={draft.reportFallbackProviderId ?? ""} onChange={(value) => setDraft({ ...draft, reportFallbackProviderId: value || null })} options={[{ value: "", label: "Off (no fallback)" }, ...chatProviders.map((provider) => ({ value: provider.id, label: provider.name, description: provider.defaultModel }))]} disabled={chatProviders.length === 0} /></div>
         <label>Model<input value={draft.reportFallbackModel ?? ""} maxLength={AGENT_BOUNDS.model} placeholder="The provider's default model" autoComplete="off" disabled={!draft.reportFallbackProviderId} onChange={(event) => setDraft({ ...draft, reportFallbackModel: event.target.value || null })} /><small>Empty uses the provider's default</small></label>
       </div>
     </fieldset>
@@ -248,6 +252,23 @@ function ProviderDialog({ provider, onCancel, onSaved }: { provider: ProviderSum
   const [streamUsage, setStreamUsage] = useState(provider?.compat.streamUsage ?? true);
   const [contextTokens, setContextTokens] = useState(provider?.compat.contextTokens ?? 128_000);
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(provider?.compat.reasoningEffort ?? "omit");
+  // D539–D542: what the provider can do, and Anthropic's headers for a proxy (the host decides for api.anthropic.com).
+  const [chat, setChat] = useState(provider ? providerChats(provider.compat) : true);
+  const [embeddings, setEmbeddings] = useState(provider ? providerEmbeds(provider.compat) : true);
+  const [anthropicHeaders, setAnthropicHeaders] = useState(provider?.compat.flavor === "anthropic");
+  // A new provider follows the host's defaults until the admin changes a field they set.
+  const [touched, setTouched] = useState<Set<string>>(new Set());
+  const touch = (field: string) => setTouched((current) => current.has(field) ? current : new Set(current).add(field));
+  const detected = providerFlavor(normalizeKnownBaseUrl(baseUrl));
+  function changeUrl(value: string) {
+    setBaseUrl(value);
+    if (provider) return;
+    const defaults = { ...DEFAULT_COMPAT, ...flavorDefaults(providerFlavor(normalizeKnownBaseUrl(value)) ?? (anthropicHeaders ? "anthropic" : null)) };
+    if (!touched.has("tokenParam")) setTokenParam(defaults.tokenParam);
+    if (!touched.has("contextTokens")) setContextTokens(defaults.contextTokens);
+    if (!touched.has("chat")) setChat(defaults.chat !== false);
+    if (!touched.has("embeddings")) setEmbeddings(defaults.embeddings !== false);
+  }
   const [knowledge, setKnowledge] = useState(() => policyDraft(provider?.knowledge));
   const [vision, setVision] = useState(() => visionDraft(provider?.vision));
   const [busy, setBusy] = useState(false);
@@ -264,7 +285,8 @@ function ProviderDialog({ provider, onCancel, onSaved }: { provider: ProviderSum
     if ("error" in images) return setError(images.error);
     setBusy(true);
     setError(null);
-    const compat = { tokenParam, streamUsage, contextTokens, reasoningEffort };
+    if (!chat && !embeddings) return setError("A provider must answer chat, make embeddings, or both.");
+    const compat = { tokenParam, streamUsage, contextTokens, reasoningEffort, chat, embeddings, ...(detected ? {} : { flavor: anthropicHeaders ? "anthropic" as const : provider?.compat.flavor === "voyage" ? "voyage" as const : null }) };
     try {
       if (provider) await updateProvider(provider.id, { name: name.trim(), baseUrl: baseUrl.trim(), ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}), removeSecret, defaultModel: defaultModel.trim() || DEFAULT_MODEL, compat, vision: images.policy, knowledge: policy.policy, expectedRevision: provider.revision });
       else await createProvider({ name: name.trim(), baseUrl: baseUrl.trim(), apiKey: apiKey.trim() || null, defaultModel: defaultModel.trim() || DEFAULT_MODEL, compat, vision: images.policy, knowledge: policy.policy });
@@ -280,27 +302,40 @@ function ProviderDialog({ provider, onCancel, onSaved }: { provider: ProviderSum
       <label htmlFor={ids.name}>Name</label>
       <input id={ids.name} value={name} maxLength={AGENT_BOUNDS.providerName} autoFocus autoComplete="off" placeholder="OpenAI" onChange={(event) => setName(event.target.value)} />
       <label htmlFor={ids.url}>Base URL</label>
-      <input id={ids.url} value={baseUrl} maxLength={AGENT_BOUNDS.baseUrl} autoComplete="off" spellCheck={false} placeholder={DEFAULT_BASE_URL} onChange={(event) => setBaseUrl(event.target.value)} />
+      <input id={ids.url} value={baseUrl} maxLength={AGENT_BOUNDS.baseUrl} autoComplete="off" spellCheck={false} placeholder={DEFAULT_BASE_URL} onChange={(event) => changeUrl(event.target.value)} />
       <p className="file-dialog-hint">https only. A private host (Ollama, LiteLLM, vLLM on your network) must be listed in AGENT_ALLOWED_PRIVATE_HOSTS on the server.</p>
+      {detected && <p className="file-dialog-hint ai-detected" role="status">{FLAVOR_HINTS[detected]}</p>}
       <label htmlFor={ids.key}>API key {provider?.hasSecret && !removeSecret ? <small>({provider.hint ? `saved: ${provider.hint}` : "saved"}; leave empty to keep it)</small> : null}</label>
       <input id={ids.key} type="password" value={apiKey} maxLength={1024} autoComplete="off" placeholder={provider?.hasSecret ? "Keep the saved key" : "sk-…"} onChange={(event) => { setApiKey(event.target.value); setRemoveSecret(false); }} />
       {provider?.hasSecret && <label className="ai-check"><input type="checkbox" checked={removeSecret} onChange={(event) => setRemoveSecret(event.target.checked)} />Remove the saved key</label>}
       <p className="file-dialog-hint">{SECRET_HONESTY} The key is sent only to this provider's endpoint and is never shown again.</p>
-      <label htmlFor={ids.model}>Default chat model</label>
-      <input id={ids.model} value={defaultModel} maxLength={AGENT_BOUNDS.model} autoComplete="off" spellCheck={false} placeholder={`${DEFAULT_MODEL} (default)`} onChange={(event) => setDefaultModel(event.target.value.replace(/\s+/g, ""))} />
-      <span className="ai-label" id={ids.param}>Output-token parameter</span>
-      <Select<"max_completion_tokens" | "max_tokens"> labelledBy={ids.param} label="Output-token parameter" value={tokenParam} onChange={setTokenParam} options={[{ value: "max_completion_tokens", label: "max_completion_tokens", description: "OpenAI" }, { value: "max_tokens", label: "max_tokens", description: "Most compatible servers" }]} />
-      <label htmlFor={ids.context}>Context window (tokens)</label>
-      <input id={ids.context} type="number" min={1024} max={10_000_000} value={contextTokens} onChange={(event) => setContextTokens(Math.min(10_000_000, Math.max(1024, Math.floor(Number(event.target.value) || 1024))))} />
-      <label className="ai-check"><input type="checkbox" checked={streamUsage} onChange={(event) => setStreamUsage(event.target.checked)} />The server reports token usage while streaming (off: tokens are estimated)</label>
-      <details className="ai-advanced" open={reasoningEffort !== "omit" || undefined}>
+      <span className="ai-label">Capabilities</span>
+      <label className="ai-check"><input type="checkbox" checked={chat} onChange={(event) => { touch("chat"); setChat(event.target.checked); }} />Chat: agents, chats, and reports</label>
+      <label className="ai-check"><input type="checkbox" checked={embeddings} onChange={(event) => { touch("embeddings"); setEmbeddings(event.target.checked); }} />Embeddings: knowledge bases</label>
+      <p className="file-dialog-hint">{capabilitiesHint(chat, embeddings)}</p>
+      {chat && <>
+        <label htmlFor={ids.model}>Default chat model</label>
+        <input id={ids.model} value={defaultModel} maxLength={AGENT_BOUNDS.model} autoComplete="off" spellCheck={false} placeholder={`${DEFAULT_MODEL} (default)`} onChange={(event) => setDefaultModel(event.target.value.replace(/\s+/g, ""))} />
+        <span className="ai-label" id={ids.param}>Output-token parameter</span>
+        <Select<"max_completion_tokens" | "max_tokens"> labelledBy={ids.param} label="Output-token parameter" value={tokenParam} onChange={(value) => { touch("tokenParam"); setTokenParam(value); }} options={[{ value: "max_completion_tokens", label: "max_completion_tokens", description: "OpenAI" }, { value: "max_tokens", label: "max_tokens", description: "Most compatible servers, Anthropic" }]} />
+        <label htmlFor={ids.context}>Context window (tokens)</label>
+        <input id={ids.context} type="number" min={1024} max={10_000_000} value={contextTokens} onChange={(event) => { touch("contextTokens"); setContextTokens(Math.min(10_000_000, Math.max(1024, Math.floor(Number(event.target.value) || 1024)))); }} />
+        <label className="ai-check"><input type="checkbox" checked={streamUsage} onChange={(event) => setStreamUsage(event.target.checked)} />The server reports token usage while streaming (off: tokens are estimated)</label>
+      </>}
+      <details className="ai-advanced" open={reasoningEffort !== "omit" || (anthropicHeaders && !detected) || undefined}>
         <summary>Advanced</summary>
-        <span className="ai-label" id={ids.effort}>Reasoning effort</span>
-        <Select<ReasoningEffort> labelledBy={ids.effort} label="Reasoning effort" value={reasoningEffort} onChange={setReasoningEffort} options={REASONING_EFFORT_OPTIONS} />
-        <p className="file-dialog-hint">Sent as reasoning_effort with every request to this provider. Some newer OpenAI models refuse tools at their default reasoning in Chat Completions; none fixes that (Test tool calling sets it when it finds this). Nook does not use OpenAI's Responses API yet.</p>
+        {chat && <>
+          <span className="ai-label" id={ids.effort}>Reasoning effort</span>
+          <Select<ReasoningEffort> labelledBy={ids.effort} label="Reasoning effort" value={reasoningEffort} onChange={setReasoningEffort} options={REASONING_EFFORT_OPTIONS} />
+          <p className="file-dialog-hint">Sent as reasoning_effort with every request to this provider. Some newer OpenAI models refuse tools at their default reasoning in Chat Completions; none fixes that (Test tool calling sets it when it finds this). Nook does not use OpenAI's Responses API yet.</p>
+        </>}
+        {detected ? <p className="file-dialog-hint">{FLAVOR_LABELS[detected]}: known by its address.</p> : <>
+          <label className="ai-check"><input type="checkbox" checked={anthropicHeaders} onChange={(event) => setAnthropicHeaders(event.target.checked)} />Send Anthropic's headers (anthropic-version, x-api-key)</label>
+          <p className="file-dialog-hint">For a proxy in front of Anthropic. Nook sends them by itself to api.anthropic.com.</p>
+        </>}
       </details>
-      <ProviderVisionFields providerId={provider?.id ?? null} defaultModel={defaultModel.trim() || DEFAULT_MODEL} draft={vision} onChange={setVision} disabled={busy} />
-      <ProviderKnowledgeFields providerId={provider?.id ?? null} draft={knowledge} onChange={setKnowledge} disabled={busy} />
+      {chat && <ProviderVisionFields providerId={provider?.id ?? null} defaultModel={defaultModel.trim() || DEFAULT_MODEL} draft={vision} onChange={setVision} disabled={busy} />}
+      {embeddings && <ProviderKnowledgeFields providerId={provider?.id ?? null} draft={knowledge} onChange={setKnowledge} disabled={busy} />}
       <FormError message={error} />
       <footer className="file-dialog-actions">
         <button type="button" className="secondary-button" onClick={onCancel} disabled={busy}>Cancel</button>
@@ -320,6 +355,58 @@ export function probeText(result: ToolCallingProbe["required"]): string {
 export const REASONING_EFFORT_OPTIONS: Array<{ value: ReasoningEffort; label: string; description?: string }> = REASONING_EFFORTS.map((value) => ({
   value, label: value === "omit" ? "Don't send" : value, ...(value === "omit" ? { description: "The model's default" } : value === "none" ? { description: "For models that refuse tools while reasoning" } : {})
 }));
+
+/** D539: what kind of endpoint a provider is, for its card. */
+export const endpointLabel = (provider: Pick<ProviderSummary, "baseUrl" | "compat">) => {
+  const flavor = providerFlavor(provider.baseUrl, provider.compat);
+  return flavor ? FLAVOR_LABELS[flavor] : "OpenAI-compatible";
+};
+
+/** D541/D542: what a provider can do, for its card ("Embeddings: none" for Anthropic). */
+export function capabilitiesSummary(compat: Pick<ProviderCompat, "chat" | "embeddings">): string {
+  const chats = providerChats(compat);
+  const embeds = providerEmbeds(compat);
+  return chats && embeds ? "Chat and embeddings" : chats ? "Chat · Embeddings: none" : embeds ? "Embeddings only · Chat: none" : "None";
+}
+
+/** The dialog's line under the two capability boxes (D541, D542). */
+export function capabilitiesHint(chat: boolean, embeddings: boolean): string {
+  if (chat && embeddings) return "Offered for chats, agents, and reports, and for knowledge bases.";
+  if (chat) return "Never offered for knowledge bases (Anthropic has no embeddings API). Add OpenAI or Voyage AI for meaning-based knowledge search.";
+  if (embeddings) return "Only for knowledge bases: never a chat or report model, and never the default.";
+  return "Choose at least one.";
+}
+
+/** What a new provider's address says about it (D539, D542). */
+export const FLAVOR_HINTS: Record<ProviderFlavor, string> = {
+  anthropic: "Anthropic (OpenAI-compatible endpoint): Nook sends anthropic-version and x-api-key with every request, asks for tools with auto (its current models refuse forced tool choice), and does not use it for embeddings.",
+  voyage: "Voyage AI: embeddings only, sized with output_dimension (256, 512, 1,024, or 2,048). Use it for knowledge bases beside a chat provider."
+};
+
+/** One Test result as words (D542: an embeddings-only provider is asked for one embedding instead of a completion). */
+export function testText(result: ProviderTest): string {
+  const models = result.models.skipped ? "Models: not listed by this provider." : result.models.ok ? `Models: ${result.models.count} in ${result.models.latencyMs} ms.` : `Models: ${result.models.error ?? "failed"}.`;
+  if (result.embeddings) return `${models} ${result.embeddings.ok ? `Embeddings: ok (${result.embeddings.model}, ${result.embeddings.dims?.toLocaleString("en-US") ?? "?"} dimensions) in ${result.embeddings.latencyMs} ms.` : `Embeddings: ${result.embeddings.error ?? "failed"}.`}`;
+  return `${models} ${result.completion.ok ? `Completion: ok (${result.completion.model}) in ${result.completion.latencyMs} ms.` : `Completion: ${result.completion.error ?? "failed"}.`}`;
+}
+
+/**
+ * "Test tool calling" as words (D540). A forced choice the model refuses is the finding, not a failure:
+ * "Forced tool choice: not supported, so Nook uses auto (fine)", and the third probe says whether
+ * tools work with auto.
+ */
+export function probeSummary(probe: ToolCallingProbe): string {
+  const saved = probe.inconclusive ? "Inconclusive results leave the saved setting as it was." : "Saved to the provider.";
+  const reasoning = probe.reasoning ? ` ${probe.reasoning.note}` : "";
+  const forcedRefused = probe.required.forcedRefused || probe.named.forcedRefused;
+  if (probe.toolCalling === "auto") {
+    const forced = forcedRefused ? "Forced tool choice: not supported, so Nook uses auto (fine)." : `Forced tool choice: required ${probeText(probe.required)}; a named tool ${probeText(probe.named)}. Nook uses auto (fine).`;
+    return `Tool calling works (auto) with ${probe.model}. ${forced} ${saved}${reasoning}`;
+  }
+  if (probe.toolCalling === "none") return `Tool calling does not work with ${probe.model}: it answered without calling the tool, also with auto${probe.auto?.error ? ` (${probe.auto.error})` : ""}. Agents and reports need a model that calls tools. ${saved}${reasoning}`;
+  if (probe.toolCalling === "inconclusive" && probe.auto) return `Tool calling (${probe.model}): could not tell; required ${probeText(probe.required)}; a named tool ${probeText(probe.named)}; auto ${probeText(probe.auto)}. ${saved}${reasoning}`;
+  return `Tool calling (${probe.model}): required ${probeText(probe.required)}; a named tool ${probeText(probe.named)}. ${probe.inconclusive ? "Inconclusive results leave the saved setting as it was; " : "Saved to the provider; "}Nook ${probe.compat.namedToolChoice ? "names the tool it needs" : probe.compat.requiredToolChoice ? "sends required with only that tool" : "asks with auto and only that tool"}.${reasoning}`;
+}
 
 /** A provider's tool-choice flags (wave 46's compat, set by "Test tool calling", wave 48b). */
 export function toolChoiceSummary(compat: { requiredToolChoice?: boolean; namedToolChoice?: boolean }): string {
