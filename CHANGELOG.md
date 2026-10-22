@@ -2,6 +2,39 @@
 
 Release notes for Nook, newest first. Upgrade steps for each release are in [docs/OPERATIONS.md](docs/OPERATIONS.md#upgrades).
 
+## v0.43.0 — 2026-10-22
+
+**Several docs per report**
+
+- **New report takes up to 8 docs**, in order, mixing Nook notes and files (PDFs too) with docs behind a tool server such as Outline. Generation reads them all and shares the prompt fairly; a long doc gets its outline and opening, and the AI can read the rest.
+- **Doc settings** adds, reorders and removes docs; "Doc changed" names the doc. Regenerate re-reads every doc; scheduled refreshes never read docs.
+
+**Changes**
+
+- **"Add a new section"** in the About menu, placed after a chosen block or at the end. The AI may only add there; anything else is refused.
+- **Docs on a change**: attach up to 4 Nook notes/files or Outline links; the AI reads them, and on Apply they join the report's docs.
+
+**Edit a report by hand**
+
+- **A trash icon on every section** (charts, KPIs, tables, text, section headings) for owners, with a confirm and **Undo**; also in each block's ⋯ menu.
+- **Edit SQL in Inspect** (owners): an editor with **Run preview** (the filters on screen, the rows, and which charts would lose a column), then Check and save as a new version, with Undo.
+- **Suggest an edit** (comment level): the same editor and preview; the suggestion lands in the owner's Changes as a ready proposal with the SQL diff and before/after. MCP: `suggest_report_query`.
+
+**Dynamic filters**
+
+- **Only touched queries re-run** when a filter changes, and blocks a filter doesn't reach say "Not filtered by Country".
+- **+ Filter** (owners): pick a column from the tables the report reads and see sample values; the AI wires it into the queries that read that table, and Nook checks every changed query still returns exactly the same results with "All" before the proposal reaches you. **Remove filter** works the same way, in the app. MCP: `add_report_filter`.
+- **Click to filter**: click a bar, slice or table row to filter the rest of the report (the clicked chart highlights; Back undoes it). On a phone, a tap shows a **Filter by …** button.
+- **More date presets**: yesterday, this week, last week, last month, last quarter, year to date, last 12 months.
+
+**Fixes**
+
+- Bar value labels no longer collide on phones (they drop the unit, compact, or hide).
+
+**Upgrading**
+
+- Migrations **064** (`report_docs`), **065** (`report_query_suggestions`) and **066** (`report_filters`) run once on the first boot: new tables and columns, and existing reports' doc links copied into `report_docs`; quick at any size. **Back up first** (`./scripts/backup.sh --force`). See [Upgrading to 0.43.0](docs/OPERATIONS.md#upgrades).
+
 ## v0.42.1 — 2026-10-16
 
 **Fixes**

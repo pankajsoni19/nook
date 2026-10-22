@@ -5,9 +5,9 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 - Plans of record: `DEVELOPMENT_PLAN.md`, `docs/plan/research/`, [reports plan](docs/plan/WAVES_45-48_REPORTS.md), [report theme](docs/plan/REPORT_THEME.md).
 - Contracts: [API](docs/plan/API_CONTRACTS.md) · [Threat model](docs/plan/THREAT_MODEL.md) · [Test plan](docs/plan/TEST_PLAN.md).
 
-**Current state (2026-10-16).**
-- **v0.42.1** is released (2026-10-16, fixes: Report owners title on Forward, the eval's Settings → AI fallback). **v0.42.0** (2026-10-15): PDFs as report docs and in `read_attachment_text`, `search_report_options`, Report owners paging. v0.41.0 brought PDF text in Files, `search_documents`, console parameters and Settings → Report owners.
-- Migrations: **001–063** are released and immutable (045 and 054 unused; 054 is reserved for Messages). **064** is lane DOCS' `report_docs`, **065** lane EDIT's `report_query_suggestions`, and **066** lane FILTERS' `report_filters` (all unreleased, for 0.43.0); next free: **067**.
+**Current state (2026-10-22).**
+- **v0.43.0** is released (2026-10-22): several docs per report, Add a new section and doc links in Changes, delete from the header, edit and suggest SQL, dynamic filters (slice 1).
+- Migrations: **001–066** are released and immutable (045 and 054 unused; 054 is reserved for Messages). Next free: **067**.
 - Development happens directly on `main`, pushed as each change passes its gates.
 
 ## In flight
