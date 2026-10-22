@@ -38,22 +38,29 @@ export const apiKeyCreatedTemplate = defineTemplate<{ keyName: string; scopes: s
   fixture: () => ({ keyName: "laptop", scopes: "Notes: read, write drafts · Tasks: read", at: "2026-09-28T09:00:00.000Z" })
 });
 
-/** D600: an edit added access to an existing key (the secret is unchanged). */
-export const apiKeyAccessAddedTemplate = defineTemplate<{ keyName: string; added: string; at: string; delayed?: boolean }>({
+/**
+ * D600: an edit added access to an existing key (the secret is unchanged). D622: a vault key's mail
+ * (`vault: true`) says so and lists what was added as counts only, never a vault, environment, or
+ * secret name or a value.
+ */
+export const apiKeyAccessAddedTemplate = defineTemplate<{ keyName: string; added: string; at: string; vault?: boolean; delayed?: boolean }>({
   name: "security.api_key_access_added",
   class: "security",
   render(data, ctx) {
     const name = cleanLine(data.keyName, 60, "unnamed");
+    const vault = data.vault === true;
     return layout({
       instanceName: ctx.instanceName,
       tone: "security",
-      subject: delayed(`Access added to API key “${name}” on your ${appName()} account`, data.delayed),
-      preheader: "An API key gained permissions. If this wasn't you, revoke it.",
-      eyebrow: "Security · API key",
-      title: "Access was added to an API key",
-      lead: "Anyone holding this key can now use the permissions below. The key itself did not change.",
+      subject: delayed(`Access added to ${vault ? "vault key" : "API key"} “${name}” on your ${appName()} account`, data.delayed),
+      preheader: vault ? "A vault key can now reach more secrets. If this wasn't you, revoke it." : "An API key gained permissions. If this wasn't you, revoke it.",
+      eyebrow: vault ? "Security · Vault key" : "Security · API key",
+      title: vault ? "Access was added to a vault key" : "Access was added to an API key",
+      lead: vault
+        ? "Anyone holding this key can now reach secret values in the places below, never beyond your own access. The key itself did not change."
+        : "Anyone holding this key can now use the permissions below. The key itself did not change.",
       blocks: [
-        context([{ title: `“${name}”`, meta: `Changed ${formatInstant(data.at, ctx.tz)}` }, { title: "Permissions added", meta: cleanLine(data.added, 300, "None") }], { tone: "security" }),
+        context([{ title: `“${name}”`, meta: `Changed ${formatInstant(data.at, ctx.tz)}` }, { title: vault ? "Vault access added" : "Permissions added", meta: cleanLine(data.added, 300, "None") }], { tone: "security" }),
         paragraph("If this wasn't you, sign in and revoke the key, then change your password, or ask your admin.")
       ],
       action: { label: "Review in Settings", href: appLink(paths.settings("keys")) },

@@ -13,7 +13,7 @@ import {
 } from "./keyGrants";
 import { keyDetailEvents, useKeysApi, type ApiKey, type KeyEvent, type KeyList, type NarrowBody, type KeysApi, type VaultKeyEvent } from "./keysApi";
 import { firstVaultRow, useVaultChoices, VaultGrantBuilder } from "./VaultGrantBuilder";
-import { namesProtected, valueReadsTodayLine, vaultFlagChips, vaultGrantChips, vaultGrantCountChips, vaultGrantsToRows, vaultKeyEventLine, vaultRowsNarrow, vaultRowsToGrants, type VaultGrantRow, type VaultGrantView } from "./vaultKeyGrants";
+import { namesProtected, valueReadsTodayLine, vaultFlagChips, vaultGrantChips, vaultGrantCountChips, vaultGrantsToRows, vaultKeyEventLine, vaultRowsAddingAccess, vaultRowsToGrants, type VaultGrantRow, type VaultGrantView } from "./vaultKeyGrants";
 import { appName } from "../appName";
 import { holdsAgentGrants, KEYS_TAB_INTROS, KEYS_TAB_LABELS, keysTabCounts, keysTabPreset, keysTabsFor, keyTabOf, listedOnLine, shownKeysTab, type KeysTab } from "./keyTabs";
 import { SettingsTabs, settingsTabIds, type SettingsTab } from "../settings/SettingsTabs";
@@ -565,16 +565,17 @@ export function keyToRows(key: ApiKey): GrantRow[] {
 }
 
 /**
- * Edit (D585): rename, change access, bring the expiry closer, or tighten addresses. Rows may be
- * added, changed, or removed with the same builder as New key; an edit that adds access asks for the
- * password (or Google) like New key, and the key keeps its secret. Vault access, surfaces, and
- * addresses still only narrow here (D278); Rotate widens those.
+ * Edit (D585, D620): rename, change access, bring the expiry closer, or tighten addresses. Rows may
+ * be added, changed, or removed with the same builder as New key, for general and vault keys alike;
+ * an edit that adds access asks for the password (or Google) like New key, and the key keeps its
+ * secret. Surfaces, addresses, and the vault settings still only narrow here (D278, D621); Rotate
+ * widens those.
  */
 function EditKeyDialog({ apiKey, policy, role, totpEnabled, onClose, onSaved }: { apiKey: ApiKey; policy: PolicySummary; role: string | undefined; totpEnabled: boolean; onClose: () => void; onSaved: (message: string) => void }) {
   const keysApi = useKeysApi();
   const held = useMemo(() => keyToRows(apiKey), [apiKey]);
   const [rows, setRows] = useState<GrantRow[]>(held);
-  // Wave 27: a vault key narrows its vault rows and turns its settings off (D278).
+  // Wave 27, D620: a vault key's rows change like a general key's; its settings only turn off (D621).
   const isVault = apiKey.kind === "vault";
   const vaultCeiling = useMemo(() => vaultGrantsToRows(apiKey.grants.filter((grant) => grant.module === "vault") as VaultGrantView[]), [apiKey]);
   const [vaultRows, setVaultRows] = useState<VaultGrantRow[]>(vaultCeiling);
@@ -589,7 +590,10 @@ function EditKeyDialog({ apiKey, policy, role, totpEnabled, onClose, onSaved }: 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const reauth = useKeyReauth(totpEnabled);
-  const adding = isVault ? [] : rowsAddingAccess(held, rows);
+  const heldProtected = Boolean(apiKey.vault?.protectedAccess);
+  const adding: Array<{ key: string }> = isVault ? vaultRowsAddingAccess(vaultCeiling, vaultRows, heldProtected) : rowsAddingAccess(held, rows);
+  const addingNumbers = adding.map((row) => (isVault ? vaultRows : rows).findIndex((item) => item.key === row.key) + 1);
+  const rowWord = isVault ? ["Vault access", "Vault access rows"] : ["Permission", "Permissions"];
   const daysLeft = apiKey.expiresAt ? Math.max(1, Math.ceil((Date.parse(apiKey.expiresAt) - Date.now()) / 86_400_000)) : null;
   const expiryChoices = [
     { value: "keep", label: daysLeft === null ? "Keep: no expiry" : `Keep: ${daysLeft} ${daysLeft === 1 ? "day" : "days"} left` },
@@ -606,7 +610,6 @@ function EditKeyDialog({ apiKey, policy, role, totpEnabled, onClose, onSaved }: 
     const { grants, error: grantError } = isVault ? vaultRowsToGrants(vaultRows) : rowsToGrants(rows);
     if (grantError) return setError(grantError);
     if (!name.trim()) return setError("Give the key a name.");
-    if (isVault && !vaultRowsNarrow(vaultCeiling, vaultRows, Boolean(apiKey.vault?.protectedAccess))) return setError("Editing can only remove access. Create a new key or rotate this one to add access.");
     const body: NarrowBody = {};
     if (isVault && mcpValues !== Boolean(apiKey.vault?.allowMcpValueReads)) body.allowMcpValueReads = mcpValues;
     if (isVault && protectedAccess !== Boolean(apiKey.vault?.protectedAccess)) body.protectedAccess = protectedAccess;
@@ -642,20 +645,21 @@ function EditKeyDialog({ apiKey, policy, role, totpEnabled, onClose, onSaved }: 
   }
 
   return <KeysDialog title={`Edit ${apiKey.name}`} description={isVault
-    ? "Editing can only remove access, bring the expiry closer, or rename. Rotate the key to add access, surfaces, or addresses."
+    ? "Add, change, or remove vault access, bring the expiry closer, or rename. Adding access asks for your password; the key keeps its secret. Rotate the key to turn a vault setting on or to add surfaces or addresses."
     : "Add, change, or remove permissions, bring the expiry closer, or rename. Adding access asks for your password; the key keeps its secret. Rotate the key to add surfaces or addresses."} onClose={onClose} busy={busy} wide>
     <form className="keys-form" onSubmit={submit} noValidate>
       <label className="keys-input">Name<input value={name} onChange={(event) => setName(event.target.value)} maxLength={80} required disabled={busy} autoComplete="off" /></label>
       <label className="keys-input">Description (optional)<input value={description} onChange={(event) => setDescription(event.target.value)} maxLength={200} disabled={busy} autoComplete="off" /></label>
       {apiKey.surfaces === "both" && <div className="keys-select-field"><span id="keys-edit-surface">Where it is used</span><Select<KeySurfaces> labelledBy="keys-edit-surface" label="Where it is used" value={surfaces} options={surfaceChoices} onChange={setSurfaces} disabled={busy} /></div>}
       {!isVault && <fieldset className="keys-fieldset"><legend>Access</legend><GrantBuilder rows={rows} onChange={setRows} role={role} policy={policy} disabled={busy} /></fieldset>}
-      {isVault && <fieldset className="keys-fieldset"><legend>Vault access</legend><VaultGrantBuilder rows={vaultRows} onChange={setVaultRows} vaults={vaults} role={role} protectedAccess={Boolean(apiKey.vault?.protectedAccess)} disabled={busy} ceiling={vaultCeiling} /></fieldset>}
+      {isVault && <fieldset className="keys-fieldset"><legend>Vault access</legend><VaultGrantBuilder rows={vaultRows} onChange={setVaultRows} vaults={vaults} role={role} protectedAccess={protectedAccess} disabled={busy} held={vaultCeiling}
+        protectedHint="Protected: this key does not allow protected environments. Rotate it to allow them." /></fieldset>}
       {isVault && <VaultFlags mcpValues={mcpValues} protectedAccess={protectedAccess} onMcpValues={setMcpValues} onProtectedAccess={setProtectedAccess} disabled={busy}
         narrowing={{ mcpValues: Boolean(apiKey.vault?.allowMcpValueReads), protectedAccess: Boolean(apiKey.vault?.protectedAccess) }} />}
       <div className="keys-select-field"><span id="keys-edit-expiry">Expiry</span><Select labelledBy="keys-edit-expiry" label="Expiry" value={expires} options={expiryChoices} onChange={setExpires} disabled={busy} /></div>
       <AllowlistField available={Boolean(policy.ipAllowlistAvailable)} pinned={policy.ipProxyPinned} value={allowlist} onChange={setAllowlist} disabled={busy} mode={apiKey.ipAllowlist?.length ? "narrow" : "create"} />
       {adding.length > 0 && <>
-        <p className="grant-note keys-adding-note" role="note">{adding.length === 1 ? "Permission" : "Permissions"} {adding.map((row) => rows.indexOf(row) + 1).join(", ")} {adding.length === 1 ? "adds" : "add"} access, so confirm it's you to save.</p>
+        <p className="grant-note keys-adding-note" role="note">{adding.length === 1 ? rowWord[0] : rowWord[1]} {addingNumbers.join(", ")} {adding.length === 1 ? "adds" : "add"} access, so confirm it's you to save.</p>
         {reauth.fields(busy)}
       </>}
       <FormError message={error} />

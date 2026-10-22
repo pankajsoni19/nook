@@ -23,7 +23,7 @@ export const EVENT_FAMILIES: Record<string, readonly string[]> = {
   keys: ["key.rotate", "key.rotate.auto", "key.rotate.skipped", "key.retire", "reauth"],
   transfer: ["export", "import", "import.preview"],
   /** Wave 27: what vault keys did here, and keys created or rotated with access to this vault (any event with a key). */
-  apikeys: ["apikey.create", "apikey.rotate", "key.limited", "key.volume"],
+  apikeys: ["apikey.create", "apikey.rotate", "apikey.update", "key.limited", "key.volume"],
   structure: ["vault.create", "vault.update", "vault.delete", "vault.restore", "env.create", "env.update", "env.protect", "env.unprotect", "env.reorder", "env.delete", "env.restore", "env.purge", "integrity.fail"]
 };
 export type EventFamily = keyof typeof EVENT_FAMILIES;

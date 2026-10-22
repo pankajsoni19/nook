@@ -10,7 +10,7 @@ import { atLeast } from "../access/levels";
 import { vaultBestLevel, vaultTitleFor } from "../vault/access";
 import { shareLevelById, sharedTitleFor } from "../agents/sharing";
 import { parseStoredScopes } from "../mcpScopes";
-import { describeAddedGrants } from "../keyGrants";
+import { describeAddedGrants, describeAddedVaultGrants } from "../keyGrants";
 import { stripMarkdown } from "./html";
 import { isMuted } from "./mutes";
 import { resolveEventChanged, resolveReminder } from "./calendarMail";
@@ -168,11 +168,13 @@ function resolveKeyCreated(payload: Payload, recipient: Recipient): Resolution {
 
 /** D600: a key that gained access through Edit; the permissions added, in words (kinds and counts only). */
 function resolveKeyAccessAdded(payload: Payload, recipient: Recipient): Resolution {
-  const key = db.query("SELECT name FROM mcp_api_keys WHERE id = ? AND user_id = ?").get(String(payload.keyId ?? ""), recipient.id) as { name: string } | null;
+  const key = db.query("SELECT name, kind FROM mcp_api_keys WHERE id = ? AND user_id = ?").get(String(payload.keyId ?? ""), recipient.id) as { name: string; kind: string } | null;
   const entries = Array.isArray(payload.added) ? payload.added.filter((entry): entry is string => typeof entry === "string") : [];
-  const added = describeAddedGrants(entries);
+  // D622: a vault key's additions are counts ("Read values: 2 environments"), never names.
+  const vault = key?.kind === "vault";
+  const added = vault ? describeAddedVaultGrants(entries) : describeAddedGrants(entries);
   if (!key || !added) return { skip: "empty" };
-  return { data: { keyName: key.name, added, at: String(payload.at ?? new Date().toISOString()) } };
+  return { data: { keyName: key.name, added, at: String(payload.at ?? new Date().toISOString()), ...(vault ? { vault: true } : {}) } };
 }
 
 /** A vault key's permissions for the security mail (Wave 27): counts and flags, never a vault's name (D223). */

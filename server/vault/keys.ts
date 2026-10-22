@@ -170,7 +170,7 @@ export function environmentOfVault(vaultId: string, envId: string) {
 }
 
 /**
- * Whether `next` only narrows `current` (D278) for a vault key: each next grant is covered by a held
+ * Whether `next` only narrows `current` (D278) for a vault key (a grant it does not cover adds access, D620): each next grant is covered by a held
  * one on the same vault with an equal or higher permission, and the same environment; a held grant
  * over every environment covers one environment only on a key without `protectedAccess` (on such a
  * key an explicit grant could reach a protected environment the "every" grant never did).
@@ -236,8 +236,9 @@ export function keysWithAccess(viewerId: string, vaultId: string) {
 /**
  * Records, in each vault a key's grants name, that the key was created (or rotated) with access to
  * it: `apikey.create` / `apikey.rotate`, the creator as the person, the key's id, `via: session`.
+ * `apikey.update` (D622): an edit gave the key more access to that vault (the added grants only).
  */
-export function recordKeyGrantEvents(keyId: string, userId: string, grants: readonly Grant[], event: "apikey.create" | "apikey.rotate") {
+export function recordKeyGrantEvents(keyId: string, userId: string, grants: readonly Grant[], event: "apikey.create" | "apikey.rotate" | "apikey.update") {
   const vaults = new Map<string, number>();
   for (const grant of grants) if (grant.module === "vault" && grant.resourceId) vaults.set(grant.resourceId, (vaults.get(grant.resourceId) ?? 0) + 1);
   const at = new Date().toISOString();

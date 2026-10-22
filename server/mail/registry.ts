@@ -52,6 +52,7 @@ export function previewFixtures(): Array<{ id: string; template: TemplateName; d
     ...base,
     { id: "tasks.assigned.many", template: "tasks.assigned", data: { actors: ["Priya Shah", "Sam Lee"], cards: Array.from({ length: 7 }, (_, index) => ({ ...assigned.cards[0]!, cardId: `6a1d6b7f-2c3e-4d4f-9a5b-${String(index).padStart(12, "0")}`, title: `Card ${index + 1}`, dueOn: index % 2 ? null : "2026-10-02" })) } },
     { id: "sharing.shared.one", template: "sharing.shared", data: { actors: ["Priya Shah"], items: [sharedTemplate.fixture().items[0]] } },
+    { id: "security.api_key_access_added.vault", template: "security.api_key_access_added", data: { keyName: "deploy", added: "Read values: 1 vault (every environment) · Read and write values: 2 environments", at: "2026-10-22T09:00:00.000Z", vault: true } },
     { id: "security.two_factor.enabled", template: "security.two_factor", data: { event: "enabled", at: "2026-09-28T09:00:00.000Z", remaining: null } },
     { id: "security.two_factor.recovery_regenerated", template: "security.two_factor", data: { event: "recovery_regenerated", at: "2026-09-28T09:00:00.000Z", remaining: 10 } },
     { id: "security.account.unblocked", template: "security.account", data: { event: "unblocked", actorName: "Priya Admin", at: "2026-09-28T09:00:00.000Z" } },

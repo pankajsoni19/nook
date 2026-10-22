@@ -22,7 +22,6 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
   - [ ] Online backups without stopping the app (SQLite `VACUUM INTO`/backup API), on a schedule set in `.env` (frequency, how many to keep), written to the existing S3 storage under a new backup prefix (and/or local).
   - [ ] Litestream continuous replication of the SQLite database to S3 (same bucket, its own prefix), with point-in-time restore.
   - [ ] Restore drill: a command that restores the latest backup (archive or Litestream) into a scratch instance and verifies it.
-- [ ] **Vault keys: Edit can add access** (operator, 2026-10-22: "allow, wherever possible target ease of use"; lane VAULTKEY): same as general keys (D585): add rows and widen with the password, refuse what the owner can't grant, security mail and bell notice.
 
 ## Waiting on the operator
 
@@ -33,6 +32,11 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 ## Small fixes (lane SMALL)
 
 - [ ] Inspect → "From the doc" (D518) needs the plan todo's `docRef` (`d2`); the scripted QA provider never sets it, so only a real model's runs show it. Check after the real-model eval.
+
+## Leftovers (lane VAULTKEY)
+
+- [ ] Edit still cannot turn a vault key's settings on (D621): "Allow protected environments" and "Allow MCP clients to read values" need Rotate, because the database trigger `api_keys_vault_flags_widen` (migration 038) refuses raising either flag. A migration that lets the server raise them after re-authentication would let Edit add a protected environment to any key; keep values over MCP (T191) behind its own confirm.
+- [ ] On a key that allows protected environments, replacing "every environment" with one unprotected environment counts as adding access (the D278 rule kept by D620), so it asks for the password although the new grant can never reach a protected environment (it is stored with `protected_at_grant = 0`). Relaxing `isVaultNarrowing` for an environment unprotected at the time would drop that prompt.
 
 ## Leftovers (lane CLAUDE)
 

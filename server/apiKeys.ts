@@ -6,7 +6,7 @@ import { addressBucket } from "./clientAddress";
 import { recordAccessEvent, type AccessVia } from "./access/events";
 import { notifyAccess } from "./access/notices";
 import {
-  addedGrantEntries, ALL_ONLY, CREATE_ONLY, dedupeGrants, GENERAL_KEY_MODULES, grantKey, grantsToScopes, isNarrowing, permissionsForModule, READ_ONLY_KINDS, RESOURCE_KINDS, SCOPE_GRANTS, scopeFor, SELECTOR_KINDS, selectorKindsFor,
+  addedGrantEntries, addedVaultEntries, ALL_ONLY, CREATE_ONLY, dedupeGrants, GENERAL_KEY_MODULES, grantKey, grantsToScopes, isNarrowing, permissionsForModule, READ_ONLY_KINDS, RESOURCE_KINDS, SCOPE_GRANTS, scopeFor, SELECTOR_KINDS, selectorKindsFor,
   type Grant, type GrantModule, type KeyKind, type KeyPermission, type KeySurfaces, type ResourceKind
 } from "./keyGrants";
 import type { McpScope } from "./mcpScopes";
@@ -25,7 +25,7 @@ import { readableDocumentPredicate } from "./documentAccess";
 import { whiteboardDisplayName } from "../shared/whiteboardScene";
 import { readableReportSql } from "./reports/access";
 import { editableCalendarPredicate, readableCalendarPredicate } from "./calendar/access";
-import { environmentOfVault, isVaultNarrowing, validateVaultGrants, vaultEffectiveGrants, vaultGrantInactive, vaultGrantInput, vaultGrantNames, VaultKeyError, type VaultGrantInput } from "./vault/keys";
+import { environmentOfVault, isVaultNarrowing, MAX_VAULT_KEY_GRANTS, recordKeyGrantEvents, validateVaultGrants, vaultEffectiveGrants, vaultGrantInactive, vaultGrantInput, vaultGrantNames, VaultKeyError, type VaultGrantInput } from "./vault/keys";
 import { shareReadableSql } from "./agents/sharing";
 import { logger } from "./log";
 
@@ -758,6 +758,9 @@ function assertAllOrChosen(grants: readonly Grant[]) {
   }
 }
 
+/** A vault key's grants for the audit (D622): `read|write:<vaultId>:<envId|*>`, ids only. */
+const vaultGrantIds = (grants: readonly Grant[]) => grants.map((grant) => `${grant.permission}:${grant.resourceId}:${grant.envId ?? "*"}`);
+
 /** A grant as a request input, so an added grant is validated by validateGrants exactly like a new key's. */
 const grantAsInput = (grant: Grant): GrantInput => ({
   module: grant.module as GrantInput["module"], permission: grant.permission as GrantInput["permission"],
@@ -765,9 +768,10 @@ const grantAsInput = (grant: Grant): GrantInput => ({
 });
 
 /**
- * PATCH /api/keys/:id: rename, describe, and narrow without a password (D278); a general key's grants
- * may also add access when the caller re-authenticated (`widen`, D585). Surfaces, expiry, limits,
- * addresses, and vault keys still only narrow. Returns what changed and the grants it added.
+ * PATCH /api/keys/:id: rename, describe, and narrow without a password (D278); a key's grants may
+ * also add access when the caller re-authenticated (`widen`: general keys D585, vault keys D620).
+ * Surfaces, expiry, limits, addresses, and vault settings still only narrow. Returns what changed and
+ * the grants it added.
  */
 export function narrowApiKey(userId: string, keyId: string, patch: z.infer<typeof narrowKeySchema>, actorId: string = userId, options: KeyUpdateOptions = {}) {
   const row = liveOwnKey(userId, keyId);
@@ -793,9 +797,29 @@ export function narrowApiKey(userId: string, keyId: string, patch: z.infer<typeo
       module: "vault", permission: input.permission, resourceKind: "vault", resourceId: input.vaultId, envId: input.envId ?? null,
       protectedAtGrant: coveredWhenGranted(input.vaultId, input.envId ?? null)
     }));
-    const unique = dedupeGrants(candidate);
-    if (!isVaultNarrowing(current, unique, protectedAccess)) throw new KeyError(400, "WIDENING_NOT_ALLOWED", "Editing a key can only remove access. Create a new key to add access.");
-    if (unique.length > MAX_GRANTS) throw new KeyError(400, "INVALID_GRANT", `A key can hold at most ${MAX_GRANTS} grants`);
+    let unique = dedupeGrants(candidate);
+    // D620: a grant no held one covers adds access (another vault or environment, read → write, or a
+    // protected environment on a key that allows them). It needs the re-authentication (the route's)
+    // and the checks a new vault key's grants get: the owner's current access to that vault and
+    // environment at that level (404 when they cannot read it), and, for a protected environment,
+    // "Allow protected environments" on the key (which Edit never turns on, D621).
+    const nextProtected = protectedAccess && patch.protectedAccess !== false;
+    const widening = unique.filter((grant) => !isVaultNarrowing(current, [grant], protectedAccess));
+    if (widening.length) {
+      if (actorId !== userId) throw new KeyError(403, "WIDENING_NOT_ALLOWED", "Only the key's owner can add vault access to it");
+      if (!options.widen && !options.dryRun) throw new KeyError(400, "WIDENING_NOT_ALLOWED", "Adding access to a key needs your password. Confirm it and save again.");
+      checkCreatePolicy(userId, row.role, { surfaces: patch.surfaces ?? row.surfaces }, readPolicies());
+      let validated: ReturnType<typeof validateVaultGrants>;
+      try {
+        validated = validateVaultGrants(userId, widening.map((grant) => ({ module: "vault", permission: grant.permission === "write" ? "write" : "read", vaultId: grant.resourceId!, envId: grant.envId ?? null })), nextProtected);
+      } catch (error) {
+        asKeyError(error);
+      }
+      added = validated.grants;
+      const addedKeys = new Set(widening.map(grantKey));
+      unique = dedupeGrants([...unique.filter((grant) => !addedKeys.has(grantKey(grant))), ...added]);
+    }
+    if (unique.length > MAX_VAULT_KEY_GRANTS) throw new KeyError(400, "INVALID_GRANT", `A key can hold at most ${MAX_VAULT_KEY_GRANTS} grants`);
     const same = unique.length === current.length && unique.every((grant) => current.some((held) => grantKey(held) === grantKey(grant)));
     if (!same) {
       nextGrants = unique;
@@ -887,7 +911,8 @@ export function narrowApiKey(userId: string, keyId: string, patch: z.infer<typeo
       changed.push("ipAllowlist");
     }
   }
-  // Vault flags (D278): only ever turned off here; turning one on is a new key or a rotation.
+  // Vault flags (D278, D621): only ever turned off here, even with the password; turning one on is a
+  // rotation or a new key (the database refuses it too: api_keys_vault_flags_widen, migration 038).
   let flags: VaultFlags | null = null;
   if (patch.allowMcpValueReads !== undefined || patch.protectedAccess !== undefined) {
     if (row.kind !== "vault") throw new KeyError(400, "INVALID", "Only vault keys have these settings");
@@ -911,10 +936,10 @@ export function narrowApiKey(userId: string, keyId: string, patch: z.infer<typeo
   if (patch.name !== undefined && patch.name !== row.name) changed.push("name");
   const description = patch.description === undefined ? row.description : (patch.description?.trim() || null);
   if (patch.description !== undefined && description !== row.description) changed.push("description");
-  if (!changed.length) return { changed, added: [] as Grant[] };
+  if (!changed.length) return { changed, added: [] as Grant[], kind: row.kind };
   // A linked key still holding "Run agents" (one linked before the rule) must drop it or be unlinked (review M1).
   assertRunGrantUnlinked(row.id, nextGrants ?? current);
-  if (options.dryRun) return { changed, added };
+  if (options.dryRun) return { changed, added, kind: row.kind };
   db.transaction(() => {
     const timestamp = now();
     const scopes = nextGrants ? grantsToScopes(nextGrants) : null;
@@ -925,7 +950,17 @@ export function narrowApiKey(userId: string, keyId: string, patch: z.infer<typeo
       insertGrantRows(row.id, nextGrants, timestamp);
     }
     if (flags) db.query("UPDATE mcp_api_keys SET allow_mcp_value_reads = ?, vault_protected_access = ? WHERE id = ?").run(flags.allowMcpValueReads ? 1 : 0, flags.protectedAccess ? 1 : 0, row.id);
-    if (added.length && nextGrants) {
+    if (added.length && nextGrants && row.kind === "vault") {
+      // D622: a vault key that gained access. The audit keeps the grants before and after (vault and
+      // environment ids, never a name or a value); the event, bell, and mail say counts only; each
+      // vault that gained the key records it in its Activity.
+      const entries = addedVaultEntries(added);
+      recordAccessEvent({ actorId, via: "web", action: "key.updated", targetUserId: userId, keyId: row.id,
+        meta: { fields: changed, grantsBefore: current.length, grantsAfter: nextGrants.length, added: entries } }, timestamp);
+      audit(actorId, null, "vault.keys.update", { keyId: row.id, fields: changed, grantsBefore: vaultGrantIds(current), grantsAfter: vaultGrantIds(nextGrants), added: entries });
+      recordKeyGrantEvents(row.id, userId, added, "apikey.update");
+      notifyAccess({ userId, kind: "key_access_added", actorId: null, keyId: row.id, count: added.length }, timestamp);
+    } else if (added.length && nextGrants) {
       // D586: adding access is its own event, with the scopes before and after; the secret stays.
       recordAccessEvent({ actorId, via: "web", action: "key.updated", targetUserId: userId, keyId: row.id,
         meta: { fields: changed, grantsBefore: current.length, grantsAfter: nextGrants.length, added: addedGrantEntries(added) } }, timestamp);
@@ -939,7 +974,7 @@ export function narrowApiKey(userId: string, keyId: string, patch: z.infer<typeo
       audit(actorId, null, "key.narrowed", { keyId: row.id, fields: changed });
     }
   })();
-  return { changed, added };
+  return { changed, added, kind: row.kind };
 }
 
 /** Withdraws the pending proposals a key made (review M1), when it stops working. */

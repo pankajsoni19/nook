@@ -50,6 +50,8 @@ export function activityLine(event: ActivityEvent) {
   if (event.event === "apikey.create" || event.event === "apikey.rotate") {
     return `${who} ${event.event === "apikey.create" ? "gave" : "rotated"} the API key “${event.key?.name ?? "a deleted key"}”${event.event === "apikey.create" ? " access to this vault" : ", keeping its access here"}`;
   }
+  // D622: an edit gave an existing key more access here.
+  if (event.event === "apikey.update") return `${who} gave the API key “${event.key?.name ?? "a deleted key"}” more access to this vault`;
   const secret = event.secret ? event.secret.name ?? (event.secret.state === "binned" ? "a secret now in the Bin" : "a secret that is gone") : null;
   const env = event.environment ? event.environment.name ?? "an environment you cannot see" : null;
   const count = event.count !== null && event.count > 1 && ["value.read", "export", "import", "import.preview", "member.add", "member.remove", "key.retire"].includes(event.event) ? event.count : null;

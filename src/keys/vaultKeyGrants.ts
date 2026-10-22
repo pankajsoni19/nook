@@ -36,17 +36,40 @@ export const grantableVaults = (vaults: readonly VaultChoice[]) => vaults.filter
  * each environment the creator reads. A protected one says so and is off until the key allows
  * protected environments.
  */
-export function envChoices(vault: VaultChoice | undefined, protectedAccess: boolean) {
+export function envChoices(vault: VaultChoice | undefined, protectedAccess: boolean, protectedHint = "Protected: turn on “Allow protected environments” first") {
   if (!vault) return [];
   const unprotected = vault.environments.filter((env) => !env.protected && reaches(env, "read"));
   return [
     { value: ALL_ENVS, label: "Every environment", description: unprotected.length ? "Every unprotected environment you can read, now and later" : "Every environment you can read here is protected: pick one by name", disabled: !unprotected.length },
     ...vault.environments.filter((env) => reaches(env, "read")).map((env) => ({
       value: env.id, label: env.name,
-      description: env.protected ? (protectedAccess ? "Protected: reachable because this key allows protected environments" : "Protected: turn on “Allow protected environments” first") : undefined,
+      description: env.protected ? (protectedAccess ? "Protected: reachable because this key allows protected environments" : protectedHint) : undefined,
       disabled: env.protected && !protectedAccess
     }))
   ];
+}
+
+/**
+ * Why a row's access cannot change (D623), or null when it can: read is the only level when write is
+ * not yours to give (a viewer, or an environment you only read). Such a row shows "Read values" as
+ * text with this reason, never a dropdown with one choice. A held write row stays a dropdown, so it
+ * can be lowered.
+ */
+export function fixedAccessReason(vault: VaultChoice | undefined, row: Pick<VaultGrantRow, "envId" | "permission">, role: string | undefined) {
+  if (row.permission !== "read") return null;
+  const write = permissionChoicesFor(vault, row.envId, role).find((option) => option.value === "write")!;
+  if (!write.disabled) return null;
+  return role === "viewer" ? "Read only: your team role can only read" : "Read only: you can only read here yourself";
+}
+
+/**
+ * The rows that add access to a vault key holding `held` (D620, a mirror of the server's
+ * isVaultNarrowing per grant): a row no held row covers on the same vault, at the same or a higher
+ * level, and on the same environment (or one environment under "every", on a key without protected
+ * access). Empty when the edit only narrows, so no password is asked.
+ */
+export function vaultRowsAddingAccess(held: readonly VaultGrantRow[], rows: readonly VaultGrantRow[], protectedAccess: boolean) {
+  return rows.filter((row) => !vaultRowsNarrow(held, [row], protectedAccess));
 }
 
 /** The permission options of a row: write only where the creator writes (and never for a viewer). */
@@ -156,7 +179,7 @@ export function vaultKeyEventLine(event: { event: string; via: string; vault: { 
   const surface = event.via === "api" ? " over REST" : event.via === "mcp" ? " over MCP" : "";
   const what: Record<string, string> = {
     "value.read": "Read a value", "value.write": "Wrote a value", "secret.create": "Created a secret", "comment.read": "Read a comment",
-    "version.read": "Read an old version", "key.limited": "Hit its rate limit", "key.volume": "Read more than 500 values in a day", "apikey.create": "Given access", "apikey.rotate": "Rotated with access"
+    "version.read": "Read an old version", "key.limited": "Hit its rate limit", "key.volume": "Read more than 500 values in a day", "apikey.create": "Given access", "apikey.rotate": "Rotated with access", "apikey.update": "Given more access"
   };
   return `${what[event.event] ?? event.event}${surface} · ${where}`;
 }

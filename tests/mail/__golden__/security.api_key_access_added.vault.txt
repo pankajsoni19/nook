@@ -1,0 +1,25 @@
+Subject: Access added to vault key “deploy” on your Nook account
+
+Nook · nook.test
+
+SECURITY · VAULT KEY
+Access was added to a vault key
+
+Anyone holding this key can now reach secret values in the places below, never beyond your own access. The key itself did not change.
+
+> “deploy”
+  Changed Thu 22 Oct 2026, 09:00 (UTC)
+> Vault access added
+  Read values: 1 vault (every environment) · Read and write values: 2 environments
+
+If this wasn't you, sign in and revoke the key, then change your password, or ask your admin.
+
+Review in Settings:
+https://nook.test/settings/keys
+
+--
+You got this because it is about your own Nook account.
+Security emails can't be turned off. They tell you about changes to your account.
+Email settings:
+https://nook.test/settings/notifications
+Sent by Nook on nook.test, a self-hosted workspace. No tracking. Nook never asks for your password by email.

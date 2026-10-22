@@ -10,7 +10,7 @@ import { keyEvents } from "./access/events";
 import { keyValueReadsToday } from "./vault/limits";
 import { recordKeyGrantEvents, validateVaultGrants, vaultKeyEvents, type VaultGrantInput } from "./vault/keys";
 import { vaultStatus } from "./vault/status";
-import { addedGrantEntries, grantsForScopes } from "./keyGrants";
+import { addedGrantEntries, addedVaultEntries, grantsForScopes } from "./keyGrants";
 import type { McpScope } from "./mcpScopes";
 import { BINNED_WINDOWS, binnedCountsByKey, isBinnedWindow, listKeyBinned, restoreKeyBinned } from "./mcpBinned";
 import { pendingProposalsByKey } from "./inbox/service";
@@ -194,18 +194,20 @@ export function registerKeyRoutes(app: Hono<AppEnv>) {
       // that adds access is checked like a new key's grants, then rate-limited and re-authenticated.
       const plan = narrowApiKey(user.id, id, body, user.id, { dryRun: true });
       if (plan.added.length) {
+        // D620: a vault key gains access only while the vault is available here.
+        if (plan.kind === "vault" && !vaultStatus().enabled) return c.json({ error: "The vault is not available on this server", code: "VAULT_DISABLED" }, 503);
         if (createLimited(user.id)) return c.json({ error: "Too many key changes. Try again later.", code: "RATE_LIMITED" }, 429);
         const reauth = await checkReauth(user.id, body, "api_key_update", c.get("sessionId"));
         if (!reauth.ok) {
-          audit(user.id, null, "keys.update_failed", { keyId: id });
+          audit(user.id, null, plan.kind === "vault" ? "vault.keys.update_failed" : "keys.update_failed", { keyId: id });
           return c.json({ error: reauth.error, code: reauth.code }, 401);
         }
         if (reauth.recoveryCodeUsed) mailTwoFactor(user.id, "recovery_used");
       }
-      const { changed, added } = narrowApiKey(user.id, id, body, user.id, { widen: plan.added.length > 0 });
+      const { changed, added, kind } = narrowApiKey(user.id, id, body, user.id, { widen: plan.added.length > 0 });
       // D600: the same kind of security mail as a new key, naming the key and what was added; a
-      // narrowing edit sends nothing.
-      if (added.length) mailApiKeyAccessAdded(user.id, id, addedGrantEntries(added));
+      // narrowing edit sends nothing. A vault key's mail says counts only (D622).
+      if (added.length) mailApiKeyAccessAdded(user.id, id, kind === "vault" ? addedVaultEntries(added) : addedGrantEntries(added));
       return c.json({ changed, key: ownApiKey(user.id, id) });
     } catch (error) {
       if (error instanceof KeyError) return keyError(c, error);

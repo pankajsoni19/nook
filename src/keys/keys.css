@@ -171,11 +171,13 @@
 /*
  * D601: a general key's grant rows (New key, Edit, Rotate) fit their longest values at desktop widths
  * ("Read agents, chats, and knowledge", "Chosen folders and notes"): a wider dialog, and Module (short
- * names) gives room to Permission. Vault rows and every other key dialog keep their size.
+ * names) gives room to Permission. D624: vault rows get the same width, and Vault (long vault names,
+ * "Payments production secrets") gets the widest column. Every other key dialog keeps its size.
  */
 @media (min-width: 761px) {
-  .keys-dialog.wide:has(.grant-builder:not(.vault-grant-builder)) { width: min(880px, calc(100vw - 32px)); }
+  .keys-dialog.wide:has(.grant-builder) { width: min(880px, calc(100vw - 32px)); }
   .grant-builder:not(.vault-grant-builder) .grant-row-fields { grid-template-columns: minmax(0, .8fr) minmax(0, 1.3fr) minmax(0, 1fr); }
+  .vault-grant-builder .grant-row-fields { grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr); }
 }
 .keys-dialog-actions .keys-save { min-width: 96px; }
 /* D587: a module with one level shows it as text, the reason on hover and to screen readers. */

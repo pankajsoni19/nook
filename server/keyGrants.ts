@@ -258,3 +258,50 @@ export function describeAddedGrants(entries: readonly string[]) {
       return `${ADDED_MODULE_WORDS[match[1]!]}: ${ADDED_PERMISSION_WORDS[match[2]!]}${items ? ` (${items} chosen ${items === 1 ? "item" : "items"})` : ""}`;
     }).join(" · ");
 }
+
+/**
+ * Vault grants (and settings) an edit added to a vault key, compact (D622): `vault:<read|write>@<N><v|e|p>`
+ * for N vaults on every environment (`v`), N named environments (`e`), or N protected environments
+ * (`p`); `vault:flag:mcp_values` / `vault:flag:protected` for a setting turned on. Counts only, never a
+ * vault, environment, or secret id or name, so it fits `access_events.meta_json` and the mail.
+ */
+export function addedVaultEntries(grants: readonly Pick<Grant, "permission" | "resourceId" | "envId" | "protectedAtGrant">[], flags: readonly ("mcp_values" | "protected")[] = []) {
+  const groups = new Map<string, Set<string>>();
+  for (const grant of grants) {
+    const scope = grant.envId ? (grant.protectedAtGrant ? "p" : "e") : "v";
+    const id = `${grant.permission === "write" ? "write" : "read"}@${scope}`;
+    const items = groups.get(id) ?? new Set<string>();
+    items.add(`${grant.resourceId}:${grant.envId ?? "*"}`);
+    groups.set(id, items);
+  }
+  const order = ["read@v", "read@e", "read@p", "write@v", "write@e", "write@p"];
+  const entries = order.filter((id) => groups.has(id)).map((id) => `vault:${id.slice(0, -1)}${groups.get(id)!.size}${id.slice(-1)}`);
+  return [...entries, ...flags.map((flag) => `vault:flag:${flag}`)];
+}
+
+const VAULT_SCOPE_WORDS: Record<string, [string, string]> = {
+  v: ["vault (every environment)", "vaults (every environment)"],
+  e: ["environment", "environments"],
+  p: ["protected environment", "protected environments"]
+};
+const VAULT_FLAG_WORDS: Record<string, string> = { mcp_values: "Values over MCP", protected: "Protected environments" };
+
+/** A vault key's added entries in words: "Read values: 1 vault (every environment) · Read and write values: 2 environments · Values over MCP". */
+export function describeAddedVaultGrants(entries: readonly string[]) {
+  const parts: string[] = [];
+  for (const entry of entries) {
+    const grant = /^vault:(read|write)@(\d+)([vep])$/.exec(entry);
+    if (grant) {
+      const count = Number(grant[2]);
+      parts.push(`${grant[1] === "write" ? "Read and write values" : "Read values"}: ${count} ${VAULT_SCOPE_WORDS[grant[3]!]![count === 1 ? 0 : 1]}`);
+      continue;
+    }
+    const flag = /^vault:flag:([a-z_]+)$/.exec(entry);
+    if (flag && flag[1]! in VAULT_FLAG_WORDS) parts.push(VAULT_FLAG_WORDS[flag[1]!]!);
+  }
+  return parts.join(" · ");
+}
+
+/** The added entries of either kind of key in words (the bell and the mail). */
+export const describeKeyAdditions = (entries: readonly string[]) =>
+  entries.some((entry) => entry.startsWith("vault:")) ? describeAddedVaultGrants(entries) : describeAddedGrants(entries);
