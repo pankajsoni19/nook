@@ -7,30 +7,26 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 
 **Current state (2026-10-22).**
 - **v0.43.0** is released (2026-10-22): several docs per report, Add a new section and doc links in Changes, delete from the header, edit and suggest SQL, dynamic filters (slice 1).
-- Migrations: **001–066** are released and immutable (045 and 054 unused; 054 is reserved for Messages). Next free: **067**.
+- Migrations: **001–066** are released and immutable (045 and 054 unused; 054 is reserved for Messages). Next free: **067** (lane CLAUDE), **068** LISTS, **069** FILT2, **070** SMALL, **071** LOCALEMB.
 - Development happens directly on `main`, pushed as each change passes its gates.
 
 ## In flight
 
-- None right now.
-
-## In flight
-
+- [ ] **Report filters, later slices** (lane FILT2, migration 069) (slice 1 shipped, D532–D537): linked filters, client-side table sort and contains, saved personal views, more filter types (number range, exclude, text contains, Add filter on dates), and concurrent parameter runs, ranked in [REPORT_FILTERS.md](docs/plan/REPORT_FILTERS.md) "Later". Started 2026-10-22.
+- [ ] **Report Lists** ([plan](docs/plan/REPORTS_ORG.md) phase 3; lane LISTS, migration 068): a report in many lists; a list never grants access.
+- [ ] **Reports: a personal copy of a report?** (lane EDIT research, D531): Metabase, Redash, and Tableau let people without edit rights save a copy and change that; Nook offers Suggest an edit instead. Lane SMALL builds **Duplicate report** (operator: "complete todo.md").
 - [ ] **Claude (Anthropic) as a model provider** (operator, 2026-10-22; lane CLAUDE):
   - [ ] Test says "anthropic-version header required": send `anthropic-version` (and `x-api-key`) automatically when the endpoint is Anthropic's.
   - [ ] Test tool calling reports "tool_choice type tool and any are not supported for this model" as a failure: record it as "forced choice unsupported, Nook uses auto" and confirm tools work with auto.
   - [ ] Knowledge bases: Anthropic has no embeddings API. Mark such providers as chat-only, default new bases to a provider that embeds (e.g. the OpenAI one), and say so clearly; evaluate Voyage AI (Anthropic's recommended embeddings) as an embeddings-only provider.
   - [ ] Anthropic-only instances (operator, 2026-10-22): knowledge bases in **keyword-only mode** (BM25 over the existing chunk FTS, no embeddings API), chosen automatically when no provider embeds; Change embedding model moves a base to vectors later.
-  - [ ] Decide with the operator: a **local embedding model** in the image (transformers.js + a small model, ~25–100 MB, CPU) for meaning-based search with no outside provider.
+  - [ ] **Local embedding model** (operator: "complete todo.md", 2026-10-22; lane LOCALEMB after lane CLAUDE lands, migration 071 if needed) (transformers.js + a small model, CPU) for meaning-based search with no outside provider.
 
 ## Waiting on the operator
 
-- [ ] **Report filters, later slices** (slice 1 shipped, D532–D537): linked filters, client-side table sort and contains, saved personal views, more filter types (number range, exclude, text contains, Add filter on dates), and concurrent parameter runs, ranked in [REPORT_FILTERS.md](docs/plan/REPORT_FILTERS.md) "Later". Start a slice when the operator asks.
 - [ ] **Real-model eval of report generation** (D488 chart kinds, D489 parameters): only the scripted provider has run. Run `bun --no-env-file scripts/reportEval.ts --clickhouse <test ClickHouse>` on a host whose Nook has a working model provider (it falls back to Settings → AI; the local instance's OpenAI key is a placeholder), or set `REPORT_EVAL_*`, or regenerate reports on the VM (docs/OPERATIONS.md "Report generation eval"). Check: the five kind cases (`onboarding_funnel`, `cohort_retention`, `quota_attainment`, `latency_spread`, `plan_flow`) get fitting chart kinds, and a doc that names a window or a dimension gets a date range or filter. Tune the prompts from the scores.
-- [ ] **Report Lists** ([plan](docs/plan/REPORTS_ORG.md) phase 3, optional, migration 067 — 064–066 went to lanes DOCS, EDIT and FILTERS): a report in many lists; a list never grants access. Start only if the operator asks.
-- [ ] **Reports: a personal copy of a report?** (lane EDIT research, D531): Metabase, Redash, and Tableau let people without edit rights save a copy and change that; Nook offers Suggest an edit instead. A "Duplicate report" would fork the schedule, sharing, and doc. Build only if the team asks.
 
-## Small fixes
+## Small fixes (lane SMALL)
 
 - [ ] Add filter is only proven against the scripted agent and the QA ClickHouse by hand: add a `CLICKHOUSE_TEST_URL` variant of tests/reportFiltersRequest.test.ts that seeds `eval_top_routes` and runs the identity check on a real server (ORDER BY ties, Decimal and Float rows).
 - [ ] Several docs (lane DOCS): a doc added in Doc settings stays "New" after a change that attached the same doc is applied (the edit read it, but only Regenerate stamps a doc's hash); decide whether an applied change should stamp it.
