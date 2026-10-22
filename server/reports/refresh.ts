@@ -1,7 +1,7 @@
 import { audit, db, now } from "../db";
 import { REPORT_LIMITS, type ReportQuery, type ReportResult, type ReportRun, type ReportSpec, type ResultColumn, type RunTrigger } from "../../shared/reports";
 import type { QueryResultView, ReportResultsView } from "../../shared/reportsView";
-import { bindValues, defaultValues, todayUtc, type BoundParam } from "../../shared/reportParams";
+import { bindValues, defaultValues, reachOf, todayUtc, type BoundParam } from "../../shared/reportParams";
 import { reportTimeZone, reportToday } from "./paramZone";
 import { ownedReport, readableReport, type ReportRow } from "./access";
 import { queryIdFor } from "./clickhouse";
@@ -129,7 +129,7 @@ export function reportResults(reportId: string, userId: string): ReportResultsVi
   const running = runningRun(reportId);
   const spec = parseSpec(report.spec_json);
   // D489: the zone the report's date presets resolve in (the control bar names it).
-  return { results: queryResults(reportId, spec), running: running ? runView(running) : null, ...(spec.parameters.length ? { timeZone: reportTimeZone(reportId) } : {}) };
+  return { results: queryResults(reportId, spec), running: running ? runView(running) : null, ...(spec.parameters.length ? { timeZone: reportTimeZone(reportId), reach: reachOf(spec.parameters, spec.queries) } : {}) };
 }
 
 // ------------------------------------------------------------------------------- abandoned runs

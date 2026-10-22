@@ -23,6 +23,7 @@ import { usableDatasource } from "./datasources";
 import { METRIC_ID, METRIC_LIMITS, type CatalogMetricInput } from "../../shared/reportsMetrics";
 import { queryResults, reportRun, startRefresh } from "./refresh";
 import { OPTION_SEARCH, paramResults, runParamSet, searchParamOptions } from "./params";
+import { reachOf } from "../../shared/reportParams";
 import { saveSchedule } from "./scheduler";
 import { listReportsPage, parseSpec as parseStoredSpec, setFavorite } from "./service";
 import { createFolder, listFolders, moveReportToFolder, updateFolder } from "./folders";
@@ -75,7 +76,7 @@ const ROWS_SHOWN = 50;
 const reportId = z.string().uuid().describe("The report id (from list_reports)");
 /** Spec v3 (D489): parameter values by parameter id (get_report lists the parameters and their defaults). */
 const parameterValues = z.record(z.string().max(40), z.unknown()).optional()
-  .describe("Parameter values by id, e.g. {\"period\": {\"preset\": \"7d\"}, \"route\": [\"/api/orders\"]}; a date range is {preset: today|7d|30d|90d|mtd|qtd} or {preset: custom, from, to}; a multi-select [] is All. Omitted: the defaults");
+  .describe("Parameter values by id, e.g. {\"period\": {\"preset\": \"7d\"}, \"route\": [\"/api/orders\"]}; a date range is {preset: today|yesterday|7d|30d|90d|this_week|last_week|mtd|last_month|qtd|last_quarter|ytd|12m} or {preset: custom, from, to}; a multi-select [] is All. Omitted: the defaults");
 
 function ownerRole(userId: string): string | null {
   const owner = db.query("SELECT role FROM users WHERE id = ? AND disabled_at IS NULL").get(userId) as { role: string } | null;
@@ -200,7 +201,7 @@ export const reportTools: McpToolSpec[] = [
   defineTool({
     name: "get_report",
     title: "Get a report",
-    description: `One report: title, status, the caller's level (owner, comment, view), auto-apply, the docs it is built from (the owner's reports: title, source, link, whether it changed since), spec v2's sections and blocks (markdown, KPI, chart, table: intent, width, section, and their mapping), and the saved queries with their SQL. Results are read per block with get_report_block. ${UNTRUSTED}`,
+    description: `One report: title, status, the caller's level (owner, comment, view), auto-apply, the docs it is built from (the owner's reports: title, source, link, whether it changed since), spec v2's sections and blocks (markdown, KPI, chart, table: intent, width, section, their mapping, and a chart's or table's clickFilter), the parameters with \`reach\` (the queries each one filters), and the saved queries with their SQL. Results are read per block with get_report_block. ${UNTRUSTED}`,
     scopes: ["reports:read"],
     access: { mode: "items", items: reportItem },
     write: false,
@@ -219,6 +220,8 @@ export const reportTools: McpToolSpec[] = [
         // Spec v2 (wave 48b): a stored v1 spec reads upgraded (intents, widths, no sections).
         specVersion: spec.specVersion, sections: spec.sections,
         parameters: spec.parameters, parameterSet: { isDefault: set.isDefault, values: set.values, bound: set.bound, notYetRun: set.missing },
+        // D533: which queries each parameter reaches (a block whose queries a parameter does not reach is not filtered by it).
+        reach: reachOf(spec.parameters, spec.queries),
         blocks: spec.blocks.map(withoutProvenance), queries: spec.queries.map(({ key: queryKey, sql, purpose, createdBy }) => ({ key: queryKey, sql, purpose, createdBy }))
       };
     })

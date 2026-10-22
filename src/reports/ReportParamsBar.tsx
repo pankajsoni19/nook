@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState } from "react";
-import { Check, ChevronDown, ListFilter, LoaderCircle, RotateCcw } from "lucide-react";
+import { Check, ChevronDown, ListFilter, LoaderCircle, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { ModalDialog } from "../files/Dialog";
 import type { ReportParamsSearch } from "../router";
 import { Select } from "../ui/Select";
@@ -82,6 +82,20 @@ const optionsNote = (state: OptionsState[string] | undefined) => state === "load
 /** "Sep 1 – Sep 30" for a custom range (the pill is short); presets read as their label. */
 /** D489: the zone the report's presets resolve in (its schedule's, else the instance's), named on the picker. */
 const ZoneContext = createContext<string>("UTC");
+
+/** D533: how many of the report's chart, KPI, and table blocks each parameter reaches. */
+export type ParamReach = Record<string, { blocks: number; total: number }>;
+const ReachContext = createContext<ParamReach>({});
+/** "Filters 4 of 6 blocks" ("all 6" when it reaches every one); null when unknown. */
+export function reachText(reach: ParamReach[string] | undefined): string | null {
+  if (!reach || !reach.total) return null;
+  if (reach.blocks === reach.total) return reach.total === 1 ? "Filters the one block" : `Filters all ${reach.total} blocks`;
+  return `Filters ${reach.blocks} of ${reach.total} ${reach.total === 1 ? "block" : "blocks"}`;
+}
+function ReachNote({ paramId }: { paramId: string }) {
+  const text = reachText(useContext(ReachContext)[paramId]);
+  return text ? <p className="report-param-reach">{text}</p> : null;
+}
 const presetText = (preset: Exclude<DateRangeValue["preset"], "custom">, zone: string) => `${DATE_PRESET_LABELS[preset]} (${zoneLabel(zone)})`;
 
 function rangeText(value: DateRangeValue, zone: string) {
@@ -105,6 +119,7 @@ type FieldProps = {
 /** One parameter's control: a pill in the bar, a labelled field in the phone's sheet. */
 function ParamField({ param, value, options, variant, disabled, onChange, onSheet }: FieldProps) {
   const zone = useContext(ZoneContext);
+  const reach = reachText(useContext(ReachContext)[param.id]);
   const isDefault = JSON.stringify(value) === JSON.stringify(param.default);
   let control: React.ReactNode;
   switch (param.type) {
@@ -113,6 +128,7 @@ function ParamField({ param, value, options, variant, disabled, onChange, onShee
       control = <Select<DatePreset> variant={variant} label={param.label} value={range.preset} searchable={false} disabled={disabled}
         placeholder={rangeText(range, zone)}
         options={DATE_PRESETS.map((preset) => ({ value: preset, label: preset === "custom" && range.preset === "custom" ? `Custom: ${rangeText(range, zone)}` : preset === "custom" ? "Custom range…" : presetText(preset, zone) }))}
+        footer={reach ? <ReachNote paramId={param.id} /> : undefined}
         onChange={(preset) => preset === "custom" ? onSheet({ kind: "range", param }) : onChange({ preset })} />;
       break;
     }
@@ -133,8 +149,8 @@ function ParamField({ param, value, options, variant, disabled, onChange, onShee
       control = <ParamInput param={param} value={value} disabled={disabled} onChange={onChange} />;
   }
   return variant === "chip"
-    ? <span className={`report-param${isDefault ? "" : " active"}`} title={param.label}>{control}</span>
-    : <div className="report-param-field"><span className="report-param-label">{param.label}</span>{control}</div>;
+    ? <span className={`report-param${isDefault ? "" : " active"}`} title={reach ? `${param.label}: ${reach.toLowerCase()}` : param.label}>{control}</span>
+    : <div className="report-param-field"><span className="report-param-label">{param.label}</span>{control}{reach && <span className="report-param-reach">{reach}</span>}</div>;
 }
 
 /** A single select: the cached choices; past 200 its search box also asks ClickHouse (D491). */
@@ -147,7 +163,8 @@ function SelectParamControl({ param, value, state, variant, disabled, onChange }
   const all = choices.includes(value) ? choices : [value, ...choices];
   return <Select<string> variant={variant} label={param.label} value={value} searchable={cut ? true : "auto"} disabled={disabled}
     onSearch={cut ? setQuery : undefined} emptyText={search.searching ? "Searching…" : search.error ?? undefined}
-    options={all.map((choice) => ({ value: choice, label: choice || "(blank)" }))} onChange={onChange} />;
+    options={all.map((choice) => ({ value: choice, label: choice || "(blank)" }))} onChange={onChange}
+    footer={variant === "chip" ? <ReachNote paramId={param.id} /> : undefined} />;
 }
 
 /** A number or text parameter: applied on Enter or when the field loses focus, if it fits. */
@@ -172,10 +189,16 @@ type BarProps = {
   onChange: (values: ParamValues) => void;
   /** D489: the report's zone (IANA), from the results. */
   timeZone?: string;
+  /** D533: how many blocks each parameter reaches ("Filters 4 of 6 blocks"). */
+  reach?: ParamReach;
+  /** D534: the owner's "+ Filter" (opens Add filter). */
+  onAddFilter?: () => void;
+  /** D534: the owner's "Remove filter" on a multi-select's sheet. */
+  onRemoveFilter?: (param: ReportParameter) => void;
 };
 
 /** The control bar: pills from 761 px, the Filters button and sheet on a phone. */
-export function ReportParamsBar({ reportId, parameters, values, busy, onChange, timeZone = "UTC" }: BarProps) {
+export function ReportParamsBar({ reportId, parameters, values, busy, onChange, timeZone = "UTC", reach = NO_REACH, onAddFilter, onRemoveFilter }: BarProps) {
   const options = useParamOptions(reportId, parameters, true);
   const [sheet, setSheet] = useState<Sheet>(null);
   const [phoneOpen, setPhoneOpen] = useState(false);
@@ -184,27 +207,30 @@ export function ReportParamsBar({ reportId, parameters, values, busy, onChange, 
   const set = (param: ReportParameter, value: ParamValue) => onChange({ ...values, [param.id]: value });
   const reset = () => onChange(defaultValues(parameters));
   const summary = (param: ReportParameter) => param.type === "date_range" ? rangeText((values[param.id] ?? param.default) as DateRangeValue, timeZone) : valueLabel(param, values[param.id] ?? param.default);
-  return <ReportIdContext.Provider value={reportId}><ZoneContext.Provider value={timeZone}><div className="report-params" role="group" aria-label="Report filters">
+  const addButton = (className: string) => onAddFilter ? <button type="button" className={`report-params-add ${className}`} onClick={onAddFilter} aria-haspopup="dialog"><Plus aria-hidden="true" />Filter</button> : null;
+  return <ReportIdContext.Provider value={reportId}><ZoneContext.Provider value={timeZone}><ReachContext.Provider value={reach}><div className="report-params" role="group" aria-label="Report filters">
     <div className="report-params-chips">
       {parameters.map((param) => <ParamField key={param.id} param={param} value={values[param.id] ?? param.default} options={options} variant="chip" disabled={false}
         onChange={(value) => set(param, value)} onSheet={setSheet} />)}
+      {addButton("report-params-add-chip")}
       {!isDefault && <button type="button" className="secondary-button report-params-reset" onClick={reset}><RotateCcw aria-hidden="true" />Reset to defaults</button>}
       {busy && <span className="report-params-busy" role="status"><LoaderCircle className="spin" aria-hidden="true" />Updating…</span>}
     </div>
     <div className="report-params-narrow">
-      <button type="button" className={`secondary-button report-params-open${changed ? " active" : ""}`} onClick={() => setPhoneOpen(true)} aria-haspopup="dialog">
+      {parameters.length > 0 && <button type="button" className={`secondary-button report-params-open${changed ? " active" : ""}`} onClick={() => setPhoneOpen(true)} aria-haspopup="dialog">
         <ListFilter aria-hidden="true" />Filters{changed > 0 && <b aria-label={`${changed} changed`}>{changed}</b>}
-      </button>
+      </button>}
       <span className="report-params-summary">{parameters.map(summary).join(" · ")}</span>
+      {addButton("report-params-add-narrow")}
       {busy && <LoaderCircle className="spin report-params-spinner" aria-label="Updating" />}
     </div>
     {sheet?.kind === "range" && <CustomRangeSheet param={sheet.param} value={values[sheet.param.id] as DateRangeValue} onClose={() => setSheet(null)}
       onApply={(value) => { setSheet(null); set(sheet.param, value); }} />}
     {sheet?.kind === "multi" && <MultiSelectSheet param={sheet.param} value={values[sheet.param.id] as string[]} options={options[sheet.param.id]} onClose={() => setSheet(null)}
-      onApply={(value) => { setSheet(null); set(sheet.param, value); }} />}
+      onApply={(value) => { setSheet(null); set(sheet.param, value); }} onRemove={onRemoveFilter ? () => { const param = sheet.param; setSheet(null); onRemoveFilter(param); } : undefined} />}
     {phoneOpen && <ParamsSheet parameters={parameters} values={values} options={options} onClose={() => setPhoneOpen(false)} reopen={() => setPhoneOpen(true)}
-      onApply={(next) => { setPhoneOpen(false); onChange(next); }} />}
-  </div></ZoneContext.Provider></ReportIdContext.Provider>;
+      onApply={(next) => { setPhoneOpen(false); onChange(next); }} onRemove={onRemoveFilter ? (param) => { setPhoneOpen(false); onRemoveFilter(param); } : undefined} />}
+  </div></ReachContext.Provider></ZoneContext.Provider></ReportIdContext.Provider>;
 }
 
 /** Custom from–to days (both included); Apply keeps a valid range only. */
@@ -228,8 +254,10 @@ function CustomRangeSheet({ param, value, onApply, onClose }: { param: ReportPar
   </ModalDialog>;
 }
 
-/** A multi-select's choices as checkboxes; none checked is All. */
-function MultiSelectSheet({ param, value, options, onApply, onClose }: { param: MultiSelectParameter; value: string[]; options: OptionsState[string] | undefined; onApply: (value: string[]) => void; onClose: () => void }) {
+const NO_REACH: ParamReach = {};
+
+/** A multi-select's choices as checkboxes; none checked is All. D534: the owner's Remove filter asks the edit agent (a proposal in Changes). */
+function MultiSelectSheet({ param, value, options, onApply, onClose, onRemove }: { param: MultiSelectParameter; value: string[]; options: OptionsState[string] | undefined; onApply: (value: string[]) => void; onClose: () => void; onRemove?: () => void }) {
   const [picked, setPicked] = useState<string[]>(value ?? []);
   const [query, setQuery] = useState("");
   useHistoryDialogGuard(true, onClose, { reopen: null });
@@ -250,8 +278,10 @@ function MultiSelectSheet({ param, value, options, onApply, onClose }: { param: 
         {shown.map((choice) => <label key={choice} className="report-param-check"><input type="checkbox" checked={picked.includes(choice)} onChange={() => toggle(choice)} />{choice || "(blank)"}</label>)}
       </div>
       {note && <p className="report-param-problem">{note}</p>}
+      <ReachNote paramId={param.id} />
     </div>
     <footer className="file-dialog-actions">
+      {onRemove && <button type="button" className="secondary-button report-param-remove" onClick={onRemove}><Trash2 aria-hidden="true" />Remove filter</button>}
       <button type="button" className="secondary-button" onClick={onClose}>Cancel</button>
       <button type="button" className="primary-button" onClick={() => onApply(picked)}><Check aria-hidden="true" />Apply</button>
     </footer>
@@ -259,7 +289,7 @@ function MultiSelectSheet({ param, value, options, onApply, onClose }: { param: 
 }
 
 /** The phone's sheet: every parameter as a field over a draft; Show results applies it. */
-function ParamsSheet({ parameters, values, options, onApply, onClose, reopen }: { parameters: readonly ReportParameter[]; values: ParamValues; options: OptionsState; onApply: (values: ParamValues) => void; onClose: () => void; reopen: () => void }) {
+function ParamsSheet({ parameters, values, options, onApply, onClose, reopen, onRemove }: { parameters: readonly ReportParameter[]; values: ParamValues; options: OptionsState; onApply: (values: ParamValues) => void; onClose: () => void; reopen: () => void; onRemove?: (param: ReportParameter) => void }) {
   const [draft, setDraft] = useState<ParamValues>(values);
   const [sheet, setSheet] = useState<Sheet>(null);
   useHistoryDialogGuard(true, onClose, { reopen, layerKey: "reports.params" });
@@ -274,6 +304,7 @@ function ParamsSheet({ parameters, values, options, onApply, onClose, reopen }: 
       <button type="button" className="primary-button" onClick={() => onApply(draft)}><Check aria-hidden="true" />Show results</button>
     </footer>
     {sheet?.kind === "range" && <CustomRangeSheet param={sheet.param} value={draft[sheet.param.id] as DateRangeValue} onClose={() => setSheet(null)} onApply={(value) => { setSheet(null); set(sheet.param, value); }} />}
-    {sheet?.kind === "multi" && <MultiSelectSheet param={sheet.param} value={draft[sheet.param.id] as string[]} options={options[sheet.param.id]} onClose={() => setSheet(null)} onApply={(value) => { setSheet(null); set(sheet.param, value); }} />}
+    {sheet?.kind === "multi" && <MultiSelectSheet param={sheet.param} value={draft[sheet.param.id] as string[]} options={options[sheet.param.id]} onClose={() => setSheet(null)} onApply={(value) => { setSheet(null); set(sheet.param, value); }}
+      onRemove={onRemove ? () => { const param = sheet.param; setSheet(null); onRemove(param); } : undefined} />}
   </ModalDialog>;
 }

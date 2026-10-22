@@ -12,11 +12,16 @@
 export const PARAM_TYPES = ["date_range", "select", "multi_select", "number", "text"] as const;
 export type ParamType = typeof PARAM_TYPES[number];
 
-/** The date range's presets, in the picker's order. Days are calendar days in the report's zone (server/reports/paramZone.ts); `to` is included. */
-export const DATE_PRESETS = ["today", "7d", "30d", "90d", "mtd", "qtd", "custom"] as const;
+/**
+ * The date range's presets, in the picker's order. Days are calendar days in the report's zone
+ * (server/reports/paramZone.ts); `to` is included. D537 (lane FILTERS) added yesterday, this and last
+ * week (ISO, Monday to Sunday), last month, last quarter, year to date, and the last 12 months.
+ */
+export const DATE_PRESETS = ["today", "yesterday", "7d", "30d", "90d", "this_week", "last_week", "mtd", "last_month", "qtd", "last_quarter", "ytd", "12m", "custom"] as const;
 export type DatePreset = typeof DATE_PRESETS[number];
 export const DATE_PRESET_LABELS: Record<DatePreset, string> = {
-  today: "Today", "7d": "Last 7 days", "30d": "Last 30 days", "90d": "Last 90 days", mtd: "Month to date", qtd: "Quarter to date", custom: "Custom"
+  today: "Today", yesterday: "Yesterday", "7d": "Last 7 days", "30d": "Last 30 days", "90d": "Last 90 days", this_week: "This week", last_week: "Last week",
+  mtd: "Month to date", last_month: "Last month", qtd: "Quarter to date", last_quarter: "Last quarter", ytd: "Year to date", "12m": "Last 12 months", custom: "Custom"
 };
 
 /** The ClickHouse types each parameter type may bind as (never Identifier: a parameter can never name a table or column). */
@@ -84,6 +89,24 @@ export function placeholdersIn(sql: string): Array<{ name: string; type: string 
   return [...sql.matchAll(/\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([A-Za-z0-9_(), ]+?)\s*\}/g)].map((match) => ({ name: match[1]!, type: normalizeType(match[2]!) }));
 }
 
+/**
+ * The parameters a query reads (D532, D533): those whose placeholders its SQL holds (a date range by
+ * `<id>_from` or `<id>_to`), in the parameters' order. A quick scan shared by the server's per-query
+ * result keys and the client's "Not filtered by"; a placeholder in a comment counts too (it can only
+ * make a query re-run when it need not).
+ */
+export function readsOf(sql: string, params: ReadonlyArray<Pick<ReportParameter, "id" | "type" | "chType">>): string[] {
+  const names = new Set(placeholdersIn(sql).map((item) => item.name));
+  return params.filter((param) => placeholdersOf(param).some((item) => names.has(item.name))).map((param) => param.id);
+}
+
+/** Which queries each parameter reaches (D533): `{ paramId: queryKey[] }`, every parameter listed. */
+export function reachOf(params: ReadonlyArray<Pick<ReportParameter, "id" | "type" | "chType">>, queries: ReadonlyArray<{ key: string; sql: string }>): Record<string, string[]> {
+  const reach: Record<string, string[]> = Object.fromEntries(params.map((param) => [param.id, [] as string[]]));
+  for (const query of queries) for (const id of readsOf(query.sql, params)) reach[id]!.push(query.key);
+  return reach;
+}
+
 /** A type as written, with its spaces taken out (`Array( String )` is `Array(String)`). */
 export const normalizeType = (type: string) => type.replace(/\s+/g, "");
 
@@ -135,10 +158,36 @@ function shiftDay(day: string, days: number): string {
 /** A real calendar day (not 2026-02-31). */
 export const validDay = (day: string) => ISO_DAY.test(day) && new Date(`${day}T00:00:00Z`).toISOString().slice(0, 10) === day;
 
+/** The last day of a month (`month` 1–12). */
+const lastDayOf = (year: number, month: number) => new Date(Date.UTC(year, month, 0)).getUTCDate();
+const dayOf = (year: number, month: number, day: number) => `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+
 /** The from and to days (both included) a date range stands for on `today`. */
 export function resolveDateRange(value: DateRangeValue, today: string): { from: string; to: string } {
+  const year = Number(today.slice(0, 4));
+  const month = Number(today.slice(5, 7));
+  // ISO weeks start on Monday (getUTCDay() is 0 on Sunday).
+  const weekday = (new Date(`${today}T00:00:00Z`).getUTCDay() + 6) % 7;
   switch (value.preset) {
     case "today": return { from: today, to: today };
+    case "yesterday": { const day = shiftDay(today, -1); return { from: day, to: day }; }
+    case "this_week": return { from: shiftDay(today, -weekday), to: today };
+    case "last_week": { const monday = shiftDay(today, -weekday - 7); return { from: monday, to: shiftDay(monday, 6) }; }
+    case "last_month": {
+      const [y, m] = month === 1 ? [year - 1, 12] : [year, month - 1];
+      return { from: dayOf(y, m, 1), to: dayOf(y, m, lastDayOf(y, m)) };
+    }
+    case "last_quarter": {
+      const first = month - ((month - 1) % 3);
+      const [y, m] = first === 1 ? [year - 1, 10] : [year, first - 3];
+      return { from: dayOf(y, m, 1), to: dayOf(y, m + 2, lastDayOf(y, m + 2)) };
+    }
+    case "ytd": return { from: dayOf(year, 1, 1), to: today };
+    case "12m": {
+      // The twelve months up to today: from the day after the same day a year ago (29 February: 1 March).
+      const day = Number(today.slice(8, 10));
+      return { from: shiftDay(dayOf(year - 1, month, Math.min(day, lastDayOf(year - 1, month))), 1), to: today };
+    }
     case "7d": return { from: shiftDay(today, -6), to: today };
     case "30d": return { from: shiftDay(today, -29), to: today };
     case "90d": return { from: shiftDay(today, -89), to: today };

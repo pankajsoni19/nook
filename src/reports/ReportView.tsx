@@ -4,7 +4,7 @@ import { ModalDialog } from "../files/Dialog";
 import { Markdown, type RenderContext } from "../chat/markdown/render";
 import { notify } from "../ui/notify";
 import { useHistoryDialogGuard } from "../ui/useHistoryDialogGuard";
-import { defaultWidth, reportLayout, type ChartBlock, type ReportBlock, type ReportDetail, type ReportResult, type ReportRun } from "../../shared/reports";
+import { blockKeys, defaultWidth, reportLayout, type ChartBlock, type ReportBlock, type ReportDetail, type ReportResult, type ReportRun } from "../../shared/reports";
 import { reportCssVariables } from "../../shared/reportTheme";
 import type { QueryResultView, ReportResultsView, ScheduleView } from "../../shared/reportsView";
 import { buildChartOption, paletteFor, type ChartBuild, type ChartPalette } from "./chartOption";
@@ -16,8 +16,8 @@ import { KpiTile, type ResultLookup } from "./KpiTile";
 import { ResultTable } from "./ResultTable";
 import { PAGE_METRICS_RUN_MARKER } from "../../shared/reportsMetrics";
 import { previewVersionOf, getParamResults, getResults, getRun, listRuns, refreshReport, runParamSet, RUN_STATUS_TEXT, timeAgo } from "./reportViewApi";
-import { ReportParamsBar, ReportParamsContext } from "./ReportParamsBar";
-import { canonicalValues, isDefaultSet, valuesFromSearch, valuesToSearch, type ParamValues } from "../../shared/reportParams";
+import { ReportParamsBar, ReportParamsContext, type ParamReach } from "./ReportParamsBar";
+import { canonicalValues, isDefaultSet, reachOf, valuesFromSearch, valuesToSearch, type ParamValues, type ReportParameter } from "../../shared/reportParams";
 import { codeOf, messageOf } from "./reportsApi";
 import { scheduleBadge, ScheduleSheet } from "./ScheduleSheet";
 import { CommentOnBlockButton } from "./reportComment";
@@ -295,18 +295,30 @@ export function ReportView({ report, canWrite, generating = false, initial, read
   const editing = useReportEditing();
   const removal = useHeaderRemoval(report, editing?.onChanged ?? noChange);
   const canRemove = Boolean(editing?.canEdit) && !readOnly && blocks.length > 1;
+  // D534: the owner's Add filter and Remove filter (not on a past version or in tests without a URL).
+  const canAddFilter = Boolean(editing?.canEdit && editing.addFilter) && !readOnly && !initial;
   const removeBlock = (block: ReportBlock) => { void removal.remove({ kind: "block", block }); };
   const removeButton = (block: ReportBlock, className = "") => canRemove
     ? <RemoveButton label={blockLabel(block)} disabled={busy} className={className} onClick={() => removeBlock(block)} /> : null;
 
+  // D533: which queries each parameter reaches, the blocks that follow it, and the changed filters a block ignores.
+  const queryReach = useMemo(() => reachOf(parameters, report.spec.queries), [parameters, report.spec.queries]);
+  const blockReach = useMemo<ParamReach>(() => {
+    const data = blocks.filter(isDataBlock);
+    return Object.fromEntries(parameters.map((param) => [param.id, { blocks: data.filter((block) => blockKeys(block).some((key) => queryReach[param.id]?.includes(key))).length, total: data.length }]));
+  }, [blocks, parameters, queryReach]);
+  const changedParams = useMemo(() => withParams ? parameters.filter((param) => !isDefaultSet([param], { [param.id]: values[param.id] ?? param.default })) : [], [parameters, values, withParams]);
+  const notFilteredBy = (block: DataBlock) => changedParams.filter((param) => !blockKeys(block).some((key) => queryReach[param.id]?.includes(key)));
+
   const card = (block: DataBlock) => <DataBlockCard key={block.id} block={block} view={results.get(block.queryKey)} hasQuery={queries.has(block.queryKey)} palette={palette}
-    running={running} loaded={view !== null} lookup={lookup} readOnly={readOnly} pending={Boolean(pending?.includes(block.queryKey))} filtered={withParams}
+    running={running} loaded={view !== null} lookup={lookup} readOnly={readOnly} pending={Boolean(pending?.some((key) => blockKeys(block).includes(key)))} filtered={withParams} notFilteredBy={notFilteredBy(block)}
     onInspect={() => setInspect({ blockId: block.id, tab: "query" })} onMenu={() => setMenuBlock(block.id)}
     onRemove={canRemove ? () => removeBlock(block) : undefined} removeDisabled={busy} />;
 
   if (!blocks.length) return null;
   return <section className={`report-view report-theme-${palette.mode}`} style={cssVars} aria-label="Report">
-    {withParams && <ReportParamsBar reportId={report.id} parameters={parameters} values={values} busy={Boolean(pending)} onChange={changeParams} timeZone={view?.timeZone} />}
+    {(withParams || (canAddFilter && paramsContext !== null)) && <ReportParamsBar reportId={report.id} parameters={parameters} values={values} busy={Boolean(pending)} onChange={changeParams} timeZone={view?.timeZone}
+      reach={blockReach} onAddFilter={canAddFilter ? editing?.addFilter : undefined} onRemoveFilter={canAddFilter && editing?.removeFilter ? (param) => editing.removeFilter!(param.id) : undefined} />}
     {!readOnly && <div className="report-view-toolbar">
       <p className="report-view-status" role="status">
         {busy ? <span className="report-view-running"><LoaderCircle className="spin" aria-hidden="true" />{!running || running.kind === "generate" ? "Generating…" : previewVersionOf(running.queryKeys) !== null ? `Running v${previewVersionOf(running.queryKeys)} on today's data…` : running.queryKeys?.[0] === PAGE_METRICS_RUN_MARKER ? "Re-reading metrics…" : running.queryKeys?.length ? `Re-running ${running.queryKeys.join(", ")}…` : "Refreshing…"}</span>
@@ -397,10 +409,12 @@ type CardProps = {
   /** D525: the owner's Remove (a trash between Inspect and ⋯; a narrow KPI tile keeps it in ⋯ only). */
   onRemove?: () => void;
   removeDisabled?: boolean;
+  /** D533: the changed filters this block's queries do not read ("Not filtered by Country"). */
+  notFilteredBy?: readonly Pick<ReportParameter, "id" | "label">[];
 };
 
 /** One chart, KPI, or table: its title, stale/error badges, the inspect, remove, and menu buttons, and the body. */
-export function DataBlockCard({ block, view, hasQuery, palette, running, loaded, lookup, onInspect, onMenu, readOnly, pending = false, filtered = false, onRemove, removeDisabled = false }: CardProps) {
+export function DataBlockCard({ block, view, hasQuery, palette, running, loaded, lookup, onInspect, onMenu, readOnly, pending = false, filtered = false, onRemove, removeDisabled = false, notFilteredBy = [] }: CardProps) {
   const result = view?.result ?? null;
   const failed = view?.failed ?? null;
   const rerunning = pending || Boolean(running && (!running.queryKeys || running.queryKeys.includes(block.queryKey)));
@@ -420,6 +434,7 @@ export function DataBlockCard({ block, view, hasQuery, palette, running, loaded,
         <button type="button" className="icon-button report-block-button" onClick={onMenu} aria-label={`More for ${title}`} aria-haspopup="dialog"><MoreHorizontal /></button>
       </span>}
     </header>
+    {notFilteredBy.length > 0 && <p className="report-block-unfiltered">Not filtered by {listLabels(notFilteredBy.map((param) => param.label))}</p>}
     <div className="report-block-body">
       {!hasQuery ? <p className="report-block-problem">This block names a query the report does not have ({block.queryKey}).</p>
         // D489: a chart or table with no rows for the chosen filters says so (not a mapping problem).
@@ -431,6 +446,9 @@ export function DataBlockCard({ block, view, hasQuery, palette, running, loaded,
     {view?.stale && failed && result && <p className="report-block-note">Showing results from {timeAgo(result.createdAt)}; the last run failed.</p>}
   </article>;
 }
+
+/** "Country", "Country and Route", "Country, Route, and Plan". */
+const listLabels = (labels: readonly string[]) => labels.length <= 1 ? labels.join("") : labels.length === 2 ? `${labels[0]} and ${labels[1]}` : `${labels.slice(0, -1).join(", ")}, and ${labels[labels.length - 1]}`;
 
 function BlockBody({ block, result, palette, lookup }: { block: DataBlock; result: ReportResult; palette: ChartPalette; lookup?: ResultLookup }) {
   if (block.type === "kpi") return <KpiTile block={block} result={result} lookup={lookup} />;

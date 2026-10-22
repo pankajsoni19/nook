@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
 import { closedSelect, filterOptions, firstEnabled, selectKey, wantsSearch, type SelectState } from "./listNavigation";
 import { DropdownSearch, DropdownSurface, ListboxOptions, optionDomId, useOutsideClose, useSheet, type Option, type Presentation } from "./Listbox";
@@ -32,13 +32,15 @@ export type SelectProps<V extends string> = {
   onSearch?: (query: string) => void;
   /** What the list says when nothing matches (default "No matches"), e.g. "Searching…" while the host looks. */
   emptyText?: string;
+  /** A line under the list (D533: a report filter's "Filters 4 of 6 blocks"); none by default. */
+  footer?: ReactNode;
 };
 
 /**
  * A select-only combobox (APG) that replaces the native select (D91). Desktop: a popup under the
  * trigger with type-ahead. Phones: a bottom sheet with 44 px rows that Back closes (D69).
  */
-export function Select<V extends string>({ value, onChange, options, label, labelledBy, placeholder = "Choose…", disabled = false, variant = "field", searchable = "auto", id, autoFocus, className, swatchOnly, presentation = "auto", defaultOpen = false, onSearch, emptyText }: SelectProps<V>) {
+export function Select<V extends string>({ value, onChange, options, label, labelledBy, placeholder = "Choose…", disabled = false, variant = "field", searchable = "auto", id, autoFocus, className, swatchOnly, presentation = "auto", defaultOpen = false, onSearch, emptyText, footer }: SelectProps<V>) {
   const autoId = useId();
   const triggerId = id ?? `${autoId}-trigger`;
   const listId = `${autoId}-listbox`;
@@ -117,7 +119,7 @@ export function Select<V extends string>({ value, onChange, options, label, labe
       <span className={`ui-select-value${swatchOnly ? " ui-visually-hidden" : ""}`}>{current ? current.label : placeholder}</span>
       <ChevronDown className="ui-select-chevron" aria-hidden="true" />
     </button>
-    {open && <DropdownSurface sheet={sheet} anchorRef={triggerRef} title={label ?? placeholder} onClose={() => close()}
+    {open && <DropdownSurface sheet={sheet} anchorRef={triggerRef} title={label ?? placeholder} onClose={() => close()} footer={footer}
       search={search ? <DropdownSearch inputRef={searchRef} value={query} label={`Search ${label ?? "options"}`} listId={listId} active={state.active}
         onChange={(next) => { changeQuery(next); setState((previous) => ({ ...previous, active: firstEnabled(filterOptions(options, next)) })); }}
         onKeyDown={(event) => onKey(event, true)} /> : undefined}>

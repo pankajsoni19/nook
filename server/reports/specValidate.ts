@@ -86,7 +86,7 @@ const blockSchema = z.discriminatedUnion("type", [
 ]);
 // Spec v3 (D489): the parameters. Strict like blocks; a value is checked against its type in checkSpecShape.
 const paramBase = { id: z.string().regex(PARAM_ID, "must match [a-z][a-z0-9_]{0,29}"), label: z.string().trim().min(1).max(PARAM_LIMITS.label) };
-const presetRange = z.object({ preset: z.enum(DATE_PRESETS.filter((preset) => preset !== "custom") as ["today", "7d", "30d", "90d", "mtd", "qtd"]) }).strict();
+const presetRange = z.object({ preset: z.enum(DATE_PRESETS.filter((preset) => preset !== "custom") as [Exclude<typeof DATE_PRESETS[number], "custom">, ...Array<Exclude<typeof DATE_PRESETS[number], "custom">>]) }).strict();
 const customRange = z.object({ preset: z.literal("custom"), from: z.string().refine(validDay, "must be a day YYYY-MM-DD"), to: z.string().refine(validDay, "must be a day YYYY-MM-DD") }).strict();
 const optionsQuery = z.string().trim().min(1).max(PARAM_LIMITS.optionsSql);
 const parameterSchema = z.discriminatedUnion("type", [

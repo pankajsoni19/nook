@@ -3,7 +3,7 @@ import { audit, db, now } from "../db";
 import { logger } from "../log";
 import { REPORT_LIMITS, type QueryOutcome, type ReportQuery, type ReportResult, type ReportSpec, type ResultColumn, type RunTrigger } from "../../shared/reports";
 import {
-  bindValues, boundRecord, canonicalValues, declaredPlaceholders, defaultValues, escapeParamString, isDefaultSet, PARAM_LIMITS, quotedElement, resolveValues, todayUtc, valueLabel,
+  bindValues, boundRecord, canonicalValues, declaredPlaceholders, defaultValues, escapeParamString, isDefaultSet, PARAM_LIMITS, placeholdersIn, quotedElement, readsOf, resolveValues, todayUtc, valueLabel,
   type BoundParam, type ParamOptions, type ParamSetInfo, type ParamValues, type ReportParameter
 } from "../../shared/reportParams";
 import type { QueryResultView, ReportResultsView } from "../../shared/reportsView";
@@ -30,8 +30,11 @@ import { reportToday } from "./paramZone";
  * - **Other sets** (a reader changed the date range or a filter): the values are checked against their
  *   parameters (and a select's against its options), bound on today's date, and keyed by the sha256 of
  *   the canonical bound values. Their results live in `report_param_results`, one per query per set,
- *   shared by everyone who can read the report. A result is fresh while its SQL is the saved SQL and it
- *   is newer than the report's last default run; a run fills the missing ones.
+ *   shared by everyone who can read the report. D532: a query that reads only default values answers
+ *   with the default results, and any other is found by its own key (`queryHashOf`: its SQL and the
+ *   values it reads) in any set, so a filter change runs only the queries that read it. A result is
+ *   fresh while its SQL is the saved SQL and it is newer than the report's last default run; a run
+ *   fills the missing ones.
  * - **Runs.** Read access is enough (D489): a run takes the report's one-run lock (409 RUN_IN_PROGRESS
  *   while another runs; the client retries), runs under the caller's query slots and the data source's
  *   limits, and is rate-limited per person (PARAM_RUNS.perMinute). Its run row is removed when it ends
@@ -344,6 +347,7 @@ export function resolveSet(spec: ReportSpec, given: Record<string, unknown> | nu
 type ParamResultRow = {
   id: string; report_id: string; set_hash: string; query_key: string; sql: string; sent_sql: string | null; params_json: string | null; columns_json: string; rows_json: string;
   row_count: number; truncated: number; rows_read: number | null; bytes_read: number | null; ch_query_id: string | null; ms: number | null; error: string | null; error_code: string | null; created_at: string;
+  /** 066 (D532): the query's own result key; NULL on rows from before it. */ query_hash: string | null;
 };
 
 function parseArray<T>(json: string): T[] {
@@ -362,19 +366,62 @@ const setQueries = (spec: ReportSpec) => {
   return spec.queries.filter((query) => used.has(query.key));
 };
 
-/** A set's cached results, and the keys whose result is missing or no longer fresh. */
-function setResults(report: ReportRow, spec: ReportSpec, hash: string): { results: QueryResultView[]; missing: string[] } {
-  const rows = new Map((db.query("SELECT * FROM report_param_results WHERE report_id = ? AND set_hash = ?").all(report.id, hash) as ParamResultRow[]).map((row) => [row.query_key, row]));
+/**
+ * D532: a query's result key: the sha256 of its SQL and the bound values of only the placeholders it
+ * reads. Two sets that differ only in a filter a query does not read share its result.
+ */
+export function queryHashOf(sql: string, bound: readonly BoundParam[]): string {
+  const names = new Set(placeholdersIn(sql).map((item) => item.name));
+  const read = bound.filter((item) => names.has(item.name)).sort((a, b) => a.name.localeCompare(b.name)).map((item) => [item.name, item.type, item.value]);
+  return createHash("sha256").update(JSON.stringify([sql, read])).digest("hex");
+}
+
+/** D532: whether every parameter a query reads holds its default in these values (its default result answers). */
+export function readsOnlyDefaults(spec: Pick<ReportSpec, "parameters">, sql: string, values: ParamValues): boolean {
+  const byId = new Map(spec.parameters.map((param) => [param.id, param]));
+  return readsOf(sql, spec.parameters).every((id) => {
+    const param = byId.get(id)!;
+    return canonicalValues([param], { [id]: values[id] ?? param.default }) === canonicalValues([param], {});
+  });
+}
+
+type SetResults = { results: QueryResultView[]; missing: string[]; /** Sets whose rows answered (their last use is touched). */ usedSets: Set<string> };
+
+/**
+ * A set's results (D532): a query that reads only default values answers with the default results
+ * (`report_results`, as Refresh all left them); any other is found by its own key (`queryHashOf`) in
+ * any cached set of the report. `missing` names the used queries with no fresh result under their key.
+ */
+function setResults(report: ReportRow, spec: ReportSpec, set: ResolvedSet, defaults: readonly QueryResultView[]): SetResults {
+  const hashes = new Map(spec.queries.map((query) => [query.key, queryHashOf(query.sql, set.bound)]));
+  const rows = new Map<string, ParamResultRow>();
+  // Newest first: the first row per query and key is its latest run.
+  for (const row of db.query("SELECT * FROM report_param_results WHERE report_id = ? AND query_hash IN (SELECT value FROM json_each(?)) ORDER BY created_at DESC, rowid DESC")
+    .all(report.id, JSON.stringify([...new Set(hashes.values())])) as ParamResultRow[]) {
+    if (row.query_hash === hashes.get(row.query_key) && !rows.has(row.query_key)) rows.set(row.query_key, row);
+  }
+  const byKey = new Map(defaults.map((item) => [item.queryKey, item]));
+  const used = new Set(setQueries(spec).map((query) => query.key));
   const missing: string[] = [];
+  const usedSets = new Set<string>();
   const results = spec.queries.map((query): QueryResultView => {
+    const fromDefault = byKey.get(query.key);
+    if (readsOnlyDefaults(spec, query.sql, set.values) && fromDefault && (fromDefault.result || fromDefault.failed)) return fromDefault;
     const row = rows.get(query.key);
     const fresh = Boolean(row && row.sql === query.sql && (!report.last_run_at || row.created_at >= report.last_run_at));
-    if (!fresh && setQueries(spec).some((item) => item.key === query.key)) missing.push(query.key);
+    if (!fresh && used.has(query.key)) missing.push(query.key);
     if (!row || row.sql !== query.sql) return { queryKey: query.key, result: null, failed: null, stale: false };
+    usedSets.add(row.set_hash);
     const view = paramResultView(row);
     return row.error === null ? { queryKey: query.key, result: view, failed: null, stale: !fresh } : { queryKey: query.key, result: null, failed: view, stale: false };
   });
-  return { results, missing };
+  return { results, missing, usedSets };
+}
+
+/** Marks the sets whose rows answered as used now (pruning keeps the most recently used). */
+function touchSets(reportId: string, hashes: Iterable<string>) {
+  const list = [...hashes];
+  if (list.length) db.query("UPDATE report_param_sets SET last_used_at = ? WHERE report_id = ? AND set_hash IN (SELECT value FROM json_each(?))").run(now(), reportId, JSON.stringify(list));
 }
 
 export type ParamResultsView = ReportResultsView & { set: ParamSetInfo };
@@ -390,9 +437,9 @@ export function paramResults(reportId: string, userId: string, given: Record<str
   const base = reportResults(reportId, userId);
   const info = (missing: string[]): ParamSetInfo => ({ isDefault: set.isDefault, values: set.values, bound: boundRecord(set.bound), missing });
   if (set.isDefault) return { ...base, set: info([]) };
-  const cached = setResults(report, spec, set.hash);
-  if (cached.results.some((item) => item.result || item.failed)) db.query("UPDATE report_param_sets SET last_used_at = ? WHERE report_id = ? AND set_hash = ?").run(now(), reportId, set.hash);
-  return { results: cached.results, running: base.running, ...(base.timeZone ? { timeZone: base.timeZone } : {}), set: info(cached.missing) };
+  const cached = setResults(report, spec, set, base.results);
+  touchSets(reportId, cached.usedSets);
+  return { results: cached.results, running: base.running, ...(base.timeZone ? { timeZone: base.timeZone } : {}), ...(base.reach ? { reach: base.reach } : {}), set: info(cached.missing) };
 }
 
 // ----------------------------------------------------------------------------------- runs
@@ -414,8 +461,8 @@ function rateLimit(userId: string, nowMs = Date.now()) {
 export const resetParamRateLimit = () => recent.clear();
 
 const UPSERT_RESULT = () => db.query(`INSERT INTO report_param_results (id, report_id, set_hash, query_key, sql, sent_sql, params_json, columns_json, rows_json, row_count, truncated,
-  rows_read, bytes_read, ch_query_id, ms, error, error_code, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  ON CONFLICT (report_id, set_hash, query_key) DO UPDATE SET id = excluded.id, sql = excluded.sql, sent_sql = excluded.sent_sql, params_json = excluded.params_json,
+  rows_read, bytes_read, ch_query_id, ms, error, error_code, created_at, query_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  ON CONFLICT (report_id, set_hash, query_key) DO UPDATE SET id = excluded.id, sql = excluded.sql, sent_sql = excluded.sent_sql, params_json = excluded.params_json, query_hash = excluded.query_hash,
   columns_json = excluded.columns_json, rows_json = excluded.rows_json, row_count = excluded.row_count, truncated = excluded.truncated, rows_read = excluded.rows_read,
   bytes_read = excluded.bytes_read, ch_query_id = excluded.ch_query_id, ms = excluded.ms, error = excluded.error, error_code = excluded.error_code, created_at = excluded.created_at`);
 
@@ -441,7 +488,7 @@ async function runOne(datasource: DatasourceRow, report: ReportRow, query: Repor
     }
     const capped = capRows(outcome.rows);
     UPSERT_RESULT().run(crypto.randomUUID(), report.id, set.hash, query.key, query.sql, outcome.sentSql, paramsJson(outcome.params), JSON.stringify(outcome.columns).slice(0, 200_000), capped.json, capped.kept,
-      outcome.truncated || capped.cut ? 1 : 0, outcome.rowsRead, outcome.bytesRead, outcome.chQueryId.slice(0, 128), outcome.ms, null, null, now());
+      outcome.truncated || capped.cut ? 1 : 0, outcome.rowsRead, outcome.bytesRead, outcome.chQueryId.slice(0, 128), outcome.ms, null, null, now(), queryHashOf(query.sql, set.bound));
     return true;
   } catch (error) {
     let code = "CLICKHOUSE";
@@ -455,7 +502,7 @@ async function runOne(datasource: DatasourceRow, report: ReportRow, query: Repor
       } catch { message = error instanceof Error ? `The query failed (${error.name})` : message; }
     }
     try {
-      UPSERT_RESULT().run(crypto.randomUUID(), report.id, set.hash, query.key, query.sql, null, paramsJson(boundRecord(set.bound)), "[]", "[]", 0, 0, null, null, queryId, Date.now() - started, message.slice(0, 2000), code.slice(0, 40), now());
+      UPSERT_RESULT().run(crypto.randomUUID(), report.id, set.hash, query.key, query.sql, null, paramsJson(boundRecord(set.bound)), "[]", "[]", 0, 0, null, null, queryId, Date.now() - started, message.slice(0, 2000), code.slice(0, 40), now(), queryHashOf(query.sql, set.bound));
     } catch { /* the set was pruned meanwhile */ }
     return false;
   } finally {
@@ -486,8 +533,9 @@ export async function runParamSet(userId: string, reportId: string, given: Recor
   const set = resolveSet(spec, given, reportToday(reportId));
   if (set.isDefault) return paramResults(reportId, userId, given);
   await assertOptionValues(report, spec, set.values, userId);
-  const cached = setResults(report, spec, set.hash);
-  const keys = options.force ? setQueries(spec).map((query) => query.key) : cached.missing;
+  const cached = setResults(report, spec, set, reportResults(reportId, userId).results);
+  // D532: `force` re-runs the used queries this set reads non-default values in (the rest answer with the default results).
+  const keys = options.force ? setQueries(spec).filter((query) => !readsOnlyDefaults(spec, query.sql, set.values)).map((query) => query.key) : cached.missing;
   if (!keys.length) return paramResults(reportId, userId, given);
   const datasource = usableDatasource(report.datasource_id);
   rateLimit(userId);

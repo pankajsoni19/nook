@@ -1,6 +1,6 @@
 # Report filters (dynamic filters): plan
 
-Lane FILTERS, 2026-10-22. Builds on D489–D491 and D507 (spec v3 parameters). Operator: "in the report, how can we add dynamic filters. research and build". Status: **planned; slice 1 starts after lane DOCS lands.** Decision ids DF1–DF7 and threat ids TF1–TF6 get the next free D/T numbers when the build commits them.
+Lane FILTERS, 2026-10-22. Builds on D489–D491 and D507 (spec v3 parameters). Operator: "in the report, how can we add dynamic filters. research and build". Status: **slice 1 built** (lane FILTERS, 2026-10-22, migration 066). The plan's decisions are recorded as **DF1 = D532, DF2 = D533, DF3 = D534, DF4 = D535, DF5 = D536, DF6 = D537** (docs/plan/WAVES_45-48_REPORTS.md, "Lane FILTERS") and its threats as **TF1–TF6 = T408–T413** (docs/plan/THREAT_MODEL.md). Later slices stay as ranked below.
 
 ## What other tools do
 
@@ -32,16 +32,16 @@ Parameters stay the only mechanism: every filter is a spec v3 parameter bound as
 
 ## Slice 1 (one release)
 
-### F1. Only re-run what a filter touches (DF1, server only)
+### F1. Only re-run what a filter touches (DF1 = D532, server only)
 - Key each query's result by the bound values of the placeholders that query reads (`queryHashOf(query, bound)`).
 - A query whose read values equal the defaults is served from `report_results`; a query that reads no parameter never runs for a non-default set.
 - Storage: `report_param_results` with the per-query hash (migration 066 adds `query_hash` only if 063's cascade makes reuse awkward). `set.missing` lists only queries whose own key is missing.
 
-### F2. Which blocks a filter reaches (DF2)
+### F2. Which blocks a filter reaches (DF2 = D533)
 - Derive `reach: { paramId: queryKey[] }` from the placeholder scan; send it in the results view and MCP `get_report`.
 - When a parameter differs from its default, a block whose queries don't read it shows a muted "Not filtered by Country" line (REPORT_THEME secondary text). Pill menus and the phone sheet say "Filters 4 of 6 blocks".
 
-### F3. Add filter (owner; DF3, DF4)
+### F3. Add filter (owner; DF3 = D534, DF4 = D535)
 - Entry: report ⋯ menu → **Add filter**, and **+ Filter** at the end of the control bar (owner). A sheet (bottom sheet on phones) with its own history layer key.
 - Column picker: columns of the tables the report's queries read (`classify(sql).tables`, allowlisted), from the schema catalog; v1 offers String, LowCardinality(String), Enum and integer types, each with its table and "read by 3 of 5 queries".
 - v1 type: **multi-select, default `[]` = All**, so default results must not change (the safety check below). Dates and single selects stay with Changes.
@@ -52,14 +52,14 @@ Parameters stay the only mechanism: every filter is a spec v3 parameter bound as
 - Remove filter: same path (`kind: "remove_filter"`), identity checked against the All result.
 - Queries that can't take a filter stay unfiltered, listed in the proposal and marked by F2.
 
-### F4. Click to filter (DF5)
+### F4. Click to filter (DF5 = D536)
 - `ChartBlock`/`TableBlock` gain optional `clickFilter: { param, column }`: `column` is the chart's x or series (or a table column); `param` a select/multi-select of a fitting type; the block's own query must not read `param`.
 - Set by the edit agent when it adds a parameter over a shown dimension, or by the owner from the block menu ("Clicking filters by…").
 - Multi-select click toggles, select click replaces; the URL **pushes**, so Back undoes a click. The source chart highlights the clicked category (amber, others grey) and does not filter itself.
 - Phone: a tap shows the tooltip with a **Filter by …** button; a tap alone never filters. Keyboard: focusable table rows (Enter), and "Filter by…" in the chart's block menu.
 - Clicked values are checked against the options (or the D491 wrap) like picked ones.
 
-### F5. More relative dates (DF6)
+### F5. More relative dates (DF6 = D537)
 - Presets `yesterday`, `this_week`, `last_week` (ISO Mon–Sun), `last_month`, `last_quarter`, `ytd`, `12m`, in the report's zone; labels like "Last month (IST)". Additive; stored specs stay valid.
 
 **Migration 066:** `report_instructions.request_json TEXT CHECK (request_json IS NULL OR (json_valid(request_json) AND length(request_json) <= 4096))`, plus `report_param_results.query_hash` only if F1 needs it.
@@ -109,12 +109,12 @@ Parameters stay the only mechanism: every filter is a spec v3 parameter bound as
 
 ## Threats
 
-- **TF1** The agent changes a query's meaning, not just its filter: DF4 identity check, SQL diff, owner acceptance, versions.
-- **TF2** Readers now see a column's values: the owner picks the column and the sheet states the exposure; columns over 100k distinct values are refused; catalog columns named or commented like email, phone, token or secret are hidden from the picker by default.
-- **TF3** Forged click values: bound, never SQL, checked against options (D489).
-- **TF4** Cost from click storms: F1 reuse, 20 runs/min per person, 300 ms click debounce, 20 sets kept.
-- **TF5** Structured-request injection: catalog identifiers validated against the allowlist and read tables; the label (≤ 60 chars) is data in the prompt.
-- **TF6** Shared per-set cache across readers is safe only while reports have no row-level security; key per reader if that ever changes.
+- **TF1 (T408)** The agent changes a query's meaning, not just its filter: DF4 identity check, SQL diff, owner acceptance, versions.
+- **TF2 (T409)** Readers now see a column's values: the owner picks the column and the sheet states the exposure; columns over 100k distinct values are refused; catalog columns named or commented like email, phone, token or secret are hidden from the picker by default.
+- **TF3 (T410)** Forged click values: bound, never SQL, checked against options (D489).
+- **TF4 (T411)** Cost from click storms: F1 reuse, 20 runs/min per person, 300 ms click debounce, 20 sets kept.
+- **TF5 (T412)** Structured-request injection: catalog identifiers validated against the allowlist and read tables; the label (≤ 60 chars) is data in the prompt.
+- **TF6 (T413)** Shared per-set cache across readers is safe only while reports have no row-level security; key per reader if that ever changes.
 
 ## Tests
 

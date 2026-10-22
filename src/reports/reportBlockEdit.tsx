@@ -21,6 +21,12 @@ export type ReportEditing = {
   onChanged: () => void;
   /** Opens the Changes panel (where a suggestion waits for the owner). */
   openChanges?: (blockId: string | null) => void;
+  /** D534 (the owner): opens Add filter ("+ Filter" in the control bar, ⋯ → Add filter). */
+  addFilter?: () => void;
+  /** D534 (the owner): asks the edit agent to remove a multi-select filter (a proposal in Changes). */
+  removeFilter?: (paramId: string) => void;
+  /** D536 (the owner): sets or clears what clicking a chart or table filters by (the block menu). */
+  setClickFilter?: (blockId: string) => void;
 };
 
 export const ReportEditContext = createContext<ReportEditing | null>(null);

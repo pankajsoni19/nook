@@ -2767,13 +2767,21 @@ Parameter values (`values`) are an object by parameter id: a date range `{ prese
 
 | Route | Body | Returns |
 | --- | --- | --- |
-| `GET /api/reports/:id/results?values=<JSON>` | | `{ results, running, timeZone, set: { isDefault, values, bound, missing } }` (`timeZone`: the IANA zone the date presets resolve in, on every results answer of a report with parameters): the default set's stored results, or another set's cached results with the query keys a run would fill (`missing`). Nothing runs. Without `values` the answer is as before. |
+| `GET /api/reports/:id/results?values=<JSON>` | | `{ results, running, timeZone, reach, set: { isDefault, values, bound, missing } }` (`timeZone`: the IANA zone the date presets resolve in, on every results answer of a report with parameters): the default set's stored results, or another set's cached results with the query keys a run would fill (`missing`). Nothing runs. Without `values` the answer is as before. |
 | `POST /api/reports/:id/param-runs` | `{ values, force? }` (strict) | The same shape, after running the set's missing queries (or all with `force`). Takes the report's one-run lock (**409 `RUN_IN_PROGRESS`** while another run holds it; the client retries) and the caller's query slots; **429 `BUSY`** past 20 runs a minute per person. The default set never runs here. |
 | `GET /api/reports/:id/parameters/:paramId/options` | `?q=` (≤ 100 characters, optional) | `{ options: { paramId, options: string[] ≤ 200, truncated, error, at, query? } }`: a select's choices from its guarded options query, cached per report (re-read after a default refresh or 6 h); `truncated` when the list reached 200. With a non-empty `q` (D491), the options query (its trailing `LIMIT` taken off) is wrapped and filtered on its first column with a bound `ILIKE` (`%q%`, wildcards escaped) through the same guard, at most 200 values; read access is enough; 429 `BUSY` past 60 searches a minute per person. A run's select value past the first 200 is checked with the same wrap (`IN {nook_values:Array(String)}`). MCP (D507): `search_report_options { reportId, parameterId, query? }` (`reports:read`, read access, a key's chosen reports only; offered to chat agents with the other report reads) is this route: `{ parameterId, query, options, truncated, error }` (`query` null and the cached list without one); the same 60 searches a minute per person, shared with the app (`RATE_LIMITED` past it). |
 
 The report page keeps the values in its URL as `?p.<id>=<value>` (a multi-select repeats its key; a custom range is `from..to`; only values that differ from the defaults).
 
 **MCP.** `get_report` takes `parameters` and answers with the spec's `parameters` and `parameterSet: { isDefault, values, bound, notYetRun }`. `get_report_block` takes `parameters` and answers with that set's result (running it first when it has none yet) and its `params`. `refresh_report` with non-default `parameters` runs that set (read access is enough), waits, and answers `{ run: null, parameterSet, queries: [{ key, ok, rows, error }] }`; with none (or the defaults) it is the owner's refresh as before.
+
+## Analytics reports: filters, slice 1 (lane FILTERS, D532–D537)
+
+Migration **066** (`report_filters`: `report_param_results.query_hash`, `report_instructions.request_json`). Plan: docs/plan/REPORT_FILTERS.md.
+
+- **Per-query results (D532).** A set's `missing` lists only the used queries that read a non-default value and have no fresh result under their own key (the sha256 of the query's SQL and the bound values of the placeholders it reads); a query that reads only defaults answers with the stored default result, and a result run for one set answers any set that binds the same values to that query. `POST …/param-runs` runs only those; `force` re-runs the used queries that read a non-default value.
+- **Reach (D533).** Every results answer of a report with parameters (with or without `values`) carries `reach: { <paramId>: [queryKey] }`, the queries whose SQL reads that parameter. MCP `get_report` answers the same `reach`.
+- **Date presets (D537).** A date range's `preset` may also be `yesterday`, `this_week`, `last_week`, `last_month`, `last_quarter`, `ytd`, or `12m` (values, defaults, URLs, and MCP `parameters`), resolved in the report's zone.
 
 ## Analytics reports: several docs, new sections, docs in Changes (lane DOCS, D515–D519)
 

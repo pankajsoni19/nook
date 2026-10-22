@@ -611,21 +611,22 @@ curl http://localhost:2026/api/health
 
 Every image carries immutable numbered migrations under `server/migrations`. They run transactionally and are recorded in SQLite's `schema_migrations` table before the HTTP server accepts requests. New schema changes are always added as a new migration; released migrations are never edited.
 
-### Upgrading to 0.43.0 (several docs per report and report edits, migrations 064–065)
+### Upgrading to 0.43.0 (several docs per report, report edits, and report filters, migrations 064–066)
 
-0.43.0 lets a report be built from up to 8 docs (Nook notes and files mixed with docs behind a tool server such as Outline), adds "Add a new section" to Changes and lets a change carry doc links (lane DOCS, D515–D520); and it lets a report's owner remove a block or a section from its header (with Undo) and edit a query's SQL from Inspect → Query with a preview, and lets people at the comment level suggest a query edit that the owner applies or rejects in Changes (D525–D531). Its migrations run once on the first boot, in order, before the HTTP server answers; they are recorded in `schema_migrations` and cannot be undone except by restoring a backup.
+0.43.0 lets a report be built from up to 8 docs (Nook notes and files mixed with docs behind a tool server such as Outline), adds "Add a new section" to Changes and lets a change carry doc links (lane DOCS, D515–D520); and it lets a report's owner remove a block or a section from its header (with Undo) and edit a query's SQL from Inspect → Query with a preview, and lets people at the comment level suggest a query edit that the owner applies or rejects in Changes (D525–D531); and a filter change re-runs only the queries that read it, blocks say which filters reach them, and the date range gains more presets (lane FILTERS, D532–D537). Its migrations run once on the first boot, in order, before the HTTP server answers; they are recorded in `schema_migrations` and cannot be undone except by restoring a backup.
 
 | Migration | What it does | Cost |
 | --- | --- | --- |
 | **064** `report_docs` | Adds two tables: `report_docs` (a report's docs in order, each with its source, link, title, the hash it was generated from, who added it and how) and `report_instruction_docs` (docs attached to a change, with their text until the change is decided). Adds four columns: `report_doc_snapshots.doc_id`, `report_runs.docs_json`, `report_instructions.kind` (`change` or `add`), and `report_instructions.after_block_id`. Every report that has a doc link gets one `report_docs` row (its first doc, `added_via = 'create'`), and its snapshots point at it. `reports.doc_*` keep their values and stay a mirror of the first doc; no report spec, version, schedule, or result is rewritten. | One row per report with a doc and one update per stored snapshot: quick at any size. |
 | **065** `report_query_suggestions` | Adds the column `report_instructions.suggested_query` (the saved query a person's suggestion changes; NULL for every existing instruction). It copies nothing and rewrites no table. | Quick at any size. |
+| **066** `report_filters` | Adds the column `report_param_results.query_hash` (each cached filter result's own key: its query's SQL and the values it reads) with the index `report_param_results_query`, and `report_instructions.request_json` (an owner's Add filter or Remove filter request, valid JSON of at most 4 KiB; NULL for every existing instruction). Cached filter results from before it have no key and re-run once when a reader next asks for them; the stored default results are untouched. | One index over the cached filter results (at most 20 sets per report): quick at any size. |
 
 Steps:
 
 1. **Back up first:** `./scripts/backup.sh --force`. Restoring this backup is the only way back.
 2. Pull, rebuild with `APP_VERSION=0.43.0`, and restart as above. `/api/health` answers once the migrations are done. No new settings.
 3. **Check:** `sqlite3 <data>/mynotes.sqlite "SELECT count(*) FROM reports WHERE doc_ref IS NOT NULL; SELECT count(DISTINCT report_id) FROM report_docs;"` shows the same number twice.
-4. **If a migration fails**, the server logs `Migration failed` with id 64 or 65 and does not start. Each is transactional, so nothing is half applied: restore the backup, or fix the cause and start again.
+4. **If a migration fails**, the server logs `Migration failed` with id 64, 65, or 66 and does not start. Each is transactional, so nothing is half applied: restore the backup, or fix the cause and start again.
 
 Old clients and MCP callers keep working: `create_report` and `POST /api/reports/generate` still take one `docRef` and `serverId`; `docs` is new. Scheduled refreshes never read docs, so nothing about them changes.
 
