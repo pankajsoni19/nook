@@ -102,7 +102,7 @@ export function AddFilterSheet({ reportId, onClose, reopen, onRequested }: { rep
             <input id={labelId} value={label} maxLength={PARAM_LIMITS.label} autoComplete="off" onChange={(event) => setLabel(event.target.value)} />
             <p className="report-add-filter-values-head">{ready.truncated ? `${ready.optionCount}+ values` : `${ready.optionCount} ${ready.optionCount === 1 ? "value" : "values"}`}, the most common first</p>
             <ul className="report-add-filter-values" aria-label="Sample values">{ready.sample.map((value) => <li key={value}>{value || "(blank)"}</li>)}{ready.optionCount > ready.sample.length && <li className="report-add-filter-more">and {ready.truncated ? "more" : ready.optionCount - ready.sample.length} more</li>}</ul>
-            <p className="report-add-filter-exposure" role="note"><Eye aria-hidden="true" />Readers will see the values of <code>{picked.table}.{picked.column}</code>.</p>
+            <p className="report-add-filter-exposure" role="note"><Eye aria-hidden="true" /><span>Readers will see the values of <code>{picked.table}.{picked.column}</code>.</span></p>
           </>}
         </section>}
         <p className="file-dialog-hint">Nook's edit agent adds it to the queries that read the table, as a filter that starts at All. Nook checks that every block shows the same as now with All before the change waits for you in Changes.</p>

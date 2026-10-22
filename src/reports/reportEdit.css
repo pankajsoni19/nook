@@ -176,13 +176,16 @@
 .report-add-filter-body { min-height: 0; flex: 1 1 auto; overflow: auto; display: grid; align-content: start; gap: 10px; padding-bottom: 4px; }
 .report-add-filter-form > .file-dialog-actions { border-top: 1px solid var(--border); margin-top: 6px; }
 .report-add-filter-columns { display: grid; gap: 4px; max-height: min(320px, 38dvh); overflow: auto; border: 1px solid var(--border); border-radius: 10px; padding: 4px; background: var(--bg); }
-.report-add-filter-column { display: grid; gap: 2px; min-width: 0; min-height: 44px; width: 100%; border: 1px solid transparent; border-radius: 8px; padding: 6px 10px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.report-add-filter-column { display: grid; gap: 2px; min-width: 0; min-height: 44px; width: 100%; border: 1px solid transparent; border-radius: 8px; padding: 6px 12px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .report-add-filter-column:hover { background: var(--panel-hover); }
 .report-add-filter-column:focus-visible { outline: 2px solid var(--yellow); outline-offset: -2px; }
 .report-add-filter-column.selected { border-color: var(--yellow-dim); background: color-mix(in srgb, var(--yellow) 10%, var(--panel)); }
 .report-add-filter-name { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: .9rem; }
 .report-add-filter-name code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .report-add-filter-meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: .76rem; }
+@media (max-width: 760px) {
+  .report-add-filter-meta { white-space: normal; }
+}
 .report-add-filter-empty { margin: 0; padding: 10px; color: var(--muted); font-size: .86rem; }
 .report-add-filter-toggle { display: flex; align-items: center; gap: 10px; min-height: 40px; cursor: pointer; }
 .report-add-filter-toggle input { width: 18px; height: 18px; min-height: 0; flex: none; }

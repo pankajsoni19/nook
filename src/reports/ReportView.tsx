@@ -1,10 +1,12 @@
 import { lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { CalendarClock, CircleCheck, CircleX, Clock3, ExternalLink, LoaderCircle, MoreHorizontal, RefreshCw, ScanSearch, Trash2, TriangleAlert } from "lucide-react";
+import { CalendarClock, CircleCheck, CircleX, Clock3, ExternalLink, ListFilter, LoaderCircle, MoreHorizontal, MousePointerClick, RefreshCw, ScanSearch, Trash2, TriangleAlert } from "lucide-react";
 import { ModalDialog } from "../files/Dialog";
 import { Markdown, type RenderContext } from "../chat/markdown/render";
 import { notify } from "../ui/notify";
 import { useHistoryDialogGuard } from "../ui/useHistoryDialogGuard";
-import { blockKeys, defaultWidth, reportLayout, type ChartBlock, type ReportBlock, type ReportDetail, type ReportResult, type ReportRun } from "../../shared/reports";
+import { blockKeys, defaultWidth, reportLayout, type ChartBlock, type ReportBlock, type ReportDetail, type ReportResult, type ReportRun, type TableBlock } from "../../shared/reports";
+import type { ChartPick } from "./charts";
+import { ClickFilterSheet, clickChoices, clickedValue, columnValues, FilterBySheet, isClickable, PickBar, pickedValues, type ClickState } from "./clickFilter";
 import { reportCssVariables } from "../../shared/reportTheme";
 import type { QueryResultView, ReportResultsView, ScheduleView } from "../../shared/reportsView";
 import { buildChartOption, paletteFor, type ChartBuild, type ChartPalette } from "./chartOption";
@@ -15,7 +17,7 @@ import { useLayerOpener } from "../historyDialogs";
 import { KpiTile, type ResultLookup } from "./KpiTile";
 import { ResultTable } from "./ResultTable";
 import { PAGE_METRICS_RUN_MARKER } from "../../shared/reportsMetrics";
-import { previewVersionOf, getParamResults, getResults, getRun, listRuns, refreshReport, runParamSet, RUN_STATUS_TEXT, timeAgo } from "./reportViewApi";
+import { getParamOptions, previewVersionOf, getParamResults, getResults, getRun, listRuns, refreshReport, runParamSet, RUN_STATUS_TEXT, timeAgo } from "./reportViewApi";
 import { ReportParamsBar, ReportParamsContext, type ParamReach } from "./ReportParamsBar";
 import { canonicalValues, isDefaultSet, reachOf, valuesFromSearch, valuesToSearch, type ParamValues, type ReportParameter } from "../../shared/reportParams";
 import { codeOf, messageOf } from "./reportsApi";
@@ -310,10 +312,40 @@ export function ReportView({ report, canWrite, generating = false, initial, read
   const changedParams = useMemo(() => withParams ? parameters.filter((param) => !isDefaultSet([param], { [param.id]: values[param.id] ?? param.default })) : [], [parameters, values, withParams]);
   const notFilteredBy = (block: DataBlock) => changedParams.filter((param) => !blockKeys(block).some((key) => queryReach[param.id]?.includes(key)));
 
+  // D536: click to filter. A click pushes a URL entry (Back undoes it); clicks closer than 300 ms are one (TF4);
+  // a value the options do not list is refused here as the server would (TF3).
+  const lastClick = useRef(0);
+  const optionCache = useRef(new Map<string, Promise<{ options: string[]; truncated: boolean } | null>>());
+  const applyClick = useCallback(async (param: ReportParameter, value: string) => {
+    const at = Date.now();
+    if (at - lastClick.current < 300) return;
+    lastClick.current = at;
+    const current = valuesRef.current[param.id] ?? param.default;
+    const next = clickedValue(param, current, value);
+    if (next === null) { notify.warning(`At most 50 values can be picked for ${param.label}`); return; }
+    const adding = param.type === "multi_select" ? !(current as string[]).includes(value) : next !== param.default;
+    if (adding) {
+      if (!optionCache.current.has(param.id)) optionCache.current.set(param.id, getParamOptions(report.id, param.id).then(({ options }) => options, () => null));
+      const options = await optionCache.current.get(param.id);
+      if (options && !options.truncated && !options.options.includes(value)) { notify.error(`${value.slice(0, 60) || "(blank)"} is not one of the choices for ${param.label}`); return; }
+    }
+    changeParams({ ...valuesRef.current, [param.id]: next });
+  }, [changeParams, report.id]);
+  const clickFor = (block: DataBlock): ClickState | undefined => {
+    if (!withParams || !isClickable(block) || !block.clickFilter) return undefined;
+    const param = parameters.find((item) => item.id === block.clickFilter!.param && (item.type === "select" || item.type === "multi_select"));
+    if (!param) return undefined;
+    return { param, column: block.clickFilter.column, picked: pickedValues(param, values[param.id] ?? param.default), onPick: (value) => { void applyClick(param, value); } };
+  };
+  const [filterBy, setFilterBy] = useState<string | null>(null);
+  const [clickSetup, setClickSetup] = useState<string | null>(null);
+  const filterByBlock = filterBy ? blocks.find((block) => block.id === filterBy) : undefined;
+  const clickSetupBlock = clickSetup ? blocks.find((block) => block.id === clickSetup) : undefined;
+
   const card = (block: DataBlock) => <DataBlockCard key={block.id} block={block} view={results.get(block.queryKey)} hasQuery={queries.has(block.queryKey)} palette={palette}
     running={running} loaded={view !== null} lookup={lookup} readOnly={readOnly} pending={Boolean(pending?.some((key) => blockKeys(block).includes(key)))} filtered={withParams} notFilteredBy={notFilteredBy(block)}
     onInspect={() => setInspect({ blockId: block.id, tab: "query" })} onMenu={() => setMenuBlock(block.id)}
-    onRemove={canRemove ? () => removeBlock(block) : undefined} removeDisabled={busy} />;
+    onRemove={canRemove ? () => removeBlock(block) : undefined} removeDisabled={busy} click={clickFor(block)} />;
 
   if (!blocks.length) return null;
   return <section className={`report-view report-theme-${palette.mode}`} style={cssVars} aria-label="Report">
@@ -371,7 +403,13 @@ export function ReportView({ report, canWrite, generating = false, initial, read
       onClose={() => setMenuBlock(null)}
       onRemove={canRemove ? () => { setMenuBlock(null); removeBlock(menuTarget); } : undefined}
       onInspect={(tab) => { setMenuBlock(null); setInspect({ blockId: menuTarget.id, tab }); }}
-      onRerun={() => { setMenuBlock(null); void startRefresh(menuTarget.queryKey); }} />}
+      onRerun={() => { setMenuBlock(null); void startRefresh(menuTarget.queryKey); }}
+      onFilterBy={clickFor(menuTarget) && results.get(menuTarget.queryKey)?.result ? () => { setMenuBlock(null); setFilterBy(menuTarget.id); } : undefined}
+      onClickSetup={editing?.canEdit && !readOnly && isClickable(menuTarget) && (menuTarget.clickFilter || clickChoices(report, menuTarget).length) ? () => { setMenuBlock(null); setClickSetup(menuTarget.id); } : undefined} />}
+    {filterByBlock && isDataBlock(filterByBlock) && clickFor(filterByBlock) && <FilterBySheet title={filterByBlock.title ?? filterByBlock.queryKey} click={clickFor(filterByBlock)!}
+      values={columnValues(results.get(filterByBlock.queryKey)?.result ?? { columns: [], rows: [] }, clickFor(filterByBlock)!.column)} onClose={() => setFilterBy(null)} />}
+    {clickSetupBlock && isClickable(clickSetupBlock) && <ClickFilterSheet report={report} block={clickSetupBlock} resultColumns={(results.get(clickSetupBlock.queryKey)?.result?.columns ?? []).map((column) => column.name)}
+      onClose={() => setClickSetup(null)} onSaved={() => { setClickSetup(null); editing?.onChanged(); }} />}
     {inspected && isDataBlock(inspected) && <InspectSheet report={report} block={inspected} query={queries.get(inspected.queryKey)} view={results.get(inspected.queryKey)}
       palette={palette} canRerun={canWrite} busy={busy} onRerun={(key) => { void startRefresh(key); }} initialTab={inspect!.tab} layerKey={`reports.inspect:${inspected.id}:${inspect!.tab}`} onClose={() => setInspect(null)} reopen={() => setInspect(lastInspect.current)} />}
     {scheduleOpen && <ScheduleSheet reportId={report.id} schedule={schedule} runs={runs} canWrite={canWrite} reopen={() => setScheduleOpen(true)}
@@ -411,10 +449,12 @@ type CardProps = {
   removeDisabled?: boolean;
   /** D533: the changed filters this block's queries do not read ("Not filtered by Country"). */
   notFilteredBy?: readonly Pick<ReportParameter, "id" | "label">[];
+  /** D536: what a click on this chart or table filters by. */
+  click?: ClickState;
 };
 
 /** One chart, KPI, or table: its title, stale/error badges, the inspect, remove, and menu buttons, and the body. */
-export function DataBlockCard({ block, view, hasQuery, palette, running, loaded, lookup, onInspect, onMenu, readOnly, pending = false, filtered = false, onRemove, removeDisabled = false, notFilteredBy = [] }: CardProps) {
+export function DataBlockCard({ block, view, hasQuery, palette, running, loaded, lookup, onInspect, onMenu, readOnly, pending = false, filtered = false, onRemove, removeDisabled = false, notFilteredBy = [], click }: CardProps) {
   const result = view?.result ?? null;
   const failed = view?.failed ?? null;
   const rerunning = pending || Boolean(running && (!running.queryKeys || running.queryKeys.includes(block.queryKey)));
@@ -439,7 +479,7 @@ export function DataBlockCard({ block, view, hasQuery, palette, running, loaded,
       {!hasQuery ? <p className="report-block-problem">This block names a query the report does not have ({block.queryKey}).</p>
         // D489: a chart or table with no rows for the chosen filters says so (not a mapping problem).
         : result && filtered && !result.rows.length && block.type !== "kpi" ? <p className="report-block-empty">No rows for these filters.</p>
-        : result ? <BlockBody block={block} result={result} palette={palette} lookup={lookup} />
+        : result ? <BlockBody block={block} result={result} palette={palette} lookup={lookup} click={click} />
           : failed ? <p className="report-block-problem"><TriangleAlert aria-hidden="true" />{failed.error ?? "The query failed"}</p>
             : <p className="report-block-empty">{readOnly ? readOnly.emptyText : loaded ? "No results yet. Refresh the report to run its queries." : "Loading…"}</p>}
     </div>
@@ -450,10 +490,32 @@ export function DataBlockCard({ block, view, hasQuery, palette, running, loaded,
 /** "Country", "Country and Route", "Country, Route, and Plan". */
 const listLabels = (labels: readonly string[]) => labels.length <= 1 ? labels.join("") : labels.length === 2 ? `${labels[0]} and ${labels[1]}` : `${labels.slice(0, -1).join(", ")}, and ${labels[labels.length - 1]}`;
 
-function BlockBody({ block, result, palette, lookup }: { block: DataBlock; result: ReportResult; palette: ChartPalette; lookup?: ResultLookup }) {
+function BlockBody({ block, result, palette, lookup, click }: { block: DataBlock; result: ReportResult; palette: ChartPalette; lookup?: ResultLookup; click?: ClickState }) {
   if (block.type === "kpi") return <KpiTile block={block} result={result} lookup={lookup} />;
-  if (block.type === "table") return <ResultTable columns={result.columns} rows={result.rows} show={block.columns} formats={block.formats} label={block.title ?? block.queryKey} />;
-  return <ChartBody block={block} result={result} palette={palette} />;
+  if (block.type === "table") return <TableBody block={block} result={result} click={click} />;
+  return <ChartBody block={block} result={result} palette={palette} click={click} />;
+}
+
+/** D536: a tapped value waiting for its Filter by button (a touch never filters by itself). */
+function useTapped(click: ClickState | undefined) {
+  const [tapped, setTapped] = useState<string | null>(null);
+  const take = (value: string, touch: boolean) => {
+    if (!click) return;
+    if (touch) setTapped(value);
+    else { setTapped(null); click.onPick(value); }
+  };
+  const bar = click && tapped !== null ? <PickBar label={click.param.label} value={tapped} picked={click.picked.includes(tapped)}
+    onApply={() => { click.onPick(tapped); setTapped(null); }} onClose={() => setTapped(null)} /> : null;
+  return { take, bar };
+}
+
+function TableBody({ block, result, click }: { block: TableBlock; result: ReportResult; click?: ClickState }) {
+  const { take, bar } = useTapped(click);
+  return <>
+    <ResultTable columns={result.columns} rows={result.rows} show={block.columns} formats={block.formats} label={block.title ?? block.queryKey}
+      pick={click ? { column: click.column, picked: click.picked, onPick: take } : undefined} />
+    {bar}
+  </>;
 }
 
 /** The width of an element, re-read when it resizes (small multiples and heatmaps lay out by their tile's width). */
@@ -477,22 +539,31 @@ function useElementWidth<T extends HTMLElement>(): [React.RefObject<T | null>, n
   return [ref, width];
 }
 
-function ChartBody({ block, result, palette }: { block: ChartBlock; result: ReportResult; palette: ChartPalette }) {
+function ChartBody({ block, result, palette, click }: { block: ChartBlock; result: ReportResult; palette: ChartPalette; click?: ClickState }) {
   const [box, width] = useElementWidth<HTMLDivElement>();
-  const built = useMemo(() => buildChartOption(block, result, palette, { width }), [block, result, palette, width]);
+  const picked = click?.picked;
+  const built = useMemo(() => buildChartOption(block, result, palette, { width, ...(picked?.length ? { picked } : {}) }), [block, result, palette, width, picked]);
+  const { take, bar } = useTapped(click);
+  // D536: the clicked category (x) or series is the value; "Other" (folded categories) is not one.
+  const onPick = click ? (pick: ChartPick) => {
+    const value = click.column === block.x ? pick.name : pick.seriesName;
+    if (value === null || value === undefined || (value === "Other" && built.foldedCategories > 0)) return;
+    take(value, pick.touch);
+  } : undefined;
   const label = `${block.title ?? block.queryKey}: ${block.kind.replace("_", " ")} chart of ${block.y.join(", ")}${block.x && block.x !== block.y[0] ? ` by ${block.x}` : ""}`;
   return <div ref={box} className={`report-chart report-chart-${block.kind}`}>
     {!built.option || built.problems.length ? <ul className="report-block-problem">{built.problems.map((problem) => <li key={problem}>{problem}</li>)}</ul>
       : built.view === "meter" ? <MeterView model={built.option as unknown as MeterModel} label={label} />
-        : <ChartCanvas built={built} label={label} mode={palette.mode} />}
+        : <ChartCanvas built={built} label={label} mode={palette.mode} onPick={onPick} />}
+    {bar}
     {built.cutRows > 0 && <p className="report-block-note">Showing the first {(result.rows.length - built.cutRows).toLocaleString()} rows; the Data tab has them all.</p>}
   </div>;
 }
 
 /** The ECharts canvas; a heatmap or calendar wider than its tile scrolls sideways inside the tile, never the page. */
-function ChartCanvas({ built, label, mode }: { built: ChartBuild; label: string; mode: ChartPalette["mode"] }) {
+function ChartCanvas({ built, label, mode, onPick }: { built: ChartBuild; label: string; mode: ChartPalette["mode"]; onPick?: (pick: ChartPick) => void }) {
   const canvas = <Suspense fallback={<div className="report-chart-canvas report-chart-loading" role="status" style={{ height: built.height }}>Loading chart…</div>}>
-    <EChart option={built.option!} mode={mode} height={built.height} minWidth={built.minWidth} label={label} />
+    <EChart option={built.option!} mode={mode} height={built.height} minWidth={built.minWidth} label={label} onPick={onPick} />
   </Suspense>;
   return <>
     {built.minWidth ? <div className="report-chart-scroll" tabIndex={0} role="group" aria-label={`${label} (scrolls sideways)`}>{canvas}</div> : canvas}
@@ -529,7 +600,8 @@ export function MeterView({ model, label }: { model: MeterModel; label: string }
   </div>;
 }
 
-export function BlockMenu({ block, canWrite, busy, onClose, onInspect, onRerun, onRemove }: { block: DataBlock; canWrite: boolean; busy: boolean; onClose: () => void; onInspect: (tab: InspectTab) => void; onRerun: () => void; /** D525: the owner's Remove (asks first). */ onRemove?: () => void }) {
+export function BlockMenu({ block, canWrite, busy, onClose, onInspect, onRerun, onRemove, onFilterBy, onClickSetup }: { block: DataBlock; canWrite: boolean; busy: boolean; onClose: () => void; onInspect: (tab: InspectTab) => void; onRerun: () => void; /** D525: the owner's Remove (asks first). */ onRemove?: () => void;
+  /** D536: the keyboard's click (the block's values as a list), and the owner's "Clicking filters by…". */ onFilterBy?: () => void; onClickSetup?: () => void }) {
   useHistoryDialogGuard(true, onClose);
   const title = block.title ?? block.queryKey;
   return <ModalDialog title={title} eyebrow="Block" onClose={onClose} variant="sheet" className="reports-dialog report-block-menu">
@@ -538,6 +610,8 @@ export function BlockMenu({ block, canWrite, busy, onClose, onInspect, onRerun, 
       <button type="button" role="menuitem" onClick={() => onInspect("data")}><ScanSearch aria-hidden="true" />View data</button>
       {canWrite && <button type="button" role="menuitem" onClick={onRerun} disabled={busy}><RefreshCw aria-hidden="true" />{busy ? "A run is in progress" : "Re-run this query"}</button>}
       {/* Wave 48: a comment on this block opens the Changes panel aimed at it (only for those who may comment). */}
+      {onFilterBy && <button type="button" role="menuitem" onClick={onFilterBy}><ListFilter aria-hidden="true" />Filter by…</button>}
+      {onClickSetup && <button type="button" role="menuitem" onClick={onClickSetup}><MousePointerClick aria-hidden="true" />Clicking filters by…</button>}
       <CommentOnBlockButton blockId={block.id} className="report-menu-comment" onBefore={onClose} />
       {onRemove && <button type="button" role="menuitem" className="report-menu-danger" onClick={onRemove} disabled={busy}><Trash2 aria-hidden="true" />{busy ? "A run is in progress" : "Remove this block"}</button>}
     </div>

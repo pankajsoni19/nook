@@ -41,7 +41,7 @@ export const suggestQuery = (id: string, queryKey: string, input: { sql: string;
 export const filterColumns = (id: string) => api<FilterColumnsView>(`/reports/${id}/filters/columns`);
 export const previewFilter = (id: string, table: string, column: string) => api<{ preview: FilterPreview }>(`/reports/${id}/filters/preview`, json("POST", { table, column }));
 export const requestFilter = (id: string, input: { table: string; column: string; label: string }) => api<{ instruction: ReportInstruction }>(`/reports/${id}/filters`, json("POST", input));
-export const requestFilterRemoval = (id: string, paramId: string) => api<{ instruction: ReportInstruction }>(`/reports/${id}/filters/${paramId}`, { method: "DELETE" });
+export const requestFilterRemoval = (id: string, paramId: string) => api<{ instruction: ReportInstruction }>(`/reports/${id}/filters/${paramId}`, { method: "DELETE", body: "{}" });
 
 export const getSharing = (id: string) => api<{ sharing: ReportSharing }>(`/reports/${id}/sharing`);
 export const saveSharing = (id: string, input: SharingInput) => api<{ sharing: ReportSharing }>(`/reports/${id}/sharing`, json("PUT", input));

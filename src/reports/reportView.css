@@ -288,17 +288,37 @@ ul.report-block-problem { display: block; padding-left: 18px; }
 .report-param-check input { width: 18px; height: 18px; flex: none; accent-color: var(--report-accent); }
 .report-param-problem { margin: 0; color: var(--report-bad); font-size: .82rem; }
 /* D533: "Filters 4 of 6 blocks" under a pill's list, in the multi-select sheet, and under a field on a phone. */
-.report-param-reach { margin: 0; padding: 8px 12px; border-top: 1px solid var(--report-border); color: var(--report-muted); font-size: .78rem; }
+.report-param-reach { margin: 0; padding: 8px 12px; border-top: 1px solid var(--report-border, var(--border)); color: var(--report-muted, var(--muted)); font-size: .78rem; }
 .report-param-field .report-param-reach, .report-params-fields > .report-param-reach { padding: 0; border-top: 0; }
 /* D534: the owner's "+ Filter" ends the bar: a chip's height and radius, dashed (it adds a filter; it filters nothing). */
 .report-params-add { display: inline-flex; align-items: center; gap: 6px; flex: none; min-height: 36px; padding: 0 14px 0 12px; border: 1px dashed color-mix(in srgb, var(--report-muted) 50%, transparent); border-radius: 999px; background: transparent; color: var(--report-soft); font: inherit; font-size: .84rem; white-space: nowrap; cursor: pointer; }
 .report-params-add svg { width: 15px; height: 15px; flex: none; }
 .report-params-add:hover { border-color: var(--report-muted); color: var(--report-text); }
 .report-params-add:focus-visible { outline: 2px solid var(--report-accent); outline-offset: 1px; }
-.report-params-add-narrow { margin-left: auto; min-height: 40px; }
+.report-params-add-narrow { margin-left: auto; min-height: 44px; }
 .report-param-remove { margin-right: auto; }
 /* D533: a block its queries do not let a changed filter reach says so, in secondary text under its title. */
 .report-block-unfiltered { margin: -4px 0 6px; color: var(--report-muted); font-size: .76rem; }
+/* D536: click to filter. A clickable chart shows the pointer; a table's rows are focusable and the picked ones wear the accent;
+   on a touch screen a tap shows "Filter by …" under the block (a tap alone never filters). */
+.report-chart-clickable { cursor: pointer; }
+.report-row-pickable { cursor: pointer; }
+.report-row-pickable:hover td { background: var(--report-hover); }
+.report-row-pickable:focus-visible { outline: 2px solid var(--report-accent); outline-offset: -2px; }
+.report-row-picked td { background: var(--report-accent-bg); }
+.report-row-picked td:first-child { box-shadow: inset 3px 0 0 var(--report-accent); }
+.report-pick-bar { display: flex; align-items: center; gap: 6px; margin-top: 8px; min-width: 0; }
+.report-pick-apply { flex: 1 1 auto; min-width: 0; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.report-pick-apply svg { width: 16px; height: 16px; flex: none; }
+.report-pick-close { flex: none; width: 44px; height: 44px; }
+.report-filter-by-list { display: grid; gap: 4px; max-height: 60vh; overflow: auto; }
+.report-filter-by-value { min-height: 44px; display: flex; align-items: center; gap: 10px; border: 1px solid transparent; border-radius: 8px; padding: 0 10px; background: transparent; color: inherit; font: inherit; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
+.report-filter-by-value:hover { background: var(--report-hover); }
+.report-filter-by-value.picked { border-color: var(--report-accent-line); background: var(--report-accent-bg); }
+.report-filter-by-value svg { width: 16px; height: 16px; flex: none; color: var(--report-accent); }
+.report-filter-by-dot { width: 16px; height: 16px; flex: none; border: 1px solid var(--report-border); border-radius: 4px; }
+.report-click-filter-options { display: grid; gap: 2px; }
+.report-click-filter-options small { color: var(--report-muted); }
 .report-block-pending .report-block-body { opacity: .45; transition: opacity .15s; }
 .report-inspect-params dd code { overflow-wrap: anywhere; }
 @media (max-width: 760px) {

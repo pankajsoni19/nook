@@ -34,11 +34,16 @@ function themeFor(mode: ThemeMode) {
   return ECHARTS_THEME_NAME;
 }
 
-export default function EChart({ option, label, mode = "dark", height, minWidth }: { option: Record<string, unknown>; label: string; mode?: ThemeMode; height?: number; minWidth?: number }) {
+/** D536: what a click on a chart hit: its category (`name`) and series, and whether a touch made it. */
+export type ChartPick = { name: string; seriesName: string | null; touch: boolean };
+
+export default function EChart({ option, label, mode = "dark", height, minWidth, onPick }: { option: Record<string, unknown>; label: string; mode?: ThemeMode; height?: number; minWidth?: number; /** D536: a click on a bar, slice, or point. */ onPick?: (pick: ChartPick) => void }) {
   const host = useRef<HTMLDivElement>(null);
   const chart = useRef<echarts.ECharts | null>(null);
   const latest = useRef(option);
   latest.current = option;
+  const pickRef = useRef(onPick);
+  pickRef.current = onPick;
 
   useEffect(() => {
     const element = host.current;
@@ -46,6 +51,14 @@ export default function EChart({ option, label, mode = "dark", height, minWidth 
     const instance = echarts.init(element, themeFor(mode), { renderer: "svg" });
     chart.current = instance;
     instance.setOption(latest.current, { notMerge: true });
+    instance.on("click", (raw) => {
+      const params = raw as unknown as { name?: unknown; seriesName?: unknown; event?: { event?: { pointerType?: string } } };
+      if (!pickRef.current || typeof params.name !== "string") return;
+      const pointer = params.event?.event?.pointerType;
+      // A tap on a phone (no hover) or any touch or pen: the tooltip and a Filter by button, never a filter by itself.
+      const touch = pointer === "touch" || pointer === "pen" || (typeof window.matchMedia === "function" && window.matchMedia("(hover: none)").matches);
+      pickRef.current({ name: params.name, seriesName: typeof params.seriesName === "string" ? params.seriesName : null, touch });
+    });
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => instance.resize());
     observer?.observe(element);
     return () => {
@@ -61,5 +74,5 @@ export default function EChart({ option, label, mode = "dark", height, minWidth 
 
   useEffect(() => { chart.current?.resize(); }, [height, minWidth]);
 
-  return <div ref={host} className="report-chart-canvas" role="img" aria-label={label} style={height || minWidth ? { ...(height ? { height } : {}), ...(minWidth ? { minWidth } : {}) } : undefined} />;
+  return <div ref={host} className={`report-chart-canvas${onPick ? " report-chart-clickable" : ""}`} role="img" aria-label={label} style={height || minWidth ? { ...(height ? { height } : {}), ...(minWidth ? { minWidth } : {}) } : undefined} />;
 }

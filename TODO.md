@@ -7,21 +7,25 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 
 **Current state (2026-10-16).**
 - **v0.42.1** is released (2026-10-16, fixes: Report owners title on Forward, the eval's Settings → AI fallback). **v0.42.0** (2026-10-15): PDFs as report docs and in `read_attachment_text`, `search_report_options`, Report owners paging. v0.41.0 brought PDF text in Files, `search_documents`, console parameters and Settings → Report owners.
-- Migrations: **001–063** are released and immutable (045 and 054 unused; 054 is reserved for Messages). **064** is lane DOCS' `report_docs` and **065** lane EDIT's `report_query_suggestions` (both unreleased, for 0.43.0); next free: **066** (lane FILTERS, if needed), then 067.
+- Migrations: **001–063** are released and immutable (045 and 054 unused; 054 is reserved for Messages). **064** is lane DOCS' `report_docs`, **065** lane EDIT's `report_query_suggestions`, and **066** lane FILTERS' `report_filters` (all unreleased, for 0.43.0); next free: **067**.
 - Development happens directly on `main`, pushed as each change passes its gates.
 
 ## In flight
 
-- [ ] **Reports: dynamic filters** (operator, 2026-10-22, "research and build"; lane FILTERS): research beyond D489's AI-added parameters (filters people add themselves, click a chart to filter, filters that narrow each other, table filters), plan done ([REPORT_FILTERS.md](docs/plan/REPORT_FILTERS.md): slice 1 = only re-run touched queries, "filters N of M blocks", owner **Add filter** with a default-unchanged check, click a chart to filter, more date presets); lane DOCS has landed (064), so it can start.
+- None right now.
 
 ## Waiting on the operator
 
+- [ ] **Report filters, later slices** (slice 1 shipped, D532–D537): linked filters, client-side table sort and contains, saved personal views, more filter types (number range, exclude, text contains, Add filter on dates), and concurrent parameter runs, ranked in [REPORT_FILTERS.md](docs/plan/REPORT_FILTERS.md) "Later". Start a slice when the operator asks.
 - [ ] **Real-model eval of report generation** (D488 chart kinds, D489 parameters): only the scripted provider has run. Run `bun --no-env-file scripts/reportEval.ts --clickhouse <test ClickHouse>` on a host whose Nook has a working model provider (it falls back to Settings → AI; the local instance's OpenAI key is a placeholder), or set `REPORT_EVAL_*`, or regenerate reports on the VM (docs/OPERATIONS.md "Report generation eval"). Check: the five kind cases (`onboarding_funnel`, `cohort_retention`, `quota_attainment`, `latency_spread`, `plan_flow`) get fitting chart kinds, and a doc that names a window or a dimension gets a date range or filter. Tune the prompts from the scores.
 - [ ] **Report Lists** ([plan](docs/plan/REPORTS_ORG.md) phase 3, optional, migration 067 — 064–066 went to lanes DOCS, EDIT and FILTERS): a report in many lists; a list never grants access. Start only if the operator asks.
 - [ ] **Reports: a personal copy of a report?** (lane EDIT research, D531): Metabase, Redash, and Tableau let people without edit rights save a copy and change that; Nook offers Suggest an edit instead. A "Duplicate report" would fork the schedule, sharing, and doc. Build only if the team asks.
 
 ## Small fixes
 
+- [ ] Add filter's "ran with one value" check (D535) picks the filter's most common value, which a query may exclude (the eval's `healthz` gives an empty error rate): pick a value the changed query's own result holds, where it shows the column.
+- [ ] Add filter is only proven against the scripted agent and the QA ClickHouse by hand: add a `CLICKHOUSE_TEST_URL` variant of tests/reportFiltersRequest.test.ts that seeds `eval_top_routes` and runs the identity check on a real server (ORDER BY ties, Decimal and Float rows).
+- [ ] A bar chart's value labels overlap at 390 px when six bars carry "498 orders" each (seen in lane FILTERS' QA, not caused by it): drop the unit or the labels when they would collide.
 - [ ] Several docs (lane DOCS): a doc added in Doc settings stays "New" after a change that attached the same doc is applied (the edit read it, but only Regenerate stamps a doc's hash); decide whether an applied change should stamp it.
 - [ ] "Add a new section" after a block outside any section puts the section first among the sections, which render after every loose block (D516), so it can land below later loose blocks; placing it truly in between would need the loose blocks after the anchor to move into a section.
 - [ ] Inspect → "From the doc" (D518) needs the plan todo's `docRef` (`d2`); the scripted QA provider never sets it, so only a real model's runs show it. Check after the real-model eval.

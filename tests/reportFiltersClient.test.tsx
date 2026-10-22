@@ -9,7 +9,11 @@ import type { ReportDetail, ReportResult, ReportSpec } from "../shared/reports";
 import { installDom, mockApi, render } from "./support/dom";
 
 installDom("http://nook.test/reports");
-mock.module("../src/reports/charts", () => ({ default: () => <div className="mock-echart" /> }));
+// The chart stands in as a button that "clicks" the DE bar (as a mouse, or as a touch when its data-touch is set).
+mock.module("../src/reports/charts", () => ({
+  default: ({ onPick }: { onPick?: (pick: { name: string; seriesName: string | null; touch: boolean }) => void }) =>
+    <button type="button" className="mock-echart" onClick={(event) => onPick?.({ name: "DE", seriesName: null, touch: (event.currentTarget as HTMLElement).dataset.touch === "1" })}>chart</button>
+}));
 
 const { ReportView } = await import("../src/reports/ReportView");
 const { ReportParamsContext, reachText } = await import("../src/reports/ReportParamsBar");
@@ -156,5 +160,122 @@ describe("D534: Add filter", () => {
     expect(text).toContain("Filters 1 of 2 blocks; it starts at All.");
     expect(text).toContain("errorsDefault results unchangedRan with Route = digest: 1 row");
     expect(text).toContain("Not filteredroutesShows every route; clicking it sets the filter");
+  });
+
+  test("Remove filter's request carries a JSON body (the server refuses a bare DELETE)", async () => {
+    const { requestFilterRemoval } = await import("../src/reports/reportEditApi");
+    const api = mockApi({ [`DELETE /reports/${REPORT_ID}/filters/country`]: () => ({ instruction: { id: "i2" } }) });
+    await requestFilterRemoval(REPORT_ID, "country");
+    expect(api.calls[0]).toMatchObject({ method: "DELETE", body: {} });
+  });
+});
+
+const { clickedValue, pickedValues } = await import("../src/reports/clickFilter");
+const { buildChartOption, paletteFor } = await import("../src/reports/chartOption");
+
+describe("D536: click to filter", () => {
+  const COUNTRY = { id: "country", label: "Country", type: "multi_select" as const, chType: "Array(String)", default: [] as string[], optionsQuery: "SELECT DISTINCT country FROM analytics.orders" };
+  const PLAN = { id: "plan", label: "Plan", type: "select" as const, chType: "String", default: "free", optionsQuery: "SELECT DISTINCT plan FROM analytics.orders" };
+  const clickSpec: ReportSpec = {
+    version: 1, specVersion: 3, sections: [], parameters: [COUNTRY],
+    queries: [
+      { key: "totals", sql: `SELECT count() AS orders FROM analytics.orders WHERE ${BY_COUNTRY}`, purpose: "Orders", createdBy: "agent" },
+      { key: "by_country", sql: "SELECT country, count() AS orders FROM analytics.orders GROUP BY country", purpose: "By country", createdBy: "agent" }
+    ],
+    blocks: [
+      { id: "kpi", type: "kpi", title: "Orders", intent: "headline", queryKey: "totals", column: "orders", unit: "orders" },
+      { id: "bars", type: "chart", title: "By country", intent: "compare", kind: "bar", queryKey: "by_country", x: "country", y: ["orders"], clickFilter: { param: "country", column: "country" } },
+      { id: "rows", type: "table", title: "Countries", intent: "detail", queryKey: "by_country", columns: ["country", "orders"], clickFilter: { param: "country", column: "country" } }
+    ]
+  };
+  const clickReport = { ...report, spec: clickSpec, blockCount: 3 } as ReportDetail;
+  const byCountry = { runId: "", queryKey: "by_country", sql: "", sentSql: "", columns: [{ name: "country", type: "String" }, { name: "orders", type: "UInt64" }], rows: [["DE", "300"], ["FR", "200"], ["US", "100"]], rowCount: 3, truncated: false, rowsRead: null, bytesRead: null, chQueryId: "x", ms: 1, error: null, errorCode: null, createdAt: "2026-10-13T09:00:00.000Z", params: null } satisfies ReportResult;
+  const clickResults = () => [
+    { queryKey: "totals", result: result("totals", "orders", 600), failed: null, stale: false },
+    { queryKey: "by_country", result: byCountry, failed: null, stale: false }
+  ];
+  function clickApi() {
+    return mockApi({
+      [`GET /reports/${REPORT_ID}/results`]: () => ({ results: clickResults(), running: null, timeZone: "UTC" }),
+      [`GET /reports/${REPORT_ID}/runs`]: () => ({ runs: [], schedule: null }),
+      [`GET /reports/${REPORT_ID}/parameters/country/options`]: () => ({ options: { paramId: "country", options: ["DE", "FR", "US"], truncated: false, error: null, at: null } }),
+      [`GET /reports/${REPORT_ID}/results?values=${encodeURIComponent(JSON.stringify({ country: ["DE"] }))}`]: () => ({ results: clickResults(), running: null, set: { isDefault: false, values: {}, bound: {}, missing: [] } })
+    });
+  }
+  /** The page's URL state as ReportsApp keeps it: each change is a pushed entry. */
+  function Clicked({ pushes }: { pushes: Array<Record<string, string[]> | undefined> }) {
+    const [search, setSearch] = useState<Record<string, string[]> | undefined>(undefined);
+    return <ReportParamsContext.Provider value={{ search, onChange: (next, options) => { if (!options?.replace) pushes.push(next); setSearch(next); } }}><ReportView report={clickReport} canWrite={false} /></ReportParamsContext.Provider>;
+  }
+
+  test("what is picked, and what a click makes of it (a multi-select toggles, a select takes the value or goes back to its default)", () => {
+    expect(pickedValues(COUNTRY, ["DE"])).toEqual(["DE"]);
+    expect(pickedValues(PLAN, "free")).toEqual([]);
+    expect(pickedValues(PLAN, "pro")).toEqual(["pro"]);
+    expect(clickedValue(COUNTRY, [], "DE")).toEqual(["DE"]);
+    expect(clickedValue(COUNTRY, ["DE", "FR"], "DE")).toEqual(["FR"]);
+    expect(clickedValue(COUNTRY, Array.from({ length: 50 }, (_, at) => `c${at}`), "DE")).toBeNull();
+    expect(clickedValue(PLAN, "free", "pro")).toBe("pro");
+    expect(clickedValue(PLAN, "pro", "pro")).toBe("free");
+  });
+
+  test("the clicked chart keeps every category and greys the ones not picked", () => {
+    const bars = clickSpec.blocks[1] as Extract<ReportSpec["blocks"][number], { type: "chart" }>;
+    const theme = paletteFor("dark");
+    const plain = buildChartOption(bars, byCountry, theme).option as { series: Array<{ data: unknown[] }> };
+    expect(plain.series[0]!.data).toEqual([300, 200, 100]);
+    const picked = buildChartOption(bars, byCountry, theme, { picked: ["DE"] }).option as { series: Array<{ data: Array<number | { value: number; itemStyle?: { color: string } }> }> };
+    expect(picked.series[0]!.data).toEqual([300, { value: 200, itemStyle: { color: theme.emphasisMuted } }, { value: 100, itemStyle: { color: theme.emphasisMuted } }]);
+  });
+
+  test("a mouse click on a bar pushes the filter (Back undoes it); the chart is highlighted, not filtered; the table's row is picked; Enter on a row toggles", async () => {
+    clickApi();
+    const pushes: Array<Record<string, string[]> | undefined> = [];
+    const view = await render(<Clicked pushes={pushes} />);
+    await view.waitFor(() => document.querySelector(".mock-echart"));
+    await view.click(document.querySelector(".mock-echart")!);
+    await view.waitFor(() => pushes.length === 1);
+    expect(pushes).toEqual([{ country: ["DE"] }]);
+    await view.waitFor(() => document.querySelector(".report-row-picked"));
+    expect(document.querySelector(".report-row-picked td")?.textContent).toBe("DE");
+    // The KPI follows the filter; the chart and table (its click sources) say they are not filtered by it.
+    expect(notes()).toEqual(["Orders: -", "By country: Not filtered by Country", "Countries: Not filtered by Country"]);
+    // Keyboard: rows are focusable; Enter on a picked row clears it (after the 300 ms that make two clicks one).
+    await Bun.sleep(320);
+    const row = document.querySelector<HTMLTableRowElement>(".report-row-picked")!;
+    expect(row.tabIndex).toBe(0);
+    const { act } = await import("react");
+    await act(async () => { row.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); await Bun.sleep(20); });
+    await view.waitFor(() => pushes.length === 2);
+    expect(pushes[1]).toBeUndefined();
+  });
+
+  test("a touch never filters by itself: the tap shows Filter by …, which does", async () => {
+    clickApi();
+    const pushes: Array<Record<string, string[]> | undefined> = [];
+    const view = await render(<Clicked pushes={pushes} />);
+    const chart = await view.waitFor(() => document.querySelector<HTMLElement>(".mock-echart"));
+    chart.dataset.touch = "1";
+    await view.click(chart);
+    expect(pushes).toEqual([]);
+    const apply = await view.waitFor(() => document.querySelector<HTMLButtonElement>(".report-pick-apply"));
+    expect(apply.textContent).toBe("Filter by Country: DE");
+    await view.click(apply);
+    await view.waitFor(() => pushes.length === 1);
+    expect(pushes).toEqual([{ country: ["DE"] }]);
+    expect(document.querySelector(".report-pick-apply")).toBeNull();
+  });
+
+  test("a clicked value that is not one of the options is refused before the URL changes", async () => {
+    mockApi({
+      [`GET /reports/${REPORT_ID}/results`]: () => ({ results: clickResults(), running: null, timeZone: "UTC" }),
+      [`GET /reports/${REPORT_ID}/runs`]: () => ({ runs: [], schedule: null }),
+      [`GET /reports/${REPORT_ID}/parameters/country/options`]: () => ({ options: { paramId: "country", options: ["FR", "US"], truncated: false, error: null, at: null } })
+    });
+    const pushes: Array<Record<string, string[]> | undefined> = [];
+    const view = await render(<Clicked pushes={pushes} />);
+    await view.click(await view.waitFor(() => document.querySelector(".mock-echart")));
+    await Bun.sleep(50);
+    expect(pushes).toEqual([]);
   });
 });

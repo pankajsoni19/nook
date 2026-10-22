@@ -193,7 +193,7 @@ export type ChartBuild = {
 };
 
 /** How the chart is laid out: the width of its tile, px (small multiples pick their columns from it; heatmaps their scroll). */
-export type ChartSize = { width?: number };
+export type ChartSize = { width?: number; /** D536: the values a click filter on this chart holds now (its own categories or series stay drawn; the rest go grey). */ picked?: readonly string[] };
 
 /** The columns a chart block maps, by role. */
 export function chartMapping(block: Pick<ChartBlock, "x" | "y" | "series" | "compareTo"> & Partial<ChartBlock>): Record<string, string> {
@@ -362,7 +362,13 @@ export function buildChartOption(block: ChartBlock, data: ChartData, theme: Char
   // Emphasis mode: a series by name, or (one series) a category, in slot 1; everything else grey.
   const emphasisSeries = block.emphasis !== undefined && series.some((item) => item.name === block.emphasis) ? block.emphasis : null;
   const emphasisCategory = block.emphasis !== undefined && emphasisSeries === null && series.length === 1 && (bars || kind === "pie") && categories.includes(block.emphasis) ? block.emphasis : null;
-  const colorOf = (at: number, name: string) => emphasisSeries !== null ? (name === emphasisSeries ? theme.series[0]! : theme.emphasisMuted) : emphasisCategory !== null ? theme.emphasisMuted : theme.series[at % theme.series.length]!;
+  // D536: a click filter's picked values: the chart keeps every category and greys the ones not picked (it never filters itself).
+  const picked = block.clickFilter && size.picked?.length ? new Set(size.picked) : null;
+  const pickedSeries = picked && block.series && block.clickFilter!.column === block.series ? picked : null;
+  const pickedCategories = picked && !pickedSeries && block.clickFilter!.column === block.x ? picked : null;
+  const dimmed = (position: number) => pickedCategories !== null && !pickedCategories.has(categories[position]!);
+  const colorOf = (at: number, name: string) => pickedSeries !== null ? (pickedSeries.has(name) ? theme.series[at % theme.series.length]! : theme.emphasisMuted)
+    : emphasisSeries !== null ? (name === emphasisSeries ? theme.series[0]! : theme.emphasisMuted) : emphasisCategory !== null ? theme.emphasisMuted : theme.series[at % theme.series.length]!;
   const legend = series.length >= 2 || (kind === "pie" && categories.length >= 2);
   const lineLike = kind === "line" || kind === "area";
   const itemTooltip = !lineLike;
@@ -395,7 +401,7 @@ export function buildChartOption(block: ChartBlock, data: ChartData, theme: Char
     const slices = categories.map((name, at) => ({ name, value: first.values[at] ?? 0 })).filter((item) => item.value > 0);
     return result({
       ...base,
-      color: slices.map((slice, at) => emphasisCategory !== null ? (slice.name === emphasisCategory ? theme.series[0]! : theme.emphasisMuted) : theme.series[at % theme.series.length]!),
+      color: slices.map((slice, at) => pickedCategories !== null ? (pickedCategories.has(slice.name) ? theme.series[at % theme.series.length]! : theme.emphasisMuted) : emphasisCategory !== null ? (slice.name === emphasisCategory ? theme.series[0]! : theme.emphasisMuted) : theme.series[at % theme.series.length]!),
       series: [{
         type: "pie", name: first.name, radius: ["45%", "72%"], center: ["50%", legend ? "56%" : "50%"], avoidLabelOverlap: true,
         itemStyle: { borderColor: ink.surface, borderWidth: MARKS.bar.gap, borderRadius: MARKS.bar.radius },
@@ -454,10 +460,11 @@ export function buildChartOption(block: ChartBlock, data: ChartData, theme: Char
         emphasis: { focus: "series" },
         label: { show: tips && categories.length <= TIP_LABELS, position: horizontal ? "right" : "top", ...labelStyle },
         data: item.values.map((value, position) => {
-          const highlight = emphasisCategory !== null && categories[position] === emphasisCategory;
+          const highlight = pickedCategories === null && emphasisCategory !== null && categories[position] === emphasisCategory;
+          const grey = dimmed(position);
           const extreme = tips && categories.length > TIP_LABELS && position === top;
-          if (!highlight && !extreme) return value;
-          return { value, ...(highlight ? { itemStyle: { color: theme.series[0] } } : {}), ...(extreme ? { label: { show: true, position: horizontal ? "right" : "top", ...labelStyle } } : {}) };
+          if (!highlight && !extreme && !grey) return value;
+          return { value, ...(highlight ? { itemStyle: { color: theme.series[0] } } : grey ? { itemStyle: { color: theme.emphasisMuted } } : {}), ...(extreme ? { label: { show: true, position: horizontal ? "right" : "top", ...labelStyle } } : {}) };
         })
       };
     }
@@ -476,6 +483,8 @@ export function buildChartOption(block: ChartBlock, data: ChartData, theme: Char
       endLabel: { show: showsEnd(item.name), ...lineLabel, distance: END_LABEL_DISTANCE },
       data: item.values.map((value, position) => {
         if (position === end) return { value, symbol: "circle", symbolSize: MARKS.line.dotRadius * 2, itemStyle: { color, borderColor: ink.surface, borderWidth: MARKS.line.dotRing } };
+        // D536: a picked point on a line wears a dot (the line keeps every point).
+        if (pickedCategories !== null && pickedCategories.has(categories[position]!)) return { value, symbol: "circle", symbolSize: MARKS.line.dotRadius * 2 + 2, itemStyle: { color, borderColor: ink.surface, borderWidth: MARKS.line.dotRing } };
         // A maximum on the first point reads rightwards from its dot, clear of the y-axis labels.
         if (position === top && top !== end) return { value, symbol: "circle", symbolSize: 6, itemStyle: { color, borderColor: ink.surface, borderWidth: MARKS.line.dotRing }, label: { show: true, position: "top", ...topAlign, ...lineLabel } };
         return value;
