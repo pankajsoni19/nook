@@ -20,6 +20,8 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
   - [ ] Test says "anthropic-version header required": send `anthropic-version` (and `x-api-key`) automatically when the endpoint is Anthropic's.
   - [ ] Test tool calling reports "tool_choice type tool and any are not supported for this model" as a failure: record it as "forced choice unsupported, Nook uses auto" and confirm tools work with auto.
   - [ ] Knowledge bases: Anthropic has no embeddings API. Mark such providers as chat-only, default new bases to a provider that embeds (e.g. the OpenAI one), and say so clearly; evaluate Voyage AI (Anthropic's recommended embeddings) as an embeddings-only provider.
+  - [ ] Anthropic-only instances (operator, 2026-10-22): knowledge bases in **keyword-only mode** (BM25 over the existing chunk FTS, no embeddings API), chosen automatically when no provider embeds; Change embedding model moves a base to vectors later.
+  - [ ] Decide with the operator: a **local embedding model** in the image (transformers.js + a small model, ~25–100 MB, CPU) for meaning-based search with no outside provider.
 
 ## Waiting on the operator
 
