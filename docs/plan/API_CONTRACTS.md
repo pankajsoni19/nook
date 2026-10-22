@@ -2903,6 +2903,24 @@ Migration **073** (`report_datasources.agent_use`, `agent_datasources`, `chat_sq
 - **Public links.** A data tool appears as `{tool, server: "data", ok}` only, with or without `includeToolResults`.
 - **Tool servers.** The slug `data` is reserved (400 on create).
 
+## Online backups, Litestream, and restore drills (lane BACKUP, D611–D619)
+
+No migration. Wire types: `shared/backups.ts` (`BackupsView`, `BackupRun`, `DrillReport`, `LitestreamStatusView`). Admins only; anyone else gets 404 `NOT_FOUND` as for a missing route.
+
+| Route | Body | Returns |
+| --- | --- | --- |
+| `GET /api/admin/backups` | | `BackupsView`: `settings` (`enabled`, `interval` like `"6h"`, `keep`, `target`, `localDir`, `s3: { bucket, prefix, endpointHost, separate, sse } \| null`, `alertAfter`, `drillInterval`, `storage`; never a credential), `running` (`{ kind: "backup" \| "drill", trigger, startedAt }` from this server or the CLI's lock, or null), `status` (`lastRun`, `lastSuccess`, `consecutiveFailures`, `recent` ≤ 20), `nextBackupAt`, `nextDrillAt`, `drill` (`last` with its `checks`, `recent`), `archives` (≤ 200, newest first: `{ name, size, createdAt, locations: ("local" \| "s3")[], offline }`), `archivesError`, `litestream` (`enabled`, `configured`, `active`, `location`, `retention`, `metrics: { txid, syncErrors, walBytes, databaseBytes } \| null`, `replica: { txid, uploadedAt, snapshotAt } \| null`, `error`). Archive and Litestream listings are cached 30 s. |
+| `POST /api/admin/backups/run` | `{}` (strict; anything else 400 `INVALID`) | 202 `{ started: true, kind: "backup", startedAt }`; 409 `BUSY` while a backup or drill runs (here or from the CLI). Works with `BACKUP_ENABLED=false`. Audited `backup.run`. |
+| `POST /api/admin/backups/drill` | `{}` | 202 `{ started: true, kind: "drill", startedAt }` (the newest archive); 409 `BUSY`. Audited `backup.drill`. |
+
+**Jobs.** Each job is `nice -n 10 bun --no-env-file server/backup-admin.ts backup|restore-drill --trigger manual|schedule` with the server's environment; results go to `BACKUP_DIR/status.json` and `drill.json` (shapes above). Exit codes 0, 1, 2, and 75 (busy).
+
+**Archive format** (`server/backup/archive.ts`): `nook-backup-<YYYYMMDDTHHMMSSZ>-<6 hex>.tar.gz`, gzip'd ustar/pax; entries `mynotes.sqlite` (the VACUUM INTO snapshot) first, then DATA_DIR's regular files (relative paths, mode 0600, their mtimes), then `nook-backup.json`: `{ format: "nook-backup", version: 1, createdAt, appVersion, gitSha, storage: { backend: "local" } \| { backend: "s3", bucket, prefix, endpointHost }, database: { path, bytes, sha256, integrity: "ok", migrations }, files: [{ path, size, sha256 }], skipped: [{ path, reason: "symlink" \| "special" \| "vanished" }], counts }`.
+
+**Notices and mail.** Bell kinds `backup_failed` (`count`: failures in a row) and `backup_drill_failed`, to every active admin, opening `/settings/backups`; mail `security.backup_failed` (`{ kind: "backup" \| "drill", failures, error, lastSuccessAt, at }`, skipped when the recipient is no longer an admin).
+
+**CLI** (`server/backup-admin.ts`): `backup`, `list`, `status`, `restore-drill [--from latest|<name>|<path>|litestream[@<RFC 3339>]] [--strict] [--keep]`, `restore --from … --to <empty folder> [--files-from …] [--db-only]`. `server/litestream.ts prepare <file>` (exit 0 written, 3 off or no bucket, 1 refused) and `config`.
+
 ## Changes to existing note endpoints (Wave 4)
 
 - `DELETE /api/notes/:id`:

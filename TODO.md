@@ -18,10 +18,6 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 
 - [ ] **Provider code per kind** (operator, 2026-10-22; lane LOCALEMB, step 0): one adapter file per provider kind (OpenAI-compatible default, Anthropic, Voyage, local); golden tests pin OpenAI's requests to v0.43.0 so other kinds can't change them.
 
-- [ ] **Backups: online, to S3, continuous, and tested** (operator, 2026-10-22; lane BACKUP):
-  - [ ] Online backups without stopping the app (SQLite `VACUUM INTO`/backup API), on a schedule set in `.env` (frequency, how many to keep), written to the existing S3 storage under a new backup prefix (and/or local).
-  - [ ] Litestream continuous replication of the SQLite database to S3 (same bucket, its own prefix), with point-in-time restore.
-  - [ ] Restore drill: a command that restores the latest backup (archive or Litestream) into a scratch instance and verifies it.
 
 ## Waiting on the operator
 
@@ -64,6 +60,14 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 - [ ] Local embeddings (D544–D546) are checked against the real model only by the opt-in `LOCAL_EMBEDDINGS_MODEL_TEST=1 bun --no-env-file test tests/localEmbeddingsModel.test.ts` (and once in the image, by hand); the Docker verify stage has no model files. Run it on the VM after the 0.44.0 image lands, and index a real base there to see the CPU per passage on its cores.
 - [ ] The local model holds about 0.8 GB while loaded (the WASM heap about 0.55 GB, the tokenizer's 250,000-piece vocabulary about 0.22 GB in @huggingface/tokenizers' JS objects); it is let go after 10 idle minutes. A smaller tokenizer representation, or an English-only model (all-MiniLM-L6-v2, 23 MB, about twice as fast) as a second choice, would cut it; ONNX Runtime Web's own threads gave nothing on Bun 1.4.2, so it stays on one core.
 
+
+## Leftovers (lane BACKUP)
+
+- [ ] Litestream and the S3 archive path are proven against the fake S3 only (tests/litestream.test.ts runs the real 0.5.17 binary when `LITESTREAM_TEST_BIN` is set). On the VM after the 0.45.0 image: set `BACKUP_TARGET`, `LITESTREAM_ENABLED=true`, check Settings → Backups reads "Replicating" with no sync errors, and run `restore-drill` and `restore-drill --from litestream` against the real bucket (R2/AWS: path-style, region `auto`, multipart, and `BACKUP_S3_SSE=required`).
+- [ ] With S3 storage an archive does not copy the bucket's objects (D612). If the operator wants self-contained archives, add `BACKUP_S3_OBJECTS=copy` (stream each object into the tar; size and time grow with the bucket).
+- [ ] The manifest lists every file and is built in memory (about 150 bytes a file: 150 MB at a million local files). Stream it to a side file if an instance gets there.
+- [ ] Restore into a fresh container finds `--from latest` in S3 only (its `/data/backup` is the empty folder being restored); a local archive needs a mount or `tar -xzf` (documented). A `--from-dir` option would make the local case one command.
+- [ ] Litestream's compaction levels and L0 retention are its defaults (only the snapshot retention is a setting); expose them if point-in-time granularity matters.
 
 ## Watch (no work unless it shows up)
 

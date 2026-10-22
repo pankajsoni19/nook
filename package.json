@@ -41,6 +41,7 @@
     "react-dom": "19.3.0",
     "resend": "6.30.0",
     "sonner": "2.0.8",
+    "tar-stream": "3.2.2",
     "unpdf": "1.8.1",
     "zod": "4.6.5"
   },
@@ -53,6 +54,7 @@
     "@types/qrcode": "1.5.6",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
+    "@types/tar-stream": "3.1.5",
     "@vitejs/plugin-react": "6.1.1",
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",

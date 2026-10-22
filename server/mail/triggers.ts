@@ -146,6 +146,11 @@ export function mailApiKeyAccessAdded(userId: string, keyId: string, added: read
   safely("security.api_key_access_added", () => enqueueMail({ userId, template: "security.api_key_access_added", payload: { keyId, added: [...added], at: new Date().toISOString() } }));
 }
 
+/** Lane BACKUP (D618): failing backups or a failed drill, to one admin (the payload holds no secret). */
+export function mailBackupFailed(userId: string, payload: { kind: "backup" | "drill"; failures: number; error: string; lastSuccessAt: string | null }) {
+  safely("security.backup_failed", () => enqueueMail({ userId, template: "security.backup_failed", payload: { ...payload, at: new Date().toISOString() } }));
+}
+
 /** #2: a role change, coalesced 10 min; the first old role is kept, so a toggle back sends nothing. */
 export function mailRoleChanged(targetId: string, fromRole: string, actorId: string | null) {
   safely("security.role_changed", () => enqueueMail({

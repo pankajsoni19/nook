@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { readFileSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseEntry } from "./ipRanges";
+import { parseBackupSettings, parseLitestreamSettings } from "./backup/settings";
 
 function integerEnv(name: string, fallback: number, min: number, max: number) {
   const raw = process.env[name]?.trim();
@@ -219,6 +220,9 @@ export function parseStorageConfig(env: Record<string, string | undefined>, data
   return { backend: "s3", bucket, endpoint, region, accessKeyId, secretAccessKey, prefix, timeoutMs };
 }
 const storageConfig = parseStorageConfig(process.env, dataDir);
+// Backups and Litestream (lane BACKUP, D611–D619): server/backup/settings.ts.
+const backupSettings = parseBackupSettings(process.env, { storage: storageConfig, dataDir, parseS3: parseStorageConfig });
+const litestreamSettings = parseLitestreamSettings(process.env, { storage: storageConfig, dataDir, parseS3: parseStorageConfig });
 
 /**
  * Hosts the agent module may call although they resolve to private, loopback, or link-local
@@ -465,6 +469,10 @@ export const config = {
   minFreeDiskBytes: integerEnv("MIN_FREE_DISK_BYTES", 1_073_741_824, 0, Number.MAX_SAFE_INTEGER),
   /** Where file bytes live (STORAGE_BACKEND and the S3_* settings); server/objectStore.ts. Never logged. */
   storage: storageConfig,
+  /** Online backups (BACKUP_*; server/backup). Never logged: the S3 part holds credentials. Tests switch these in process. */
+  backup: backupSettings,
+  /** Litestream replication (LITESTREAM_*; server/litestream.ts and scripts/nook-start.sh). Never logged. */
+  litestream: litestreamSettings,
   /** APP_NAME (Wave 39): titles, link previews, the manifest, mail, and MCP. Tests switch it in process. */
   appName: appNameValue,
   appVersion: process.env.APP_VERSION ?? "0.44.0",

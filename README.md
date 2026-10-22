@@ -90,7 +90,7 @@ Team secrets per environment (dev, staging, prod, or your own): values, logins, 
 - Private by default: the server authorises every read, and search, previews, Today, feeds, and MCP only see what the user may open.
 - Hashed API keys and feed tokens, rate limits on sign-in, search, and MCP, and payload-less Web Push to allowlisted push services only.
 - A hardened container: non-root user, read-only root filesystem, dropped capabilities, and `no-new-privileges`.
-- Verified weekly backups with five-archive retention (`scripts/backup.sh`).
+- Online backups while Nook runs (a consistent SQLite snapshot and the data directory, checked by SHA-256), kept on disk or in S3, optional Litestream point-in-time replication, and restore drills (Settings → Backups).
 
 Nook is designed for one host on a trusted network. Prefer HTTPS through Tailscale Serve or a reverse proxy.
 

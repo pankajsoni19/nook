@@ -64,6 +64,8 @@ process.env.ALLOWED_EMAILS = allowedTestEmails.join(",");
 process.env.MAX_UPLOAD_BYTES = "4194304";
 process.env.USER_STORAGE_QUOTA_BYTES = "12582912";
 process.env.MIN_FREE_DISK_BYTES = "0";
+// Lane BACKUP: no scheduled online backup of the test data directory (tests/backupRoutes.test.ts runs jobs itself).
+process.env.BACKUP_ENABLED = "false";
 
 // S3 storage slice: `MYNOTES_TEST_STORAGE=s3 bun test <files>` runs the shared server against an
 // in-process fake S3 (tests/support/fakeS3.ts) instead of DATA_DIR; the default run stays on the local

@@ -38,6 +38,8 @@ export type FakeS3 = {
   stallBodyNext(pattern: RegExp, times?: number): void;
   /** Added to "now" for every Last-Modified this service stamps (a store whose clock differs). */
   clockOffsetMs: number;
+  /** When set, GET and HEAD answer `x-amz-server-side-encryption: <value>` (a bucket with default encryption, lane BACKUP). */
+  sseHeader: string | null;
   stop(): void;
 };
 
@@ -90,7 +92,8 @@ export function startFakeS3(options: { port?: number; bucket?: string; accessKey
       const key = segments.slice(1).map(decodeURIComponent).join("/");
       const line = `${request.method} ${key}${url.search}`;
       log.push(line);
-      const credential = /Credential=([^/]+)\//.exec(request.headers.get("authorization") ?? "")?.[1];
+      // A signed request names its key in Authorization; a presigned URL in X-Amz-Credential (lane BACKUP).
+      const credential = /Credential=([^/]+)\//.exec(request.headers.get("authorization") ?? "")?.[1] ?? url.searchParams.get("X-Amz-Credential")?.split("/")[0];
       if (credential !== accessKeyId) return s3Error(403, "InvalidAccessKeyId", "The AWS Access Key Id you provided does not exist in our records.");
       if (requestBucket !== bucket) return s3Error(404, "NoSuchBucket");
       const stall = stalls.find((entry) => entry.times > 0 && entry.pattern.test(line));
@@ -179,6 +182,7 @@ export function startFakeS3(options: { port?: number; bucket?: string; accessKey
         if (!object) return request.method === "HEAD" ? new Response(null, { status: 404 }) : s3Error(404, "NoSuchKey", "The specified key does not exist.");
         const size = object.bytes.byteLength;
         const headers = new Headers({ "Content-Type": object.contentType, ETag: object.etag, "Last-Modified": object.lastModified.toUTCString(), "Accept-Ranges": "bytes" });
+        if (fake.sseHeader) headers.set("x-amz-server-side-encryption", fake.sseHeader);
         const range = /^bytes=(\d*)-(\d*)$/.exec(request.headers.get("range") ?? "");
         if (range && (range[1] || range[2])) {
           let start = range[1] ? Number(range[1]) : Math.max(0, size - Number(range[2]));
@@ -221,6 +225,7 @@ export function startFakeS3(options: { port?: number; bucket?: string; accessKey
       stalls.push({ pattern, times, body: true });
     },
     clockOffsetMs: 0,
+    sseHeader: null,
     failNext(pattern, times = 1) {
       failures.push({ pattern, times });
     },

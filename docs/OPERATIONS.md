@@ -435,6 +435,29 @@ Compose passes these variables from `.env` (see `.env.example`). Invalid values 
 | `S3_PREFIX` | empty | A key prefix (letters, digits, `.`, `_`, `-`, `/`), so one bucket can hold several things; a trailing `/` is added. One Nook per prefix: the prefix is claimed by this data directory at first start (`<prefix>.nook-instance`). |
 | `S3_ALLOW_HTTP` | `false` | `true` allows a plain `http://` `S3_ENDPOINT` on another host (a MinIO on a private network you trust). Every file then crosses that network unencrypted. Exactly `true` or `false`. |
 | `S3_TIMEOUT_MS` | `30000` | Deadline for one S3 request (1000–600000); a part upload or a whole small read gets four times this, and a download stream fails after this long without bytes. A store that does not answer gives `503 STORAGE_UNAVAILABLE` instead of a hanging request, and fails the startup probe. |
+| `BACKUP_ENABLED` | `true` | Online backups on a schedule (see *Backup and restore*): `true` or `false`. Off, **Back up now** in Settings → Backups and `bun server/backup-admin.ts backup` still work. |
+| `BACKUP_INTERVAL` | `1d` | How often: a number and `m`, `h`, `d`, or `w`, from `15m` to `30d` (e.g. `6h`). The next run is due that long after the last one finished; after a failure, an hour later (or the interval, if shorter). |
+| `BACKUP_KEEP` | `14` | Archives kept in each place (1–1000); older ones are deleted after each successful run. Only names like `nook-backup-<time>-<id>.tar.gz` directly in the folder or under the prefix are ever deleted. |
+| `BACKUP_TARGET` | `local` (`s3` with `STORAGE_BACKEND=s3`) | `local` (`BACKUP_DIR`), `s3`, or `both`. `s3` and `both` need a bucket: the storage bucket (`STORAGE_BACKEND=s3`), or the `S3_*` settings with `S3_BUCKET` (files may stay local), or `BACKUP_S3_BUCKET`. |
+| `BACKUP_DIR` | `DATA_DIR/backup` | Where local archives, the job's work folder, its lock, and its status files go. An absolute path; another volume mounted into the container keeps archives off the data disk. Not `DATA_DIR` itself, never a folder containing it. The status files hold no secret. |
+| `BACKUP_S3_PREFIX` | `backups/` | Key prefix of the archives, after `S3_PREFIX` in the storage bucket (`<S3_PREFIX>backups/`), or alone in `BACKUP_S3_BUCKET`. |
+| `BACKUP_S3_SSE` | `off` | `required`: after each upload Nook checks that the bucket encrypted the archive at rest (the `x-amz-server-side-encryption` answer header); if not, the upload is deleted and the run fails. Turn on the bucket's default encryption (SSE-S3 or SSE-KMS); Bun's S3 client cannot ask for it per request. |
+| `BACKUP_S3_BUCKET` | empty | A bucket of its own for archives and Litestream (another account or region). With it, the `BACKUP_S3_*` settings below are used instead of the `S3_*` ones, under the same rules. |
+| `BACKUP_S3_ENDPOINT` | empty | As `S3_ENDPOINT`, for `BACKUP_S3_BUCKET`. |
+| `BACKUP_S3_REGION` | empty | As `S3_REGION`, for `BACKUP_S3_BUCKET`. |
+| `BACKUP_S3_ACCESS_KEY_ID` | empty | As `S3_ACCESS_KEY_ID`, for `BACKUP_S3_BUCKET` (or `BACKUP_S3_ACCESS_KEY_ID_FILE`). |
+| `BACKUP_S3_SECRET_ACCESS_KEY` | empty | As `S3_SECRET_ACCESS_KEY`, for `BACKUP_S3_BUCKET` (or `BACKUP_S3_SECRET_ACCESS_KEY_FILE`). Never logged. |
+| `BACKUP_S3_ACCESS_KEY_ID_FILE` | empty | A file holding `BACKUP_S3_ACCESS_KEY_ID`, outside `DATA_DIR`. |
+| `BACKUP_S3_SECRET_ACCESS_KEY_FILE` | empty | A file holding `BACKUP_S3_SECRET_ACCESS_KEY`, outside `DATA_DIR`. |
+| `BACKUP_S3_ALLOW_HTTP` | `false` | As `S3_ALLOW_HTTP`, for `BACKUP_S3_ENDPOINT`. |
+| `BACKUP_S3_TIMEOUT_MS` | `30000` | As `S3_TIMEOUT_MS`, for `BACKUP_S3_BUCKET`. |
+| `BACKUP_ALERT_AFTER` | `2` | Failed runs in a row (1–100) before every admin gets a bell notice and, when mail is on, a security mail; again a day later while they keep failing. |
+| `BACKUP_DRILL_INTERVAL` | `off` | A scheduled restore drill: `off`, or a duration from `1h` to `90d` (e.g. `7d`). It restores the newest archive into a scratch folder, checks it, and removes it; a failure notifies admins. |
+| `LITESTREAM_ENABLED` | `false` | `true`: the image's start script runs Nook under Litestream, which replicates `mynotes.sqlite` continuously to the backup bucket (as for `BACKUP_TARGET=s3`) for point-in-time restore. Without a bucket or without the binary, Nook starts alone with a warning. Restart the container after changing it. |
+| `LITESTREAM_S3_PREFIX` | `litestream/` | Litestream's prefix, after `S3_PREFIX` (or in `BACKUP_S3_BUCKET`); the replica is `<prefix>mynotes`. |
+| `LITESTREAM_RETENTION` | `7d` | How far back a point-in-time restore can go: Litestream keeps its snapshots (one a day) this long (`1h` to `365d`). |
+| `LITESTREAM_METRICS_ADDR` | `127.0.0.1:9090` | Litestream's metrics endpoint inside the container (loopback only); Settings → Backups reads the replication state from it. Empty turns it off. |
+| `LITESTREAM` | `include` | **Build time** (a `docker compose build` argument): `include` puts the pinned Litestream binary (39 MB, checked by sha256) in the image; `skip` leaves it out. |
 | `PUSH_ENABLED` | `auto` | Web Push for calendar reminders: `auto` (on only when `APP_ORIGIN` is `https:`), `true`, or `false`. Browsers allow push only on a secure origin, so on `http://localhost` or a LAN address reminders appear in the bell and the notifications list only. |
 | `PUSH_SUBJECT` | `APP_ORIGIN` | The VAPID contact push services may use: an `http(s)` URL or a `mailto:` address. |
 | `PUSH_ENDPOINT_HOSTS` | empty | Extra push-service hosts, comma-separated (`push.example.com` or `*.push.example.com`), besides the built-in `*.googleapis.com`, `*.push.services.mozilla.com`, `*.push.apple.com`, and `*.notify.windows.com`. |
@@ -475,7 +498,7 @@ The container reads and writes `/data`, mapped by Compose to:
 ├── storage-instance                this data directory's id (claims an S3 prefix, see S3 storage)
 ├── push/vapid.json                 Web Push signing keys (0600), created at first boot when push is on
 ├── server.heartbeat                rewritten every 5 s while the server runs (stale after 15 s)
-└── backup/                         weekly archives (host backup script only)
+└── backup/                         online and offline archives, the job lock, status files (Backup and restore)
 ```
 
 Markdown files and documents are never exposed as static files; authenticated API handlers enforce access before reading them. File names live only in SQLite and are never used as paths. Uploads are streamed to `.staging` on the data volume (never to the container's small `/tmp`), and a sweeper removes abandoned staging files and orphaned objects at boot and hourly. A refused upload reports which limit applied. Notes and files in the Bin stay in place on disk until they are deleted forever.
@@ -590,36 +613,126 @@ A report's doc tools (the linked pages the AI may read) log `Doc tool call` and 
 
 ## Backup and restore
 
-Run the host-side backup script once a week:
+Nook protects its data three ways (lane BACKUP, D611–D619):
+
+- **Online backups**: on a schedule from `.env`, the server snapshots the database and packs the data directory into a verified `.tar.gz` **without stopping**, and keeps the newest few on this server's disk, in S3, or both.
+- **Litestream** (optional): continuous replication of the database to S3, for a restore to any point in time within its retention.
+- **Restore drills**: a backup restored into a scratch folder and checked, by hand or on a schedule, so a broken backup shows up before you need it.
+
+Settings → **Backups** (admins) shows all three: the last good backup and the next, failures, the archives in each place, the last drill's checks, and Litestream's replication. **Back up now** and **Run restore drill** start a job at once.
+
+### Online backups
+
+On by default: every day, the newest 14 kept, in `DATA_DIR/backup` (or in S3 with `STORAGE_BACKEND=s3`). The settings (see *Configuration*):
 
 ```sh
-./scripts/backup.sh
+BACKUP_ENABLED=true
+BACKUP_INTERVAL=6h          # 15m to 30d: m, h, d, or w
+BACKUP_KEEP=14              # per place
+BACKUP_TARGET=both          # local, s3, or both
+BACKUP_S3_PREFIX=backups/   # after S3_PREFIX, in the S3_* bucket
+BACKUP_ALERT_AFTER=2        # failed runs in a row before admins are told
+BACKUP_DRILL_INTERVAL=7d    # optional scheduled restore drill
 ```
 
-It briefly stops a running app container so the SQLite database, Markdown files, and documents are captured at the same point in time, writes a verified gzip archive under `/srv/mynotes/backup` (or your configured data directory), keeps the newest five archives, and starts the app again. A second run within seven days is skipped; use `./scripts/backup.sh --force` only when you intentionally want an extra snapshot.
+How a run works:
 
-For unattended weekly execution, add this entry with `crontab -e` (Sunday at 03:00):
+1. **One at a time.** A job takes `BACKUP_DIR/.lock` (a backup or a drill, from the server or the command line; a lock untouched for two minutes belongs to a dead job and is taken over). It runs as a separate process at low priority (`nice -n 10 bun server/backup-admin.ts backup`), so requests are not slowed by it. While a backup runs, the hourly sweeper leaves files and the Bin alone (they wait an hour).
+2. **Disk check.** It refuses to start when the snapshot and the archive could leave less than `MIN_FREE_DISK_BYTES` free on the backup folder's disk.
+3. **Snapshot.** `VACUUM INTO` on a read-only connection copies the database as of one moment while writers carry on (WAL), compact, without free pages. `PRAGMA integrity_check` on the copy must answer `ok`.
+4. **Pack.** The archive holds the snapshot as `mynotes.sqlite`, then every regular file of the data directory (note Markdown, `documents/objects`, `avatars`, `push/vapid.json`, `storage-instance`, …), then a manifest, `nook-backup.json`, with every file's size and SHA-256, the migrations applied, and row counts. Left out: the live database and its `-wal`/`-shm`, `documents/.staging`, `*.tmp`, `server.heartbeat`, Litestream's local state, the backup folder, and links (never followed; listed in the manifest). Files are read from one open descriptor each (notes and objects are replaced by rename, never rewritten), so each is one version; a file purged from the Bin while the run reads is recorded as such.
+5. **Verify.** The archive is read back end to end (gzip, tar, and every SHA-256 against the manifest) before it goes anywhere.
+6. **Copy and prune.** To S3 as a multipart upload streamed from the file (one 8 MiB part in memory at a time), checked by size afterwards; locally by a rename. Then each place keeps its newest `BACKUP_KEEP`: only names like `nook-backup-20261022T030000Z-1a2b3c.tar.gz` directly in the folder or under the prefix are ever deleted (D619), never anything else in the bucket.
+7. **Record.** The run (archive name, size, SHA-256, places, error, warnings) goes to `BACKUP_DIR/status.json`. After `BACKUP_ALERT_AFTER` failures in a row every admin gets a bell notice and, when mail is on, a security mail; again a day later while it keeps failing. A run that reached the local folder but not S3 counts as failed.
 
-```cron
-0 3 * * 0 cd /path/to/nook && ./scripts/backup.sh >> /srv/mynotes/backup/backup.log 2>&1
-```
+The first scheduled backup comes 10 minutes after the first start; later ones `BACKUP_INTERVAL` after the last one finished (an hour after a failure). A server that was down past its time backs up within a minute of starting.
 
-To restore, stop Nook, extract an archive into an empty data directory, point `MYNOTES_DATA_DIR` at that directory if it differs from the default, and start the service:
+**What an archive contains with `STORAGE_BACKEND=s3`** (D612): the database and the data directory (note Markdown, `storage-instance`, push keys), **not** the bucket's objects (Files, attachments, pictures, whiteboard scenes, profile pictures). Copying them into every archive would multiply the bucket's size by `BACKUP_KEEP` and make each run as slow as a full download; the bucket protects them better with **versioning** (with a noncurrent-version expiry longer than your archive retention): an object Nook purges, or a stolen key deletes, stays recoverable. A restore then needs the archive and the bucket as of the same time or later. The restore drill checks, read-only, that every object the restored database names is in the bucket. With local storage the archive holds everything.
+
+Archives are about the size of the data directory (gzip gains little on media). Items in the Bin are included like live ones, so something deleted forever can survive in older archives until they rotate out (`BACKUP_KEEP` × `BACKUP_INTERVAL`). `.env` and the keys are never in an archive: `TOTP_ENCRYPTION_KEY`, `VAULT_ENCRYPTION_KEY`, and `AGENT_SECRETS_KEY` live in the environment or in files outside `DATA_DIR` (Nook refuses a key file inside it), and the archive holds only what they encrypt. Keep `.env` safe and apart from the archives: an archive together with the vault key reveals every vault secret, and a restore needs the same keys.
+
+### From the host
 
 ```sh
-mkdir -p /srv/mynotes-restored
-tar -xzf /srv/mynotes/backup/mynotes-YYYYMMDDTHHMMSSZ.tar.gz \
-  -C /srv/mynotes-restored
-MYNOTES_DATA_DIR=/srv/mynotes-restored docker compose up -d --build
+./scripts/backup.sh               # an online backup now, inside the running container
+./scripts/backup.sh --offline     # stop the app, tar DATA_DIR, start it again (before an upgrade or a key rotation)
 ```
 
-The archive contains the data directory contents at its root, so no path rearrangement is required. Keep the same `.env` (in particular `TOTP_ENCRYPTION_KEY`) when starting the restored copy, and start only one instance per data directory.
+Without a flag the script runs `bun server/backup-admin.ts backup` in the running app container, with its settings. With the app stopped, or with `--offline` (`--force` is the same, its old name), it makes the offline archive it always made: `DATA_DIR/backup/mynotes-<time>.tar.gz`, five kept, one a week unless forced. No cron entry is needed any more; keep one only for offline archives.
 
-- **With `STORAGE_BACKEND=s3` the archive does not contain the file bytes**: Files, attachments, pictures, whiteboard scenes, and profile pictures are in the bucket, and `backup.sh` says so on every run. Back the bucket up on its own schedule, at least as often as the archive: turn on **bucket versioning** (with a noncurrent-version expiry longer than your archive retention), or copy it with `aws s3 sync s3://<bucket>/<prefix> /backups/nook-files` or `rclone sync <remote>:<bucket>/<prefix> /backups/nook-files`. A restore needs both: the archive (database, `storage-instance`) and the bucket contents from the same time or later. A file whose bytes are missing answers 500 and is counted by the boot integrity check; `storage-admin.ts verify` lists them.
-- **⚠ Restore tests with S3: never point a restored copy at the live bucket and prefix with a key that can delete.** It would sweep and purge the live Nook's files. Nook refuses to start such a copy (its claim number is behind the bucket's; see *S3 storage*, Restored copies), but use another `S3_PREFIX` (copy the objects there first) or a read-only key anyway. Only after a real disaster restore run `bun server/storage-admin.ts reclaim`.
-- Archives include `documents/objects` but not `documents/.staging`. Archive size and the time the app is stopped grow with the stored files (gzip gains little on already-compressed media), and five archives multiply that disk use.
-- Items in the Bin are included like live ones. A note or file deleted forever (or expired from the Bin) can survive in older archives for up to about five weeks, until those archives rotate out.
-- The backup intentionally does not include `.env`. Store it securely alongside your backups, especially `TOTP_ENCRYPTION_KEY`, which is required to use restored TOTP enrollments. **The exception is `VAULT_ENCRYPTION_KEY`:** keep it somewhere other than the backups, because an archive together with that key reveals every vault secret, and a restore needs the same key (see *Vault*). Vault values are in the archive only as ciphertext.
+The command line, inside the container (`docker compose exec app …`, or `docker compose run --rm app …` with the app stopped):
+
+```sh
+bun server/backup-admin.ts backup                    # one online backup now
+bun server/backup-admin.ts list                      # the archives in each place
+bun server/backup-admin.ts status                    # the last runs and the last drill
+bun server/backup-admin.ts restore-drill [--from latest|<archive name>|<path>|litestream[@<time>]] [--strict] [--keep]
+bun server/backup-admin.ts restore --from <source> --to <empty folder> [--files-from latest|<archive>] [--db-only]
+```
+
+Exit codes: 0 done, 1 failed, 2 usage or settings, 75 another backup or drill is running.
+
+### Restore drill
+
+```sh
+docker compose exec app bun server/backup-admin.ts restore-drill
+```
+
+The drill takes the newest archive (local first, then S3; or `--from` one), downloads it if needed into `BACKUP_DIR/.drill-<id>`, and checks: the archive against its manifest (sizes and SHA-256), `PRAGMA integrity_check`, the migration runner in read-only verify mode (a migration this version does not know fails it; migrations it would still apply are a warning, a failure with `--strict`), row counts against the manifest, and that every document, profile picture, and published note version the database names is in the archive (with S3 storage: in the bucket, read only). It prints a short report, exits non-zero on failure, and removes the scratch copy (`--keep` keeps it). It never starts a server on the copy, so it never touches the S3 prefix claim. `BACKUP_DRILL_INTERVAL=7d` runs it weekly; a failed scheduled drill notifies admins. `--from litestream` (or `litestream@2026-10-22T09:30:00Z`) drills a Litestream restore of the database.
+
+### Restore
+
+Stop Nook first. Restore into an **empty** folder (the command refuses a used one), check it, then point Compose at it:
+
+```sh
+docker compose stop app
+mkdir -p /srv/mynotes-restored && chown 1000:1000 /srv/mynotes-restored
+# From an online archive in S3 (latest, or a name from `list`), or a path to a .tar.gz the container can read:
+MYNOTES_DATA_DIR=/srv/mynotes-restored docker compose run --rm app \
+  bun server/backup-admin.ts restore --from latest --to /data
+MYNOTES_DATA_DIR=/srv/mynotes-restored docker compose up -d
+```
+
+Inside that container `/data` is the empty folder being restored, so `--from latest` finds archives in S3 only. For a local archive, pass its path from a folder the container can read (mount the old backup folder, or set `BACKUP_DIR` to it), or extract it by hand: an archive is a plain `tar.gz` of a data directory, so `tar -xzf /srv/mynotes/backup/nook-backup-….tar.gz -C /srv/mynotes-restored` works too (it leaves `nook-backup.json` beside the data, which Nook ignores), as does an offline `mynotes-*.tar.gz`. Then run `restore-drill --from <that archive>` to check it.
+
+Keep the same `.env` (the TOTP, vault, and agent keys). Start only one Nook on a data directory.
+
+**From Litestream, to a point in time.** Litestream holds the database only; note Markdown and local files come from an archive:
+
+```sh
+MYNOTES_DATA_DIR=/srv/mynotes-restored docker compose run --rm app \
+  bun server/backup-admin.ts restore --from litestream@2026-10-22T09:30:00Z --files-from latest --to /data
+```
+
+`--from litestream` restores the newest state. The files come from the archive named by `--files-from`; notes published after that archive are reported (their newest versions' Markdown is not in it), so choose the newest archive before the time, and back up often (`BACKUP_INTERVAL=6h`) when you rely on Litestream. `--db-only` restores the database alone. Outside the image, set `LITESTREAM_BIN` to a `litestream` binary.
+
+**With S3 storage**, a restored data directory is behind the bucket's last claim and refuses to start against the same bucket and prefix (see *S3 storage*, Restored copies). After a real disaster restore (the old server is gone for good) run `bun server/storage-admin.ts reclaim` once. A restore *test* must use another `S3_PREFIX` or a read-only key: never point a test copy at the live prefix with a key that can delete. The drill is always safe: it starts no server.
+
+### Litestream
+
+`LITESTREAM_ENABLED=true` (and a bucket: the storage bucket, `S3_BUCKET`, or `BACKUP_S3_BUCKET`) replicates `mynotes.sqlite` continuously to `<S3_PREFIX>litestream/mynotes` in the same bucket, so a restore can go back to any moment in the last `LITESTREAM_RETENTION` (default 7 days).
+
+- **The binary.** The image carries Litestream **0.5.17**, the release's static Linux build, checked by sha256 at build time (`Dockerfile`, stage `litestream`); `LITESTREAM=skip` builds without it.
+- **Supervision.** The image starts through `scripts/nook-start.sh`. With Litestream on, it writes `/tmp/litestream.yml` (bucket, path, endpoint, region, retention; no credential, and never in `DATA_DIR`), gives Litestream the S3 credentials in its own environment (`LITESTREAM_ACCESS_KEY_ID`, from `S3_*`, `BACKUP_S3_*`, or their `_FILE`), and runs `litestream replicate -exec "bun server/index.ts"`: Litestream starts Nook, forwards `SIGTERM` to it on `docker compose stop`, and exits when Nook exits (so Compose's restart policy works as before). Off, without a bucket, or without the binary, the script runs `bun server/index.ts` as before (the last two with a warning). `docker compose run app bun …` is unaffected.
+- **SQLite settings** (D616). Nook already runs in WAL mode with `busy_timeout = 5000`, which Litestream requires. It keeps SQLite's default `wal_autocheckpoint` (1,000 pages, PASSIVE): Litestream holds a read transaction, so a PASSIVE checkpoint never resets the WAL past what Litestream has copied, and Litestream runs its own checkpoints (its brief write lock is covered by the busy timeout). Nook never issues `wal_checkpoint(TRUNCATE)` or `RESTART` on the live database, and never turns the WAL off. Online backups' `VACUUM INTO` is a reader too and does not disturb it.
+- **Health.** Settings → Backups reads Litestream's metrics (`LITESTREAM_METRICS_ADDR`, loopback inside the container) and the newest uploaded transaction in the bucket: last upload, how many transactions the replica is behind, the last snapshot, and sync errors.
+- **Cost.** One small upload a second while Nook writes, compacted into fewer objects over time, and a full snapshot a day; Litestream deletes what is past the retention itself.
+
+### S3 credentials and bucket policy
+
+Backups and Litestream use the storage key unless `BACKUP_S3_BUCKET` gives them a bucket and key of their own. Limit each key to its prefixes. For a bucket `nook-files` with `S3_PREFIX=nook`:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    { "Effect": "Allow", "Action": "s3:ListBucket", "Resource": "arn:aws:s3:::nook-files", "Condition": { "StringLike": { "s3:prefix": ["nook/*"] } } },
+    { "Effect": "Allow", "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"], "Resource": "arn:aws:s3:::nook-files/nook/*" }
+  ]
+}
+```
+
+Nook needs delete for retention and Litestream for its own clean-up, so a stolen key could delete backups: turn on **bucket versioning** (or Object Lock) with a noncurrent-version expiry, and keep a copy elsewhere if the data matters (another account, `rclone sync` to another provider). Turn on the bucket's **default encryption** (SSE-S3 or SSE-KMS; AWS applies SSE-S3 to new objects by default, R2 always encrypts) and set `BACKUP_S3_SSE=required` to have every archive checked for it.
 
 ## Upgrades
 
@@ -648,6 +761,16 @@ Check: `sqlite3 <data>/mynotes.sqlite "SELECT id, name FROM schema_migrations WH
 **Auto-archive is on for every board, existing ones included, at 30 days.** On the first sweep after the upgrade (at boot, then hourly), cards that have sat in a done column for 30 days or more by their last change are archived: hidden from the board, never deleted, still listed by MCP and search with `archived: true`, and back on the board with **Restore to board** in the card or by moving them out. A board's owner or a manager turns it off with **Board settings → Done cards → Auto-archive cards in done columns** (or `PATCH /api/tasks/boards/:id {"autoArchiveDays": null}`); cards it already archived stay archived until restored. To turn it off on every board and bring back what the first sweep archived, run `sqlite3 <data>/mynotes.sqlite "UPDATE boards SET auto_archive_days = NULL; UPDATE cards SET archived_at = NULL WHERE archived_at IS NOT NULL;"` (safe while Nook runs). Each sweep that archives cards writes one `task.cards_auto_archived` audit row per board (actor: the system) with the count and the days. Each person can show archived cards on a board (**Board settings → Display**) and collapse columns; both are kept per person on the server. The board's and Tasks home's filter bars now keep **+ Filter** and the search box first, with the applied filters after them. A card's ⋯ menu and dialog gain **Archive** (anyone who can edit cards; audited `task.card_archive`), with Undo.
 
 **Vault keys: Edit can add access** (lane VAULTKEY, D620–D624, no migration). Settings → API keys → Vault → Edit now adds vaults and environments and raises read to write, after your password; removing still needs none. The vault settings still turn on only by Rotate. Each addition is audited (`vault.keys.update`), recorded in the vault's Activity, and mailed to the key's owner (`security.api_key_access_added`, a security mail: sent whenever mail is configured).
+
+**Online backups, Litestream, and restore drills (lane BACKUP, D611–D619; no migration).** Back up first as before (`./scripts/backup.sh --offline`), then rebuild and start. What changes on the first start:
+
+- **Backups start on their own.** `BACKUP_ENABLED` defaults to `true`: 10 minutes after the start, then every day, the server writes an online backup and keeps the newest 14 (`BACKUP_INTERVAL`, `BACKUP_KEEP`). With local storage they go to `DATA_DIR/backup` and use about the data directory's size each, so check the disk (a run refuses to leave less than `MIN_FREE_DISK_BYTES`); point `BACKUP_DIR` at another volume, lower `BACKUP_KEEP`, or set `BACKUP_TARGET=s3`. With `STORAGE_BACKEND=s3` they go to `<S3_PREFIX>backups/` in the same bucket with the same key (which already may put, list, and delete under the prefix) and hold the database and the data directory, not the bucket's objects (keep bucket versioning on). Set `BACKUP_ENABLED=false` to keep only your own backups.
+- **`scripts/backup.sh` backs up online.** Without a flag it now runs the online backup inside the running container; `--offline` (or `--force`, as before) stops the app and archives `DATA_DIR` the old way, which the upgrade steps here still use. The weekly cron entry is no longer needed. Old `mynotes-*.tar.gz` archives stay readable by `restore` and `restore-drill`.
+- **The image starts through `scripts/nook-start.sh`** (the new `CMD`), which runs `bun server/index.ts` exactly as before unless `LITESTREAM_ENABLED=true`. The image carries Litestream 0.5.17 (about 39 MB larger; `LITESTREAM=skip` in `.env` before `docker compose build` leaves it out).
+- **New:** Settings → **Backups** for admins (and the `backup_failed` bell notice and `security.backup_failed` mail), `bun server/backup-admin.ts` (`backup`, `list`, `status`, `restore-drill`, `restore`), and the variables in *Configuration* (`BACKUP_*`, `LITESTREAM_*`). See *Backup and restore*.
+- **To turn on Litestream:** `LITESTREAM_ENABLED=true` with an S3 bucket, then `docker compose up -d` (the container must restart). Check Settings → Backups → Litestream reads "Replicating", then run `docker compose exec app bun server/backup-admin.ts restore-drill --from litestream`.
+
+Check: `docker compose exec app bun server/backup-admin.ts backup` prints "Backup created", and `docker compose exec app bun server/backup-admin.ts restore-drill` ends with "Restore drill passed".
 
 ### Upgrading to 0.44.0
 

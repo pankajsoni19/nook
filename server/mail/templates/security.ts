@@ -70,6 +70,38 @@ export const apiKeyAccessAddedTemplate = defineTemplate<{ keyName: string; added
   fixture: () => ({ keyName: "laptop", added: "Tasks: write (2 chosen items) · Files: read", at: "2026-10-22T09:00:00.000Z" })
 });
 
+/**
+ * Lane BACKUP (D618): to every admin, when online backups failed BACKUP_ALERT_AFTER times in a row
+ * (again a day later while they keep failing), or when a scheduled restore drill failed.
+ */
+export const backupFailedTemplate = defineTemplate<{ kind: "backup" | "drill"; failures: number; error: string; lastSuccessAt: string | null; at: string; delayed?: boolean }>({
+  name: "security.backup_failed",
+  class: "security",
+  render(data, ctx) {
+    const drill = data.kind === "drill";
+    const subject = drill ? `The restore drill failed on ${ctx.instanceName}` : `Backups are failing on ${ctx.instanceName}`;
+    return layout({
+      instanceName: ctx.instanceName,
+      tone: "security",
+      subject: delayed(subject, data.delayed),
+      preheader: drill ? "The latest backup could not be restored and checked." : "Online backups did not complete. Check the server.",
+      eyebrow: "Admin · Backups",
+      title: drill ? "A restore drill failed" : data.failures === 1 ? "A backup failed" : `${data.failures} backups in a row failed`,
+      lead: drill ? "The scheduled drill restored a backup into a scratch folder, and a check failed." : "Nook could not finish its scheduled online backup.",
+      blocks: [
+        context([
+          { title: drill ? "Failed check" : "Last error", meta: cleanLine(data.error, 300, "Unknown error") },
+          { title: "Last good backup", meta: data.lastSuccessAt ? formatInstant(data.lastSuccessAt, ctx.tz) : "None yet" }
+        ], { tone: "security" }),
+        paragraph("Open Settings → Backups for the details, or run bun server/backup-admin.ts status on the server.")
+      ],
+      action: { label: "Open Backups", href: appLink(paths.settings("backups")) },
+      footer: securityFooter(`You got this because you are an admin of ${appName()}.`)
+    });
+  },
+  fixture: () => ({ kind: "backup" as const, failures: 2, error: "s3: S3 error AccessDenied", lastSuccessAt: "2026-10-21T03:00:00.000Z", at: "2026-10-22T03:00:00.000Z" })
+});
+
 const ROLE_LABELS: Record<string, string> = { admin: "Admin", member: "Member", viewer: "Viewer", guest: "Guest" };
 const ROLE_LINES: Record<string, string> = {
   admin: "Admins manage the team and have every member permission.",

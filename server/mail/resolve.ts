@@ -243,6 +243,8 @@ export function resolvePayload(template: TemplateName, payload: Payload, recipie
     case "security.api_key_created": return resolveKeyCreated(payload, recipient);
     case "security.api_key_access_added": return resolveKeyAccessAdded(payload, recipient);
     case "security.role_changed": return resolveRoleChanged(payload, recipient);
+    // Lane BACKUP (D618): only while the recipient is still an admin.
+    case "security.backup_failed": return recipient.role !== "admin" ? { skip: "access_lost" } : { data: { kind: payload.kind === "drill" ? "drill" : "backup", failures: Number(payload.failures) || 1, error: String(payload.error ?? ""), lastSuccessAt: typeof payload.lastSuccessAt === "string" ? payload.lastSuccessAt : null, at: String(payload.at ?? new Date().toISOString()) } };
     case "security.two_factor": return resolveTwoFactor(payload);
     case "security.account": return resolveAccount(payload);
     case "account.verify": return resolveVerify(payload, recipient, nowMs);

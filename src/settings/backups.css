@@ -1,0 +1,26 @@
+/* Settings → Backups (lane BACKUP). The cards are Report data sources' (reports.css); these are the extras. */
+.backups-settings .report-source-head strong svg { width: 17px; height: 17px; flex: none; color: var(--muted); }
+.backups-settings .report-source-head strong { flex-wrap: wrap; }
+.backups-settings .report-source-facts div { grid-template-columns: 96px minmax(0, 1fr); }
+.backups-settings code { overflow-wrap: anywhere; font-size: .8rem; }
+.backups-settings .spin { animation: nook-backups-spin 1s linear infinite; }
+@keyframes nook-backups-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .backups-settings .spin { animation: none; } }
+.backups-when { color: var(--muted); }
+.backups-warning { display: flex; align-items: flex-start; gap: 6px; margin: 0; color: #f3d48a; font-size: .84rem; overflow-wrap: anywhere; }
+.backups-warning svg { flex: none; width: 16px; height: 16px; margin-top: 2px; }
+.backups-checks { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: .82rem; }
+.backups-checks li { display: flex; align-items: flex-start; gap: 6px; min-width: 0; overflow-wrap: anywhere; }
+.backups-checks li svg { flex: none; width: 15px; height: 15px; margin-top: 2px; }
+.backups-checks li.ok svg { color: #8fd19e; }
+.backups-checks li.warn svg { color: #e2c46c; }
+.backups-checks li.failed { color: #fda4af; }
+.backups-checks strong { font-weight: 650; }
+.backups-subheading { margin: 18px 0 8px; font-size: .9rem; font-weight: 650; }
+.backups-archives { list-style: none; margin: 0 0 14px; padding: 0; display: grid; border: 1px solid var(--border); border-radius: 14px; background: var(--panel); overflow: hidden; }
+.backups-archives li { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; padding: 10px 14px; min-width: 0; }
+.backups-archives li + li { border-top: 1px solid var(--border); }
+.backups-archive-name { display: inline-flex; align-items: center; gap: 8px; min-width: 0; overflow-wrap: anywhere; font-size: .84rem; }
+.backups-archives small { color: var(--muted); font-size: .8rem; }
+.backups-ok { width: 15px; height: 15px; flex: none; color: #8fd19e; }
+.backups-failed { width: 15px; height: 15px; flex: none; color: #fda4af; }

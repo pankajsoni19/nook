@@ -196,6 +196,19 @@ export const registeredMigrations: readonly typeof migrations[number][] = migrat
  */
 export const registeredMigrationIds: readonly number[] = migrations.map((migration) => migration.id);
 
+/**
+ * The migration runner's read-only verify mode (lane BACKUP, D617: the restore drill). Compares the ids a
+ * database has applied with this build's, and changes nothing: `missing` would run on the first start,
+ * `unknown` means the database is from a newer Nook than this one.
+ */
+export function verifyMigrations(db: Database) {
+  const hasTable = db.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'").get() !== null;
+  const applied = hasTable ? (db.query("SELECT id FROM schema_migrations ORDER BY id").all() as Array<{ id: number }>).map((row) => row.id) : [];
+  const appliedSet = new Set(applied);
+  const known = new Set(registeredMigrationIds);
+  return { applied, missing: registeredMigrationIds.filter((id) => !appliedSet.has(id)), unknown: applied.filter((id) => !known.has(id)) };
+}
+
 /** Applies the pending migrations in order; returns how many ran (each is logged with its timing). */
 export function runMigrations(db: Database) {
   const log = logger("db");

@@ -24,6 +24,7 @@ import { sweepSchemaSync } from "./reports/schemaCatalog";
 import { scheduleDocumentIndex } from "./documentSearch";
 import { sweepAutoArchive } from "./tasks/archive";
 import { logger } from "./log";
+import { backupInProgress } from "./backup/service";
 
 const slog = logger("sweeper");
 
@@ -83,7 +84,11 @@ export function runSweep(options: { boot?: boolean; nowMs?: number } = {}) {
   running ??= (async () => {
     try {
       let counts: SweepCounts | null = null;
-      const filesAllowed = await fileSweepsAllowed();
+      // Lane BACKUP (D614): while a backup reads DATA_DIR, files and the Bin are left alone (next hour instead),
+      // so nothing it is about to pack is purged under it.
+      const backingUp = backupInProgress();
+      if (backingUp) slog.info("A backup is running; file sweeps and Bin purges wait for the next sweep");
+      const filesAllowed = !backingUp && await fileSweepsAllowed();
       try {
         if (!filesAllowed) throw new Error("File sweeps are off for this run");
         const sizes = options.boot ? new Map<string, number>() : undefined;
@@ -115,7 +120,7 @@ export function runSweep(options: { boot?: boolean; nowMs?: number } = {}) {
       // Bin purges run even when the file sweep failed, so retention never stalls on it.
       let bin: BinSweepCounts | null = null;
       try {
-        bin = await sweepBin({ nowMs: options.nowMs });
+        bin = backingUp ? { purged: 0, pending: 0 } as BinSweepCounts : await sweepBin({ nowMs: options.nowMs });
         if (bin.purged || bin.pending) slog.info(`Bin sweep: ${bin.purged} purged, ${bin.pending} pending retry`);
       } catch (error) {
         slog.error("Bin sweep failed", error);

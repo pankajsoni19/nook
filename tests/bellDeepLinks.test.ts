@@ -111,7 +111,10 @@ describe("bell deep links (id-only hrefs, T68)", () => {
       ["new_sign_in", { kind: "device", id: "firefox:linux" }, "/settings/security"],
       ["feed_revoked", { kind: "calendar", id: calendar }, "/settings/access"],
       ["routine_paused", { kind: "routine", id: routine }, "/inbox/routines"],
-      ["avatar_removed", null, "/settings/security"]
+      ["avatar_removed", null, "/settings/security"],
+      // Lane BACKUP (D614): to admins; Settings → Backups.
+      ["backup_failed", null, "/settings/backups"],
+      ["backup_drill_failed", null, "/settings/backups"]
     ];
     // Every kind the server can store is covered (readable agents, chats, and bases: tests/agentsSharing*.test.ts, knowledge tests).
     expect([...new Set(cases.map(([kind]) => kind))].sort()).toEqual(await noticeKinds());

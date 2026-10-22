@@ -53,7 +53,10 @@ export type AccessNoticeKind = "share_removed" | "share_lowered" | "access_reset
   | "avatar_removed"
   // D600: an edit added access to one of your API keys (the line names the permissions from the
   // `key.updated` event written in the same transaction). Opens Settings → API keys.
-  | "key_access_added";
+  | "key_access_added"
+  // Lane BACKUP (D618): to every admin, online backups failed `count` times in a row (BACKUP_ALERT_AFTER),
+  // or a scheduled restore drill failed. Opens Settings → Backups.
+  | "backup_failed" | "backup_drill_failed";
 
 export type AccessNotice = {
   userId: string;
@@ -158,6 +161,9 @@ export function accessNoticeHref(row: { kind: string; resource_kind: string | nu
       return paths.settings("keys");
     case "routine_paused":
       return paths.routines();
+    case "backup_failed":
+    case "backup_drill_failed":
+      return paths.settings("backups");
     // Settings → Security: recognised devices, Google sign-in, and two-factor.
     case "new_sign_in":
     case "avatar_removed":
@@ -209,6 +215,8 @@ const isAccessKind = (value: string | null): value is AccessKind => value !== nu
 
 function line(row: NoticeRow, recipientId: string) {
   if (row.kind === "new_sign_in") return `New sign-in from ${deviceLabelFromCode(row.resource_id)}`;
+  if (row.kind === "backup_failed") return `${row.count === 1 ? "A backup" : `${row.count ?? 0} backups in a row`} failed on this server. Open Settings → Backups for the error.`;
+  if (row.kind === "backup_drill_failed") return "The scheduled restore drill failed: the latest backup could not be restored and checked. Open Settings → Backups.";
   const actor = row.actor_name ?? "An admin";
   if (row.resource_kind === "vault" && row.resource_id) {
     const title = vaultTitleFor(recipientId, row.resource_id);

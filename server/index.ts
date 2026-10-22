@@ -55,6 +55,7 @@ import { abandonGenerateRuns } from "./reports/generate";
 import { roleHasReports } from "./reports/access";
 import { abandonRunsAtBoot } from "./reports/refresh";
 import { startReportScheduler } from "./reports/scheduler";
+import { registerBackupRoutes, startBackupScheduler } from "./backup/service";
 import { failInstructionsAtBoot, startInstructionSweep } from "./reports/instructions";
 import { backfillVersions } from "./reports/versionBackfill";
 import { resumeKnowledgeIndexing } from "./knowledge/index";
@@ -974,6 +975,8 @@ registerAgentRoutes(app);
 registerKnowledgeRoutes(app);
 // Analytics reports (Wave 45): data sources (admin), the schema catalog, reports, and the SQL console.
 registerReportRoutes(app);
+// Online backups (lane BACKUP): Settings → Backups, Back up now, and the restore drill (admins).
+registerBackupRoutes(app);
 registerCalendarRoutes(app);
 registerPreferenceRoutes(app);
 registerMailRoutes(app);
@@ -1155,6 +1158,8 @@ try {
   log.error("Note and whiteboard attachment backfill failed", error);
 }
 startSweeper();
+// Online backups and the restore drill (lane BACKUP): a minute tick; each job is a low-priority child process.
+startBackupScheduler();
 // Analytics reports (Wave 47): runs a stopped server left behind are abandoned; scheduled refreshes tick once a minute.
 abandonRunsAtBoot();
 startReportScheduler();

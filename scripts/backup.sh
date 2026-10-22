@@ -1,4 +1,12 @@
 #!/usr/bin/env bash
+# Nook backups from the host (docs/OPERATIONS.md, Backup and restore).
+#
+#   ./scripts/backup.sh            an online backup now, inside the running app container
+#                                  (bun server/backup-admin.ts backup: the server keeps running; BACKUP_TARGET,
+#                                  BACKUP_KEEP, and the S3 settings apply). With the app stopped, an offline
+#                                  archive as below, at most one a week.
+#   ./scripts/backup.sh --offline  stop the app, archive DATA_DIR with tar, start it again (before an upgrade,
+#   ./scripts/backup.sh --force    a key rotation, or a storage migration); --force is the same (its old name).
 set -Eeuo pipefail
 
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -50,11 +58,28 @@ readonly RETENTION_COUNT=5
 readonly MINIMUM_AGE_SECONDS=$((7 * 24 * 60 * 60))
 
 force=false
-if [[ "${1:-}" == "--force" ]]; then
+if [[ "${1:-}" == "--force" || "${1:-}" == "--offline" ]]; then
   force=true
 elif [[ $# -gt 0 ]]; then
-  echo "Usage: $0 [--force]" >&2
+  echo "Usage: $0 [--offline | --force]" >&2
   exit 2
+fi
+
+# Online by default (lane BACKUP): the running server's own environment, a VACUUM INTO snapshot, verified.
+if [[ "${force}" == false ]]; then
+  running_id="$(compose ps -q app 2>/dev/null || true)"
+  if [[ -n "${running_id}" && "$(docker inspect -f '{{.State.Running}}' "${running_id}" 2>/dev/null || true)" == "true" ]]; then
+    set +e
+    compose exec -T app bun --no-env-file server/backup-admin.ts backup
+    status=$?
+    set -e
+    if (( status == 75 )); then
+      echo "A backup or restore drill is already running in the app; nothing to do." >&2
+      exit 0
+    fi
+    exit "${status}"
+  fi
+  echo "The app is not running: making an offline archive instead."
 fi
 
 s3_warning

@@ -3,7 +3,7 @@ import { assignedTemplate, commentTemplate, proposalsTemplate, sharedTemplate } 
 import { eventChangedTemplate, reminderTemplate } from "./templates/calendar";
 import { binExpiringTemplate, sprintTemplate } from "./templates/later";
 import { digestTemplate } from "./templates/digest";
-import { accountEventTemplate, apiKeyAccessAddedTemplate, apiKeyCreatedTemplate, newSignInTemplate, passwordChangedTemplate, roleChangedTemplate, twoFactorTemplate } from "./templates/security";
+import { accountEventTemplate, apiKeyAccessAddedTemplate, backupFailedTemplate, apiKeyCreatedTemplate, newSignInTemplate, passwordChangedTemplate, roleChangedTemplate, twoFactorTemplate } from "./templates/security";
 import type { TemplateDef } from "./templates/types";
 
 /**
@@ -36,7 +36,9 @@ export const TEMPLATES = {
   "security.password_changed": passwordChangedTemplate,
   // The plan's "later" items (#9, #14), with migration 044.
   "security.new_sign_in": newSignInTemplate,
-  "account.welcome": welcomeTemplate
+  "account.welcome": welcomeTemplate,
+  // Lane BACKUP (D618): admins hear about failing backups and drills.
+  "security.backup_failed": backupFailedTemplate
 } as const;
 
 export type TemplateName = keyof typeof TEMPLATES;
@@ -53,6 +55,7 @@ export function previewFixtures(): Array<{ id: string; template: TemplateName; d
     { id: "tasks.assigned.many", template: "tasks.assigned", data: { actors: ["Priya Shah", "Sam Lee"], cards: Array.from({ length: 7 }, (_, index) => ({ ...assigned.cards[0]!, cardId: `6a1d6b7f-2c3e-4d4f-9a5b-${String(index).padStart(12, "0")}`, title: `Card ${index + 1}`, dueOn: index % 2 ? null : "2026-10-02" })) } },
     { id: "sharing.shared.one", template: "sharing.shared", data: { actors: ["Priya Shah"], items: [sharedTemplate.fixture().items[0]] } },
     { id: "security.api_key_access_added.vault", template: "security.api_key_access_added", data: { keyName: "deploy", added: "Read values: 1 vault (every environment) · Read and write values: 2 environments", at: "2026-10-22T09:00:00.000Z", vault: true } },
+    { id: "security.backup_failed.drill", template: "security.backup_failed", data: { kind: "drill", failures: 1, error: "Files the database names: 2 of 140 missing", lastSuccessAt: "2026-10-22T03:00:00.000Z", at: "2026-10-22T04:00:00.000Z" } },
     { id: "security.two_factor.enabled", template: "security.two_factor", data: { event: "enabled", at: "2026-09-28T09:00:00.000Z", remaining: null } },
     { id: "security.two_factor.recovery_regenerated", template: "security.two_factor", data: { event: "recovery_regenerated", at: "2026-09-28T09:00:00.000Z", remaining: 10 } },
     { id: "security.account.unblocked", template: "security.account", data: { event: "unblocked", actorName: "Priya Admin", at: "2026-09-28T09:00:00.000Z" } },
