@@ -71,6 +71,15 @@
 .report-diff-removed .report-diff-side { opacity: .7; }
 .report-diff-hidden { margin: 0; border: 1px dashed var(--report-border); border-radius: 12px; padding: 12px; color: var(--report-muted); }
 @media (min-width: 761px) { .report-diff-two { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+/* D516: a new section shown in its place: the block it follows, the section, and what comes next. */
+.report-diff-inplace { display: grid; gap: 10px; min-width: 0; }
+.report-diff-context { margin: 0; border: 1px dashed var(--report-border); border-radius: 10px; padding: 8px 12px; color: var(--report-muted); font-size: .84rem; overflow-wrap: anywhere; }
+.report-diff-new-section { display: grid; gap: 8px; min-width: 0; border: 1px solid var(--report-accent-line); border-radius: 14px; padding: 12px; background: var(--report-accent-bg); }
+.report-diff-new-section .report-section-title { margin: 0; }
+.report-diff-new-section .report-section-summary { margin: 0; }
+.report-diff-new-blocks { display: grid; gap: 10px; min-width: 0; }
+@media (min-width: 1024px) { .report-diff-new-blocks:has(> :nth-child(2)) { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+.report-proposal-kind { color: var(--report-accent); font-weight: 650; }
 .report-diff-query { display: grid; gap: 6px; }
 .report-diff-query p { margin: 0; display: flex; align-items: center; gap: 8px; }
 .report-diff-sql-before { opacity: .65; text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--report-bad) 60%, transparent); }

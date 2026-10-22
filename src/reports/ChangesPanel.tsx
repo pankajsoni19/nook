@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type MutableRefObject } from "react";
-import { ArrowDown, ArrowUp, Check, CircleStop, GitCommitVertical, LayoutList, LoaderCircle, Send, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, CircleStop, GitCommitVertical, LayoutList, LoaderCircle, Paperclip, Send, X } from "lucide-react";
 import { followRun, type SequencedRunEvent } from "../chat/chatApi";
 import { ModalDialog } from "../files/Dialog";
 import { notify } from "../ui/notify";
@@ -7,19 +7,25 @@ import { Select } from "../ui/Select";
 import { useHistoryDialogGuard, useLayerReopen, type LayerReopenMemory } from "../ui/useHistoryDialogGuard";
 import { useLayerOpener } from "../historyDialogs";
 import type { ReportDetail } from "../../shared/reports";
-import { INSTRUCTION_LIMITS, INSTRUCTION_STATUS_TEXT, type InstructionsView, type ReportInstruction } from "../../shared/reportsEdit";
+import { INSTRUCTION_LIMITS, INSTRUCTION_STATUS_TEXT, type InstructionDocView, type InstructionsView, type ReportInstruction } from "../../shared/reportsEdit";
+import { REPORT_DOC_LIMITS, type DocServerChoice } from "../../shared/reportsGenerate";
+import { DocAdder, DocList, type DocListItem, type PickedDoc } from "./DocList";
+import { NOOK_FALLBACK } from "./NewReportSheet";
 import { ArrangeSheet } from "./ArrangeSheet";
 import { applyEvent, resultLine, stepDetail, toolLabel, type ProgressStep } from "./GenerateProgress";
 import { ProposalSheet } from "./ProposalSheet";
 import { addInstruction, cancelInstruction, listInstructions, reorderInstructions, setAutoApply, threadMoving } from "./reportEditApi";
 import { timeAgo } from "./reportViewApi";
-import { messageOf } from "./reportsApi";
+import { docServers, messageOf } from "./reportsApi";
 import { VersionsSheet, type VersionsMemory } from "./VersionsSheet";
 import "./reportEdit.css";
 
 const POLL_MS = 1500;
 /** The composer's "whole report" choice (block ids never start with an underscore). */
 const PAGE = "_page";
+/** D516: "Add a new section", and its "At the end" place. */
+const ADD = "_add";
+const END = "_end";
 
 /** The caller's rights on a report (level, comment, apply), read once by the page. */
 export function useReportRights(reportId: string) {
@@ -31,6 +37,15 @@ export function useReportRights(reportId: string) {
   }, [reportId]);
   return rights;
 }
+
+/** D516: where a new section goes, as the thread says it. */
+export const addTargetLabel = (report: ReportDetail, afterBlockId: string | null) => afterBlockId ? `New section after “${blockLabel(report, afterBlockId)}”` : "New section at the end";
+
+/** D517: an instruction's attached doc as a row: its title, source, and whether Apply added it to the report's docs. */
+export const instructionDocItem = (doc: InstructionDocView): DocListItem => ({
+  key: doc.id, title: doc.title, ref: doc.ref ?? "", nook: doc.source === "nook", source: doc.source === "nook" ? doc.serverName ?? "Nook" : `via ${doc.serverName ?? "a tool server"}`,
+  tag: doc.joined ? "Added to the report's docs" : doc.joinNote ? "Not added" : null, meta: doc.joinNote?.replace(/^Not added: /, "") ?? null
+});
 
 const blockLabel = (report: ReportDetail, blockId: string | null) => {
   if (!blockId) return "Whole report";
@@ -69,10 +84,16 @@ export function ChangesPanel({ report, initialBlockId, onClose, onReportChanged,
   const [error, setError] = useState<string | null>(null);
   const [text, setText] = useState("");
   const [target, setTarget] = useState<string>(initialBlockId ?? "");
+  // D516: a new section's place (a block id, or the end); D517: the docs attached to the next instruction.
+  const [place, setPlace] = useState<string>(END);
+  const [attached, setAttached] = useState<Array<PickedDoc & { key: string }>>([]);
+  const [attaching, setAttaching] = useState(false);
+  const [servers, setServers] = useState<DocServerChoice[] | null>(null);
   const [sending, setSending] = useState(false);
   const [sheet, setSheet] = useState<Sheet | null>(null);
   const textId = useId();
   const targetId = useId();
+  const placeId = useId();
   const applied = useRef<Set<string> | null>(null);
   useHistoryDialogGuard(true, onClose, { reopen: reopenPanel, layerKey: `reports.changes:${initialBlockId ?? ""}` });
 
@@ -105,13 +126,25 @@ export function ChangesPanel({ report, initialBlockId, onClose, onReportChanged,
   useLayerOpener("reports.changes-arrange", () => openSheet({ kind: "arrange" }));
   useLayerOpener("reports.changes-proposal", (instructionId) => { if (instructionId) openSheet({ kind: "proposal", instructionId }); });
 
+  // The doc sources load when the person first attaches a doc (Nook is always there).
+  useEffect(() => {
+    if (!attaching || servers) return undefined;
+    let alive = true;
+    docServers().then(({ servers: list }) => { if (alive) setServers(list.some((item) => item.builtin) ? list : [NOOK_FALLBACK(), ...list]); }).catch(() => { if (alive) setServers([NOOK_FALLBACK()]); });
+    return () => { alive = false; };
+  }, [attaching, servers]);
+
+  const adding = target === ADD;
   async function send(event: FormEvent) {
     event.preventDefault();
     if (!text.trim() || sending) return;
     setSending(true);
     try {
-      await addInstruction(report.id, text.trim(), target || null);
+      const docs = attached.map(({ docRef, serverId, tool, arg }) => ({ docRef, serverId, tool: tool ?? null, arg: arg ?? null }));
+      await addInstruction(report.id, text.trim(), adding ? null : target || null, { kind: adding ? "add" : "change", afterBlockId: adding && place !== END ? place : null, docs });
       setText("");
+      setAttached([]);
+      setAttaching(false);
       await load();
     } catch (reason) {
       notify.error(messageOf(reason, "Could not send the instruction"));
@@ -145,11 +178,25 @@ export function ChangesPanel({ report, initialBlockId, onClose, onReportChanged,
       {view?.canComment && <form className="report-changes-compose" noValidate onSubmit={send}>
         <label htmlFor={targetId}>About</label>
         <Select id={targetId} value={target || PAGE} onChange={(next) => setTarget(next === PAGE ? "" : next)}
-          options={[{ value: PAGE, label: "The whole report" }, ...dataBlocks.map((block) => ({ value: block.id, label: blockLabel(report, block.id) }))]} />
-        <label htmlFor={textId} className="sr-only">What should change</label>
-        <textarea id={textId} autoFocus={focusComposer} value={text} maxLength={INSTRUCTION_LIMITS.text} rows={3} placeholder={target ? "Split this by country…" : "Add weekly retention below the revenue chart…"}
+          options={[{ value: PAGE, label: "The whole report" }, { value: ADD, label: "Add a new section", description: "New charts or text in a section of their own" }, ...dataBlocks.map((block) => ({ value: block.id, label: blockLabel(report, block.id) }))]} />
+        {adding && <>
+          <label htmlFor={placeId}>Place it</label>
+          <Select id={placeId} value={place} onChange={setPlace}
+            options={[{ value: END, label: "At the end" }, ...dataBlocks.map((block) => ({ value: block.id, label: `After “${blockLabel(report, block.id)}”` }))]} />
+        </>}
+        <label htmlFor={textId} className="sr-only">{adding ? "What the new section should show" : "What should change"}</label>
+        <textarea id={textId} autoFocus={focusComposer} value={text} maxLength={INSTRUCTION_LIMITS.text} rows={3} placeholder={adding ? "A section on refunds by country, with the weekly trend…" : target ? "Split this by country…" : "Add weekly retention below the revenue chart…"}
           onChange={(event) => setText(event.target.value)}
           onKeyDown={(event) => { if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) void send(event as unknown as FormEvent); }} />
+        {attached.length > 0 && <DocList label="Attached docs" removeLabel="Detach" items={attached.map((doc) => ({ key: doc.key, title: doc.title ?? null, ref: doc.docRef, nook: doc.serverId === "nook", source: doc.serverId === "nook" ? "Nook" : `via ${servers?.find((item) => item.id === doc.serverId)?.name ?? "a tool server"}` }))}
+          disabled={sending} onRemove={(index) => setAttached((current) => current.filter((_, at) => at !== index))} />}
+        {attaching
+          ? <DocAdder servers={servers} defaultServerId={report.doc?.serverId ?? null} label="Attach a doc" addLabel="Attach" disabled={sending} full={attached.length >= REPORT_DOC_LIMITS.instructionDocs}
+            onAdd={(doc) => {
+              if (attached.some((item) => item.docRef === doc.docRef && item.serverId === doc.serverId)) return;
+              setAttached((current) => current.length >= REPORT_DOC_LIMITS.instructionDocs ? current : [...current, { ...doc, key: crypto.randomUUID() }]);
+            }} />
+          : <button type="button" className="secondary-button report-changes-attach" onClick={() => setAttaching(true)} disabled={sending}><Paperclip aria-hidden="true" />Attach a doc</button>}
         <div className="report-changes-compose-actions">
           <p className="file-dialog-hint">The AI changes the report one instruction at a time{view.canApply ? "" : "; the owner reviews each change"}.</p>
           <button type="submit" className="primary-button" disabled={sending || !text.trim()}>{sending ? <LoaderCircle className="spin" /> : <Send />}Send</button>
@@ -211,10 +258,12 @@ function InstructionItem({ report, item, canApply, queuedIndex, queuedCount, onM
   return <li className={`report-instruction report-instruction-${item.status}`}>
     <div className="report-instruction-head">
       <span className={`reports-status report-instruction-status-${item.status}`}>{item.status === "running" && <LoaderCircle className="spin" aria-hidden="true" />}{instructionStatusText(item, canApply)}</span>
-      <span className="report-instruction-target">{blockLabel(report, item.blockId)}</span>
+      <span className="report-instruction-target">{item.kind === "add" ? addTargetLabel(report, item.afterBlockId) : blockLabel(report, item.blockId)}</span>
       <span className="report-instruction-meta">{item.isMine ? "You" : item.authorName ?? "Someone"}{item.via === "mcp" ? " via MCP" : ""} · {timeAgo(item.createdAt)}</span>
     </div>
     <p className="report-instruction-text">{item.text}</p>
+    {(item.docs?.length ?? 0) > 0 && <DocList label="Attached docs" items={item.docs.map(instructionDocItem)} />}
+    {!item.docs?.length && (item.docCount ?? 0) > 0 && <p className="report-instruction-docs-count">{item.docCount === 1 ? "1 doc attached" : `${item.docCount} docs attached`}</p>}
     {item.summary && item.status !== "queued" && <p className="report-instruction-summary">{item.summary}</p>}
     {item.error && (item.status === "failed" || item.status === "cancelled") && <p className="report-instruction-error">{item.error}</p>}
     {item.status === "applied" && item.appliedVersion !== null && <p className="report-instruction-summary"><Check aria-hidden="true" />Version {item.appliedVersion}{item.autoApplied ? " (applied automatically)" : ""}</p>}

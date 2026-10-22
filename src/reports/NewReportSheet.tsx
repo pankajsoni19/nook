@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { FileText, Search, Table2 } from "lucide-react";
+import { FileText, Plus, Search, Table2 } from "lucide-react";
 import { appName } from "../appName";
 import { ModalDialog } from "../files/Dialog";
 import { Select } from "../ui/Select";
@@ -7,8 +7,8 @@ import { useConfirm } from "../ui/useConfirm";
 import { useHistoryDialogGuard } from "../ui/useHistoryDialogGuard";
 import { setServerPolicies } from "../chat/chatApi";
 import { REPORT_LIMITS, type DatasourceChoice } from "../../shared/reports";
-import { defaultBrowseTools, isReadLikeTool, isWriteLikeName, type DocServerChoice } from "../../shared/reportsGenerate";
-import { linkHost, parseNookRef } from "../../shared/nookDocRef";
+import { defaultBrowseTools, isReadLikeTool, isWriteLikeName, REPORT_DOC_LIMITS, type DocInput, type DocServerChoice } from "../../shared/reportsGenerate";
+import { DocList, sourceForLink, type DocListItem } from "./DocList";
 import { BrowseToolsPicker } from "./BrowseToolsPicker";
 import { NookDocPicker, nookLinkOf } from "./NookDocPicker";
 import { codeOf, createReport, docServers, generateReport, messageOf, regenerateReport } from "./reportsApi";
@@ -68,19 +68,8 @@ export const NOOK_FALLBACK = (): DocServerChoice => ({
   pick: { tool: "read", arg: "id", outline: false }, candidates: [], toolNames: ["read_note", "read_document_text", "search_notes"]
 });
 
-/**
- * B4: the source a pasted link selects: Nook for a link on one of this instance's origins (or a bare
- * id), else the tool server whose host the link is on (or a subdomain of it, either way); null keeps
- * the current choice.
- */
-export function sourceForLink(ref: string, servers: readonly DocServerChoice[]): string | null {
-  const nook = servers.find((item) => item.builtin);
-  if (nook && parseNookRef(ref, nook.origins?.length ? nook.origins : typeof window === "undefined" ? [] : [window.location.origin])) return nook.id;
-  const host = linkHost(ref);
-  if (!host) return null;
-  const match = servers.find((item) => item.host && (host === item.host || host.endsWith(`.${item.host}`) || item.host.endsWith(`.${host}`)));
-  return match?.id ?? null;
-}
+// B4: the source a pasted link selects (DocList.tsx, shared with Doc settings and Changes).
+export { sourceForLink };
 
 export const TOOL_SERVERS_PATH = "/settings/ai/tools";
 
@@ -138,6 +127,8 @@ export function NewReportSheet({ sources, role = "member", onCancel, onCreated, 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
+  // D515: the docs added so far (the link being typed is the last one); a Nook pick knows its title.
+  const [docs, setDocs] = useState<Array<DocInput & { key: string; title: string | null }>>([]);
   // Lane I: the folder the new report goes in (null: Unfiled); "Change" shows the picker.
   const [folderId, setFolderId] = useState<string | null>(folders?.some((item) => item.id === initialFolderId) ? initialFolderId : null);
   const [changingFolder, setChangingFolder] = useState(false);
@@ -169,7 +160,10 @@ export function NewReportSheet({ sources, role = "member", onCancel, onCreated, 
   useEffect(() => { loadServers(); }, [loadServers]);
 
   const server = useMemo(() => servers?.find((item) => item.id === serverId) ?? null, [servers, serverId]);
-  useEffect(() => { setBrowse(server ? defaultBrowseTools(server.tools.map((item) => item.name)) : []); }, [server]);
+  // B3: the browse tools follow the first doc's source (D515).
+  const firstServerId = docs[0]?.serverId ?? serverId;
+  const firstServer = useMemo(() => servers?.find((item) => item.id === firstServerId) ?? null, [servers, firstServerId]);
+  useEffect(() => { setBrowse(firstServer ? defaultBrowseTools(firstServer.tools.map((item) => item.name)) : []); }, [firstServer]);
   const nook = server?.builtin === true;
   // B4: a pasted link picks its source: Nook for this instance's links, a tool server for its host.
   const changeRef = (value: string) => {
@@ -177,6 +171,31 @@ export function NewReportSheet({ sources, role = "member", onCancel, onCreated, 
     const picked = servers ? sourceForLink(value, servers) : null;
     if (picked && picked !== serverId) { setServerId(picked); setTool(AUTO); setArg(""); }
   };
+  const docsFull = docs.length >= REPORT_DOC_LIMITS.docs;
+  const sourceName = (id: string) => servers?.find((item) => item.id === id)?.name ?? (id === "nook" ? `${appName()} (this workspace)` : "A tool server");
+  const docItems: DocListItem[] = docs.map((doc) => ({ key: doc.key, title: doc.title, ref: doc.docRef, nook: doc.serverId === "nook", source: doc.serverId === "nook" ? appName() : `via ${sourceName(doc.serverId)}${doc.tool ? ` (${doc.tool})` : ""}` }));
+  const currentDoc = (): (DocInput & { key: string; title: string | null }) | null => docRef.trim() && serverId
+    ? { key: crypto.randomUUID(), docRef: docRef.trim(), serverId, tool: tool === AUTO || nook ? null : tool, arg: nook ? null : arg.trim() || null, title: null }
+    : null;
+  /** The typed link joins the list (D515), keeping the source for the next one. */
+  function addCurrent() {
+    const doc = currentDoc();
+    if (!doc || docsFull) return;
+    if (tool === AUTO && !server?.pick) return setError("Nook found no fetch tool on that server; choose the tool to use.");
+    if (docs.some((item) => item.docRef === doc.docRef && item.serverId === doc.serverId)) return setError("That doc is already in the list.");
+    setError(null);
+    setDocs((current) => [...current, doc]);
+    setDocRef("");
+    setTool(AUTO);
+    setArg("");
+  }
+  const moveDoc = (index: number, by: -1 | 1) => setDocs((current) => {
+    const next = [...current];
+    const to = index + by;
+    if (to < 0 || to >= next.length) return current;
+    [next[index], next[to]] = [next[to]!, next[index]!];
+    return next;
+  });
   const chosenTool = tool === AUTO ? null : server?.tools.find((item) => item.name === tool) ?? null;
   const autoLabel = server?.pick ? `Auto: ${server.pick.tool} (${server.pick.arg})` : "Auto: none found";
   const argPlaceholder = chosenTool ? chosenTool.args.find((name) => name === "id" || name === "url") ?? chosenTool.args[0] ?? "id" : server?.pick?.arg ?? "id";
@@ -212,13 +231,19 @@ export function NewReportSheet({ sources, role = "member", onCancel, onCreated, 
       }
       return;
     }
-    if (!docRef.trim()) return setError("Paste the doc's link.");
-    if (!serverId) return setError("Choose where the doc is read from.");
-    if (tool === AUTO && !server?.pick) return setError("Nook found no fetch tool on that server; choose the tool to use.");
+    const current = currentDoc();
+    if (!docs.length && !docRef.trim()) return setError("Paste the doc's link.");
+    if (docRef.trim() && !serverId) return setError("Choose where the doc is read from.");
+    if (current && tool === AUTO && !server?.pick) return setError("Nook found no fetch tool on that server; choose the tool to use.");
+    // D515: the listed docs and the link being typed, in order (at most 8); one doc goes as before.
+    const all = [...docs, ...(current ? [current] : [])];
+    if (all.length > REPORT_DOC_LIMITS.docs) return setError(`A report reads at most ${REPORT_DOC_LIMITS.docs} docs.`);
     setBusy(true);
     setError(null);
     try {
-      const input = { docRef: docRef.trim(), serverId, datasourceId: source, tool: tool === AUTO || nook ? null : tool, arg: nook ? null : arg.trim() || null, browseTools: browse };
+      const only = all.length === 1 ? all[0]! : null;
+      const docInput = only ? { docRef: only.docRef, serverId: only.serverId, tool: only.tool ?? null, arg: only.arg ?? null } : { docs: all.map(({ docRef: ref, serverId: id, tool: name, arg: input }) => ({ docRef: ref, serverId: id, tool: name ?? null, arg: input ?? null })) };
+      const input = { ...docInput, datasourceId: source, browseTools: browse };
       // K1: a new report is created in the chosen folder by the generate request itself.
       const started = reportId ? await regenerateReport(reportId, input) : await generateReport({ ...input, title: title.trim() || null, ...(folderId ? { folderId } : {}) });
       onCreated(started.report.id);
@@ -239,12 +264,26 @@ export function NewReportSheet({ sources, role = "member", onCancel, onCreated, 
       </div>}
       {mode === "doc" && <DocSourceNotice state={docSource} admin={role === "admin"} onRetry={loadServers} onOpenToolServers={onOpenToolServers} onAllow={(id, name) => { void allowAutomatically(id, name); }} allowing={allowing} />}
       {mode === "doc" && <>
+        {docs.length > 0 && <>
+          <span className="reports-label">Docs ({docs.length + (docRef.trim() ? 1 : 0)} of {REPORT_DOC_LIMITS.docs}), read in this order</span>
+          <DocList items={docItems} disabled={busy} onMove={moveDoc} onRemove={(index) => setDocs((current) => current.filter((_, at) => at !== index))} />
+        </>}
         <div className="new-report-doc-label">
-          <label htmlFor={ids.doc}>Doc link</label>
-          <button type="button" className="secondary-button" onClick={() => setPicking((open) => !open)} aria-expanded={picking} disabled={busy}><Search aria-hidden="true" />Pick from {appName()}</button>
+          <label htmlFor={ids.doc}>{docs.length ? "Add another doc" : "Doc link"}</label>
+          <button type="button" className="secondary-button" onClick={() => setPicking((open) => !open)} aria-expanded={picking} disabled={busy || docsFull}><Search aria-hidden="true" />Pick from {appName()}</button>
         </div>
-        <input id={ids.doc} value={docRef} maxLength={2048} autoFocus autoComplete="off" inputMode="url" placeholder={`A link to a note or file in ${appName()}, or to a doc in your doc system`} onChange={(event) => changeRef(event.target.value)} />
-        {picking && <NookDocPicker onClose={() => setPicking(false)} onPick={(pick) => { changeRef(nookLinkOf(pick)); setServerId("nook"); setPicking(false); }} />}
+        <div className="report-doc-adder-row">
+          <input id={ids.doc} value={docRef} maxLength={2048} autoFocus autoComplete="off" inputMode="url" disabled={docsFull} placeholder={docsFull ? `That is the most docs (${REPORT_DOC_LIMITS.docs})` : `A link to a note or file in ${appName()}, or to a doc in your doc system`} onChange={(event) => changeRef(event.target.value)}
+            onKeyDown={(event) => { if (event.key === "Enter" && docRef.trim()) { event.preventDefault(); addCurrent(); } }} />
+          <button type="button" className="secondary-button" onClick={addCurrent} disabled={busy || docsFull || !docRef.trim()} title="Add this doc and paste another"><Plus aria-hidden="true" />Add</button>
+        </div>
+        {picking && <NookDocPicker onClose={() => setPicking(false)} onPick={(pick) => {
+          setPicking(false);
+          // A pick joins the list at once (D515); the link being typed stays where it is.
+          if (docs.some((item) => item.serverId === "nook" && item.docRef === nookLinkOf(pick))) return setError("That doc is already in the list.");
+          setError(null);
+          setDocs((current) => current.length >= REPORT_DOC_LIMITS.docs ? current : [...current, { key: crypto.randomUUID(), docRef: nookLinkOf(pick), serverId: "nook", tool: null, arg: null, title: pick.title }]);
+        }} />}
         <span className="reports-label" id={ids.server}>Read it through</span>
         {servers === null
           ? <p className="file-dialog-hint" role="status">Loading doc sources…</p>
@@ -266,7 +305,7 @@ export function NewReportSheet({ sources, role = "member", onCancel, onCreated, 
             </div>
           </div>
         </details>}
-        {server?.synced && <BrowseToolsPicker server={server} value={browse} onChange={setBrowse} disabled={busy} />}
+        {firstServer?.synced && <BrowseToolsPicker server={firstServer} value={browse} onChange={setBrowse} disabled={busy} />}
       </>}
       <span className="reports-label" id={ids.source}>Data source</span>
       <Select labelledBy={ids.source} label="Data source" value={source} onChange={setSource} options={sources.map((item) => ({ value: item.id, label: item.name, description: `Default database ${item.database}` }))} />
@@ -282,12 +321,12 @@ export function NewReportSheet({ sources, role = "member", onCancel, onCreated, 
         <input id={ids.title} value={title} maxLength={REPORT_LIMITS.title} autoFocus={mode === "blank"} autoComplete="off" placeholder={mode === "doc" ? "From the doc" : "Weekly revenue"} onChange={(event) => setTitle(event.target.value)} />
       </>}
       <p className="file-dialog-hint">{mode === "doc"
-        ? "The AI reads the doc, writes read-only SQL against the tables an admin allowed, checks it, and builds the report. It uses your AI budget."
+        ? `The AI reads ${docs.length ? "the docs" : "the doc"} (up to ${REPORT_DOC_LIMITS.docs}: Add puts another in the list), writes read-only SQL against the tables an admin allowed, checks it, and builds the report. It uses your AI budget.`
         : "The report starts as a draft with a SQL console. Queries run on that data source, read-only, on the tables an admin allowed."}</p>
       {error && <p className="form-error" role="alert">{error}</p>}
       <footer className="file-dialog-actions">
         <button type="button" className="secondary-button" onClick={onCancel} disabled={busy}>Cancel</button>
-        <button type="submit" className="primary-button" disabled={busy}>{busy ? (mode === "doc" ? "Reading the doc…" : "Creating…") : mode === "doc" ? "Generate report" : "Create report"}</button>
+        <button type="submit" className="primary-button" disabled={busy}>{busy ? (mode === "doc" ? (docs.length ? "Reading the docs…" : "Reading the doc…") : "Creating…") : mode === "doc" ? "Generate report" : "Create report"}</button>
       </footer>
     </form>
     {confirm.confirmElement}

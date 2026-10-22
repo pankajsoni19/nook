@@ -7,17 +7,12 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 
 **Current state (2026-10-16).**
 - **v0.42.1** is released (2026-10-16, fixes: Report owners title on Forward, the eval's Settings → AI fallback). **v0.42.0** (2026-10-15): PDFs as report docs and in `read_attachment_text`, `search_report_options`, Report owners paging. v0.41.0 brought PDF text in Files, `search_documents`, console parameters and Settings → Report owners.
-- Migrations: **001–063** are released and immutable (045 and 054 unused; 054 is reserved for Messages). Next free: **064** (lane DOCS); **065** is lane EDIT's `report_query_suggestions` (unreleased); **066** (lane FILTERS, if needed), then 067.
+- Migrations: **001–063** are released and immutable (045 and 054 unused; 054 is reserved for Messages). **064** is lane DOCS' `report_docs` and **065** lane EDIT's `report_query_suggestions` (both unreleased, for 0.43.0); next free: **066** (lane FILTERS, if needed), then 067.
 - Development happens directly on `main`, pushed as each change passes its gates.
 
 ## In flight
 
-- [ ] **Reports: several docs, and docs in Changes** (operator, 2026-10-22; lane DOCS, migration 064):
-  - [ ] New report takes **more than one doc**, mixing Nook notes/Files and outside tool-server docs (Outline); generation reads them all; Doc settings, "doc changed" and Regenerate cover every doc.
-  - [ ] Changes: the **About** dropdown gains **"Add a new section"** (placed after a chosen block, or at the end), alongside the page and the existing blocks.
-  - [ ] Changes: an instruction can carry **Nook note/file or Outline doc links**; the edit agent reads them, and they join the report's docs.
-
-- [ ] **Reports: dynamic filters** (operator, 2026-10-22, "research and build"; lane FILTERS): research beyond D489's AI-added parameters (filters people add themselves, click a chart to filter, filters that narrow each other, table filters), plan done ([REPORT_FILTERS.md](docs/plan/REPORT_FILTERS.md): slice 1 = only re-run touched queries, "filters N of M blocks", owner **Add filter** with a default-unchanged check, click a chart to filter, more date presets); build after lane DOCS lands.
+- [ ] **Reports: dynamic filters** (operator, 2026-10-22, "research and build"; lane FILTERS): research beyond D489's AI-added parameters (filters people add themselves, click a chart to filter, filters that narrow each other, table filters), plan done ([REPORT_FILTERS.md](docs/plan/REPORT_FILTERS.md): slice 1 = only re-run touched queries, "filters N of M blocks", owner **Add filter** with a default-unchanged check, click a chart to filter, more date presets); lane DOCS has landed (064), so it can start.
 
 ## Waiting on the operator
 
@@ -27,6 +22,11 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 
 ## Small fixes
 
+- [ ] Several docs (lane DOCS): a doc added in Doc settings stays "New" after a change that attached the same doc is applied (the edit read it, but only Regenerate stamps a doc's hash); decide whether an applied change should stamp it.
+- [ ] "Add a new section" after a block outside any section puts the section first among the sections, which render after every loose block (D516), so it can land below later loose blocks; placing it truly in between would need the loose blocks after the anchor to move into a section.
+- [ ] Inspect → "From the doc" (D518) needs the plan todo's `docRef` (`d2`); the scripted QA provider never sets it, so only a real model's runs show it. Check after the real-model eval.
+- [ ] Button lint on New report (found by lane DOCS, already on main before it): the "From a doc" / "Blank" mode buttons have under 12 px side padding, and at 390 px a Reports row's open button wraps ("title, Owner, Ready, data source").
+- [ ] The edit agent re-reads every report doc's newest snapshot on each change (up to 8 docs in its 60 KB share); a change that touches one block could carry only the doc its block came from once D518's mapping is reliable.
 - [ ] "Pick from Nook": before the Files index's first backfill after boot, the fallback scan can offer a scanned PDF by name (picking it gives the "no text layer" error).
 
 ## Watch (no work unless it shows up)

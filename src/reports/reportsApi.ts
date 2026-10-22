@@ -1,6 +1,6 @@
 import { api, ApiError } from "../api";
 import type { CatalogTable, ConnectionTest, DatasourceChoice, DatasourceSummary, QueryOutcome, ReportDetail, ReportFolder, ReportFolderTree, ReportListFilter, ReportListPage, ReportSummary, SchemaSearchHit, SchemaSyncResult } from "../../shared/reports";
-import type { DocServerChoice, DocState, GenerateStarted, GenerationRun } from "../../shared/reportsGenerate";
+import type { DocInput, DocServerChoice, DocState, GenerateStarted, GenerationRun } from "../../shared/reportsGenerate";
 
 /** The Reports API (docs/plan/API_CONTRACTS.md § Analytics reports, Wave 45). */
 
@@ -89,7 +89,8 @@ export function countLabel(value: number | null, noun = "rows") {
 
 // Wave 46: generation from a doc, and the doc's state.
 export const docServers = () => api<{ servers: DocServerChoice[] }>("/reports/doc-servers");
-export type GenerateBody = { docRef: string; serverId: string; tool?: string | null; arg?: string | null; datasourceId: string; title?: string | null; browseTools?: string[] | null; folderId?: string | null };
+/** One doc (`docRef`, `serverId`) or, D515, several (`docs`, 1–8 in order). */
+export type GenerateBody = { docRef?: string; serverId?: string; tool?: string | null; arg?: string | null; docs?: DocInput[]; datasourceId: string; title?: string | null; browseTools?: string[] | null; folderId?: string | null };
 export const generateReport = (body: GenerateBody) => api<GenerateStarted>("/reports/generate", json("POST", body));
 export const regenerateReport = (id: string, body: Partial<Omit<GenerateBody, "title" | "folderId">> = {}) => api<GenerateStarted>(`/reports/${id}/generate`, json("POST", body));
 export const cancelGeneration = (id: string) => api<{ cancelled: boolean }>(`/reports/${id}/generate/cancel`, json("POST", {}));
@@ -97,3 +98,7 @@ export const latestGeneration = (id: string) => api<{ run: GenerationRun | null 
 export const getDocState = (id: string) => api<{ doc: DocState }>(`/reports/${id}/doc`);
 export const saveBrowseTools = (id: string, tools: string[]) => api<{ doc: DocState }>(`/reports/${id}/doc/browse-tools`, json("PUT", { tools }));
 export const checkDoc = (id: string) => api<{ doc: DocState }>(`/reports/${id}/doc/check`, json("POST", {}));
+// D515: Doc settings → the report's docs.
+export const addReportDoc = (id: string, doc: DocInput) => api<{ doc: DocState }>(`/reports/${id}/docs`, json("POST", doc));
+export const reorderReportDocs = (id: string, ids: string[]) => api<{ doc: DocState }>(`/reports/${id}/docs/order`, json("PUT", { ids }));
+export const removeReportDoc = (id: string, docId: string) => api<{ doc: DocState }>(`/reports/${id}/docs/${docId}`, { method: "DELETE", body: "{}" });

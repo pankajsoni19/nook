@@ -1,0 +1,38 @@
+/* D515–D517: a report's docs or a change's attached docs, and the control that adds one (New report, Doc settings, the Changes composer). 44 px tap targets on phones. */
+
+.report-doc-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; min-width: 0; }
+.report-doc-row { display: flex; align-items: center; gap: 10px; min-width: 0; border: 1px solid var(--border); border-radius: 10px; padding: 4px 4px 4px 10px; background: var(--panel-raised); }
+.report-doc-row-icon { flex: none; display: inline-flex; color: var(--yellow); }
+.report-doc-row-icon svg { width: 16px; height: 16px; }
+.report-doc-row-text { flex: 1 1 auto; min-width: 0; display: grid; gap: 1px; padding: 4px 0; }
+.report-doc-row-text strong { font-size: .86rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.report-doc-row-text small { color: var(--muted); font-size: .74rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.report-doc-row-flag { color: var(--yellow); font-weight: 650; }
+.report-doc-row-actions { flex: none; display: inline-flex; align-items: center; gap: 2px; }
+.report-doc-row-actions .icon-button { width: 36px; height: 36px; }
+.report-doc-row-actions .icon-button svg { width: 16px; height: 16px; }
+.report-doc-row-actions .icon-button:disabled { opacity: .35; cursor: default; }
+
+.report-doc-adder { display: grid; gap: 6px; min-width: 0; }
+.report-doc-adder-row { display: flex; align-items: stretch; gap: 8px; min-width: 0; }
+.report-doc-adder-row input { flex: 1 1 auto; min-width: 0; }
+.report-doc-adder-row .secondary-button { flex: none; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; padding: 0 14px; white-space: nowrap; }
+.report-doc-adder-row .secondary-button svg { width: 15px; height: 15px; }
+.report-doc-adder-source { display: grid; gap: 4px; min-width: 0; }
+.report-doc-adder-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.report-doc-adder-head label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.report-doc-adder-head .secondary-button { flex: none; min-height: 36px; display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; font-size: .8rem; white-space: nowrap; }
+.report-doc-adder-head .secondary-button svg { width: 14px; height: 14px; }
+/* In the Changes composer (not a file dialog form): its own field look. */
+.report-changes-compose .report-doc-adder-row input { min-height: 44px; border: 1px solid var(--report-border); border-radius: 10px; padding: 0 10px; background: var(--report-raised); color: var(--report-text); font: inherit; outline: 0; }
+.report-changes-compose .report-doc-adder-row input:focus { border-color: var(--report-accent-line); }
+.report-changes-compose .nook-doc-picker-search input { flex: 1 1 auto; min-width: 0; min-height: 42px; border: 0; padding: 0; background: transparent; color: var(--report-text); font: inherit; outline: 0; }
+.report-changes-attach { justify-self: start; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; }
+.report-instruction-docs-count { margin: 0; color: var(--muted); font-size: .8rem; }
+.report-instruction .report-doc-row { background: transparent; }
+
+@media (max-width: 760px) {
+  .report-doc-row-actions .icon-button { width: 44px; height: 44px; }
+  .report-doc-row { padding-left: 8px; gap: 8px; }
+  .report-doc-adder-head .secondary-button { min-height: 44px; }
+}

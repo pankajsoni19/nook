@@ -1,5 +1,6 @@
 import { api } from "../api";
-import type { InstructionsView, PatchOp, ProposalView, ReportInstruction, OwnerReview, OwnerReviewScope, ReportOwners, ReportSharing, SharingInput } from "../../shared/reportsEdit";
+import type { DocInput } from "../../shared/reportsGenerate";
+import type { InstructionKind, InstructionsView, PatchOp, ProposalView, ReportInstruction, OwnerReview, OwnerReviewScope, ReportOwners, ReportSharing, SharingInput } from "../../shared/reportsEdit";
 import type { VersionDiff, VersionHistoryItem, VersionSnapshot } from "../../shared/reportVersions";
 import type { QueryEditPreview } from "../../shared/reportsQueryEdit";
 import type { ParamValues } from "../../shared/reportParams";
@@ -9,7 +10,9 @@ import type { ParamValues } from "../../shared/reportParams";
 const json = (method: string, body: unknown): RequestInit => ({ method, body: JSON.stringify(body) });
 
 export const listInstructions = (id: string) => api<InstructionsView>(`/reports/${id}/instructions`);
-export const addInstruction = (id: string, text: string, blockId: string | null) => api<{ instruction: ReportInstruction }>(`/reports/${id}/instructions`, json("POST", { text, blockId }));
+/** D516, D517: `extra` asks for a new section (kind add, after a block or at the end) and attaches docs. */
+export const addInstruction = (id: string, text: string, blockId: string | null, extra: { kind?: InstructionKind; afterBlockId?: string | null; docs?: DocInput[] } = {}) =>
+  api<{ instruction: ReportInstruction }>(`/reports/${id}/instructions`, json("POST", { text, blockId, ...(extra.kind === "add" ? { kind: "add", afterBlockId: extra.afterBlockId ?? null, blockId: null } : {}), ...(extra.docs?.length ? { docs: extra.docs } : {}) }));
 export const reorderInstructions = (id: string, ids: string[]) => api<InstructionsView>(`/reports/${id}/instructions/reorder`, json("POST", { ids }));
 export const cancelInstruction = (id: string, instructionId: string) => api<{ instruction: ReportInstruction }>(`/reports/${id}/instructions/${instructionId}/cancel`, json("POST", {}));
 export const getProposal = (id: string, instructionId: string) => api<{ proposal: ProposalView }>(`/reports/${id}/instructions/${instructionId}/proposal`);

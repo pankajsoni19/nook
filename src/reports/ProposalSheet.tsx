@@ -33,6 +33,40 @@ export function BlockPreview({ block, results, palette, lookup }: { block: Repor
   return <DataBlockCard block={block} view={results.get(block.queryKey)} hasQuery={results.has(block.queryKey)} palette={palette} running={null} loaded lookup={lookup} onInspect={noop} onMenu={noop} />;
 }
 
+/** A block's name in a one-line context ("After “Top countries”"). */
+const blockName = (block: ReportBlock | undefined) => !block ? "the last block" : ("title" in block && block.title) || (block.type === "markdown" ? "the text block" : block.id);
+
+/**
+ * D516: a proposed new section shown where it goes: after the chosen block (or at the end), the new
+ * section's title and its blocks drawn from the proposal's results, then the section that follows it.
+ */
+export function NewSectionInPlace({ report, proposal, afterBlockId, results, palette, lookup }: { report: ReportDetail; proposal: ProposalView; afterBlockId: string | null; results: ReadonlyMap<string, QueryResultView>; palette: ChartPalette; lookup: ResultLookup }) {
+  const oldSections = new Set((report.spec.sections ?? []).map((section) => section.id));
+  const sections = proposal.spec.sections ?? [];
+  const added = sections.filter((section) => !oldSections.has(section.id));
+  const addedBlocks = proposal.blocks.filter((change) => change.change === "added" && change.after).map((change) => change.after!);
+  const anchor = afterBlockId ? report.spec.blocks.find((block) => block.id === afterBlockId) : report.spec.blocks.at(-1);
+  const lastAdded = added.length ? sections.findIndex((section) => section.id === added.at(-1)!.id) : -1;
+  const next = lastAdded >= 0 ? sections.slice(lastAdded + 1).find((section) => oldSections.has(section.id)) : undefined;
+  const loose = addedBlocks.filter((block) => !block.section || !added.some((section) => section.id === block.section));
+  return <section className="report-diff-inplace" aria-label="The new section in place">
+    <p className="report-diff-context">{afterBlockId && anchor ? <>After “{blockName(anchor)}”</> : <>At the end of the report{anchor ? <>, after “{blockName(anchor)}”</> : null}</>}</p>
+    {added.map((section) => <div key={section.id} className="report-diff-new-section">
+      <span className="report-diff-label">New section</span>
+      <h2 className="report-section-title">{section.title}</h2>
+      {section.summary && <p className="report-section-summary">{section.summary}</p>}
+      <div className="report-diff-new-blocks">
+        {addedBlocks.filter((block) => block.section === section.id).map((block) => <BlockPreview key={block.id} block={block} results={results} palette={palette} lookup={lookup} />)}
+      </div>
+    </div>)}
+    {loose.length > 0 && <div className="report-diff-new-section">
+      <span className="report-diff-label">New blocks</span>
+      <div className="report-diff-new-blocks">{loose.map((block) => <BlockPreview key={block.id} block={block} results={results} palette={palette} lookup={lookup} />)}</div>
+    </div>}
+    {next && <p className="report-diff-context">Then “{next.title}”</p>}
+  </section>;
+}
+
 type Props = {
   report: ReportDetail;
   instructionId: string;
@@ -84,14 +118,15 @@ export function ProposalSheet({ report, instructionId, instruction, canApply, on
   const mayReject = canApply || Boolean(instruction?.isMine);
   return <ModalDialog title="Review the change" eyebrow={report.title} onClose={onClose} busy={busy !== null} variant="sheet" className="reports-dialog report-edit-sheet report-proposal">
     <div className={`report-edit-sheet-body report-view report-theme-${palette.mode} report-diff`} style={cssVars}>
-      {instruction && <blockquote className="report-proposal-ask">{instruction.text}</blockquote>}
+      {instruction && <blockquote className="report-proposal-ask">{instruction.kind === "add" && <span className="report-proposal-kind">Add a new section · </span>}{instruction.text}</blockquote>}
       {error && <p className="form-error" role="alert">{error}</p>}
       {!proposal && !error && <p className="reports-loading" role="status">Loading the proposal…</p>}
       {proposal && <>
         {proposal.redacted && <p className="report-proposal-waiting" role="status">{proposalWaitingText(proposal.redacted)}</p>}
         {proposal.summary && <p className="report-proposal-summary">{proposal.summary}</p>}
         {proposal.outOfDate && <p className="report-proposal-stale" role="note"><TriangleAlert aria-hidden="true" />{proposal.staleReason ?? "The report changed since this was proposed"}. It is rejected when the queue moves on; ask again.</p>}
-        {proposal.blocks.map((change) => <section key={change.blockId} className={`report-diff-block report-diff-${change.change}`} aria-label={`${CHANGE_TEXT[change.change]}: ${change.after?.title ?? change.before?.title ?? change.blockId}`}>
+        {instruction?.kind === "add" && !proposal.redacted && <NewSectionInPlace report={report} proposal={proposal} afterBlockId={instruction.afterBlockId} results={after} palette={palette} lookup={lookupAfter} />}
+        {(instruction?.kind === "add" ? proposal.blocks.filter((change) => change.change !== "added") : proposal.blocks).map((change) => <section key={change.blockId} className={`report-diff-block report-diff-${change.change}`} aria-label={`${CHANGE_TEXT[change.change]}: ${change.after?.title ?? change.before?.title ?? change.blockId}`}>
           <h3><span className="reports-status">{CHANGE_TEXT[change.change]}</span>{change.after?.title ?? change.before?.title ?? change.blockId}</h3>
           <div className={`report-diff-sides${change.before && change.after && change.change !== "moved" ? " report-diff-two" : ""}`}>
             {change.before && change.change !== "moved" && <div className="report-diff-side"><span className="report-diff-label">Before</span><BlockPreview block={change.before} results={before} palette={palette} lookup={lookupBefore} /></div>}
