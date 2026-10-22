@@ -7,13 +7,20 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 
 **Current state (2026-10-16).**
 - **v0.42.1** is released (2026-10-16, fixes: Report owners title on Forward, the eval's Settings → AI fallback). **v0.42.0** (2026-10-15): PDFs as report docs and in `read_attachment_text`, `search_report_options`, Report owners paging. v0.41.0 brought PDF text in Files, `search_documents`, console parameters and Settings → Report owners.
-- Migrations: **001–063** are released and immutable (045 and 054 unused; 054 is reserved for Messages). Next free: **064**.
+- Migrations: **001–063** are released and immutable (045 and 054 unused; 054 is reserved for Messages). Next free: **064** (lane DOCS), then 065.
 - Development happens directly on `main`, pushed as each change passes its gates.
+
+## In flight
+
+- [ ] **Reports: several docs, and docs in Changes** (operator, 2026-10-22; lane DOCS, migration 064):
+  - [ ] New report takes **more than one doc**, mixing Nook notes/Files and outside tool-server docs (Outline); generation reads them all; Doc settings, "doc changed" and Regenerate cover every doc.
+  - [ ] Changes: the **About** dropdown gains **"Add a new section"** (placed after a chosen block, or at the end), alongside the page and the existing blocks.
+  - [ ] Changes: an instruction can carry **Nook note/file or Outline doc links**; the edit agent reads them, and they join the report's docs.
 
 ## Waiting on the operator
 
 - [ ] **Real-model eval of report generation** (D488 chart kinds, D489 parameters): only the scripted provider has run. Run `bun --no-env-file scripts/reportEval.ts --clickhouse <test ClickHouse>` on a host whose Nook has a working model provider (it falls back to Settings → AI; the local instance's OpenAI key is a placeholder), or set `REPORT_EVAL_*`, or regenerate reports on the VM (docs/OPERATIONS.md "Report generation eval"). Check: the five kind cases (`onboarding_funnel`, `cohort_retention`, `quota_attainment`, `latency_spread`, `plan_flow`) get fitting chart kinds, and a doc that names a window or a dimension gets a date range or filter. Tune the prompts from the scores.
-- [ ] **Report Lists** ([plan](docs/plan/REPORTS_ORG.md) phase 3, optional, migration 064): a report in many lists; a list never grants access. Start only if the operator asks.
+- [ ] **Report Lists** ([plan](docs/plan/REPORTS_ORG.md) phase 3, optional, migration 065 — 064 went to lane DOCS): a report in many lists; a list never grants access. Start only if the operator asks.
 
 ## Small fixes
 
