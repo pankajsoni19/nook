@@ -934,6 +934,8 @@ docker run -d --name nook-clickhouse -p 127.0.0.1:22200:8123 \
 CLICKHOUSE_TEST_URL=http://nook:nooktest@127.0.0.1:22200 bun test tests/reportsClickhouseLive.test.ts
 ```
 
+`tests/reportFiltersRequestLive.test.ts` (same variable) seeds the eval case `top_routes` (it drops and recreates `eval_top_routes`, so the user needs CREATE/DROP there) and runs Add filter's identity check (D535) on the real server over rows that tie in their ORDER BY, Decimal, and Float columns, then applies the filter and runs a picked route.
+
 The user and password may also come from `CLICKHOUSE_TEST_USER` and `CLICKHOUSE_TEST_PASSWORD`. To refresh a fixture, run `curl -s -u nook:nooktest 'http://127.0.0.1:22200/?default_format=TabSeparatedRaw' --data-binary "EXPLAIN QUERY TREE <the .sql file's statement>"` and save it as the matching `.txt`; `tests/reportsQueryTree26.test.ts` fails until every fixture has an expectation.
 
 ### Report generation eval
