@@ -252,6 +252,59 @@ describe("a report from several docs", () => {
     await republish(owner, notes.revenue!, "# Revenue metrics\n\nRevenue per day: `sum(amount)` from `analytics.orders`.");
   });
 
+  test("D580: a change to a block carries only the doc its plan todo names; a whole-page change, or an unknown doc, carries every doc", async () => {
+    const spec = specOf(reportId);
+    const block = spec.blocks.find((item) => item.type !== "markdown" && item.provenance?.runId)!;
+    const runId = block.provenance!.runId!;
+    const plan = JSON.parse((db.query("SELECT plan_json FROM report_runs WHERE id = ?").get(runId) as { plan_json: string }).plan_json) as Json;
+    const queryKey = "queryKey" in block ? block.queryKey : null;
+    const named = (docRef: string | null) => {
+      const todos = (plan.todos as Json[]).map((todo) => todo.blockId === block.id || (queryKey && todo.queryKey === queryKey) ? { ...todo, docRef } : todo);
+      if (!todos.some((todo) => todo.docRef === docRef)) todos.push({ id: "t-docref", title: "Block", kind: "chart", section: null, metric: null, docRef, tables: [], intent: null, status: "done", note: null, queryKey, blockId: block.id });
+      db.query("UPDATE report_runs SET plan_json = ? WHERE id = ?").run(JSON.stringify({ ...plan, todos }), runId);
+    };
+    const promptFor = async (body: Json) => {
+      provider.calls.length = 0;
+      const sent = await send(owner, "POST", `/reports/${reportId}/instructions`, body);
+      expect(sent.status).toBe(201);
+      await waitStatus(sent.body.instruction.id, ["proposed", "failed"]);
+      const system = systemOf();
+      const current = await send(owner, "GET", `/reports/${reportId}/instructions`);
+      const row = (current.body.instructions as Json[]).find((item) => item.id === sent.body.instruction.id)!;
+      if (row.status === "proposed") expect((await send(owner, "POST", `/reports/${reportId}/instructions/${row.id}/reject`)).status).toBe(200);
+      return system;
+    };
+    // Three edits over 200 KB docs: they would use up the owner's daily budget the later tests need.
+    const usage = db.query("SELECT * FROM agent_usage_daily WHERE user_id = ?").all(owner.userId) as Json[];
+    try {
+      named("d2: Order handbook");
+      const focused = await promptFor({ text: "make it a stacked bar", blockId: block.id });
+      expect(focused).toContain("HANDBOOK START");
+      expect(focused).not.toContain("RETURNS START");
+      expect(focused).not.toContain("# Revenue metrics");
+      expect(focused).toContain("Only the doc this block was made from is shown (“Order handbook”); the report has 2 other docs");
+      // The run records the one doc it read, so the next change to the block finds it again.
+      const editRun = db.query("SELECT docs_json FROM report_runs WHERE report_id = ? AND kind = 'edit' ORDER BY started_at DESC, rowid DESC LIMIT 1").get(reportId) as { docs_json: string };
+      expect((JSON.parse(editRun.docs_json) as Json[]).map((doc) => doc.title)).toEqual(["Order handbook"]);
+
+      // The whole page: every doc.
+      const whole = await promptFor({ text: "tighten the titles" });
+      for (const marker of ["HANDBOOK START", "RETURNS START", "# Revenue metrics"]) expect(whole).toContain(marker);
+      // A todo that names no doc: every doc, as before.
+      named(null);
+      const unknown = await promptFor({ text: "make it a stacked bar", blockId: block.id });
+      for (const marker of ["HANDBOOK START", "RETURNS START", "# Revenue metrics"]) expect(unknown).toContain(marker);
+      expect(unknown).not.toContain("Only the doc this block was made from");
+    } finally {
+      db.query("UPDATE report_runs SET plan_json = ? WHERE id = ?").run(JSON.stringify(plan), runId);
+      db.query("DELETE FROM agent_usage_daily WHERE user_id = ?").run(owner.userId);
+      for (const row of usage) {
+        const columns = Object.keys(row);
+        db.query(`INSERT INTO agent_usage_daily (${columns.join(", ")}) VALUES (${columns.map(() => "?").join(", ")})`).run(...columns.map((column) => row[column]));
+      }
+    }
+  });
+
   test("Doc settings adds (it counts as changed until regenerated), refuses a doc twice, reorders (the first is mirrored), and removes; never the last one", async () => {
     const added = await send(owner, "POST", `/reports/${reportId}/docs`, nookDoc(notes.countries!));
     expect(added.status).toBe(200);
