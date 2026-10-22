@@ -316,7 +316,9 @@ export type LayoutSection = { id: string | null; title: string | null; summary: 
  * The page order (docs/plan/REPORT_THEME.md § Layout): the narrative (markdown blocks before the
  * first other block, with no section), the KPI strip (KPIs with no section), then the sections in the
  * spec's order with their blocks in spec order. Blocks with no section (or one the spec does not
- * declare) form an untitled section first.
+ * declare) that come before every block in a section form an untitled section first; D578: one that
+ * comes after a block in a section shows, in an untitled group, right after that block's section, so
+ * a block placed after a section's block (Arrange, "Add a new section", an edit) shows where it was placed.
  */
 export function reportLayout(spec: Pick<ReportSpec, "blocks"> & { sections?: ReportSection[] }): { narrative: MarkdownBlock[]; strip: KpiBlock[]; sections: LayoutSection[] } {
   const declaredSections = spec.sections ?? [];
@@ -327,21 +329,38 @@ export function reportLayout(spec: Pick<ReportSpec, "blocks"> & { sections?: Rep
   const strip: KpiBlock[] = [];
   const loose: ReportBlock[] = [];
   const grouped = new Map<string, ReportBlock[]>();
+  // D578: the loose blocks that follow a section's block, by that section.
+  const after = new Map<string, ReportBlock[]>();
+  let lastSection: string | null = null;
   for (const block of spec.blocks) {
     const section = sectionOf(block);
     if (leading && block.type === "markdown" && section === null) { narrative.push(block); continue; }
     if (block.type !== "kpi" || section !== null) leading = false;
     if (block.type === "kpi" && section === null) { strip.push(block); continue; }
-    if (section === null) loose.push(block);
-    else grouped.set(section, [...(grouped.get(section) ?? []), block]);
+    if (section !== null) { grouped.set(section, [...(grouped.get(section) ?? []), block]); lastSection = section; continue; }
+    if (lastSection === null) loose.push(block);
+    else after.set(lastSection, [...(after.get(lastSection) ?? []), block]);
   }
   const sections: LayoutSection[] = [];
   if (loose.length) sections.push({ id: null, title: null, summary: null, blocks: loose });
   for (const section of declaredSections) {
     const blocks = grouped.get(section.id) ?? [];
     if (blocks.length || section.summary) sections.push({ id: section.id, title: section.title, summary: section.summary ?? null, blocks });
+    const following = after.get(section.id);
+    if (following?.length) sections.push({ id: null, title: null, summary: null, blocks: following });
   }
   return { narrative, strip, sections };
+}
+
+/** D578: the declared section whose untitled group a loose block shows after (the section of the nearest block before it that is in one), or null (the untitled section first). */
+export function looseBlockSection(spec: Pick<ReportSpec, "blocks"> & { sections?: ReportSection[] }, blockId: string): string | null {
+  const declared = new Set((spec.sections ?? []).map((section) => section.id));
+  let lastSection: string | null = null;
+  for (const block of spec.blocks) {
+    if (block.id === blockId) return lastSection;
+    if (block.section && declared.has(block.section)) lastSection = block.section;
+  }
+  return null;
 }
 
 // ----------------------------------------------------------------------------- reports and runs

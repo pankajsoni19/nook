@@ -5,14 +5,14 @@ import { retireUsersAfterFile } from "./support/retireUsers";
 import { sampleAnswer, sampleSpec } from "./support/reportSeed";
 import { qaScript, startScriptedProvider } from "../scripts/fakeReportProvider";
 import { DEFAULT_COMPAT } from "../shared/agents";
-import type { ReportSpec } from "../shared/reports";
+import { reportLayout, type ReportSpec } from "../shared/reports";
 
 const { generateDeps, liveGenerations, docBudgets, documentsBlock } = await import("../server/reports/generate");
 const { editDeps, liveEdits } = await import("../server/reports/edit");
 const refresh = await import("../server/reports/refresh");
 const { syncSchema } = await import("../server/reports/schemaCatalog");
 const { resolveDocInputs } = await import("../server/reports/reportDocs");
-const { addSectionErrors, addPlacement } = await import("../server/reports/addSection");
+const { addSectionErrors, addPlacement, addSectionText } = await import("../server/reports/addSection");
 const { applyPatch } = await import("../server/reports/patch");
 
 /**
@@ -398,6 +398,27 @@ describe("Add a new section (D516)", () => {
     expect(meddling.ok && addSectionErrors(spec, meddling.spec, "country-bar")).toEqual(["Block kpi-orders was updated; a new section only adds blocks", "Section bottom was changed; a new section changes no other section"]);
     const loose = applyPatch(spec, { ops: [{ op: "add_block", block: { id: "n2", type: "markdown", markdown: "x" }, after: "country-bar" }] }, "agent");
     expect(loose.ok && addSectionErrors(spec, loose.spec, "country-bar")).toEqual(["Add the new section with add_section", "Block n2 must be in the new section (set its section to the new section's id)"]);
+    // D578: the new blocks follow the chosen block.
+    const elsewhere = applyPatch(spec, { ops: [{ op: "add_section", section: { id: "fresh", title: "Fresh" }, after: "top" }, { op: "add_block", block: newBlock, after: "recent-table" }] }, "agent");
+    expect(elsewhere.ok && addSectionErrors(spec, elsewhere.spec, "country-bar")).toEqual(["The new blocks are in the wrong place: add the first with add_block {after: \"country-bar\"} and each next one after the one before it"]);
+  });
+
+  test("D578: after a block outside any section, the new section lands truly between it and the blocks after it", () => {
+    // No sections yet: daily-line, country-bar, recent-table are loose. After daily-line, the new section shows
+    // between it and country-bar (which now come after the section's blocks in the spec).
+    const spec = { ...sampleSpec(), specVersion: 3, sections: [], parameters: [] } as unknown as ReportSpec;
+    expect(addPlacement(spec, "daily-line")).toMatchObject({ afterBlock: "daily-line", afterSection: null, inSection: false });
+    const patched = applyPatch(spec, { ops: [{ op: "add_section", section: { id: "fresh", title: "Fresh" }, after: null }, { op: "add_block", block: { id: "n1", type: "markdown", markdown: "New", section: "fresh" }, after: "daily-line" }] }, "agent");
+    expect(patched.ok && addSectionErrors(spec, patched.spec, "daily-line")).toEqual([]);
+    const layout = reportLayout(patched.ok ? patched.spec : spec);
+    expect(layout.sections.map((section) => [section.id, section.blocks.map((block) => block.id)])).toEqual([[null, ["daily-line"]], ["fresh", ["n1"]], [null, ["country-bar", "recent-table"]]]);
+    // A loose block that shows after a section (it follows that section's block in the spec): the new section goes after that section.
+    const later = { ...spec, sections: [{ id: "top", title: "Top" }], blocks: spec.blocks.map((block) => block.id === "daily-line" ? { ...block, section: "top" } : block) } as ReportSpec;
+    expect(addPlacement(later, "country-bar")).toMatchObject({ afterSection: "top", inSection: false });
+    expect(addSectionText(later, "country-bar")).toContain("add_section {after: \"top\"} (it is outside any section and shows after that section)");
+    const second = applyPatch(later, { ops: [{ op: "add_section", section: { id: "fresh", title: "Fresh" }, after: "top" }, { op: "add_block", block: { id: "n1", type: "markdown", markdown: "New", section: "fresh" }, after: "country-bar" }] }, "agent");
+    expect(second.ok && addSectionErrors(later, second.spec, "country-bar")).toEqual([]);
+    expect(reportLayout(second.ok ? second.spec : later).sections.map((section) => [section.id, section.blocks.map((block) => block.id)])).toEqual([["top", ["daily-line"]], [null, ["country-bar"]], ["fresh", ["n1"]], [null, ["recent-table"]]]);
   });
 });
 

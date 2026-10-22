@@ -1,12 +1,16 @@
-import type { ReportBlock, ReportSpec } from "../../shared/reports";
+import { looseBlockSection, type ReportBlock, type ReportSpec } from "../../shared/reports";
 import { diffSpecs } from "./patch";
 
 /**
  * "Add a new section" (D516): an instruction of kind `add` asks the edit agent for a new spec section
  * with new blocks, placed after a chosen block or at the end, changing nothing else. Sections render
- * in their declared order after the blocks outside any section, so the new section goes right after
- * the section that holds the chosen block (first among the sections when that block is in none), or
- * after the last section at the end; its blocks follow the chosen block (or the last block) in order.
+ * in their declared order; a block outside any section shows before them when it comes before every
+ * block in a section, else right after the section of the block before it (D578). So the new section
+ * goes right after the section that holds the chosen block, or that the chosen block outside any
+ * section shows after (first among the sections when there is none), or after the last section at the
+ * end; its blocks follow the chosen block (or the last block) in order. Blocks outside any section that
+ * came after the chosen block then come after the new section's blocks, so they show after it: the
+ * section lands truly between them, and no existing block is moved.
  */
 
 export type AddPlacement = {
@@ -17,6 +21,8 @@ export type AddPlacement = {
   /** Whether the chosen block is gone (the section then goes at the end). */
   anchorMissing: boolean;
   atEnd: boolean;
+  /** Whether the chosen block is in a section (else it is outside any, D578). */
+  inSection?: boolean;
 };
 
 const titleOf = (block: ReportBlock | undefined) => block && "title" in block && typeof block.title === "string" && block.title ? block.title : null;
@@ -25,8 +31,8 @@ export function addPlacement(spec: ReportSpec, afterBlockId: string | null): Add
   const declared = new Set((spec.sections ?? []).map((section) => section.id));
   const anchor = afterBlockId ? spec.blocks.find((block) => block.id === afterBlockId) : undefined;
   if (anchor) {
-    const section = anchor.section && declared.has(anchor.section) ? anchor.section : null;
-    return { afterBlock: anchor.id, afterSection: section, anchorMissing: false, atEnd: false };
+    const section = anchor.section && declared.has(anchor.section) ? anchor.section : looseBlockSection(spec, anchor.id);
+    return { afterBlock: anchor.id, afterSection: section, anchorMissing: false, atEnd: false, inSection: Boolean(anchor.section && declared.has(anchor.section)) };
   }
   const sections = spec.sections ?? [];
   return { afterBlock: spec.blocks.at(-1)?.id ?? null, afterSection: sections.at(-1)?.id ?? null, anchorMissing: Boolean(afterBlockId), atEnd: true };
@@ -38,7 +44,7 @@ export function addSectionText(spec: ReportSpec, afterBlockId: string | null): s
   const anchor = place.afterBlock ? spec.blocks.find((block) => block.id === place.afterBlock) : undefined;
   const where = place.atEnd
     ? `at the end of the report${place.anchorMissing ? ` (the block it was to follow, ${afterBlockId}, is no longer in the report)` : ""}: add_section {after: ${place.afterSection ? `"${place.afterSection}"` : "null"}}${place.afterBlock ? ` and add_block {after: "${place.afterBlock}"} for the first new block` : ""}`
-    : `right after block \`${place.afterBlock}\`${titleOf(anchor) ? ` (“${titleOf(anchor)}”)` : ""}: add_section {after: ${place.afterSection ? `"${place.afterSection}"` : "null"}}${place.afterSection ? ` (the section that holds it)` : " (it is outside any section, so the new section comes first among the sections)"} and add_block {after: "${place.afterBlock}"} for the first new block`;
+    : `right after block \`${place.afterBlock}\`${titleOf(anchor) ? ` (“${titleOf(anchor)}”)` : ""}: add_section {after: ${place.afterSection ? `"${place.afterSection}"` : "null"}}${place.inSection ? " (the section that holds it)" : place.afterSection ? " (it is outside any section and shows after that section)" : " (it is outside any section, so the new section comes first among the sections)"} and add_block {after: "${place.afterBlock}"} for the first new block`;
   return [
     "The instruction asks for a NEW SECTION. Add one section with add_section {section: {id, title, summary?}, after} and its blocks with add_block, each block's section set to the new section's id and each new block after the one before it. Add the queries they need with add_query.",
     `Place it ${where}.`,
@@ -75,6 +81,17 @@ export function addSectionErrors(before: ReportSpec, after: ReportSpec, afterBlo
     const at = newSections.map((section, index) => addedIds.has(section.id) ? index : -1).filter((index) => index >= 0);
     if (at[0] !== start || at.some((index, offset) => index !== start + offset)) {
       errors.push(`The new section is in the wrong place: add it with add_section {after: ${place.afterSection ? `"${place.afterSection}"` : "null"}}`);
+    }
+  }
+  // D578: the new blocks follow the chosen block, one after another, so the blocks that came after it
+  // (outside any section) show after the new section.
+  if (blocks.length && place.afterBlock) {
+    const order = after.blocks.map((block) => block.id);
+    const anchorAt = order.indexOf(place.afterBlock);
+    const addedBlockIds = new Set(blocks.map((block) => block.id));
+    const positions = order.map((id, index) => addedBlockIds.has(id) ? index : -1).filter((index) => index >= 0);
+    if (anchorAt < 0 || positions.some((index, offset) => index !== anchorAt + 1 + offset)) {
+      errors.push(`The new blocks are in the wrong place: add the first with add_block {after: "${place.afterBlock}"} and each next one after the one before it`);
     }
   }
   return errors;

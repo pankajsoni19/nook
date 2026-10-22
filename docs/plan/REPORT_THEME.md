@@ -85,7 +85,7 @@ Out of 5,040 amber-first orders, 202 passed; this one was chosen.
   - 6 columns at 768–1023 px.
   - 1 column at <768 px, where every block is full width.
 - Gaps: 10 px gutters, 12–14 px card padding, 10 px card radius.
-- Page order: title + narrative, then a KPI strip, then sections. Each section has an optional heading and blocks.
+- Page order: title + narrative, then a KPI strip, then sections. Each section has an optional heading and blocks. Blocks without a section that come before every block in a section form an untitled section first; one that comes after a section's block shows right after that section (D578), so a block shows where the spec places it.
 - Block widths: `full` = 12 columns, `half` = 6, `third` = 4. KPIs are sized automatically to fit the strip, with a minimum width of 150 px.
 - Chart heights are fixed by kind: line and area 220, bar 28 px per category (minimum 160), pie 220, scatter 260.
 

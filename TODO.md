@@ -31,7 +31,6 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 ## Small fixes (lane SMALL)
 
 - [ ] Add filter is only proven against the scripted agent and the QA ClickHouse by hand: add a `CLICKHOUSE_TEST_URL` variant of tests/reportFiltersRequest.test.ts that seeds `eval_top_routes` and runs the identity check on a real server (ORDER BY ties, Decimal and Float rows).
-- [ ] "Add a new section" after a block outside any section puts the section first among the sections, which render after every loose block (D516), so it can land below later loose blocks; placing it truly in between would need the loose blocks after the anchor to move into a section.
 - [ ] Inspect → "From the doc" (D518) needs the plan todo's `docRef` (`d2`); the scripted QA provider never sets it, so only a real model's runs show it. Check after the real-model eval.
 - [ ] Report lists (lane LISTS leftovers, D550–D559): the docs site describes report organization only in release notes, so lists go into "What's new" at the 0.44.0 release; Team → member access pages list a person's report shares but not their list shares (group pages count them); "New report" inside a list view does not add the new report to the list.
 

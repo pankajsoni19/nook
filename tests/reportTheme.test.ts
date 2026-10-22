@@ -111,7 +111,7 @@ describe("layout", () => {
     expect([chartHeight("horizontal_bar", 2), chartHeight("horizontal_bar", 16)]).toEqual([160, 16 * 28 + 24]);
   });
 
-  test("page order: narrative, the KPI strip, an untitled section, then the declared sections", () => {
+  test("page order: narrative, the KPI strip, an untitled section, then the declared sections (D578: a loose block after a section's block shows after that section)", () => {
     const layout = reportLayout({
       sections: [{ id: "b", title: "B" }, { id: "a", title: "A", summary: "Why" }, { id: "empty", title: "Empty" }],
       blocks: [
@@ -126,7 +126,13 @@ describe("layout", () => {
     });
     expect(layout.narrative.map((block) => block.id)).toEqual(["intro"]);
     expect(layout.strip.map((block) => block.id)).toEqual(["k1", "k2"]);
-    expect(layout.sections.map((section) => [section.id, section.blocks.map((block) => block.id)])).toEqual([[null, ["t1", "note"]], ["b", ["c2"]], ["a", ["c1"]]]);
+    // t1 comes after c1 (section a), note after c2 (section b): each shows right after that section.
+    expect(layout.sections.map((section) => [section.id, section.blocks.map((block) => block.id)])).toEqual([["b", ["c2"]], [null, ["note"]], ["a", ["c1"]], [null, ["t1"]]]);
+    const before = reportLayout({ sections: [{ id: "a", title: "A" }], blocks: [
+      { id: "t0", type: "table", queryKey: "q" },
+      { id: "c1", type: "chart", queryKey: "q", kind: "line", x: "d", y: ["v"], section: "a" }
+    ] });
+    expect(before.sections.map((section) => [section.id, section.blocks.map((block) => block.id)])).toEqual([[null, ["t0"]], ["a", ["c1"]]]);
   });
 });
 

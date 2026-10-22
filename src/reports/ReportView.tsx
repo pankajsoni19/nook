@@ -409,7 +409,7 @@ export function ReportView({ report, canWrite, generating = false, initial, read
       {layout.strip.filter((block) => block.hero).map((block) => card(block))}
       {layout.strip.some((block) => !block.hero) && <div className="report-kpi-strip">{layout.strip.filter((block) => !block.hero).map((block) => card(block))}</div>}
     </div>}
-    {layout.sections.map((section) => <section key={section.id ?? "_"} className="report-section" aria-label={section.title ?? undefined}>
+    {layout.sections.map((section) => <section key={section.id ?? `_${section.blocks[0]?.id ?? ""}`} className="report-section" aria-label={section.title ?? undefined}>
       {section.title && (canRemove && section.id
         ? <div className="report-section-head">
           <h2 className="report-section-title">{section.title}</h2>
