@@ -22,6 +22,8 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 
 - [ ] **Chat agents can use report data sources (ClickHouse)** (operator, 2026-10-22; lane AGENTSQL): today chat agents can't reach ClickHouse. Give agents guarded schema search, describe, and SELECT tools over data sources an admin allows for agents, with results shown in chat; the reports guard, allowlist and limits apply; no ad-hoc SQL over MCP keys (T361 stands).
 
+- [ ] **Provider code per kind** (operator, 2026-10-22; lane LOCALEMB, step 0): one adapter file per provider kind (OpenAI-compatible default, Anthropic, Voyage, local); golden tests pin OpenAI's requests to v0.43.0 so other kinds can't change them.
+
 ## Waiting on the operator
 
 - [ ] **Real-model eval of report generation** (D488 chart kinds, D489 parameters): only the scripted provider has run. Run `bun --no-env-file scripts/reportEval.ts --clickhouse <test ClickHouse>` on a host whose Nook has a working model provider (it falls back to Settings → AI; the local instance's OpenAI key is a placeholder), or set `REPORT_EVAL_*`, or regenerate reports on the VM (docs/OPERATIONS.md "Report generation eval"). Check: the five kind cases (`onboarding_funnel`, `cohort_retention`, `quota_attainment`, `latency_spread`, `plan_flow`) get fitting chart kinds, and a doc that names a window or a dimension gets a date range or filter. Tune the prompts from the scores.
