@@ -1,6 +1,7 @@
-import { AGENT_BOUNDS, ANTHROPIC_VERSION, CHAT_IMAGE_BOUNDS, MODEL_TIMEOUTS, type ProviderCompat, type ProviderFlavor, type ReasoningEffort, type TokenUsage } from "../../shared/agents";
+import { AGENT_BOUNDS, CHAT_IMAGE_BOUNDS, MODEL_TIMEOUTS, type ProviderCompat, type ProviderFlavor, type ReasoningEffort, type TokenUsage } from "../../shared/agents";
 import { EgressError, egressFetch, readEgressText, type EgressResponse } from "./egress";
 import { logger } from "../log";
+import { adapterOf } from "./providerKinds";
 
 const modelLog = logger("agents");
 
@@ -140,16 +141,11 @@ const ERROR_BODY_MAX_BYTES = 64 * 1024;
 
 /**
  * The headers of every request to a provider (models, chat, probes, embeddings): the key as Bearer,
- * and for Anthropic (D539, by host or `compat.flavor`) also `x-api-key` and `anthropic-version`, which
- * its native `/v1/models` requires (its OpenAI-compatible `/chat/completions` takes either).
+ * plus what the connection's kind adds (D543: its adapter; Anthropic's `x-api-key` and
+ * `anthropic-version`, D539).
  */
 export function providerHeaders(connection: Pick<ProviderConnection, "apiKey" | "flavor">, accept: string): Record<string, string> {
-  return {
-    Accept: accept,
-    "Content-Type": "application/json",
-    ...(connection.apiKey ? { Authorization: `Bearer ${connection.apiKey}` } : {}),
-    ...(connection.flavor === "anthropic" ? { "anthropic-version": ANTHROPIC_VERSION, ...(connection.apiKey ? { "x-api-key": connection.apiKey } : {}) } : {})
-  };
+  return adapterOf(connection).headers(connection.apiKey, accept);
 }
 const headersFor = providerHeaders;
 
@@ -203,20 +199,18 @@ async function failedResponse(response: EgressResponse, readBody?: string): Prom
   throw new ProviderError("PROVIDER_ERROR", `${base} (HTTP ${status})${detail ? `: ${detail.redacted}` : ""}`, status, `${base} (HTTP ${status})${detail ? `: ${detail.admin}` : ""}`);
 }
 
-/** Pages of Anthropic's native model list Nook reads at most (D539: 1,000 a page, so 5,000 ids; more than any account has). */
-export const MODEL_LIST_PAGES = 5;
-
 /**
- * `GET {baseUrl}/models` → model ids (at most 500, sorted). OpenAI's shape (`data[].id`) and
- * Anthropic's native one (D539: `data[].id` too, plus `has_more` and `last_id`, read a page of 1,000
- * at a time with `after_id`, at most `MODEL_LIST_PAGES` pages).
+ * `GET {baseUrl}/models` → model ids (at most 500, sorted), `data[].id`. The kind's adapter (D543)
+ * says how many pages to read and each page's query (D539: Anthropic's native list, 1,000 a page
+ * with `after_id`, following `has_more` and `last_id`); a kind with no list over HTTP lists none.
  */
 export async function listModels(connection: ProviderConnection): Promise<string[]> {
   const ids: string[] = [];
-  const anthropic = connection.flavor === "anthropic";
+  const list = adapterOf(connection).modelsList;
+  if (!list) return [];
   let after: string | null = null;
-  for (let page = 0; page < (anthropic ? MODEL_LIST_PAGES : 1); page += 1) {
-    const query = anthropic ? `?limit=1000${after ? `&after_id=${encodeURIComponent(after)}` : ""}` : "";
+  for (let page = 0; page < list.pages; page += 1) {
+    const query = list.query(after);
     let response: Awaited<ReturnType<typeof egressFetch>>;
     try {
       response = await egressFetch(`${connection.baseUrl}/models${query}`, { method: "GET", headers: headersFor(connection, "application/json") }, { maxBytes: MODELS_LIST_MAX_BYTES, firstByteMs: modelTimeouts.firstByteMs, idleMs: modelTimeouts.idleMs, totalMs: modelTimeouts.totalMs });
@@ -306,7 +300,7 @@ export async function completeStreaming(connection: ProviderConnection, request:
     // Review L2 (Wave 46): a provider that refuses `required` or a named choice with a 400 is asked once
     // more with `auto` (under a named choice only that tool is still offered, so it is the only call to make).
     if (response.status === 400 && body.tool_choice !== undefined && body.tool_choice !== "auto") {
-      // D540: a 400 that says this forced choice is not supported (Anthropic's current models) is
+      // D540: a 400 that says this forced choice is not supported (Anthropic's current models; any kind) is
       // learned once `auto` works: the provider's compat stops asking for that kind (`required`, or a
       // named tool), saved and audited, so later requests go out with what the provider takes at once.
       const refusedKind = readBody !== undefined && refusesForcedToolChoice(readBody) ? (body.tool_choice === "required" ? "required" : "named") : null;

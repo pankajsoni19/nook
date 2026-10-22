@@ -2,6 +2,7 @@ import { endianness } from "node:os";
 import { EMBEDDING_BATCH, takesDimensions } from "../../shared/knowledge";
 import { EgressError, egressFetch, readEgressText } from "../agents/egress";
 import { excerpt, ProviderError, providerHeaders, type ProviderConnection } from "../agents/loop";
+import { adapterOf, type EmbeddingInputType } from "../agents/providerKinds";
 
 /**
  * Embeddings (plan §9, D368; Wave 44 "AC-E"): `POST {baseUrl}/embeddings` on the configured
@@ -78,15 +79,11 @@ function rethrow(error: unknown): never {
  * `dims` numbers when `dims` is given.
  */
 /**
- * The request body (D542): OpenAI's `dimensions` and `encoding_format: "float"`; with a provider that
- * sizes by `output_dimension` (Voyage AI) that field instead, no `encoding_format` (Voyage takes only
- * null or base64; its default is floats), and `input_type` (document when indexing, query when searching).
+ * The request body, as the connection's kind shapes it (D543: its adapter): OpenAI's `dimensions`
+ * and `encoding_format: "float"`; Voyage AI's `output_dimension` and `input_type` (D542).
  */
-export function embeddingBody(connection: Pick<ProviderConnection, "compat" | "flavor">, model: string, dims: number | null, inputs: readonly string[], inputType?: "document" | "query"): Record<string, unknown> {
-  const voyage = connection.compat.dimensionsParam === "output_dimension" || connection.flavor === "voyage";
-  const sized = dims !== null && takesDimensions(model, { dimensionsParam: connection.compat.dimensionsParam, flavor: connection.flavor ?? undefined });
-  if (voyage) return { model, input: inputs, ...(sized ? { output_dimension: dims } : {}), ...(inputType ? { input_type: inputType } : {}) };
-  return { model, input: inputs, encoding_format: "float", ...(sized ? { dimensions: dims } : {}) };
+export function embeddingBody(connection: Pick<ProviderConnection, "compat" | "flavor">, model: string, dims: number | null, inputs: readonly string[], inputType?: EmbeddingInputType): Record<string, unknown> {
+  return adapterOf(connection).embeddingBody(model, dims, inputs, inputType, connection.compat);
 }
 
 async function embedBatch(connection: ProviderConnection, model: string, dims: number | null, inputs: readonly string[], signal?: AbortSignal, inputType?: "document" | "query"): Promise<EmbeddingResult> {
@@ -95,7 +92,7 @@ async function embedBatch(connection: ProviderConnection, model: string, dims: n
   try {
     response = await egressFetch(`${connection.baseUrl}/embeddings`, {
       method: "POST",
-      // D539: the same headers as every other call to the provider (Anthropic's when it is Anthropic).
+      // D539/D543: the same headers as every other call to the provider (its kind's adapter).
       headers: providerHeaders(connection, "application/json"),
       body,
       signal

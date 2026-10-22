@@ -92,8 +92,8 @@ export type KnowledgeEmbeddingChoice = {
   anyModel: boolean; maxDims: number;
   /** D542: the only sizes this provider takes (Voyage AI: 256, 512, 1,024, 2,048, within `maxDims`); absent: any from 64 to `maxDims`. */
   sizes?: number[];
-  /** D542: the provider's kind when it decides how a size is asked for (Voyage AI's `output_dimension`). */
-  flavor?: "voyage";
+  /** D542/D543: the provider's kind (absent: OpenAI-compatible); it decides how a size is asked for (Voyage AI's `output_dimension`). */
+  flavor?: "anthropic" | "voyage";
 };
 
 /**

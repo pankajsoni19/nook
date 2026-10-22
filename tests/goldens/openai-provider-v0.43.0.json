@@ -1,0 +1,739 @@
+{
+  "created": {
+    "compat": {
+      "tokenParam": "max_completion_tokens",
+      "streamUsage": true,
+      "supportsTools": true,
+      "contextTokens": 128000
+    },
+    "defaultModel": "gpt-6-luna",
+    "embeddingModel": "text-embedding-3-small",
+    "embeddingDims": 512,
+    "baseUrl": "http://127.0.0.1:<port>/v1"
+  },
+  "test": {
+    "requests": [
+      {
+        "method": "GET",
+        "path": "/v1/models",
+        "headers": {
+          "accept": "application/json",
+          "accept-encoding": "gzip, deflate, br, zstd",
+          "authorization": "Bearer sk-golden-not-real-0001",
+          "connection": "keep-alive",
+          "content-type": "application/json",
+          "user-agent": "Nook/<version>"
+        },
+        "body": null
+      },
+      {
+        "method": "POST",
+        "path": "/v1/chat/completions",
+        "headers": {
+          "accept": "text/event-stream",
+          "accept-encoding": "gzip, deflate, br, zstd",
+          "authorization": "Bearer sk-golden-not-real-0001",
+          "connection": "keep-alive",
+          "content-type": "application/json",
+          "user-agent": "Nook/<version>"
+        },
+        "body": {
+          "model": "gpt-6-luna",
+          "messages": [
+            {
+              "role": "user",
+              "content": "Reply with the single word: ok"
+            }
+          ],
+          "stream": true,
+          "stream_options": {
+            "include_usage": true
+          },
+          "max_completion_tokens": 1
+        }
+      }
+    ],
+    "answer": {
+      "ok": true,
+      "models": {
+        "ok": true,
+        "count": 2,
+        "latencyMs": "<ms>",
+        "error": null
+      },
+      "completion": {
+        "ok": true,
+        "model": "gpt-6-luna",
+        "latencyMs": "<ms>",
+        "error": null
+      }
+    }
+  },
+  "testTools": {
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/v1/chat/completions",
+        "headers": {
+          "accept": "text/event-stream",
+          "accept-encoding": "gzip, deflate, br, zstd",
+          "authorization": "Bearer sk-golden-not-real-0001",
+          "connection": "keep-alive",
+          "content-type": "application/json",
+          "user-agent": "Nook/<version>"
+        },
+        "body": {
+          "model": "gpt-6-luna",
+          "messages": [
+            {
+              "role": "user",
+              "content": "This is a connection test. Call the nook_probe tool with ok set to true."
+            }
+          ],
+          "stream": true,
+          "stream_options": {
+            "include_usage": true
+          },
+          "max_completion_tokens": 64,
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "nook_probe",
+                "description": "Answers the probe. Call it with ok set to true.",
+                "parameters": {
+                  "type": "object",
+                  "required": [
+                    "ok"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "type": "function",
+              "function": {
+                "name": "nook_other",
+                "description": "Do not call this tool.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          ],
+          "tool_choice": "required"
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/v1/chat/completions",
+        "headers": {
+          "accept": "text/event-stream",
+          "accept-encoding": "gzip, deflate, br, zstd",
+          "authorization": "Bearer sk-golden-not-real-0001",
+          "connection": "keep-alive",
+          "content-type": "application/json",
+          "user-agent": "Nook/<version>"
+        },
+        "body": {
+          "model": "gpt-6-luna",
+          "messages": [
+            {
+              "role": "user",
+              "content": "This is a connection test. Call the nook_probe tool with ok set to true."
+            }
+          ],
+          "stream": true,
+          "stream_options": {
+            "include_usage": true
+          },
+          "max_completion_tokens": 64,
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "nook_probe",
+                "description": "Answers the probe. Call it with ok set to true.",
+                "parameters": {
+                  "type": "object",
+                  "required": [
+                    "ok"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "tool_choice": {
+            "type": "function",
+            "function": {
+              "name": "nook_probe"
+            }
+          }
+        }
+      }
+    ],
+    "answer": {
+      "required": {
+        "ok": true,
+        "outcome": "supported",
+        "status": 200,
+        "error": null
+      },
+      "named": {
+        "ok": true,
+        "outcome": "supported",
+        "status": 200,
+        "error": null
+      },
+      "compat": {
+        "requiredToolChoice": true,
+        "namedToolChoice": true
+      },
+      "inconclusive": false,
+      "model": "gpt-6-luna"
+    }
+  },
+  "modelsList": {
+    "requests": [
+      {
+        "method": "GET",
+        "path": "/v1/models",
+        "headers": {
+          "accept": "application/json",
+          "accept-encoding": "gzip, deflate, br, zstd",
+          "authorization": "Bearer sk-golden-not-real-0001",
+          "connection": "keep-alive",
+          "content-type": "application/json",
+          "user-agent": "Nook/<version>"
+        },
+        "body": null
+      }
+    ],
+    "answer": [
+      "gpt-6-luna",
+      "text-embedding-3-small"
+    ]
+  },
+  "chatRequired": {
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/v1/chat/completions",
+        "headers": {
+          "accept": "text/event-stream",
+          "accept-encoding": "gzip, deflate, br, zstd",
+          "authorization": "Bearer sk-golden-not-real-0001",
+          "connection": "keep-alive",
+          "content-type": "application/json",
+          "user-agent": "Nook/<version>"
+        },
+        "body": {
+          "model": "gpt-6-luna",
+          "messages": [
+            {
+              "role": "system",
+              "content": "You are terse."
+            },
+            {
+              "role": "user",
+              "content": "Look up the weather."
+            }
+          ],
+          "stream": true,
+          "stream_options": {
+            "include_usage": true
+          },
+          "max_completion_tokens": 200,
+          "temperature": 0.2,
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "lookup",
+                "description": "Looks a thing up.",
+                "parameters": {
+                  "type": "object",
+                  "required": [
+                    "q"
+                  ],
+                  "properties": {
+                    "q": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "type": "function",
+              "function": {
+                "name": "submit",
+                "description": "Submits the answer.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "done": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "tool_choice": "required"
+        }
+      }
+    ],
+    "answer": {
+      "content": "",
+      "finishReason": "tool_calls",
+      "toolCalls": [
+        {
+          "name": "lookup",
+          "arguments": "{\"ok\":true}"
+        }
+      ],
+      "usage": {
+        "promptTokens": 5,
+        "completionTokens": 1,
+        "estimated": false
+      }
+    }
+  },
+  "chatNamed": {
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/v1/chat/completions",
+        "headers": {
+          "accept": "text/event-stream",
+          "accept-encoding": "gzip, deflate, br, zstd",
+          "authorization": "Bearer sk-golden-not-real-0001",
+          "connection": "keep-alive",
+          "content-type": "application/json",
+          "user-agent": "Nook/<version>"
+        },
+        "body": {
+          "model": "gpt-6-luna",
+          "messages": [
+            {
+              "role": "system",
+              "content": "You are terse."
+            },
+            {
+              "role": "user",
+              "content": "Look up the weather."
+            }
+          ],
+          "stream": true,
+          "stream_options": {
+            "include_usage": true
+          },
+          "max_completion_tokens": 300,
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "submit",
+                "description": "Submits the answer.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "done": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "tool_choice": {
+            "type": "function",
+            "function": {
+              "name": "submit"
+            }
+          }
+        }
+      }
+    ],
+    "answer": {
+      "content": "",
+      "finishReason": "tool_calls",
+      "toolCalls": [
+        {
+          "name": "submit",
+          "arguments": "{\"ok\":true}"
+        }
+      ],
+      "usage": {
+        "promptTokens": 5,
+        "completionTokens": 1,
+        "estimated": false
+      }
+    }
+  },
+  "chatAuto": {
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/v1/chat/completions",
+        "headers": {
+          "accept": "text/event-stream",
+          "accept-encoding": "gzip, deflate, br, zstd",
+          "authorization": "Bearer sk-golden-not-real-0001",
+          "connection": "keep-alive",
+          "content-type": "application/json",
+          "user-agent": "Nook/<version>"
+        },
+        "body": {
+          "model": "gpt-6-mini",
+          "messages": [
+            {
+              "role": "system",
+              "content": "You are terse."
+            },
+            {
+              "role": "user",
+              "content": "Look up the weather."
+            }
+          ],
+          "stream": true,
+          "stream_options": {
+            "include_usage": true
+          },
+          "max_completion_tokens": 4096,
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "lookup",
+                "description": "Looks a thing up.",
+                "parameters": {
+                  "type": "object",
+                  "required": [
+                    "q"
+                  ],
+                  "properties": {
+                    "q": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "type": "function",
+              "function": {
+                "name": "submit",
+                "description": "Submits the answer.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "done": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "tool_choice": "auto"
+        }
+      }
+    ],
+    "answer": {
+      "content": "",
+      "finishReason": "tool_calls",
+      "toolCalls": [
+        {
+          "name": "lookup",
+          "arguments": "{\"ok\":true}"
+        }
+      ],
+      "usage": {
+        "promptTokens": 5,
+        "completionTokens": 1,
+        "estimated": false
+      }
+    }
+  },
+  "chatText": {
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/v1/chat/completions",
+        "headers": {
+          "accept": "text/event-stream",
+          "accept-encoding": "gzip, deflate, br, zstd",
+          "authorization": "Bearer sk-golden-not-real-0001",
+          "connection": "keep-alive",
+          "content-type": "application/json",
+          "user-agent": "Nook/<version>"
+        },
+        "body": {
+          "model": "gpt-6-luna",
+          "messages": [
+            {
+              "role": "user",
+              "content": "Say ok"
+            }
+          ],
+          "stream": true,
+          "stream_options": {
+            "include_usage": true
+          },
+          "max_completion_tokens": 4096
+        }
+      }
+    ],
+    "answer": {
+      "content": "ok",
+      "finishReason": "stop",
+      "toolCalls": [],
+      "usage": {
+        "promptTokens": 5,
+        "completionTokens": 1,
+        "estimated": false
+      }
+    }
+  },
+  "chatForcedRefused": {
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/v1/chat/completions",
+        "headers": {
+          "accept": "text/event-stream",
+          "accept-encoding": "gzip, deflate, br, zstd",
+          "authorization": "Bearer sk-golden-not-real-0001",
+          "connection": "keep-alive",
+          "content-type": "application/json",
+          "user-agent": "Nook/<version>"
+        },
+        "body": {
+          "model": "gpt-6-luna",
+          "messages": [
+            {
+              "role": "user",
+              "content": "refuse-forced please"
+            }
+          ],
+          "stream": true,
+          "stream_options": {
+            "include_usage": true
+          },
+          "max_completion_tokens": 4096,
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "lookup",
+                "description": "Looks a thing up.",
+                "parameters": {
+                  "type": "object",
+                  "required": [
+                    "q"
+                  ],
+                  "properties": {
+                    "q": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "type": "function",
+              "function": {
+                "name": "submit",
+                "description": "Submits the answer.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "done": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "tool_choice": "required"
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/v1/chat/completions",
+        "headers": {
+          "accept": "text/event-stream",
+          "accept-encoding": "gzip, deflate, br, zstd",
+          "authorization": "Bearer sk-golden-not-real-0001",
+          "connection": "keep-alive",
+          "content-type": "application/json",
+          "user-agent": "Nook/<version>"
+        },
+        "body": {
+          "model": "gpt-6-luna",
+          "messages": [
+            {
+              "role": "user",
+              "content": "refuse-forced please"
+            }
+          ],
+          "stream": true,
+          "stream_options": {
+            "include_usage": true
+          },
+          "max_completion_tokens": 4096,
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "lookup",
+                "description": "Looks a thing up.",
+                "parameters": {
+                  "type": "object",
+                  "required": [
+                    "q"
+                  ],
+                  "properties": {
+                    "q": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "type": "function",
+              "function": {
+                "name": "submit",
+                "description": "Submits the answer.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "done": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "tool_choice": "auto"
+        }
+      }
+    ],
+    "answer": {
+      "content": "",
+      "finishReason": "tool_calls",
+      "toolCalls": [
+        {
+          "name": "lookup",
+          "arguments": "{\"ok\":true}"
+        }
+      ],
+      "usage": {
+        "promptTokens": 5,
+        "completionTokens": 1,
+        "estimated": false
+      }
+    }
+  },
+  "embedSized": {
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/v1/embeddings",
+        "headers": {
+          "accept": "application/json",
+          "accept-encoding": "gzip, deflate, br, zstd",
+          "authorization": "Bearer sk-golden-not-real-0001",
+          "connection": "keep-alive",
+          "content-type": "application/json",
+          "user-agent": "Nook/<version>"
+        },
+        "body": {
+          "model": "text-embedding-3-small",
+          "input": [
+            "alpha",
+            "beta gamma"
+          ],
+          "encoding_format": "float",
+          "dimensions": 512
+        }
+      }
+    ],
+    "answer": {
+      "count": 2,
+      "dims": 512,
+      "tokens": 4,
+      "estimated": false
+    }
+  },
+  "embedQuery": {
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/v1/embeddings",
+        "headers": {
+          "accept": "application/json",
+          "accept-encoding": "gzip, deflate, br, zstd",
+          "authorization": "Bearer sk-golden-not-real-0001",
+          "connection": "keep-alive",
+          "content-type": "application/json",
+          "user-agent": "Nook/<version>"
+        },
+        "body": {
+          "model": "text-embedding-3-small",
+          "input": [
+            "what is alpha"
+          ],
+          "encoding_format": "float",
+          "dimensions": 512
+        }
+      }
+    ],
+    "answer": {
+      "count": 1,
+      "dims": 512
+    }
+  },
+  "embedNative": {
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/v1/embeddings",
+        "headers": {
+          "accept": "application/json",
+          "accept-encoding": "gzip, deflate, br, zstd",
+          "authorization": "Bearer sk-golden-not-real-0001",
+          "connection": "keep-alive",
+          "content-type": "application/json",
+          "user-agent": "Nook/<version>"
+        },
+        "body": {
+          "model": "text-embedding-ada-002",
+          "input": [
+            "delta"
+          ],
+          "encoding_format": "float"
+        }
+      }
+    ],
+    "answer": {
+      "count": 1,
+      "dims": 1536
+    }
+  }
+}
