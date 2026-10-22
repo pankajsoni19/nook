@@ -19,7 +19,7 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 
 - [ ] **Reports: delete a section from its header** (operator, 2026-10-22; lane EDIT): a trash icon on each block's header (title, text, chart, KPI, table) removes it after a confirm, as a new version (today only Changes → Arrange can).
 - [ ] **Reports: modify a query, not only view it** (operator, 2026-10-22, "research and build"; lane EDIT): owners edit SQL in Inspect → Query (today only Changes → Arrange → Edit SQL); research how team members below owner should change one (suggest an edit for the owner to apply, try it without saving).
-- [ ] **Reports: dynamic filters** (operator, 2026-10-22, "research and build"; lane FILTERS): research beyond D489's AI-added parameters (filters people add themselves, click a chart to filter, filters that narrow each other, table filters), plan in docs/plan/REPORT_FILTERS.md, then build after lane DOCS lands.
+- [ ] **Reports: dynamic filters** (operator, 2026-10-22, "research and build"; lane FILTERS): research beyond D489's AI-added parameters (filters people add themselves, click a chart to filter, filters that narrow each other, table filters), plan done ([REPORT_FILTERS.md](docs/plan/REPORT_FILTERS.md): slice 1 = only re-run touched queries, "filters N of M blocks", owner **Add filter** with a default-unchanged check, click a chart to filter, more date presets); build after lane DOCS lands.
 
 ## Waiting on the operator
 
