@@ -29,6 +29,8 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
   - [ ] Restore drill: a command that restores the latest backup (archive or Litestream) into a scratch instance and verifies it.
 - [ ] **Vault keys: Edit can add access** (operator, 2026-10-22: "allow, wherever possible target ease of use"; lane VAULTKEY): same as general keys (D585): add rows and widen with the password, refuse what the owner can't grant, security mail and bell notice.
 
+- [ ] **Docs site: features first, release notes out of the way** (operator, 2026-10-22; lane DOCSITE): https://pankajsoni19.github.io/nook/ opens on ~40 "What's new in vX" entries before the apps; lead with what Nook does and each app, keep one "What's new" (latest) link, and move older release notes to their own page.
+
 ## Waiting on the operator
 
 - [ ] **Real-model check of chat agents on data sources** (lane AGENTSQL, D592): only the scripted provider has called the data tools. On a host with a working model, give an agent a data source (Settings → Report data sources → Chat agents may use this data source) and check that it searches before it queries, aggregates in SQL rather than paging raw rows, and summarizes instead of repeating the table.
