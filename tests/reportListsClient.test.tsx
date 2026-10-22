@@ -156,6 +156,55 @@ describe("a list", () => {
     await settle();
   });
 
+  test("New report from a list you curate adds it to that list before opening it", async () => {
+    const NEW = "0b8f7c2e-1111-4111-8111-000000000009";
+    const toasts = captureToasts();
+    const api = base({
+      "POST /reports": () => ({ report: { ...summary(NEW, "Margins"), spec: { version: 2, sections: [], blocks: [], queries: [] }, doc: null, lastError: null } }),
+      [`PUT /reports/lists/${LIST}/items/${NEW}`]: () => ({ added: true, list: list({ count: 4 }) })
+    });
+    const create = async (folder: string) => {
+      let opened = "";
+      const view = await render(home({ folder, onOpen: (id) => { opened = id; } }));
+      await view.waitFor(() => rowTitles().length > 0);
+      await view.click(view.button("New report")!);
+      const sheet = await view.waitFor(() => document.querySelector(".new-report-sheet"));
+      await view.click([...sheet.querySelectorAll<HTMLButtonElement>("[role=radio]")].find((item) => item.textContent === "Blank")!);
+      const input = sheet.querySelector<HTMLInputElement>("input[placeholder='Weekly revenue']")!;
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "Margins");
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      await view.click(view.button("Create report", sheet)!);
+      await view.waitFor(() => opened);
+      return opened;
+    };
+    expect(await create(reportsListView(LIST))).toBe(NEW);
+    const adds = () => api.calls.filter((call) => call.method === "PUT" && call.path.startsWith("/reports/lists/"));
+    expect(adds().map((call) => call.path)).toEqual([`/reports/lists/${LIST}/items/${NEW}`]);
+    expect(toasts.some((toast) => toast.message === "Added the new report to Board pack")).toBe(true);
+  });
+
+  test("New report from a list you only view creates it normally, outside the list", async () => {
+    const NEW = "0b8f7c2e-1111-4111-8111-000000000009";
+    const api = base({ "POST /reports": () => ({ report: { ...summary(NEW, "Margins"), spec: { version: 2, sections: [], blocks: [], queries: [] }, doc: null, lastError: null } }) });
+    let opened = "";
+    const view = await render(home({ folder: reportsListView(OTHER_LIST), onOpen: (id) => { opened = id; } }));
+    await view.waitFor(() => rowTitles().length > 0);
+    await view.click(view.button("New report")!);
+    const sheet = await view.waitFor(() => document.querySelector(".new-report-sheet"));
+    await view.click([...sheet.querySelectorAll<HTMLButtonElement>("[role=radio]")].find((item) => item.textContent === "Blank")!);
+    const input = sheet.querySelector<HTMLInputElement>("input[placeholder='Weekly revenue']")!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "Margins");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await view.click(view.button("Create report", sheet)!);
+    await view.waitFor(() => opened);
+    expect(opened).toBe(NEW);
+    expect(api.calls.some((call) => call.method === "PUT" && call.path.startsWith("/reports/lists/"))).toBe(false);
+  });
+
   test("Back and Forward step between All reports and a list", async () => {
     base();
     await settle();

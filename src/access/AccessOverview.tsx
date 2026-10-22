@@ -79,6 +79,13 @@ export function AccessOverview({ summary, loadPage, actions, reloadKey = 0, busy
         {summary.reports.map((row, index) => <AccessRowItem key={`${row.id ?? "hidden"}-${index}`} row={row} busy={busy} />)}
       </ul>
     </section>}
+    {summary.reportLists && summary.reportLists.length > 0 && <section className="team-card ma-module" aria-labelledby="ma-module-report-lists">
+      <h3 id="ma-module-report-lists">Report lists</h3>
+      <p className="team-muted">The owner changes who sees a list from Share list. A list never gives access to the reports in it.</p>
+      <ul className="group-item-list" aria-label="Report list access">
+        {summary.reportLists.map((row, index) => <AccessRowItem key={`${row.id ?? "hidden"}-${index}`} row={row} busy={busy} />)}
+      </ul>
+    </section>}
   </div>;
 }
 

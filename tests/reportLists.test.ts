@@ -224,6 +224,31 @@ describe("lists", () => {
   });
 });
 
+describe("Team → member access", () => {
+  test("lists shared with a person by name or through a group show on their access page (names only to those who can see the list); Reset removes the direct ones", async () => {
+    const { accessSummary, resetAccess } = await import("../server/team/memberAccess");
+    const person = await role("Lists access person", "member");
+    const list = await newList(owner, "Access pack");
+    const groupId = crypto.randomUUID();
+    const at = new Date().toISOString();
+    db.query("INSERT INTO user_groups (id, name, created_at, updated_at) VALUES (?, 'Lists access group', ?, ?)").run(groupId, at, at);
+    db.query("INSERT INTO group_members (group_id, user_id, added_at) VALUES (?, ?, ?)").run(groupId, person.userId, at);
+    await send(owner, "PUT", `/reports/lists/${list.id}/sharing`, { visibility: "selected", shares: [{ kind: "user", id: person.userId, level: "view" }, { kind: "group", id: groupId, level: "edit" }] });
+    const mine = accessSummary(person.userId, person.userId) as Json;
+    expect(mine.reportLists).toEqual([expect.objectContaining({ kind: "report_list", id: list.id, title: "Access pack", level: "edit", active: true })]);
+    expect(mine.reportLists[0].sources.map((source: Json) => [source.via, source.level])).toEqual([["direct", "view"], ["group", "edit"]]);
+    // An admin who can't see the list gets its owner, never its name (D269).
+    const asAdmin = accessSummary(admin.userId, person.userId) as Json;
+    expect(asAdmin.reportLists).toEqual([expect.objectContaining({ kind: "report_list", titleHidden: true, title: "Report list owned by Lists owner" })]);
+    expect(JSON.stringify(asAdmin.reportLists)).not.toContain(list.id);
+    expect(mine.resetCounts.directShares).toBeGreaterThanOrEqual(1);
+    resetAccess(admin.userId, person.userId);
+    expect(db.query("SELECT COUNT(*) AS count FROM report_list_members WHERE user_id = ?").get(person.userId)).toEqual({ count: 0 });
+    // Reset also took them out of the group, so the list is gone from their page.
+    expect((accessSummary(person.userId, person.userId) as Json).reportLists).toEqual([]);
+  });
+});
+
 describe("MCP", () => {
   test("list_report_lists and get_report_list (reports:read), add_report_to_list (reports:write, audited); never offered to agents; no removal over MCP", async () => {
     const tool = (name: string) => reportTools.find((item) => item.name === name)!;

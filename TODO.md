@@ -31,7 +31,7 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 ## Small fixes (lane SMALL)
 
 - [ ] Inspect → "From the doc" (D518) needs the plan todo's `docRef` (`d2`); the scripted QA provider never sets it, so only a real model's runs show it. Check after the real-model eval.
-- [ ] Report lists (lane LISTS leftovers, D550–D559): the docs site describes report organization only in release notes, so lists go into "What's new" at the 0.44.0 release; Team → member access pages list a person's report shares but not their list shares (group pages count them); "New report" inside a list view does not add the new report to the list.
+- [ ] Report lists (lane LISTS leftover, D550–D559): the docs site describes report organization only in release notes, so lists go into "What's new" at the 0.44.0 release (operator, at the release).
 
 ## Leftovers (lane CLAUDE)
 

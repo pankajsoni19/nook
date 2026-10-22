@@ -68,6 +68,8 @@ export type AccessSummary = {
   chat?: AccessRow[];
   /** Reports wave 48: reports shared with the person (read-only rows). */
   reports?: AccessRow[];
+  /** Phase 3 (D551): report lists shared with the person (read-only rows; older servers omit it). */
+  reportLists?: AccessRow[];
   resetCounts: ResetCounts;
   pageSize: number;
 };
@@ -89,7 +91,7 @@ export type AccessSource = {
  */
 export type AccessRow = {
   /** Wave 43: also an agent or a chat (the Chat section). */
-  kind: AccessKind | "agent" | "chat" | "knowledge_base" | "report";
+  kind: AccessKind | "agent" | "chat" | "knowledge_base" | "report" | "report_list";
   title: string;
   titleHidden: boolean;
   owner: { id: string; displayName: string };

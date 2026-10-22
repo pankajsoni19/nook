@@ -3,6 +3,7 @@ import { adminRevokeKey, listApiKeys, listInventory } from "../apiKeys";
 import { folderLevel } from "../access";
 import { ITEM_TABLES, itemLevel, presentItem, readabilityChecker } from "../access/effective";
 import { readableReportSql } from "../reports/access";
+import { readableListSql } from "../reports/listAccess";
 import { recordAccessEvent } from "../access/events";
 import { itemSortKey, openCursor, openItemHandle, sealCursor, sealItemHandle, type PageCursor } from "../access/handles";
 import { ACCESS_KINDS, KIND_LEVELS, LEVEL_RANK, isLevel, type AccessKind, type ItemLevel, type Level } from "../access/levels";
@@ -149,10 +150,41 @@ function reportRows(viewerId: string, userId: string) {
   return rows.sort((left, right) => left.owner.displayName.localeCompare(right.owner.displayName) || left.title.localeCompare(right.title)).slice(0, ACCESS_PAGE);
 }
 
+/** Report lists shared with the person by name (phase 3, D551). */
+const reportListMemberCount = (userId: string) => (db.query("SELECT COUNT(*) AS count FROM report_list_members m JOIN report_lists l ON l.id = m.list_id WHERE m.user_id = ? AND l.deleted_at IS NULL").get(userId) as { count: number }).count;
+
+/**
+ * Report lists shared with the person by name or through a group (phase 3, D551), like reportRows: one
+ * row per live list, with every way they reach it; the name only when the viewer can see the list
+ * (D269). A list never grants a report (D550), so the row is the list alone. Read-only on the page: the
+ * owner changes a list's sharing from Share list.
+ */
+function reportListRows(viewerId: string, userId: string) {
+  const grants = db.query(`SELECT 'direct' AS via, m.list_id, m.level, '' AS group_id, NULL AS group_name FROM report_list_members m WHERE m.user_id = $userId
+      UNION ALL
+      SELECT 'group', lg.list_id, lg.level, lg.group_id, g.name FROM group_members gm JOIN report_list_group_shares lg ON lg.group_id = gm.group_id JOIN user_groups g ON g.id = lg.group_id
+        WHERE gm.user_id = $userId LIMIT 2000`).all({ userId }) as Array<{ via: "direct" | "group"; list_id: string; level: "view" | "edit"; group_id: string; group_name: string | null }>;
+  const byList = new Map<string, typeof grants>();
+  for (const grant of grants) byList.set(grant.list_id, [...(byList.get(grant.list_id) ?? []), grant]);
+  const canSee = (listId: string, who: string) => Boolean(db.query(`SELECT 1 FROM report_lists l WHERE l.id = $id AND ${readableListSql("l")}`).get({ id: listId, userId: who }));
+  const rows = [];
+  for (const [listId, sources] of byList) {
+    const list = db.query("SELECT l.id, l.name, l.owner_id, u.display_name AS owner_name FROM report_lists l JOIN users u ON u.id = l.owner_id WHERE l.id = ? AND l.deleted_at IS NULL").get(listId) as { id: string; name: string; owner_id: string; owner_name: string } | null;
+    if (!list) continue;
+    const visible = canSee(listId, viewerId);
+    rows.push({
+      kind: "report_list" as const, title: visible ? list.name : `Report list owned by ${list.owner_name}`, titleHidden: !visible, owner: { id: list.owner_id, displayName: list.owner_name },
+      ...(visible ? { id: list.id } : {}), level: sources.some((source) => source.level === "edit") ? "edit" as const : "view" as const, active: canSee(listId, userId),
+      sources: sources.map((source) => ({ via: source.via, level: source.level, group: source.via === "group" ? { id: source.group_id, name: source.group_name ?? "" } : null, lowerTo: [] as string[] }))
+    });
+  }
+  return rows.sort((left, right) => left.owner.displayName.localeCompare(right.owner.displayName) || left.title.localeCompare(right.title)).slice(0, ACCESS_PAGE);
+}
+
 /** What Reset access removes, counted (the confirm shows these before, the result after). */
 export function resetCounts(userId: string) {
   // Wave 43 (AC-D): direct agent and chat shares count with the others.
-  let direct = vaultMemberCount(userId) + sharedDirectCount(userId) + reportMemberCount(userId);
+  let direct = vaultMemberCount(userId) + sharedDirectCount(userId) + reportMemberCount(userId) + reportListMemberCount(userId);
   for (const kind of ACCESS_KINDS) direct += directCount(kind, userId);
   const count = (sql: string) => (db.query(sql).get(userId) as { count: number }).count;
   return {
@@ -243,6 +275,8 @@ export function accessSummary(viewerId: string, userId: string) {
     })),
     // Reports wave 48 (D459): reports shared with the person, read-only here.
     reports: reportRows(viewerId, userId),
+    // Phase 3 (D551): report lists shared with the person, read-only here.
+    reportLists: reportListRows(viewerId, userId),
     resetCounts: counts,
     pageSize: ACCESS_PAGE
   };
@@ -507,6 +541,11 @@ export function resetAccess(actorId: string, userId: string) {
       perOwner.set(row.owner_id, (perOwner.get(row.owner_id) ?? 0) + row.count);
     }
     db.query("DELETE FROM report_members WHERE user_id = ?").run(userId);
+    // Report lists shared by name (phase 3, D551): their member rows go (owned lists stay).
+    for (const row of db.query("SELECT l.owner_id, COUNT(*) AS count FROM report_list_members m JOIN report_lists l ON l.id = m.list_id WHERE m.user_id = ? AND l.deleted_at IS NULL GROUP BY l.owner_id").all(userId) as Array<{ owner_id: string; count: number }>) {
+      perOwner.set(row.owner_id, (perOwner.get(row.owner_id) ?? 0) + row.count);
+    }
+    db.query("DELETE FROM report_list_members WHERE user_id = ?").run(userId);
     rotateOnLostReach(actorId, reach);
     const feeds = db.query("UPDATE calendar_feeds SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL").run(timestamp, userId).changes;
     const routines = pauseRoutinesOf(userId);

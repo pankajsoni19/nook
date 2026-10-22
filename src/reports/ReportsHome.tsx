@@ -112,7 +112,8 @@ export function ReportsHome({ displayName, role, onHome, onSettings, onSignOut, 
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [searchAll, setSearchAll] = useState(false);
-  const [creating, setCreating] = useState<{ folderId: string | null } | null>(null);
+  // Phase 3: New report from a list the caller curates also adds the new report to that list.
+  const [creating, setCreating] = useState<{ folderId: string | null; list?: { id: string; name: string } } | null>(null);
   const [naming, setNaming] = useState<NameRequest | null>(null);
   const [moving, setMoving] = useState<ReportSummary | null>(null);
   const [movingFolder, setMovingFolder] = useState<ReportFolder | null>(null);
@@ -464,7 +465,20 @@ export function ReportsHome({ displayName, role, onHome, onSettings, onSignOut, 
     actions={inDrawer ? { ...actions, newReportIn: (folder) => { setDrawer(false); actions.newReportIn(folder); }, moveTo: (folder) => { setDrawer(false); whenHistorySettled(() => setMovingFolder(folder)); } } : actions} />;
 
   const noSources = sources !== null && sources.length === 0;
-  const newReport = () => setCreating({ folderId: currentFolder?.id ?? null });
+  const newReport = () => setCreating({ folderId: currentFolder?.id ?? null, ...(curating && currentList ? { list: { id: currentList.id, name: currentList.name } } : {}) });
+  /** The new report opens; made from a list its creator curates, it joins the end of that list first. */
+  const created = async (id: string, list?: { id: string; name: string }) => {
+    setCreating(null);
+    if (list) {
+      try {
+        await addToList(list.id, id);
+        notify.success(`Added the new report to ${list.name}`);
+      } catch (reason) {
+        notify.error(errorText(reason, `Could not add the new report to ${list.name}`));
+      }
+    }
+    onOpen(id);
+  };
   const emptyCopy = query ? "No report has that title" : missingFolder ? (listId ? "This list is gone" : "This folder is gone") : filtered ? "No reports match these filters"
     : view === "favorites" ? "No favorites yet" : view === "shared" ? "Nothing is shared with you yet" : view === "unfiled" ? "Every report is in a folder" : currentFolder ? "This folder is empty"
     : currentList ? (currentList.hidden ? "No report here you can open" : "This list is empty") : "No reports yet";
@@ -517,7 +531,7 @@ export function ReportsHome({ displayName, role, onHome, onSettings, onSignOut, 
           {plain && view === "shared" && <p>Reports other people share with you appear here.</p>}
           {plain && currentList && !currentList.hidden && <p>{curating ? "Add reports with Add to list… in a report’s ⋯ menu or on its page, or drag a report onto the list." : "Its curators haven’t added reports yet."}</p>}
           {!query && missingFolder && <button className="secondary-button" onClick={() => select(null, { replace: true })}>Show all reports</button>}
-          {plain && !noSources && canWrite && (view === null || currentFolder) && <button className="primary-button" onClick={newReport}><Plus />{currentFolder ? "New report here" : "New report"}</button>}
+          {plain && !noSources && canWrite && (view === null || currentFolder || curating) && <button className="primary-button" onClick={newReport}><Plus />{currentFolder || curating ? "New report here" : "New report"}</button>}
           {plain && !view && canWrite && tree && !tree.folders.length && reports.length > 0 && <p>No folders yet: use New folder in the list to group your reports.</p>}
         </div>}
         {!error && reports && scoped.length > 0 && <ul className="reports-rows" aria-label={`Reports in ${title}`}>
@@ -582,7 +596,7 @@ export function ReportsHome({ displayName, role, onHome, onSettings, onSignOut, 
       {nav(true)}
     </ModalDialog>}
     {creating && sources && <NewReportSheet sources={sources} role={role} onOpenToolServers={onOpenToolServers} folders={folderLabels} initialFolderId={creating.folderId}
-      onCancel={() => setCreating(null)} onCreated={(id) => { setCreating(null); onOpen(id); }} />}
+      onCancel={() => setCreating(null)} onCreated={(id) => { void created(id, creating.list); }} />}
     {naming && <NameDialog title={naming.kind === "rename" ? "Rename folder" : naming.parent ? `New folder in ${naming.parent.name}` : "New folder"} eyebrow="Reports" label="Folder name"
       initialValue={naming.kind === "rename" ? naming.folder.name : ""} submitLabel={naming.kind === "rename" ? "Rename" : "Create folder"} hint={`Up to ${REPORT_FOLDER_NAME_MAX} characters.`}
       validate={checkFolderName(naming.kind === "rename" ? naming.folder.name : "")} onSubmit={submitName} onCancel={closeNaming} />}
