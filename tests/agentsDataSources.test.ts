@@ -223,7 +223,13 @@ describe("the data tools in a chat (D592–D596)", () => {
       const parsed = JSON.parse(result.data.resultPreview) as Json;
       expect(parsed.code).toBe("GUARD");
       if (guard) expect(parsed.guard).toBe(guard);
-      expect(result.data.sqlResult).toBeUndefined();
+      // A failed query is kept with the chat too: its SQL and the error, no rows (D594).
+      expect(result.data.sqlResult).toMatchObject({ failed: true, rowCount: 0 });
+      const kept = await api(member, "GET", `/chats/${chatId}/sql-results/${result.data.sqlResult.id}`);
+      expect(kept.status).toBe(200);
+      expect(kept.body.result).toMatchObject({ sql, rows: [], error: { code: "GUARD" } });
+      // It cannot become a report.
+      expect((await api(member, "POST", "/reports/from-chat", { chatId, resultId: result.data.sqlResult.id, title: "Nope" })).status).toBe(400);
     }
     expect(clickhouse.requests.some((request) => request.sql.includes("secret.salaries") || request.sql.includes("INSERT") || request.sql.includes("169.254"))).toBe(false);
   });
@@ -269,6 +275,8 @@ describe("the data tools in a chat (D592–D596)", () => {
     expect(hidden.status).toBe(403);
     expect(hidden.body.code).toBe("DATASOURCE_UNAVAILABLE");
     expect(JSON.stringify(hidden.body)).not.toContain("analytics.orders");
+    // Nor may they turn it into a report.
+    expect((await api(member, "POST", "/reports/from-chat", { chatId, resultId: ref.id, title: "Peek" })).status).toBe(403);
     await setPolicy("members");
     expect((await api(member, "GET", `/chats/${chatId}/sql-results/${ref.id}`)).status).toBe(200);
     // A public link never carries a data tool's arguments or summary, even with tool results included.
@@ -308,6 +316,74 @@ describe("the data tools in a chat (D592–D596)", () => {
     const capped = await runDataTool({ tool: "run_sql", sources: [source] }, { sql: "SELECT 1 FROM analytics.orders" }, context({ count: DATA_TOOL_BOUNDS.queriesPerRun }));
     expect(JSON.parse(capped.text).code).toBe("LIMIT_REACHED");
     resetDataToolRateForTests();
+    await setPolicy("off");
+  });
+});
+
+describe("Turn into a report and the storage quota (D598, D594)", () => {
+  test("the report holds the query, a table, and a fitting chart, on the result's data source, and renders at once", async () => {
+    await setPolicy("members");
+    const agent = (await newAgent(member)).body.agent;
+    const chatId = await newChat(member, agent.id);
+    const sql = "SELECT country, revenue FROM analytics.orders ORDER BY revenue DESC LIMIT 5";
+    const previous = clickhouse.state.select;
+    clickhouse.state.select = (text, request) => text.includes("analytics.orders") && text.includes("LIMIT 5")
+      ? { meta: [{ name: "country", type: "String" }, { name: "revenue", type: "Decimal(18, 2)" }], data: [["DE", "500.00"], ["FR", "400.00"], ["US", "300.00"], ["GB", "200.00"], ["IT", "100.00"]] }
+      : previous(text, request);
+    try {
+      const { events } = await send(member, chatId, `tool:data__run_sql:${JSON.stringify({ sql })}`);
+      const ref = events.find((event) => event.type === "tool_result")!.data.sqlResult as Json;
+      const made = await api(member, "POST", "/reports/from-chat", { chatId, resultId: ref.id, title: "Revenue by country" });
+      expect(made.status).toBe(201);
+      const report = made.body.report as Json;
+      expect(report.datasourceId ?? report.datasource?.id).toBe(datasourceId);
+      expect(report.spec.queries).toEqual([expect.objectContaining({ key: "chat_query", sql })]);
+      const types = report.spec.blocks.map((block: Json) => `${block.type}${block.kind ? `:${block.kind}` : ""}`);
+      expect(types).toContain("table");
+      expect(made.body.chart).toBe(types.includes("chart:bar"));
+      expect(made.body.chart).toBe(true);
+      // The query ran and its result is stored, so the report renders without a refresh.
+      const view = await api(member, "GET", `/reports/${report.id}`);
+      expect(view.status).toBe(200);
+      const stored = db.query("SELECT COUNT(*) AS n FROM report_results WHERE report_id = ?").get(report.id) as { n: number };
+      expect(stored.n).toBeGreaterThan(0);
+      expect(db.query("SELECT 1 FROM audit_log WHERE event_type = 'reports.report.from_chat' AND metadata_json LIKE ?").get(`%${report.id}%`)).toBeTruthy();
+    } finally {
+      clickhouse.state.select = previous;
+    }
+    await setPolicy("off");
+  });
+
+  test("the chart is a line over time, a bar over at most 30 categories, or none", async () => {
+    const { chartFor } = await import("../server/reports/fromChat");
+    const days = Array.from({ length: 10 }, (_, index) => [`2026-10-${String(index + 1).padStart(2, "0")}`, String(index * 10)]);
+    expect(chartFor([{ name: "day", type: "Date" }, { name: "orders", type: "UInt64" }], days, "Orders")).toMatchObject({ kind: "line", x: "day", y: ["orders"], format: "number" });
+    const many = Array.from({ length: 40 }, (_, index) => [`C${index}`, String(index)]);
+    expect(chartFor([{ name: "country", type: "String" }, { name: "n", type: "UInt64" }], many, "N")).toBeNull();
+    expect(chartFor([{ name: "a", type: "String" }, { name: "b", type: "String" }], [["x", "y"], ["z", "w"]], "T")).toBeNull();
+  });
+
+  test("a kept result counts against the chat owner's quota, and past it the table is not kept", async () => {
+    await setPolicy("members");
+    const { config } = await import("../server/config");
+    const { storedBytes } = await import("../server/documents");
+    const agent = (await newAgent(member)).body.agent;
+    const chatId = await newChat(member, agent.id);
+    const before = storedBytes(member.userId);
+    const { events } = await send(member, chatId, `tool:data__run_sql:${JSON.stringify({ sql: "SELECT country, revenue FROM analytics.orders" })}`);
+    expect(events.find((event) => event.type === "tool_result")!.data.sqlResult).toBeDefined();
+    expect(storedBytes(member.userId)).toBeGreaterThan(before + 10_000);
+    const quota = config.userStorageQuotaBytes;
+    try {
+      config.userStorageQuotaBytes = storedBytes(member.userId) + 100;
+      const marker = runMarker();
+      const second = await send(member, chatId, `tool:data__run_sql:${JSON.stringify({ sql: "SELECT country, revenue FROM analytics.orders", purpose: marker })}`);
+      expect(second.events.find((event) => event.type === "tool_result")!.data.sqlResult).toBeUndefined();
+      const toolTurn = completions(marker).at(-1)!.messages.find((turn) => turn.role === "tool")!.content!;
+      expect(toolTurn).toContain("storage quota is full");
+    } finally {
+      config.userStorageQuotaBytes = quota;
+    }
     await setPolicy("off");
   });
 });

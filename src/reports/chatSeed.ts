@@ -1,57 +1,64 @@
 /**
  * "Turn into a report" from a chat's query result (lane AGENTSQL, D598): the chat hands Reports the
- * data source and the SQL through sessionStorage (never the URL), Reports opens New report → Blank on
- * that data source, and once the report exists its console opens with the query. Every access is in
- * try/catch: storage may be off (a private window), and then the hand-off simply does not happen.
+ * chat, the result, its data source, and a title through sessionStorage (never the URL; no SQL or rows:
+ * the server reads the stored result itself, under the same access rule as the chat's table). Reports
+ * opens New report → Blank on that data source; Create makes the report with the query, a table, and a
+ * fitting chart (`POST /api/reports/from-chat`). The hand-off is read once; a copy per result stays for
+ * Forward, which reopens the sheet after Back closed it (layer key `reports.fromChat:<resultId>`), until
+ * the report is created. Every access is in try/catch: with storage off the hand-off does not happen.
  */
 
 export const REPORT_FROM_CHAT_KEY = "mynotes:reports-from-chat";
-const CONSOLE_SEED_PREFIX = "mynotes:reports-console-seed:";
+const SEED_PREFIX = "mynotes:reports-from-chat:";
+const ID = /^[0-9a-f-]{36}$/i;
 
-export type ReportFromChat = { datasourceId: string; sql: string; title: string };
+export type ReportFromChat = { chatId: string; resultId: string; datasourceId: string; title: string };
+
+function parse(raw: string | null): ReportFromChat | null {
+  if (raw === null) return null;
+  try {
+    const value = JSON.parse(raw) as Partial<ReportFromChat>;
+    if (typeof value.chatId !== "string" || !ID.test(value.chatId) || typeof value.resultId !== "string" || !ID.test(value.resultId) || typeof value.datasourceId !== "string") return null;
+    return { chatId: value.chatId, resultId: value.resultId, datasourceId: value.datasourceId, title: typeof value.title === "string" ? value.title.slice(0, 120) : "" };
+  } catch {
+    return null;
+  }
+}
 
 export function writeReportFromChat(seed: ReportFromChat): boolean {
   try {
     sessionStorage.setItem(REPORT_FROM_CHAT_KEY, JSON.stringify(seed));
+    sessionStorage.setItem(`${SEED_PREFIX}${seed.resultId}`, JSON.stringify(seed));
     return true;
   } catch {
     return false;
   }
 }
 
-/** Forgets the chat's hand-off once Reports has acted on it. */
+/** The chat's hand-off (null when there is none or it is malformed); read in a state initializer, so it does not remove it. */
+export function peekReportFromChat(): ReportFromChat | null {
+  try {
+    return parse(sessionStorage.getItem(REPORT_FROM_CHAT_KEY));
+  } catch {
+    return null;
+  }
+}
+
+/** Forgets the hand-off once Reports has opened the sheet (the per-result copy stays for Forward). */
 export function dropReportFromChat() {
   try { sessionStorage.removeItem(REPORT_FROM_CHAT_KEY); } catch { /* storage off */ }
 }
 
-/** The chat's hand-off (null when there is none or it is malformed); read in a state initializer, so it does not remove it. */
-export function peekReportFromChat(): ReportFromChat | null {
+/** The per-result copy Forward reopens the sheet with (null once the report was created). */
+export function recallReportFromChat(resultId: string): ReportFromChat | null {
   try {
-    const raw = sessionStorage.getItem(REPORT_FROM_CHAT_KEY);
-    if (raw === null) return null;
-    const value = JSON.parse(raw) as Partial<ReportFromChat>;
-    if (typeof value.datasourceId !== "string" || typeof value.sql !== "string" || !value.sql.trim()) return null;
-    return { datasourceId: value.datasourceId, sql: value.sql.slice(0, 20_000), title: typeof value.title === "string" ? value.title.slice(0, 120) : "" };
+    return parse(sessionStorage.getItem(`${SEED_PREFIX}${resultId}`));
   } catch {
     return null;
   }
 }
 
-/** Remembers the SQL the new report's console opens with. */
-export function writeConsoleSeed(reportId: string, sql: string) {
-  try { sessionStorage.setItem(`${CONSOLE_SEED_PREFIX}${reportId}`, sql); } catch { /* storage off: the console opens empty */ }
-}
-
-/** The SQL a report's console opens with (null when none); read in a state initializer, so it does not remove it. */
-export function peekConsoleSeed(reportId: string): string | null {
-  try {
-    return sessionStorage.getItem(`${CONSOLE_SEED_PREFIX}${reportId}`);
-  } catch {
-    return null;
-  }
-}
-
-/** Forgets the seed once the console holds it (its draft keeps the text from then on). */
-export function dropConsoleSeed(reportId: string) {
-  try { sessionStorage.removeItem(`${CONSOLE_SEED_PREFIX}${reportId}`); } catch { /* storage off */ }
+/** Forgets the per-result copy (the report exists now). */
+export function forgetReportFromChat(resultId: string) {
+  try { sessionStorage.removeItem(`${SEED_PREFIX}${resultId}`); } catch { /* storage off */ }
 }

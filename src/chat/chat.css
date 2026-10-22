@@ -318,6 +318,8 @@
 .chat-sql-num { text-align: right; font-variant-numeric: tabular-nums; }
 .chat-sql-null { color: #6b6b72; font-style: italic; }
 .chat-sql-note { margin: 0; padding: 8px 12px; font-size: .78rem; }
+.chat-sql-failed { border-color: #5b2a33; }
+.chat-sql-error { color: #fda4af; overflow-wrap: anywhere; }
 .chat-sql-actions .chat-sql-action { min-height: 32px; min-width: 64px; justify-content: center; padding: 0 12px; white-space: nowrap; }
 @media (max-width: 760px) { .chat-sql-actions .chat-sql-action { min-height: 44px; } }
 .chat-confirm { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; min-width: 0; max-width: min(100%, 760px); scroll-margin-bottom: 140px; border: 1px solid #6b582f; border-radius: 14px; padding: 14px 16px; background: #1f1d16; outline: 0; }

@@ -11,7 +11,7 @@ import { defaultBrowseTools, isReadLikeTool, isWriteLikeName, REPORT_DOC_LIMITS,
 import { DocList, sourceForLink, type DocListItem } from "./DocList";
 import { BrowseToolsPicker } from "./BrowseToolsPicker";
 import { NookDocPicker, nookLinkOf } from "./NookDocPicker";
-import { codeOf, createReport, docServers, generateReport, messageOf, regenerateReport } from "./reportsApi";
+import { codeOf, createReport, createReportFromChat, docServers, generateReport, messageOf, regenerateReport } from "./reportsApi";
 import "./generate.css";
 
 type Mode = "doc" | "blank";
@@ -111,9 +111,10 @@ export function DocSourceNotice({ state, admin, onRetry, onOpenToolServers, onAl
  * pasted link picks its source. It says why the sources could not load (Retry) or why the chosen
  * server may not work (not synced, no read-only fetch tool), with admins' link to fix it.
  */
-export function NewReportSheet({ sources, role = "member", onCancel, onCreated, onOpenToolServers, reportId = null, initialSource = null, folders, initialFolderId = null, blankSeed = null }: { sources: DatasourceChoice[]; role?: string; onCancel: () => void; onCreated: (id: string) => void; onOpenToolServers?: () => void; /** Generate into this (empty) report instead of a new one: doc mode only, no title. */ reportId?: string | null; initialSource?: string | null;
+export function NewReportSheet({ sources, role = "member", onCancel, onCreated, onOpenToolServers, reportId = null, initialSource = null, folders, initialFolderId = null, blankSeed = null, reopen, layerKey }: { sources: DatasourceChoice[]; role?: string; onCancel: () => void; onCreated: (id: string) => void; onOpenToolServers?: () => void; /** Generate into this (empty) report instead of a new one: doc mode only, no title. */ reportId?: string | null; initialSource?: string | null;
   /** Lane I: the owner's folders (a path label each); with them the sheet shows "In: <folder>" and a change control. */ folders?: ReadonlyArray<{ id: string; label: string }>; initialFolderId?: string | null;
-  /** AGENTSQL (D598): a chat's query result: Blank, this title, and a note that the console opens with the query. */ blankSeed?: { title: string } | null }) {
+  /** AGENTSQL (D598): a chat's query result: Blank, this title, and Create makes the report from it (the query, a table, a fitting chart). */ blankSeed?: { title: string; chatId: string; resultId: string } | null;
+  /** D480: how Forward reopens this sheet after Back closed it, and the layer's key for after a remount. */ reopen?: () => void; layerKey?: string }) {
   const [servers, setServers] = useState<DocServerChoice[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [mode, setMode] = useState<Mode>(blankSeed ? "blank" : "doc");
@@ -136,7 +137,7 @@ export function NewReportSheet({ sources, role = "member", onCancel, onCreated, 
   const confirm = useConfirm();
   const [allowing, setAllowing] = useState(false);
   const ids = { mode: useId(), doc: useId(), server: useId(), tool: useId(), toolHint: useId(), arg: useId(), argHint: useId(), title: useId(), source: useId(), folder: useId() };
-  useHistoryDialogGuard(true, onCancel, { blocked: busy });
+  useHistoryDialogGuard(true, onCancel, { blocked: busy, ...(reopen ? { reopen } : {}), ...(layerKey ? { layerKey } : {}) });
 
   const live = useRef(true);
   useEffect(() => { live.current = true; return () => { live.current = false; }; }, []);
@@ -225,7 +226,9 @@ export function NewReportSheet({ sources, role = "member", onCancel, onCreated, 
       setBusy(true);
       setError(null);
       try {
-        onCreated((await createReport(title.trim(), source, folderId)).report.id);
+        onCreated((blankSeed
+          ? await createReportFromChat({ chatId: blankSeed.chatId, resultId: blankSeed.resultId, title: title.trim(), folderId })
+          : await createReport(title.trim(), source, folderId)).report.id);
       } catch (reason) {
         setError(messageOf(reason, "Could not create the report"));
         setBusy(false);
@@ -323,7 +326,7 @@ export function NewReportSheet({ sources, role = "member", onCancel, onCreated, 
       </>}
       <p className="file-dialog-hint">{mode === "doc"
         ? `The AI reads ${docs.length ? "the docs" : "the doc"} (up to ${REPORT_DOC_LIMITS.docs}: Add puts another in the list), writes read-only SQL against the tables an admin allowed, checks it, and builds the report. It uses your AI budget.`
-        : blankSeed ? "The report starts as a draft with its SQL console holding the chat's query. Queries run on that data source, read-only, on the tables an admin allowed."
+        : blankSeed ? "The report starts with the chat's query as a table, and a chart when the data fits one; it runs on that data source, read-only, on the tables an admin allowed."
         : "The report starts as a draft with a SQL console. Queries run on that data source, read-only, on the tables an admin allowed."}</p>
       {error && <p className="form-error" role="alert">{error}</p>}
       <footer className="file-dialog-actions">

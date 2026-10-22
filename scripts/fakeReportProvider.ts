@@ -359,6 +359,9 @@ export const chatSqlScript: Script = (context) => {
   const done = turns.slice(lastUser + 1).filter((turn) => turn.role === "tool").length;
   const orders = /order|revenue|countr/i.test(asked);
   if (done === 0) return { content: "Looking for the right table.\n\n", toolCalls: [{ name: "data__search_schema", arguments: { query: orders ? "orders revenue" : "requests route" } }] };
+  // A question about salaries asks for a table off the allowlist: the guard refuses it (a failed query in the chat).
+  if (done === 1 && /salar/i.test(asked)) return { toolCalls: [{ name: "data__run_sql", arguments: { sql: "SELECT name, salary FROM relqa_private.salaries", purpose: "Salaries" } }] };
+  if (done === 2 && /salar/i.test(asked)) return { content: "That table is not one I may read, so I cannot answer." };
   if (done === 1) return { toolCalls: [{ name: "data__run_sql", arguments: { sql: orders ? CHAT_SQL.orders : CHAT_SQL.routes, purpose: orders ? "Revenue by country" : "Requests per route" } }] };
   let summary = "";
   try {

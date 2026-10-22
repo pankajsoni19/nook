@@ -33,7 +33,8 @@ const numeric = (type: string) => /^(Nullable\()?(U?Int|Float|Decimal)/.test(typ
 export function SqlResultCard({ chatId, result, canMakeReport, onTurnIntoReport }: { chatId: string; result: SqlResultRef; canMakeReport: boolean; onTurnIntoReport?: (seed: ReportFromChat) => void }) {
   const [detail, setDetail] = useState<SqlResultDetail | null>(null);
   const [hidden, setHidden] = useState<string | null>(null);
-  const [showSql, setShowSql] = useState(false);
+  // A failed query shows its SQL at once: it is what the person came to see (D594).
+  const [showSql, setShowSql] = useState(result.failed === true);
   useEffect(() => {
     let live = true;
     getSqlResult(chatId, result.id).then(({ result: loaded }) => { if (live) setDetail(loaded); }, (reason: unknown) => {
@@ -51,20 +52,21 @@ export function SqlResultCard({ chatId, result, canMakeReport, onTurnIntoReport 
     link.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
-  return <section className="chat-sql" aria-label={`Query result from ${result.datasourceName}`}>
+  const failed = result.failed === true || Boolean(detail?.error);
+  return <section className={`chat-sql${failed ? " chat-sql-failed" : ""}`} aria-label={`${failed ? "Failed query" : "Query result"} from ${result.datasourceName}`}>
     <header className="chat-sql-head">
-      <span className="chat-sql-title"><Table2 aria-hidden="true" />{result.datasourceName}<small>{rows}{result.truncated ? " · rows truncated" : ""}</small></span>
+      <span className="chat-sql-title"><Table2 aria-hidden="true" />{result.datasourceName}<small>{failed ? "query failed" : `${rows}${result.truncated ? " · rows truncated" : ""}`}</small></span>
       {detail && <span className="chat-sql-actions">
         <button type="button" className="chat-action chat-sql-action" aria-expanded={showSql} onClick={() => setShowSql(!showSql)}>{showSql ? <ChevronDown /> : <ChevronRight />}SQL</button>
-        <button type="button" className="chat-action chat-sql-action" onClick={exportCsv}><Download />CSV</button>
-        {canMakeReport && onTurnIntoReport && <button type="button" className="chat-action chat-sql-action" onClick={() => onTurnIntoReport({ datasourceId: detail.datasource.id, sql: detail.sql, title: "" })}><FilePlus2 />Turn into a report</button>}
+        {!failed && <button type="button" className="chat-action chat-sql-action" onClick={exportCsv}><Download />CSV</button>}
+        {!failed && canMakeReport && onTurnIntoReport && <button type="button" className="chat-action chat-sql-action" onClick={() => onTurnIntoReport({ chatId, resultId: result.id, datasourceId: detail.datasource.id, title: "" })}><FilePlus2 />Turn into a report</button>}
       </span>}
     </header>
     {hidden !== null ? <p className="chat-muted chat-sql-note">{hidden}</p>
       : !detail ? <p className="chat-muted chat-sql-note">Loading the result…</p>
       : <>
         {showSql && <pre className="chat-sql-text">{detail.sql}</pre>}
-        {detail.columns.length === 0 ? <p className="chat-muted chat-sql-note">No columns.</p> : <div className="chat-sql-scroll" tabIndex={0} role="region" aria-label={`${result.datasourceName} result, ${rows}`}>
+        {detail.error ? <p className="chat-sql-note chat-sql-error" role="note">{detail.error.message}</p> : detail.columns.length === 0 ? <p className="chat-muted chat-sql-note">No columns.</p> : <div className="chat-sql-scroll" tabIndex={0} role="region" aria-label={`${result.datasourceName} result, ${rows}`}>
           <table className="chat-sql-table">
             <thead><tr>{detail.columns.map((column, index) => <th key={`${column.name}-${index}`} scope="col"><span>{column.name}</span><small>{column.type}</small></th>)}</tr></thead>
             <tbody>{detail.rows.map((row, rowIndex) => <tr key={rowIndex}>{detail.columns.map((column, index) => {

@@ -62,6 +62,14 @@ describe("a run_sql result in the chat (D594)", () => {
     expect(renderToStaticMarkup(<SqlResults calls={[call]} chatId={undefined} canMakeReport={false} />)).toBe("");
   });
 
+  test("a failed query's card says so and offers no CSV or report", () => {
+    const failed = { ...call, sqlResult: { ...call.sqlResult!, rowCount: 0, columnCount: 0, truncated: false, failed: true as const } };
+    const markup = renderToStaticMarkup(<SqlResults calls={[failed]} chatId="33333333-3333-4333-8333-333333333333" canMakeReport onTurnIntoReport={() => {}} />);
+    expect(markup).toContain("query failed");
+    expect(markup).toContain("chat-sql-failed");
+    expect(markup).not.toContain("rows truncated");
+  });
+
   test("CSV: a header row, quoting, and formula cells defused", () => {
     expect(resultCsv({ columns: [{ name: "country", type: "String" }, { name: "n", type: "UInt64" }], rows: [["DE", 3], ["a,b", null], ["=1+1", "say \"hi\""]] }))
       .toBe("country,n\r\nDE,3\r\n\"a,b\",\r\n'=1+1,\"say \"\"hi\"\"\"");

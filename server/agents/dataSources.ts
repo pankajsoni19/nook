@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
+import { statfs } from "node:fs/promises";
+import { config } from "../config";
 import { audit, db, now } from "../db";
+import { storedBytes } from "../documents";
 import { agentUseAllows, REPORT_LIMITS, type DatasourceAgentUse } from "../../shared/reports";
 import { DATA_TOOL_BOUNDS, DATA_TOOL_NAMES, type DatasourceCatalogItem, type SqlResultDetail, type SqlResultRef } from "../../shared/agents";
 import type { DatasourceRow } from "../reports/datasources";
@@ -166,14 +169,14 @@ const jsonSafe = (rows: unknown[][]) => rows.map((row) => row.map((cell) => type
 const rowsWord = (count: number) => `${count.toLocaleString("en-US")} ${count === 1 ? "row" : "rows"}`;
 
 /** A failure as the model's text: Nook's message, the guard's code, and the repair hint (E3). */
-function failureOf(error: unknown): { code: string; text: string } {
+function failureOf(error: unknown): { code: string; message: string; text: string } {
   let known: ReportError;
   try {
     known = asReportError(error);
   } catch {
     known = new ReportError(502, "CLICKHOUSE", "The query could not be run");
   }
-  return { code: known.code, text: JSON.stringify({ error: known.message, code: known.code, ...(typeof known.details.guard === "string" ? { guard: known.details.guard } : {}), ...(typeof known.details.hint === "string" ? { hint: known.details.hint } : {}) }) };
+  return { code: known.code, message: known.message, text: JSON.stringify({ error: known.message, code: known.code, ...(typeof known.details.guard === "string" ? { guard: known.details.guard } : {}), ...(typeof known.details.hint === "string" ? { hint: known.details.hint } : {}) }) };
 }
 
 /**
@@ -185,6 +188,8 @@ export async function runDataTool(spec: DataToolSpec, args: Record<string, unkno
   let datasourceId: string | null = null;
   let sha256: string | undefined;
   let sql: string | null = null;
+  // D594 (follow-up): a run_sql that reached the data source is kept with the chat even when it fails.
+  let attempted: { row: DatasourceRow; sql: string; sha256: string } | null = null;
   const started = Date.now();
   const auditCall = (fields: Record<string, unknown>) => audit(context.userId, null, "agents.sql.run", { runId: context.runId, agentId: context.agentId, chatId: context.chatId, datasourceId, tool: spec.tool, ...(sha256 ? { sha256 } : {}), ms: Date.now() - started, ...fields });
   try {
@@ -227,19 +232,21 @@ export async function runDataTool(spec: DataToolSpec, args: Record<string, unkno
         if (sql.length > REPORT_LIMITS.sqlChars) throw new ReportError(400, "INVALID", `The SQL is longer than ${REPORT_LIMITS.sqlChars} characters`);
         if (context.queries.count >= DATA_TOOL_BOUNDS.queriesPerRun) throw new ReportError(429, "LIMIT_REACHED", `This answer has used its ${DATA_TOOL_BOUNDS.queriesPerRun} queries; answer with what you have`);
         context.queries.count += 1;
+        attempted = { row, sql, sha256 };
         const queryId = adHocQueryId("agentsql");
         const maxRows = Math.min(row.max_rows, DATA_TOOL_BOUNDS.uiRows);
         const outcome = await runGuarded(row, sql, { classes: ["select"], maxRows, queryId, userId: context.userId, signal: context.signal });
         const rows = jsonSafe(outcome.rows);
         const stored = fitRows(rows, maxRows, DATA_TOOL_BOUNDS.storedRowsBytes);
         const truncated = outcome.truncated || stored.cut;
-        const ref = context.chatId ? storeResult(context, row, sql, sha256, outcome.columns, stored.rows, truncated, outcome.ms) : null;
+        const kept = context.chatId ? await storeResult(context, row, { sql, sha256, columns: outcome.columns, rows: stored.rows, truncated, ms: outcome.ms, error: null }) : { ref: null, reason: null };
+        const ref = kept.ref;
         // The model's share: 50 rows at most, and what fits 12 KB of rows (the rest of the 16 KB is the frame).
         const shown = fitRows(rows, DATA_TOOL_BOUNDS.modelRows, DATA_TOOL_BOUNDS.modelBytes - 4096);
         auditCall({ ok: true, queryId, rows: rows.length, truncated });
         const text = JSON.stringify({
           datasource: row.name, columns: outcome.columns, rows: shown.rows, rowCount: rows.length, rowsShownToYou: shown.rows.length, truncated, ms: outcome.ms, rowsRead: outcome.rowsRead,
-          note: ref ? `The person sees ${rowsWord(stored.rows.length)} as a table under your reply.` : undefined
+          note: ref ? `The person sees ${rowsWord(stored.rows.length)} as a table under your reply.` : kept.reason ? `The table was not kept for the person: ${kept.reason}.` : undefined
         });
         return { ok: true, text, preview: `${rowsWord(rows.length)}${truncated ? " (cut)" : ""}, ${outcome.columns.length} ${outcome.columns.length === 1 ? "column" : "columns"} from ${row.name}`, ...(ref ? { sqlResult: ref } : {}) };
       }
@@ -252,22 +259,44 @@ export async function runDataTool(spec: DataToolSpec, args: Record<string, unkno
     }
     const failure = failureOf(error);
     auditCall({ ok: false, code: failure.code });
-    return { ok: false, text: failure.text, preview: failure.text };
+    // The failed query is kept with the chat like a result (its SQL and the error, no rows), under the same access rule (D595).
+    const kept = attempted && context.chatId ? await storeResult(context, attempted.row, { sql: attempted.sql, sha256: attempted.sha256, columns: [], rows: [], truncated: false, ms: Date.now() - started, error: { message: failure.message, code: failure.code } }) : null;
+    return { ok: false, text: failure.text, preview: failure.text, ...(kept?.ref ? { sqlResult: kept.ref } : {}) };
   }
 }
 
 // --- Stored results (D594, D595) --------------------------------------------------------------------
 
-function storeResult(context: DataToolContext, row: DatasourceRow, sql: string, sha256: string, columns: Array<{ name: string; type: string }>, rows: unknown[][], truncated: boolean, ms: number): SqlResultRef | null {
+type StoredInput = { sql: string; sha256: string; columns: Array<{ name: string; type: string }>; rows: unknown[][]; truncated: boolean; ms: number; error: { message: string; code: string } | null };
+
+/**
+ * Keeps a run_sql result (or a failure: its SQL and error, no rows; the error is kept as `rows_json`
+ * `{error, code}`) with the chat, within the chat owner's storage quota and the free-disk floor, like
+ * tool images (the bytes count in `storedBytes`). Returns the reference, or why it was not kept.
+ */
+async function storeResult(context: DataToolContext, row: DatasourceRow, input: StoredInput): Promise<{ ref: SqlResultRef | null; reason: string | null }> {
   const id = crypto.randomUUID();
+  const columnsJson = JSON.stringify(input.columns);
+  const rowsJson = JSON.stringify(input.error ? { error: input.error.message.slice(0, 1000), code: input.error.code } : input.rows);
+  if (columnsJson.length > 65_536) return { ref: null, reason: "the result has too many columns to keep" };
+  const bytes = Buffer.byteLength(input.sql, "utf8") + Buffer.byteLength(columnsJson, "utf8") + Buffer.byteLength(rowsJson, "utf8");
+  const owner = db.query("SELECT owner_id FROM chats WHERE id = ? AND deleted_at IS NULL").get(context.chatId) as { owner_id: string } | null;
+  if (!owner) return { ref: null, reason: "the chat is no longer there" };
+  const quota = config.userStorageQuotaBytes;
+  if (quota > 0 && storedBytes(owner.owner_id) + bytes > quota) return { ref: null, reason: "the chat owner's storage quota is full" };
+  try {
+    const disk = await statfs(config.dataDir);
+    if (disk.bavail * disk.bsize < config.minFreeDiskBytes + bytes) return { ref: null, reason: "this Nook's disk is nearly full" };
+  } catch {
+    return { ref: null, reason: "this Nook's disk could not be checked" };
+  }
   try {
     db.query(`INSERT INTO chat_sql_results (chat_id, id, message_id, datasource_id, user_id, sql, sql_sha256, columns_json, rows_json, row_count, truncated, ms, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(context.chatId, id, context.messageId, row.id, context.userId, sql, sha256, JSON.stringify(columns).slice(0, 65_536), JSON.stringify(rows), rows.length, truncated ? 1 : 0, Math.round(ms), now());
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(context.chatId, id, context.messageId, row.id, context.userId, input.sql, input.sha256, columnsJson, rowsJson, input.rows.length, input.truncated ? 1 : 0, Math.round(input.ms), now());
   } catch {
-    // A result that cannot be kept (a column list past 64 KB) is only the model's.
-    return null;
+    return { ref: null, reason: "it could not be stored" };
   }
-  return { id, datasourceId: row.id, datasourceName: row.name, rowCount: rows.length, columnCount: columns.length, truncated };
+  return { ref: { id, datasourceId: row.id, datasourceName: row.name, rowCount: input.rows.length, columnCount: input.columns.length, truncated: input.truncated, ...(input.error ? { failed: true } : {}) }, reason: null };
 }
 
 type ResultRow = { chat_id: string; id: string; message_id: string; datasource_id: string | null; sql: string; columns_json: string; rows_json: string; row_count: number; truncated: number; ms: number | null; created_at: string };
@@ -284,9 +313,13 @@ export function readSqlResult(chatId: string, resultId: string, viewerId: string
   if (!source) throw new AgentError(410, "DATASOURCE_GONE", "The data source of this result was removed, so it is not shown");
   if (!agentMayUse(source, liveRole(viewerId))) throw new AgentError(403, "DATASOURCE_UNAVAILABLE", `This result is from ${source.name}, which you can't use with chat agents, so it is hidden`);
   const parse = (text: string): unknown => { try { return JSON.parse(text); } catch { return []; } };
+  const stored = parse(row.rows_json);
+  // A failed query keeps `{error, code}` instead of rows.
+  const error = stored && typeof stored === "object" && !Array.isArray(stored) && typeof (stored as { error?: unknown }).error === "string"
+    ? { message: (stored as { error: string }).error, code: String((stored as { code?: unknown }).code ?? "FAILED") } : null;
   return {
-    id: row.id, datasource: { id: source.id, name: source.name }, sql: row.sql, columns: parse(row.columns_json) as SqlResultDetail["columns"], rows: parse(row.rows_json) as unknown[][],
-    rowCount: row.row_count, truncated: row.truncated === 1, ms: row.ms, createdAt: row.created_at
+    id: row.id, datasource: { id: source.id, name: source.name }, sql: row.sql, columns: parse(row.columns_json) as SqlResultDetail["columns"], rows: Array.isArray(stored) ? stored as unknown[][] : [],
+    rowCount: row.row_count, truncated: row.truncated === 1, ms: row.ms, createdAt: row.created_at, ...(error ? { error } : {})
   };
 }
 

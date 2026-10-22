@@ -19,6 +19,7 @@ import { registerQueryEditRoutes } from "./queryEditRoutes";
 import { registerReportFolderRoutes } from "./folderRoutes";
 import { registerReportListRoutes } from "./listRoutes";
 import { ownerReview } from "./ownerReview";
+import { reportFromChatResult } from "./fromChat";
 import { duplicateReport } from "./duplicate";
 
 /**
@@ -45,6 +46,7 @@ const datasourceCreate = z.object({
 }).strict();
 const datasourcePatch = datasourceCreate.partial().extend({ expectedRevision: z.number().int().min(1), removePassword: z.boolean().optional() }).strict();
 const previewSchema = z.object({ allowlist }).strict();
+const fromChatSchema = z.object({ chatId: uuid, resultId: uuid, title: line(REPORT_LIMITS.title), folderId: uuid.nullish() }).strict();
 const reportCreate = z.object({ title: line(REPORT_LIMITS.title), datasourceId: uuid, folderId: uuid.nullish() }).strict();
 const duplicateSchema = z.object({ title: line(REPORT_LIMITS.title).optional(), folderId: uuid.nullish() }).strict();
 const reportPatch = z.object({ title: line(REPORT_LIMITS.title).optional(), datasourceId: uuid.optional(), expectedRevision: z.number().int().min(1) }).strict();
@@ -173,6 +175,11 @@ export function registerReportRoutes(app: Hono<AppEnv>) {
   app.post("/api/reports", handle(async (c) => {
     const input = await parseJson(c.req.raw, reportCreate);
     return c.json({ report: createReport(c.get("user").id, { ...input, folderId: input.folderId?.toLowerCase() ?? null }) }, 201);
+  }));
+  // AGENTSQL (D598): "Turn into a report" from a chat's query result: the query, a table, and a fitting chart.
+  app.post("/api/reports/from-chat", handle(async (c) => {
+    const input = await parseJson(c.req.raw, fromChatSchema);
+    return c.json(await reportFromChatResult({ userId: c.get("user").id }, { chatId: input.chatId.toLowerCase(), resultId: input.resultId.toLowerCase(), title: input.title, folderId: input.folderId?.toLowerCase() ?? null }, c.req.raw.signal), 201);
   }));
   app.get("/api/reports/:reportId", handle((c) => ({ report: reportDetail(id(c, "reportId"), c.get("user").id) })));
   app.patch("/api/reports/:reportId", handle(async (c) => {

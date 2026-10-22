@@ -29,6 +29,8 @@ export const listReports = (query: ReportListQuery = {}) => api<ReportListPage>(
 /** D486: the caller's own star on a report they can open. */
 export const starReport = (id: string, favorite: boolean) => api<{ favorite: boolean }>(`/reports/${id}/favorite`, { method: favorite ? "PUT" : "DELETE", body: "{}" });
 export const getReport = (id: string) => api<{ report: ReportDetail }>(`/reports/${id}`);
+/** AGENTSQL (D598): a report from a chat's query result: the query, a table, and a fitting chart. */
+export const createReportFromChat = (input: { chatId: string; resultId: string; title: string; folderId?: string | null }) => api<{ report: ReportDetail; chart: boolean }>("/reports/from-chat", json("POST", input.folderId ? input : { chatId: input.chatId, resultId: input.resultId, title: input.title }));
 export const createReport = (title: string, datasourceId: string, folderId: string | null = null) => api<{ report: ReportDetail }>("/reports", json("POST", folderId ? { title, datasourceId, folderId } : { title, datasourceId }));
 
 // Lane I: the owner's report folders (the Reports home's left nav).

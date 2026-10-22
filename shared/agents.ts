@@ -318,11 +318,15 @@ export type ToolCallView = {
  * the message; the SQL and the rows are read from `GET /api/chats/:chatId/sql-results/:resultId` by
  * whoever can read the chat and may still use the data source through agents.
  */
-export type SqlResultRef = { id: string; datasourceId: string; datasourceName: string; rowCount: number; columnCount: number; truncated: boolean };
+export type SqlResultRef = { id: string; datasourceId: string; datasourceName: string; rowCount: number; columnCount: number; truncated: boolean;
+  /** The query failed: its SQL and error are kept, no rows. */
+  failed?: true };
 /** The stored result as the chat reads it (D594). */
 export type SqlResultDetail = {
   id: string; datasource: { id: string; name: string }; sql: string; columns: Array<{ name: string; type: string }>; rows: unknown[][];
   rowCount: number; truncated: boolean; ms: number | null; createdAt: string;
+  /** A failed query: the error the guard or ClickHouse gave (no rows). */
+  error?: { message: string; code: string };
 };
 /**
  * The data-source tools a chat agent gets (lane AGENTSQL, D592): the generation agent's schema tools
