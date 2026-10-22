@@ -52,19 +52,25 @@ export function formatReportsFilter(filter: ReportsFilter | undefined) {
 /**
  * Spec v3 (D489): a report page's parameter values in its query (`?p.period=7d&p.route=%2Fapi`), raw
  * strings by parameter id (a multi-select repeats its key). The report reads them against its spec
- * (shared/reportParams.ts valuesFromSearch); anything it does not know is ignored.
+ * (shared/reportParams.ts valuesFromSearch); anything it does not know is ignored. D563: a table block's
+ * sort and contains box ride along as `?t.<blockId>=<column>.desc` and `?tq.<blockId>=<text>`, kept here
+ * under the keys `t.<blockId>` and `tq.<blockId>` (a parameter id never holds a dot).
  */
 export type ReportParamsSearch = Record<string, string[]>;
 const PARAM_KEY = /^p\.([a-z][a-z0-9_]{0,29})$/;
+/** D563: a table block's sort (`t.`) or contains text (`tq.`), by block id. */
+export const TABLE_KEY = /^tq?\.[a-z0-9][a-z0-9_-]{0,39}$/;
 
 export function parseReportParams(search: string): ReportParamsSearch | undefined {
   const out: ReportParamsSearch = {};
   let count = 0;
   for (const [key, value] of new URLSearchParams(search)) {
     const match = PARAM_KEY.exec(key);
-    if (!match || count >= 200) continue;
+    const id = match ? match[1]! : TABLE_KEY.test(key) ? key : null;
+    if (id === null || count >= 200) continue;
     count += 1;
-    (out[match[1]!] ??= []).push(value.slice(0, 200));
+    if (match) (out[id] ??= []).push(value.slice(0, 200));
+    else out[id] = [value.slice(0, 200)];
   }
   return Object.keys(out).length ? out : undefined;
 }
@@ -73,6 +79,7 @@ export function formatReportParams(params: ReportParamsSearch | undefined) {
   if (!params) return "";
   const query = new URLSearchParams();
   for (const id of Object.keys(params).sort()) {
+    if (TABLE_KEY.test(id)) { const value = params[id]?.[0]; if (value) query.append(id, value); continue; }
     if (!/^[a-z][a-z0-9_]{0,29}$/.test(id)) continue;
     for (const value of params[id] ?? []) query.append(`p.${id}`, value);
   }

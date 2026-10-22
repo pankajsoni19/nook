@@ -21,6 +21,13 @@ import { getParamOptions, previewVersionOf, getParamResults, getResults, getRun,
 import { ReportParamsBar, ReportParamsContext, type ParamReach } from "./ReportParamsBar";
 import { canonicalValues, isDefaultSet, optionParentsOf, reachOf, valuesFromSearch, valuesToSearch, type ParamValues, type ReportParameter } from "../../shared/reportParams";
 import { dropUnlinked, parentsKey, parentValuesOf } from "./linkedFilters";
+import { CONTAINS_CHARS, containsKey, formatSort, parseSort, sortKey } from "./tableView";
+import { TABLE_KEY } from "../router";
+
+/** D563: a table block's sort (raw `column.desc`) and contains text from the URL, and how to change them. */
+type TableControl = { sort: string | undefined; contains: string; onSort: (raw: string | null) => void; onContains: (text: string) => void };
+/** The URL's table entries (sort and contains), kept when the filters change. */
+const tableEntries = (search: Record<string, string[]> | undefined) => Object.fromEntries(Object.entries(search ?? {}).filter(([key]) => TABLE_KEY.test(key)));
 import { codeOf, messageOf } from "./reportsApi";
 import { scheduleBadge, ScheduleSheet } from "./ScheduleSheet";
 import { CommentOnBlockButton } from "./reportComment";
@@ -211,9 +218,22 @@ export function ReportView({ report, canWrite, generating = false, initial, read
     }
   }, [report.id, setKey]);
   const pushValues = useCallback((next: ParamValues, options?: { replace?: boolean }) => {
-    const search = valuesToSearch(parameters, next);
+    // D563: a table's sort and contains text stay when the filters change.
+    const search = { ...tableEntries(paramsContext?.search), ...valuesToSearch(parameters, next) };
     paramsContext?.onChange(Object.keys(search).length ? search : undefined, options);
   }, [parameters, paramsContext]);
+  /** D563: a table block's sort or contains text in the URL (history replace: personal, never a Back step). */
+  const setTableKey = useCallback((key: string, value: string | null) => {
+    if (!paramsContext) return;
+    const next = { ...(paramsContext.search ?? {}) };
+    if (value) next[key] = [value];
+    else delete next[key];
+    paramsContext.onChange(Object.keys(next).length ? next : undefined, { replace: true });
+  }, [paramsContext]);
+  const tableControl = (block: DataBlock): TableControl | undefined => block.type !== "table" || !paramsContext || readOnly || initial ? undefined : {
+    sort: paramsContext.search?.[sortKey(block.id)]?.[0], contains: paramsContext.search?.[containsKey(block.id)]?.[0] ?? "",
+    onSort: (next) => setTableKey(sortKey(block.id), next), onContains: (text) => setTableKey(containsKey(block.id), text.slice(0, CONTAINS_CHARS) || null)
+  };
   // D561: a parent's change drops the linked children's picks its new choices do not hold, with a note, before the URL changes.
   const linked = useMemo(() => parameters.some((param) => optionParentsOf(param, parameters).length > 0), [parameters]);
   const changeParams = useCallback((next: ParamValues) => {
@@ -376,7 +396,7 @@ export function ReportView({ report, canWrite, generating = false, initial, read
   const card = (block: DataBlock) => <DataBlockCard key={block.id} block={block} view={results.get(block.queryKey)} hasQuery={queries.has(block.queryKey)} palette={palette}
     running={running} loaded={view !== null} lookup={lookup} readOnly={readOnly} pending={Boolean(pending?.some((key) => blockKeys(block).includes(key)))} filtered={withParams} notFilteredBy={notFilteredBy(block)}
     onInspect={() => setInspect({ blockId: block.id, tab: "query" })} onMenu={() => setMenuBlock(block.id)}
-    onRemove={canRemove ? () => removeBlock(block) : undefined} removeDisabled={busy} click={clickFor(block)} />;
+    onRemove={canRemove ? () => removeBlock(block) : undefined} removeDisabled={busy} click={clickFor(block)} table={tableControl(block)} />;
 
   if (!blocks.length) return null;
   return <section className={`report-view report-theme-${palette.mode}`} style={cssVars} aria-label="Report">
@@ -482,10 +502,12 @@ type CardProps = {
   notFilteredBy?: readonly Pick<ReportParameter, "id" | "label">[];
   /** D536: what a click on this chart or table filters by. */
   click?: ClickState;
+  /** D563: a table block's sort and contains box (the report page only). */
+  table?: TableControl;
 };
 
 /** One chart, KPI, or table: its title, stale/error badges, the inspect, remove, and menu buttons, and the body. */
-export function DataBlockCard({ block, view, hasQuery, palette, running, loaded, lookup, onInspect, onMenu, readOnly, pending = false, filtered = false, onRemove, removeDisabled = false, notFilteredBy = [], click }: CardProps) {
+export function DataBlockCard({ block, view, hasQuery, palette, running, loaded, lookup, onInspect, onMenu, readOnly, pending = false, filtered = false, onRemove, removeDisabled = false, notFilteredBy = [], click, table }: CardProps) {
   const result = view?.result ?? null;
   const failed = view?.failed ?? null;
   const rerunning = pending || Boolean(running && (!running.queryKeys || running.queryKeys.includes(block.queryKey)));
@@ -510,7 +532,7 @@ export function DataBlockCard({ block, view, hasQuery, palette, running, loaded,
       {!hasQuery ? <p className="report-block-problem">This block names a query the report does not have ({block.queryKey}).</p>
         // D489: a chart or table with no rows for the chosen filters says so (not a mapping problem).
         : result && filtered && !result.rows.length && block.type !== "kpi" ? <p className="report-block-empty">No rows for these filters.</p>
-        : result ? <BlockBody block={block} result={result} palette={palette} lookup={lookup} click={click} />
+        : result ? <BlockBody block={block} result={result} palette={palette} lookup={lookup} click={click} table={table} />
           : failed ? <p className="report-block-problem"><TriangleAlert aria-hidden="true" />{failed.error ?? "The query failed"}</p>
             : <p className="report-block-empty">{readOnly ? readOnly.emptyText : loaded ? "No results yet. Refresh the report to run its queries." : "Loading…"}</p>}
     </div>
@@ -521,9 +543,9 @@ export function DataBlockCard({ block, view, hasQuery, palette, running, loaded,
 /** "Country", "Country and Route", "Country, Route, and Plan". */
 const listLabels = (labels: readonly string[]) => labels.length <= 1 ? labels.join("") : labels.length === 2 ? `${labels[0]} and ${labels[1]}` : `${labels.slice(0, -1).join(", ")}, and ${labels[labels.length - 1]}`;
 
-function BlockBody({ block, result, palette, lookup, click }: { block: DataBlock; result: ReportResult; palette: ChartPalette; lookup?: ResultLookup; click?: ClickState }) {
+function BlockBody({ block, result, palette, lookup, click, table }: { block: DataBlock; result: ReportResult; palette: ChartPalette; lookup?: ResultLookup; click?: ClickState; table?: TableControl }) {
   if (block.type === "kpi") return <KpiTile block={block} result={result} lookup={lookup} />;
-  if (block.type === "table") return <TableBody block={block} result={result} click={click} />;
+  if (block.type === "table") return <TableBody block={block} result={result} click={click} table={table} />;
   return <ChartBody block={block} result={result} palette={palette} click={click} />;
 }
 
@@ -540,11 +562,12 @@ function useTapped(click: ClickState | undefined) {
   return { take, bar };
 }
 
-function TableBody({ block, result, click }: { block: TableBlock; result: ReportResult; click?: ClickState }) {
+function TableBody({ block, result, click, table }: { block: TableBlock; result: ReportResult; click?: ClickState; table?: TableControl }) {
   const { take, bar } = useTapped(click);
   return <>
     <ResultTable columns={result.columns} rows={result.rows} show={block.columns} formats={block.formats} label={block.title ?? block.queryKey}
-      pick={click ? { column: click.column, picked: click.picked, onPick: take } : undefined} />
+      pick={click ? { column: click.column, picked: click.picked, onPick: take } : undefined}
+      view={table ? { sort: parseSort(table.sort, result.columns), contains: table.contains, truncated: result.truncated, onSort: (next) => table.onSort(formatSort(next)), onContains: table.onContains } : undefined} />
     {bar}
   </>;
 }

@@ -161,6 +161,21 @@ ul.report-block-problem { display: block; padding-left: 18px; }
 .report-table th.report-mapped, .report-table td.report-mapped { background: color-mix(in srgb, var(--report-mapped) 14%, transparent); }
 .report-role { margin-left: 6px; border-radius: 6px; padding: 0 5px; background: color-mix(in srgb, var(--report-mapped) 30%, var(--report-surface)); color: var(--report-text); font-size: .68rem; font-style: normal; font-weight: 700; }
 .report-show-all { justify-self: start; min-height: 44px; }
+/* D563, D564: a report table's sortable headers (the header text itself is the button) and its contains box. */
+.report-th-sort { display: block; width: calc(100% + 20px); margin: -6px -10px; min-height: 0; border: 0; border-radius: 0; padding: 6px 10px; background: transparent; color: inherit; font: inherit; font-weight: 700; text-align: inherit; cursor: pointer; }
+.report-th-sort:hover { background: color-mix(in srgb, var(--report-accent) 8%, transparent); }
+.report-th-sort:focus-visible { outline: 2px solid var(--report-accent); outline-offset: -2px; }
+.report-table .report-th-sort span { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.report-th-sort.sorted span { color: var(--report-accent); }
+.report-sort-icon { width: 13px; height: 13px; flex: none; }
+.report-table-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; min-width: 0; }
+.report-table-contains { min-height: 36px; width: 220px; max-width: 100%; border: 1px solid var(--report-border); border-radius: 8px; padding: 0 10px; background: var(--report-surface); color: var(--report-text); font: inherit; font-size: .84rem; }
+.report-table-contains:focus-visible { outline: 2px solid var(--report-accent); outline-offset: 1px; }
+.report-table-count { margin: 0; color: var(--report-muted); font-size: .76rem; }
+.report-table-none { margin: 0; padding: 10px; color: var(--report-muted); font-size: .84rem; }
+@media (max-width: 767px) {
+  .report-table-contains { flex: 1 1 100%; width: 100%; min-height: 44px; }
+}
 
 /* The Mapping tab's auto-fixes. */
 .report-autofix-list { margin: 0; padding-left: 18px; display: grid; gap: 4px; color: var(--report-soft); font-size: .84rem; }

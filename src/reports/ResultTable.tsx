@@ -1,9 +1,23 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { ArrowDown, ArrowUp } from "lucide-react";
 import type { ResultColumn, ValueFormat } from "../../shared/reports";
 import { cellLabel, formatValue } from "./chartOption";
+import { CONTAINS_CHARS, containsRows, nextSort, sortRows, type TableSort } from "./tableView";
 
 /** Rows a table shows before "Show all". */
 export const TABLE_PAGE_ROWS = 100;
+/** D563: from this many rows a table offers its contains box (it shows whenever it holds text). */
+export const CONTAINS_FROM_ROWS = 8;
+
+/** D563, D564: a report table's sort and contains box (personal, kept in the URL by the caller). */
+export type TableViewState = {
+  sort: TableSort | null;
+  contains: string;
+  onSort: (next: TableSort | null) => void;
+  onContains: (text: string) => void;
+  /** The query's rows were cut (the data source's row cap or the stored limit): sorting and matching see only these. */
+  truncated: boolean;
+};
 
 type Props = {
   columns: readonly ResultColumn[];
@@ -18,24 +32,43 @@ type Props = {
   label: string;
   /** D536: a row click sets a filter to this column's value (focusable rows, Enter; `touch` for a tap). */
   pick?: { column: string; picked: readonly string[]; onPick: (value: string, touch: boolean) => void };
+  /** D563: sortable headers and a contains box (a report's table block). */
+  view?: TableViewState;
 };
 
+const numeric = (type: string) => /^(Nullable\()?(U?Int|Float|Decimal)/.test(type);
+
 /** A result as a table that scrolls sideways on a phone, with the column types under the names. */
-export function ResultTable({ columns, rows, show, formats, highlight, raw = false, label, pick }: Props) {
+export function ResultTable({ columns, rows, show, formats, highlight, raw = false, label, pick, view }: Props) {
   const [all, setAll] = useState(false);
   const pointer = useRef<string>("mouse");
   const pickAt = pick ? columns.findIndex((column) => column.name === pick.column) : -1;
   const picked = show?.length ? show.map((name) => columns.findIndex((column) => column.name === name)).filter((index) => index >= 0) : columns.map((_, index) => index);
-  const visible = all ? rows : rows.slice(0, TABLE_PAGE_ROWS);
-  const numeric = (type: string) => /^(Nullable\()?(U?Int|Float|Decimal)/.test(type);
+  // D563: the contains box narrows the loaded rows, then the sort orders them; "Show all" pages what is left.
+  const matched = view ? sortRows(containsRows(rows, picked, columns, view.contains, formats), columns, view.sort) : rows;
+  const visible = all ? matched : matched.slice(0, TABLE_PAGE_ROWS);
+  const term = view?.contains.trim() ?? "";
+  const tools = Boolean(view) && (rows.length > CONTAINS_FROM_ROWS || term !== "");
+  // D564: sorting and matching see only the loaded rows; say so when the query's rows were cut.
+  const within = view?.truncated && (term || view.sort) ? `within the first ${rows.length.toLocaleString()} rows` : null;
+  const count = term ? `${matched.length.toLocaleString()} of ${rows.length.toLocaleString()} rows${within ? `, ${within}` : ""}` : within ? `Sorted ${within}` : null;
   return <div className="report-table-block">
+    {view && tools && <div className="report-table-tools">
+      <ContainsBox label={label} value={view.contains} onChange={view.onContains} />
+      {count && <span className="report-table-count" role="status">{count}</span>}
+    </div>}
+    {!tools && count && <p className="report-table-count" role="status">{count}</p>}
     <div className="report-table-scroll" tabIndex={0} role="region" aria-label={label}>
       <table className="report-table">
         <thead><tr>{picked.map((index) => {
           const column = columns[index]!;
           const role = highlight?.[column.name];
-          return <th key={`${column.name}-${index}`} scope="col" className={role ? "report-mapped" : undefined}>
-            <span>{column.name}{role && <em className="report-role">{role}</em>}</span><small>{column.type}</small>
+          const sorted = view?.sort?.column === column.name ? view.sort : null;
+          const head = <><span>{column.name}{role && <em className="report-role">{role}</em>}{sorted && (sorted.desc ? <ArrowDown className="report-sort-icon" aria-hidden="true" /> : <ArrowUp className="report-sort-icon" aria-hidden="true" />)}</span><small>{column.type}</small></>;
+          return <th key={`${column.name}-${index}`} scope="col" className={role ? "report-mapped" : undefined}
+            aria-sort={view ? sorted ? (sorted.desc ? "descending" : "ascending") : "none" : undefined}>
+            {view ? <button type="button" className={`report-th-sort${sorted ? " sorted" : ""}`} onClick={() => view.onSort(nextSort(view.sort, column.name))}
+              title={!sorted ? `Sort by ${column.name}` : sorted.desc ? "Back to the query's order" : `Sort by ${column.name}, largest first`}>{head}</button> : head}
           </th>;
         })}</tr></thead>
         <tbody>{visible.map((row, rowIndex) => {
@@ -53,9 +86,19 @@ export function ResultTable({ columns, rows, show, formats, highlight, raw = fal
         })}</tr>;
         })}</tbody>
       </table>
+      {view && term && !matched.length && <p className="report-table-none">No rows contain “{term}”.</p>}
     </div>
-    {rows.length > TABLE_PAGE_ROWS && <button type="button" className="secondary-button report-show-all" onClick={() => setAll((current) => !current)}>
-      {all ? `Show the first ${TABLE_PAGE_ROWS}` : `Show all ${rows.length.toLocaleString()} rows`}
+    {matched.length > TABLE_PAGE_ROWS && <button type="button" className="secondary-button report-show-all" onClick={() => setAll((current) => !current)}>
+      {all ? `Show the first ${TABLE_PAGE_ROWS}` : `Show all ${matched.length.toLocaleString()} rows`}
     </button>}
   </div>;
+}
+
+/** The contains box: it types freely; the URL (replace) follows each change. Escape clears it. */
+function ContainsBox({ label, value, onChange }: { label: string; value: string; onChange: (text: string) => void }) {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => setDraft(value), [value]);
+  return <input type="search" className="report-table-contains" placeholder="Contains…" aria-label={`Show rows of ${label} that contain`} value={draft} maxLength={CONTAINS_CHARS}
+    onChange={(event) => { setDraft(event.target.value); onChange(event.target.value); }}
+    onKeyDown={(event) => { if (event.key === "Escape" && draft) { event.preventDefault(); event.stopPropagation(); setDraft(""); onChange(""); } }} />;
 }
