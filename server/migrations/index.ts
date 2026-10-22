@@ -59,6 +59,7 @@ import { documentFtsMigration } from "./060_document_fts";
 import { reportFavoritesMigration } from "./061_report_favorites";
 import { reportOwnersMigration } from "./062_report_owners";
 import { reportParametersMigration } from "./063_report_parameters";
+import { reportQuerySuggestionsMigration } from "./065_report_query_suggestions";
 
 const migrations = [initialMigration, folderSharingMigration, totpMigration, totpRecoveryCodesMigration, mcpApiKeysMigration, documentsMigration, binMigration, noteSearchMigration, taskBoardsMigration, mcpKeyScopesMigration, taskDatesMigration, collectionsMigration, calendarMigration, eventNextOccurrenceMigration, taskCardUxMigration, userPreferencesMigration, teamRolesMigration,
   // 018 (Team invites) may reach existing installs after 019 (task hierarchy) and 020 (task views); none depends on another.
@@ -159,7 +160,9 @@ const migrations = [initialMigration, folderSharingMigration, totpMigration, tot
   reportOwnersMigration,
   // 063 (report parameters, spec v3: report_results.params_json, report_param_sets, report_param_results,
   // report_param_options) needs only 050.
-  reportParametersMigration
+  reportParametersMigration,
+  // 065 (lane EDIT, D527: report_instructions.suggested_query, a person's suggested query edit) needs only 052.
+  reportQuerySuggestionsMigration
 ];
 
 /** Every registered migration in order (read-only), for tests that build an older database shape. */

@@ -138,3 +138,23 @@
 .report-owner-list .report-share-name > svg { width: 16px; height: 16px; flex: none; color: var(--report-accent); }
 .report-owner-tag { border-radius: 6px; padding: 0 6px; background: var(--report-accent-bg); color: var(--report-accent); font-size: .72rem; font-weight: 650; }
 .report-owner-tag-off { background: var(--report-bad-bg); color: var(--report-bad); }
+
+/* Lane EDIT (D527–D529): Inspect → Query → Edit SQL / Suggest an edit, with Run preview. */
+.report-query-edit-lead { margin: 0; }
+.report-query-edit .report-sql { min-height: 180px; }
+.report-query-edit-run { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.report-query-edit-run .file-dialog-hint { margin: 0; flex: 1 1 240px; }
+.report-query-edit-run button { min-height: 44px; display: inline-flex; align-items: center; gap: 8px; }
+.report-query-edit-error { display: grid; gap: 4px; margin: 0; }
+.report-query-edit-error p { margin: 0; }
+.report-query-edit-error ul { margin: 0; padding-left: 18px; overflow-wrap: anywhere; }
+.report-query-preview { display: grid; gap: 8px; min-width: 0; }
+.report-query-preview-old .report-table-scroll, .report-query-preview-old .report-query-checks { opacity: .6; }
+.report-query-checks { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.report-query-checks li { display: flex; align-items: flex-start; gap: 8px; color: var(--report-text); font-size: .85rem; overflow-wrap: anywhere; }
+.report-query-checks li > svg { margin-top: 2px; }
+.report-query-check-ok > svg { color: #4ade80; }
+.report-query-check-bad > svg { color: var(--report-bad); }
+.report-query-edit-note { display: grid; gap: 6px; }
+.report-query-edit-note label { font-size: .8rem; color: var(--report-muted); }
+.report-query-edit-note textarea { width: 100%; min-height: 64px; resize: vertical; border: 1px solid var(--report-border); border-radius: 10px; padding: 10px; background: var(--report-raised); color: var(--report-text); font: inherit; }

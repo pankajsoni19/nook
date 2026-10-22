@@ -15,6 +15,7 @@ import "./bin";
 import { registerGenerateRoutes } from "./generateRoutes";
 import { registerReportViewRoutes } from "./viewRoutes";
 import { registerReportEditRoutes } from "./editRoutes";
+import { registerQueryEditRoutes } from "./queryEditRoutes";
 import { registerReportFolderRoutes } from "./folderRoutes";
 import { ownerReview } from "./ownerReview";
 
@@ -210,4 +211,6 @@ export function registerReportRoutes(app: Hono<AppEnv>) {
   registerReportViewRoutes(app);
   // Wave 48: instructions, proposals, versions, manual edits, and sharing (editRoutes.ts).
   registerReportEditRoutes(app);
+  // Lane EDIT (D525–D531): Run preview and Suggest for a saved query (queryEditRoutes.ts).
+  registerQueryEditRoutes(app);
 }

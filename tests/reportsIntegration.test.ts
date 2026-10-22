@@ -300,7 +300,7 @@ describe("final review L3 and M3", () => {
     // The release it names is this one.
     expect(section).not.toMatch(/\b0\.39\.\d/);
     const { registeredMigrationIds } = await import("../server/migrations");
-    expect(registeredMigrationIds.filter((id) => id >= 50)).toEqual([50, 51, 52, 53, 55, 56, 57, 58, 59, 60, 61, 62, 63]);
+    expect(registeredMigrationIds.filter((id) => id >= 50 && id <= 63)).toEqual([50, 51, 52, 53, 55, 56, 57, 58, 59, 60, 61, 62, 63]);
   });
 
   test("docs/OPERATIONS.md has the 0.39.0 upgrade section: 060–062, backup, the background index, the folder rebuild, and SIGNUP_ROLE", async () => {
@@ -316,7 +316,7 @@ describe("final review L3 and M3", () => {
     expect(runner).toContain('"Migration failed"');
     expect(section).not.toMatch(/next release|unreleased/i);
     const { registeredMigrationIds } = await import("../server/migrations");
-    expect(registeredMigrationIds.filter((id) => id >= 60)).toEqual([60, 61, 62, 63]);
+    expect(registeredMigrationIds.filter((id) => id >= 60 && id <= 63)).toEqual([60, 61, 62, 63]);
   });
 
   test("docs/OPERATIONS.md has the 0.40.0 upgrade section: 063, its tables, backup, REPORT_TIME_ZONE, and the failure path", async () => {
@@ -328,6 +328,16 @@ describe("final review L3 and M3", () => {
     expect(section).not.toMatch(/next release|unreleased/i);
     expect(text).not.toContain("Upgrading past 0.39.0");
     const { registeredMigrationIds } = await import("../server/migrations");
-    expect(registeredMigrationIds.filter((id) => id >= 63)).toEqual([63]);
+    expect(registeredMigrationIds.filter((id) => id === 63)).toEqual([63]);
+  });
+
+  test("docs/OPERATIONS.md has the 0.43.0 upgrade section: 065 (lane EDIT), its column, backup, and the failure path", async () => {
+    const text = await Bun.file(new URL("../docs/OPERATIONS.md", import.meta.url)).text();
+    const start = text.indexOf("### Upgrading to 0.43.0");
+    expect(start).toBeGreaterThan(0);
+    const section = text.slice(start, text.indexOf("### Upgrading to 0.42.1", start));
+    for (const word of ["**065**", "report_query_suggestions", "report_instructions.suggested_query", "APP_VERSION=0.43.0", "Back up first", "./scripts/backup.sh --force", "Migration failed"]) expect(section).toContain(word);
+    const { registeredMigrationIds } = await import("../server/migrations");
+    expect(registeredMigrationIds).toContain(65);
   });
 });

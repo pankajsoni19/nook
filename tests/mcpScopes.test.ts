@@ -94,7 +94,7 @@ test("the reports tools split by scope: reads under reports:read, every write un
   await import("../server/mcpTools");
   const { reportTools } = await import("../server/reports/mcpTools");
   const read = ["list_reports", "list_report_datasources", "list_report_folders", "get_report", "get_report_block", "get_report_run", "get_report_instruction", "list_report_versions", "get_report_version_diff", "get_report_metrics", "list_report_owners", "list_unmanaged_reports", "search_report_options"];
-  const write = ["create_report", "refresh_report", "set_report_schedule", "add_report_instruction", "apply_report_proposal", "reject_report_proposal", "update_report_query", "create_report_folder", "move_report_to_folder", "update_report_metric", "star_report", "unstar_report",
+  const write = ["create_report", "refresh_report", "set_report_schedule", "add_report_instruction", "apply_report_proposal", "reject_report_proposal", "update_report_query", "suggest_report_query", "create_report_folder", "move_report_to_folder", "update_report_metric", "star_report", "unstar_report",
     "update_report_folder", "add_report_owner"];
   expect(reportTools.map((tool) => tool.name).sort()).toEqual([...read, ...write].sort());
   for (const tool of reportTools) {
@@ -105,9 +105,9 @@ test("the reports tools split by scope: reads under reports:read, every write un
   // No tool runs SQL it was handed: no run_sql, no console, nothing that deletes (the Bin's tools do).
   // Owner removal is app-only (D180, D482).
   expect(reportTools.some((tool) => /run_sql|console|sql|delete|remove|purge/i.test(tool.name))).toBe(false);
-  // Review L4: the one tool that takes SQL is update_report_query, and the docs say so (no "no ad-hoc SQL" claim).
+  // Review L4: the tools that take SQL are update_report_query and (D530) suggest_report_query, and the docs say so (no "no ad-hoc SQL" claim).
   const takesSql = reportTools.filter((tool) => "sql" in ((tool.inputSchema as unknown as { shape?: Record<string, unknown> }).shape ?? {})).map((tool) => tool.name);
-  expect(takesSql).toEqual(["update_report_query"]);
+  expect(takesSql).toEqual(["update_report_query", "suggest_report_query"]);
   const source = await Bun.file(new URL("../server/reports/mcpTools.ts", import.meta.url)).text() + await Bun.file(new URL("../server/mcpScopes.ts", import.meta.url)).text();
   expect(source).not.toMatch(/no ad-hoc SQL|runs ad-hoc SQL/i);
   expect(source).toContain("update_report_query runs guarded SELECTs, saved as a version (T383)");

@@ -1,7 +1,7 @@
 import { useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ChevronLeft, Copy, Download, FileTerminal, History, LoaderCircle, RefreshCw } from "lucide-react";
+import { ChevronLeft, Copy, Download, FileTerminal, History, LoaderCircle, PencilLine, RefreshCw } from "lucide-react";
 import { ModalDialog } from "../files/Dialog";
-import { registerHistoryDialogGuard } from "../historyDialogs";
+import { registerHistoryDialogGuard, useLayerOpener } from "../historyDialogs";
 import { useHistoryDialogGuard } from "../ui/useHistoryDialogGuard";
 import type { AutoFix, ChartBlock, KpiBlock, ReportBlock, ReportDetail, ReportQuery, ReportResult, TableBlock } from "../../shared/reports";
 import type { ProvenanceView, QueryResultView } from "../../shared/reportsView";
@@ -14,11 +14,14 @@ import { getProvenance, RUN_STATUS_TEXT, runLabel, timeAgo, toCsv } from "./repo
 import { countLabel, messageOf } from "./reportsApi";
 import { ReportRunsContext } from "./RunsSheet";
 import { ReportConsoleContext } from "./reportConsole";
+import { useReportEditing } from "./reportBlockEdit";
+import { QueryEditSheet, type QueryEditMode } from "./QueryEditSheet";
 
 export type DataBlock = KpiBlock | ChartBlock | TableBlock;
 
 type Props = {
-  report: Pick<ReportDetail, "id" | "title" | "doc">;
+  /** `revision` and `spec` (the report page's): Edit SQL and Suggest an edit (lane EDIT) need them. */
+  report: Pick<ReportDetail, "id" | "title" | "doc"> & Partial<Pick<ReportDetail, "revision" | "spec">>;
   block: DataBlock;
   query: ReportQuery | undefined;
   view: QueryResultView | undefined;
@@ -140,8 +143,15 @@ export function InspectSheet({ report, block, query, view, palette, canRerun, bu
   const mapping = blockMapping(block);
   const title = block.title ?? (block.type === "kpi" ? block.label ?? block.column : block.queryKey);
 
+  // Lane EDIT (D527–D529): Edit SQL (the owner) or Suggest an edit (the comment level), a sheet over this one.
+  const editing = useReportEditing();
+  const editMode: QueryEditMode | null = !query || report.revision === undefined || !report.spec ? null : editing?.canEdit ? "save" : editing?.canSuggest ? "suggest" : null;
+  const [queryEdit, setQueryEdit] = useState(false);
+  const [draft, setDraft] = useState<string | null>(null);
+  useLayerOpener("reports.query-edit", (blockId) => { if (blockId === block.id && editMode) setQueryEdit(true); });
+
   const first = shownTab.step === 0;
-  return <ModalDialog title={title} eyebrow="How was this built" onClose={close} variant="sheet" className="reports-dialog report-inspect">
+  return <><ModalDialog title={title} eyebrow="How was this built" onClose={close} variant="sheet" className="reports-dialog report-inspect">
     <div className="report-inspect-tabs" role="tablist" aria-label="Inspect">
       {INSPECT_TABS.map((name) => <button key={name} type="button" role="tab" id={`inspect-tab-${name}`} aria-selected={tab === name} aria-controls="inspect-panel"
         className={tab === name ? "active" : undefined} onClick={() => tabs.select(name, tab)}>{INSPECT_TAB_LABELS[name]}</button>)}
@@ -150,7 +160,7 @@ export function InspectSheet({ report, block, query, view, palette, canRerun, bu
         aria-label="Back to the previous tab" onClick={() => tabs.back()}><ChevronLeft /></button>
     </div>
     <div className="report-inspect-body" role="tabpanel" id="inspect-panel" aria-labelledby={`inspect-tab-${tab}`}>
-      {tab === "query" && <QueryTab block={block} query={query} result={result} failed={failed} canRerun={canRerun} busy={busy} onRerun={onRerun} />}
+      {tab === "query" && <QueryTab block={block} query={query} result={result} failed={failed} canRerun={canRerun} busy={busy} onRerun={onRerun} editMode={editMode} onEdit={() => setQueryEdit(true)} />}
       {tab === "data" && (shown && shown.columns.length ? <section className="report-inspect-section">
         <p className="report-inspect-facts">
           <span>{countLabel(shown.rowCount)}{shown.truncated ? " (cut off at the stored limit)" : ""}</span>
@@ -163,10 +173,15 @@ export function InspectSheet({ report, block, query, view, palette, canRerun, bu
       {tab === "mapping" && <MappingTab block={block} view={view} palette={palette} />}
       {tab === "provenance" && <ProvenanceTab report={report} block={block} given={given} />}
     </div>
-  </ModalDialog>;
+  </ModalDialog>
+  {queryEdit && editMode && query && report.revision !== undefined && report.spec && <QueryEditSheet report={{ id: report.id, revision: report.revision, spec: report.spec }}
+    blockId={block.id} blockTitle={title} query={query} mode={editMode} highlight={mapping} draft={draft} onDraft={setDraft}
+    onClose={() => setQueryEdit(false)} reopen={() => setQueryEdit(true)} layerKey={`reports.query-edit:${block.id}`}
+    onChanged={() => editing?.onChanged()} openChanges={editing?.openChanges} />}
+  </>;
 }
 
-function QueryTab({ block, query, result, failed, canRerun, busy, onRerun }: { block: DataBlock; query: ReportQuery | undefined; result: ReportResult | null; failed: ReportResult | null; canRerun: boolean; busy: boolean; onRerun: (key: string) => void }) {
+function QueryTab({ block, query, result, failed, canRerun, busy, onRerun, editMode, onEdit }: { block: DataBlock; query: ReportQuery | undefined; result: ReportResult | null; failed: ReportResult | null; canRerun: boolean; busy: boolean; onRerun: (key: string) => void; editMode: QueryEditMode | null; onEdit: () => void }) {
   const latest = failed && (!result || failed.createdAt >= result.createdAt) ? failed : result;
   // Item 4: the owner tweaks the block's query in the SQL console panel (prefilled with it).
   const openConsole = useContext(ReportConsoleContext);
@@ -174,6 +189,8 @@ function QueryTab({ block, query, result, failed, canRerun, busy, onRerun }: { b
     {!query && <p className="form-error">This block names the query <code>{block.queryKey}</code>, which the report does not have.</p>}
     {query?.purpose && <p className="report-inspect-purpose">{query.purpose}</p>}
     <div className="report-inspect-head"><h3>SQL as saved</h3>{query && <span className="report-inspect-head-actions">
+      {/* D527: the owner edits here; the comment level suggests an edit to the owner. Readers only read. */}
+      {editMode && <button type="button" className="secondary-button" onClick={onEdit}><PencilLine aria-hidden="true" />{editMode === "save" ? "Edit SQL" : "Suggest an edit"}</button>}
       {openConsole && <button type="button" className="secondary-button" onClick={() => openConsole(query.sql, latest?.params)}><FileTerminal aria-hidden="true" />Open in console</button>}
       <CopyButton text={query.sql} label="Copy" />
     </span>}</div>

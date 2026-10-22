@@ -73,6 +73,8 @@ export const NOOK_NEVER_TOOLS: ReadonlySet<string> = new Set([
   // schedule, instructions, or proposals. A report's own edit agent works through its instructions.
   "list_report_datasources", "create_report", "refresh_report", "set_report_schedule",
   "add_report_instruction", "apply_report_proposal", "reject_report_proposal", "update_report_query", "update_report_metric",
+  // D530: a suggested query edit runs SQL too (T402).
+  "suggest_report_query",
   // Lane I: a report's folder is its owner's organisation of the Reports home, not an agent's.
   "create_report_folder", "move_report_to_folder", "update_report_folder",
   // Phase 2 (D482): who owns a report is for people and admins to decide, never an agent.

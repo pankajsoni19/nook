@@ -611,6 +611,22 @@ curl http://localhost:2026/api/health
 
 Every image carries immutable numbered migrations under `server/migrations`. They run transactionally and are recorded in SQLite's `schema_migrations` table before the HTTP server accepts requests. New schema changes are always added as a new migration; released migrations are never edited.
 
+### Upgrading to 0.43.0 (report edits, migration 065)
+
+0.43.0 lets a report's owner remove a block or a section from its header (with Undo) and edit a query's SQL from Inspect → Query with a preview, and lets people at the comment level suggest a query edit that the owner applies or rejects in Changes (D525–D531). Its migration runs once on the first boot, before the HTTP server answers; it is recorded in `schema_migrations` and cannot be undone except by restoring a backup.
+
+| Migration | What it does | Cost |
+| --- | --- | --- |
+| **065** `report_query_suggestions` | Adds the column `report_instructions.suggested_query` (the saved query a person's suggestion changes; NULL for every existing instruction). It copies nothing and rewrites no table. | Quick at any size. |
+
+Steps:
+
+1. **Back up first:** `./scripts/backup.sh --force`. Restoring this backup is the only way back.
+2. Pull, rebuild with `APP_VERSION=0.43.0`, and restart as above. `/api/health` answers once the migration is done. No new settings.
+3. **If the migration fails**, the server logs `Migration failed` with id 65 and does not start. It is transactional, so nothing is half applied: restore the backup, or fix the cause and start again.
+
+Commenters' previews and suggestions run guarded SELECTs on the report's data source with the read-only ClickHouse user, like the owner's console (T402); they are audited as `reports.query.preview` and `reports.query.suggest`.
+
 ### Upgrading to 0.42.1 (no migration)
 
 A fix release: no migration and no new settings. Pull, rebuild with `APP_VERSION=0.42.1`, and restart as above.

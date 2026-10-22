@@ -14,6 +14,8 @@ import { ReportError } from "./errors";
 import { startGenerate } from "./generate";
 import { addInstruction, applyProposal, getInstruction, proposalView, rejectProposal } from "./instructions";
 import { manualEdit } from "./manualEdit";
+import { suggestQueryEdit } from "./querySuggest";
+import { QUERY_EDIT_LIMITS } from "../../shared/reportsQueryEdit";
 import { catalogRow, metricCatalogView, saveCatalogEdit } from "./metricCatalog";
 import { usableDatasource } from "./datasources";
 import { METRIC_ID, METRIC_LIMITS, type CatalogMetricInput } from "../../shared/reportsMetrics";
@@ -43,7 +45,8 @@ const parseSpec = (json: string): ReportSpec => knownSpec(parseStoredSpec(json))
  * - `reports:write`: create_report (starts a generation from a doc), refresh_report,
  *   set_report_schedule, add_report_instruction (queues it for the edit agent; a proposal unless the
  *   owner turned on auto-apply), apply_report_proposal and reject_report_proposal, update_report_query
- *   (a saved query's SQL, through the guard and a full re-validation; a new version).
+ *   (a saved query's SQL, through the guard and a full re-validation; a new version), and
+ *   suggest_report_query (D530: the comment level's SQL, checked the same way, queued as a proposal).
  * - Lane I, folders; phase 2 (D483): `list_report_folders` (reports:read: the workspace's shared tree
  *   with per-caller counts), `create_report_folder` (reports:write: any member), `update_report_folder`
  *   (reports:write: rename, move, reorder; admins only), and `move_report_to_folder` (reports:write: a
@@ -58,7 +61,8 @@ const parseSpec = (json: string): ReportSpec => knownSpec(parseStoredSpec(json))
  * Writes are non-destructive (a version, a run, a queued instruction), audited with `via: "mcp"` and the
  * key, and counted against `report_write` (100 a day per key). Nothing is deleted over MCP but through
  * the Bin's tools. SQL over MCP (T361, T383): `update_report_query` runs guarded SELECTs, saved as a
- * version, on a report the key's owner owns; nothing else takes SQL, and no tool returns a free query's rows. Tools act as the
+ * version, on a report the key's owner owns; `suggest_report_query` runs the same checks and only
+ * queues a proposal (T402); nothing else takes SQL, and no tool returns a free query's rows. Tools act as the
  * key's owner: changing tools need the owner of the report, adding an instruction the comment level.
  * Guests (no Reports module) get nothing. None of these is offered to chat agents (NOOK_NEVER_TOOLS).
  */
@@ -487,6 +491,27 @@ export const reportTools: McpToolSpec[] = [
       }, { keyId: key.keyId });
       return { version: saved.version, revision: saved.revision, ...(saved.warnings ? { warnings: saved.warnings } : {}) };
     })
+  }),
+  // D530: the comment level's way to change a saved query: a proposal for the owner, never a save (D180 holds).
+  defineTool({
+    name: "suggest_report_query",
+    title: "Suggest a change to a report's saved query",
+    description: "Suggests new SQL for one of a report's saved queries (reports you may comment on, or your own). Nook checks it as the owner's save would (the guard, a run of every query, the blocks' columns) and queues it in the report's Changes as a proposal the owner applies or rejects; it changes nothing by itself. Returns the instruction; follow it with get_report_instruction. Refusals answer INVALID with the reasons. At most 10 suggestions an hour.",
+    scopes: ["reports:write"],
+    access: { mode: "items", items: reportItem, related: ["queryKey", "blockId"] },
+    write: true,
+    buckets: ["report_write"],
+    inputSchema: z.object({
+      reportId,
+      queryKey: z.string().regex(QUERY_KEY),
+      sql: z.string().min(1).max(REPORT_LIMITS.sqlChars),
+      note: z.string().max(QUERY_EDIT_LIMITS.note).optional().describe("Why, for the owner"),
+      blockId: z.string().regex(BLOCK_ID).optional().describe("The block it came from (from get_report)"),
+      expectedRevision: z.number().int().min(1).optional().describe("The revision from get_report; refused when the report changed since")
+    }),
+    handler: (args, key) => asOwner(key, (role) => suggestQueryEdit({ userId: key.userId, role, keyId: key.keyId }, args.reportId, {
+      queryKey: args.queryKey, sql: args.sql, note: args.note ?? null, blockId: args.blockId ?? null, ...(args.expectedRevision !== undefined ? { expectedRevision: args.expectedRevision } : {})
+    }))
   }),
   defineTool({
     name: "create_report_folder",

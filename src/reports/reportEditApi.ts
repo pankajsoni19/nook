@@ -1,6 +1,8 @@
 import { api } from "../api";
 import type { InstructionsView, PatchOp, ProposalView, ReportInstruction, OwnerReview, OwnerReviewScope, ReportOwners, ReportSharing, SharingInput } from "../../shared/reportsEdit";
 import type { VersionDiff, VersionHistoryItem, VersionSnapshot } from "../../shared/reportVersions";
+import type { QueryEditPreview } from "../../shared/reportsQueryEdit";
+import type { ParamValues } from "../../shared/reportParams";
 
 /** The Wave 48 report routes (server/reports/editRoutes.ts): instructions, proposals, versions, manual edits, sharing. */
 
@@ -24,7 +26,13 @@ export const getVersionDiff = (id: string, to: number, from?: number | null) => 
 export const previewVersion = (id: string, version: number) => api<{ runId: string; status: string; results: VersionSnapshot["results"] }>(`/reports/${id}/versions/${version}/preview`, json("POST", {}));
 export const restoreVersion = (id: string, version: number) => api<{ version: number; refreshRunId: string | null }>(`/reports/${id}/versions/${version}/restore`, json("POST", {}));
 
-export const editSpec = (id: string, ops: PatchOp[], expectedRevision: number) => api<{ version: number; revision: number }>(`/reports/${id}/spec/edit`, json("POST", { ops, expectedRevision }));
+export const editSpec = (id: string, ops: PatchOp[], expectedRevision: number) => api<{ version: number; revision: number; warnings?: string[] }>(`/reports/${id}/spec/edit`, json("POST", { ops, expectedRevision }));
+/** Lane EDIT (D528): Run preview of a saved query's new SQL with the parameter values on screen (the owner and the comment level). */
+export const previewQuery = (id: string, queryKey: string, sql: string, values: ParamValues | null, signal?: AbortSignal) =>
+  api<{ preview: QueryEditPreview }>(`/reports/${id}/queries/${queryKey}/preview`, { ...json("POST", { sql, values }), signal });
+/** D527: the comment level suggests the new SQL to the owner (a proposal in Changes). */
+export const suggestQuery = (id: string, queryKey: string, input: { sql: string; note: string | null; blockId: string | null; expectedRevision: number }) =>
+  api<{ instruction: ReportInstruction; warnings?: string[] }>(`/reports/${id}/queries/${queryKey}/suggest`, json("POST", input));
 
 export const getSharing = (id: string) => api<{ sharing: ReportSharing }>(`/reports/${id}/sharing`);
 export const saveSharing = (id: string, input: SharingInput) => api<{ sharing: ReportSharing }>(`/reports/${id}/sharing`, json("PUT", input));

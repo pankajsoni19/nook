@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { CalendarClock, CircleCheck, CircleX, Clock3, ExternalLink, LoaderCircle, MoreHorizontal, RefreshCw, ScanSearch, TriangleAlert } from "lucide-react";
+import { CalendarClock, CircleCheck, CircleX, Clock3, ExternalLink, LoaderCircle, MoreHorizontal, RefreshCw, ScanSearch, Trash2, TriangleAlert } from "lucide-react";
 import { ModalDialog } from "../files/Dialog";
 import { Markdown, type RenderContext } from "../chat/markdown/render";
 import { notify } from "../ui/notify";
@@ -21,6 +21,7 @@ import { canonicalValues, isDefaultSet, valuesFromSearch, valuesToSearch, type P
 import { codeOf, messageOf } from "./reportsApi";
 import { scheduleBadge, ScheduleSheet } from "./ScheduleSheet";
 import { CommentOnBlockButton } from "./reportComment";
+import { blockLabel, useHeaderRemoval, useReportEditing } from "./reportBlockEdit";
 import { useHeaderActions, useRegisterReportCommands } from "./reportCommands";
 import "./reportView.css";
 
@@ -290,9 +291,18 @@ export function ReportView({ report, canWrite, generating = false, initial, read
     schedule: { open: () => setScheduleOpen(true), badge: badge?.text ?? null }
   }, readOnly ? [] : ["refreshAll", "schedule"]);
 
+  // Lane EDIT (D525): the owner removes a block or a section from its header (never the last block).
+  const editing = useReportEditing();
+  const removal = useHeaderRemoval(report, editing?.onChanged ?? noChange);
+  const canRemove = Boolean(editing?.canEdit) && !readOnly && blocks.length > 1;
+  const removeBlock = (block: ReportBlock) => { void removal.remove({ kind: "block", block }); };
+  const removeButton = (block: ReportBlock, className = "") => canRemove
+    ? <RemoveButton label={blockLabel(block)} disabled={busy} className={className} onClick={() => removeBlock(block)} /> : null;
+
   const card = (block: DataBlock) => <DataBlockCard key={block.id} block={block} view={results.get(block.queryKey)} hasQuery={queries.has(block.queryKey)} palette={palette}
     running={running} loaded={view !== null} lookup={lookup} readOnly={readOnly} pending={Boolean(pending?.includes(block.queryKey))} filtered={withParams}
-    onInspect={() => setInspect({ blockId: block.id, tab: "query" })} onMenu={() => setMenuBlock(block.id)} />;
+    onInspect={() => setInspect({ blockId: block.id, tab: "query" })} onMenu={() => setMenuBlock(block.id)}
+    onRemove={canRemove ? () => removeBlock(block) : undefined} removeDisabled={busy} />;
 
   if (!blocks.length) return null;
   return <section className={`report-view report-theme-${palette.mode}`} style={cssVars} aria-label="Report">
@@ -315,6 +325,7 @@ export function ReportView({ report, canWrite, generating = false, initial, read
     </div>}
     {loadError && <p className="form-error" role="alert">{loadError} <button type="button" className="secondary-button" onClick={() => { void loadResults(); }}>Try again</button></p>}
     {layout.narrative.map((block) => <div key={block.id} className="report-narrative">
+      {removeButton(block, " report-block-float")}
       {block.title && <h2 className="report-narrative-title">{block.title}</h2>}
       <div className="report-markdown"><Markdown text={block.markdown} context={markdownContext} /></div>
     </div>)}
@@ -324,19 +335,29 @@ export function ReportView({ report, canWrite, generating = false, initial, read
       {layout.strip.some((block) => !block.hero) && <div className="report-kpi-strip">{layout.strip.filter((block) => !block.hero).map((block) => card(block))}</div>}
     </div>}
     {layout.sections.map((section) => <section key={section.id ?? "_"} className="report-section" aria-label={section.title ?? undefined}>
-      {section.title && <h2 className="report-section-title">{section.title}</h2>}
+      {section.title && (canRemove && section.id
+        ? <div className="report-section-head">
+          <h2 className="report-section-title">{section.title}</h2>
+          <RemoveButton label={`the section ${section.title}`} disabled={busy}
+            onClick={() => { void removal.remove({ kind: "section", section: { id: section.id!, title: section.title! }, blockIds: section.blocks.map((block) => block.id) }); }} />
+        </div>
+        : <h2 className="report-section-title">{section.title}</h2>)}
       {section.summary && <p className="report-section-summary">{section.summary}</p>}
       <div className="report-grid">
         {section.blocks.map((block) => block.type === "markdown"
           ? <article key={block.id} className={`report-block report-block-markdown ${widthClass(block)}`}>
-            {block.title && <h3 className="report-block-title">{block.title}</h3>}
-            <div className="report-markdown"><Markdown text={block.markdown} context={markdownContext} /></div>
+            {/* D525: a titled text block gets a header row like a chart's; an untitled one, the trash floated in its text. */}
+            {block.title && (canRemove
+              ? <header className="report-block-head"><h3 className="report-block-title">{block.title}</h3><span className="report-block-buttons">{removeButton(block)}</span></header>
+              : <h3 className="report-block-title">{block.title}</h3>)}
+            <div className="report-markdown">{!block.title && removeButton(block, " report-block-float")}<Markdown text={block.markdown} context={markdownContext} /></div>
           </article>
           : card(block))}
       </div>
     </section>)}
     {menuTarget && isDataBlock(menuTarget) && <BlockMenu block={menuTarget} canWrite={canWrite} busy={busy}
       onClose={() => setMenuBlock(null)}
+      onRemove={canRemove ? () => { setMenuBlock(null); removeBlock(menuTarget); } : undefined}
       onInspect={(tab) => { setMenuBlock(null); setInspect({ blockId: menuTarget.id, tab }); }}
       onRerun={() => { setMenuBlock(null); void startRefresh(menuTarget.queryKey); }} />}
     {inspected && isDataBlock(inspected) && <InspectSheet report={report} block={inspected} query={queries.get(inspected.queryKey)} view={results.get(inspected.queryKey)}
@@ -344,7 +365,16 @@ export function ReportView({ report, canWrite, generating = false, initial, read
     {scheduleOpen && <ScheduleSheet reportId={report.id} schedule={schedule} runs={runs} canWrite={canWrite} reopen={() => setScheduleOpen(true)}
       onSaved={(next) => { setSchedule(next); setScheduleOpen(false); notify.success(next.enabled ? "Schedule saved" : "Schedule off"); }} onClose={() => setScheduleOpen(false)} />}
     {externalLink && <ExternalLinkSheet href={externalLink} onClose={() => setExternalLink(null)} />}
+    {removal.confirmElement}
   </section>;
+}
+
+const noChange = () => undefined;
+
+/** D525: the trash on a block header or a section title, the same size and colour as Inspect and ⋯. */
+function RemoveButton({ label, disabled, className = "", onClick }: { label: string; disabled?: boolean; className?: string; onClick: () => void }) {
+  return <button type="button" className={`icon-button report-block-button report-block-remove${className}`} onClick={onClick} disabled={disabled}
+    aria-label={`Remove ${label}`} title={disabled ? "The report is running" : "Remove"}><Trash2 /></button>;
 }
 
 type CardProps = {
@@ -364,10 +394,13 @@ type CardProps = {
   pending?: boolean;
   /** D489: the report has parameters (an empty result is "no rows for these filters"). */
   filtered?: boolean;
+  /** D525: the owner's Remove (a trash between Inspect and ⋯; a narrow KPI tile keeps it in ⋯ only). */
+  onRemove?: () => void;
+  removeDisabled?: boolean;
 };
 
-/** One chart, KPI, or table: its title, stale/error badges, the inspect and menu buttons, and the body. */
-export function DataBlockCard({ block, view, hasQuery, palette, running, loaded, lookup, onInspect, onMenu, readOnly, pending = false, filtered = false }: CardProps) {
+/** One chart, KPI, or table: its title, stale/error badges, the inspect, remove, and menu buttons, and the body. */
+export function DataBlockCard({ block, view, hasQuery, palette, running, loaded, lookup, onInspect, onMenu, readOnly, pending = false, filtered = false, onRemove, removeDisabled = false }: CardProps) {
   const result = view?.result ?? null;
   const failed = view?.failed ?? null;
   const rerunning = pending || Boolean(running && (!running.queryKeys || running.queryKeys.includes(block.queryKey)));
@@ -383,6 +416,7 @@ export function DataBlockCard({ block, view, hasQuery, palette, running, loaded,
       </span>
       {!readOnly && <span className="report-block-buttons">
         <button type="button" className="icon-button report-block-button" onClick={onInspect} aria-label={`How was ${title} built`} title="How was this built"><ScanSearch /></button>
+        {onRemove && <RemoveButton label={title} disabled={removeDisabled} onClick={onRemove} />}
         <button type="button" className="icon-button report-block-button" onClick={onMenu} aria-label={`More for ${title}`} aria-haspopup="dialog"><MoreHorizontal /></button>
       </span>}
     </header>
@@ -477,7 +511,7 @@ export function MeterView({ model, label }: { model: MeterModel; label: string }
   </div>;
 }
 
-export function BlockMenu({ block, canWrite, busy, onClose, onInspect, onRerun }: { block: DataBlock; canWrite: boolean; busy: boolean; onClose: () => void; onInspect: (tab: InspectTab) => void; onRerun: () => void }) {
+export function BlockMenu({ block, canWrite, busy, onClose, onInspect, onRerun, onRemove }: { block: DataBlock; canWrite: boolean; busy: boolean; onClose: () => void; onInspect: (tab: InspectTab) => void; onRerun: () => void; /** D525: the owner's Remove (asks first). */ onRemove?: () => void }) {
   useHistoryDialogGuard(true, onClose);
   const title = block.title ?? block.queryKey;
   return <ModalDialog title={title} eyebrow="Block" onClose={onClose} variant="sheet" className="reports-dialog report-block-menu">
@@ -487,6 +521,7 @@ export function BlockMenu({ block, canWrite, busy, onClose, onInspect, onRerun }
       {canWrite && <button type="button" role="menuitem" onClick={onRerun} disabled={busy}><RefreshCw aria-hidden="true" />{busy ? "A run is in progress" : "Re-run this query"}</button>}
       {/* Wave 48: a comment on this block opens the Changes panel aimed at it (only for those who may comment). */}
       <CommentOnBlockButton blockId={block.id} className="report-menu-comment" onBefore={onClose} />
+      {onRemove && <button type="button" role="menuitem" className="report-menu-danger" onClick={onRemove} disabled={busy}><Trash2 aria-hidden="true" />{busy ? "A run is in progress" : "Remove this block"}</button>}
     </div>
   </ModalDialog>;
 }

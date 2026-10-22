@@ -14,6 +14,7 @@ import { cancelConsole, cellText, codeOf, countLabel, datasourceChoices, deleteR
 import { NewReportSheet } from "./NewReportSheet";
 import { copyReportLink, LinkSheet, reportLink } from "./reportLink";
 import { ReportConsoleContext } from "./reportConsole";
+import { ReportEditContext, type ReportEditing } from "./reportBlockEdit";
 import { STATUS_LABELS } from "./ReportsHome";
 import { StarButton } from "./StarButton";
 import { ReportGeneration } from "./ReportGeneration";
@@ -133,6 +134,10 @@ export function ReportPage({ reportId, displayName, flash, onBack, onSettings, o
   const reloadReport = useCallback(() => { void load(); }, [load]);
   // Changing the report (refresh, schedule, regenerate, apply, edits, the console) is its owner's (D455).
   const ownerWrite = canWrite && Boolean(report?.isOwner);
+  // Lane EDIT (D525–D529): Remove from a header and Edit SQL (the owner); Suggest an edit (the comment level).
+  const editing = useMemo<ReportEditing>(() => ({
+    canEdit: ownerWrite, canSuggest: canWrite && !report?.isOwner && Boolean(rights?.canComment) && rights?.level === "comment", onChanged: reloadReport, openChanges
+  }), [canWrite, openChanges, ownerWrite, reloadReport, report?.isOwner, rights?.canComment, rights?.level]);
   useEffect(() => { if (report) document.title = `${report.title} · Reports · ${appName()}`; }, [report]);
   useEffect(() => { saveDraft(reportId, sql); }, [reportId, sql]);
 
@@ -293,7 +298,9 @@ export function ReportPage({ reportId, displayName, flash, onBack, onSettings, o
           <ReportRunsContext.Provider value={report.isOwner ? openRuns : null}>
             <ReportConsoleContext.Provider value={consoleInPanel(report) ? openConsole : null}>
               <ReportParamsContext.Provider value={paramsContext}>
-                <ReportGeneration report={report} canWrite={ownerWrite} onChanged={() => { void load(); }} />
+                <ReportEditContext.Provider value={editing}>
+                  <ReportGeneration report={report} canWrite={ownerWrite} onChanged={() => { void load(); }} />
+                </ReportEditContext.Provider>
               </ReportParamsContext.Provider>
             </ReportConsoleContext.Provider>
           </ReportRunsContext.Provider>

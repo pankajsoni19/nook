@@ -92,6 +92,8 @@ export type ReportInstruction = {
   startedAt: string | null;
   finishedAt: string | null;
   decidedAt: string | null;
+  /** D527: a person's suggested edit of this saved query (no agent run; its proposal is the person's SQL). */
+  suggestedQuery?: string | null;
 };
 
 export type BlockChangeKind = "added" | "updated" | "removed" | "moved";

@@ -78,6 +78,14 @@
 .report-block-button { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 10px; color: var(--report-muted); }
 .report-block-button:hover { color: var(--report-text); background: var(--report-hover); }
 .report-block-button svg { width: 18px; height: 18px; }
+/* D525: the owner's Remove. On a text block or the narrative it floats at the top right (the text wraps
+   round it, as the header's buttons sit); beside a section title it keeps the title's line. */
+.report-block-remove:hover:not(:disabled) { color: var(--report-bad); }
+.report-block-remove:disabled { color: var(--report-faint); background: transparent; cursor: default; }
+.report-block-float { float: right; margin: -6px -8px 0 8px; }
+.report-section-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.report-section-head .report-section-title { flex: 1 1 auto; min-width: 0; }
+.report-section-head .report-block-button { margin: -6px -8px -10px 0; }
 .report-block-body { min-width: 0; }
 .report-block-empty { margin: 0; padding: 18px 0; color: var(--report-muted); font-size: .85rem; text-align: center; }
 .report-block-problem { margin: 0; display: flex; align-items: flex-start; gap: 6px; padding: 10px 0; color: var(--report-bad); font-size: .85rem; overflow-wrap: anywhere; }
@@ -99,6 +107,8 @@ ul.report-block-problem { display: block; padding-left: 18px; }
 @container report-kpi (max-width: 220px) {
   .report-block-kpi .report-block-head { flex-wrap: wrap; justify-content: flex-end; row-gap: 0; }
   .report-block-kpi .report-block-title { order: 1; flex-basis: 100%; }
+  /* D525: three buttons crowd a narrow tile; Remove stays in its ⋯ menu. */
+  .report-block-kpi .report-block-remove { display: none; }
 }
 @container report-kpi (max-width: 240px) { .report-kpi-vs { flex-basis: 100%; } }
 .report-kpi { display: grid; gap: 4px; padding: 2px 0; }
@@ -177,6 +187,9 @@ ul.report-block-problem { display: block; padding-left: 18px; }
 .report-inspect-purpose { margin: 0; color: var(--report-soft); }
 .report-inspect-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .report-inspect-head h3 { margin: 0; color: var(--report-text); font-size: .9rem; }
+/* D527: with Edit SQL beside Open in console and Copy, a phone puts the buttons on their own line under the heading. */
+.report-inspect-head:has(> .report-inspect-head-actions) { flex-wrap: wrap; row-gap: 8px; }
+.report-inspect-head:has(> .report-inspect-head-actions) h3 { white-space: nowrap; }
 .report-copy { min-height: 44px; display: inline-flex; align-items: center; gap: 6px; }
 .report-copy svg, .report-inspect-actions svg { width: 15px; height: 15px; }
 .report-code { margin: 0; max-height: 260px; overflow: auto; border-radius: 10px; padding: 10px 12px; background: var(--report-code-bg); color: var(--report-soft); font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -201,6 +214,7 @@ ul.report-block-problem { display: block; padding-left: 18px; }
 .report-menu-list button:hover:not(:disabled) { background: var(--report-hover); }
 .report-menu-list button:disabled { color: var(--report-faint); cursor: default; }
 .report-menu-list svg { width: 18px; height: 18px; color: var(--report-muted); }
+.report-menu-list .report-menu-danger:not(:disabled), .report-menu-list .report-menu-danger:not(:disabled) svg { color: var(--report-bad); }
 .report-link-full { margin: 0; overflow-wrap: anywhere; }
 .report-link-open { min-height: 44px; display: inline-flex; align-items: center; gap: 6px; text-decoration: none; }
 .report-link-open svg { width: 16px; height: 16px; }

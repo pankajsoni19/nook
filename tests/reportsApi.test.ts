@@ -389,7 +389,7 @@ describe("MCP (reports:read)", () => {
     expect(visibleTools(chosen).filter((tool) => tool.name.includes("report")).map((tool) => tool.name)).toEqual(["list_reports", "list_report_folders", "get_report_metrics", "get_report", "get_report_block", "search_report_options", "get_report_run", "get_report_instruction", "list_report_versions", "get_report_version_diff", "list_report_owners", "list_unmanaged_reports"]);
     expect(visibleTools(key).filter((tool) => tool.name.includes("report")).map((tool) => tool.name)).toEqual(["list_reports", "list_report_datasources", "list_report_folders", "get_report_metrics", "get_report", "get_report_block", "search_report_options", "get_report_run", "get_report_instruction", "list_report_versions", "get_report_version_diff", "list_report_owners", "list_unmanaged_reports"]);
     expect(visibleTools({ ...key, scopes: ["reports:read", "reports:write"] }).some((tool) => /sql/i.test(tool.name))).toBe(false);
-    expect(visibleTools({ ...key, scopes: ["reports:read", "reports:write"] }).filter((tool) => /query/i.test(tool.name)).map((tool) => tool.name)).toEqual(["update_report_query"]);
+    expect(visibleTools({ ...key, scopes: ["reports:read", "reports:write"] }).filter((tool) => /query/i.test(tool.name)).map((tool) => tool.name)).toEqual(["update_report_query", "suggest_report_query"]);
     // The key owner turned guest: nothing.
     const guestKey = { ...key, userId: guest.userId };
     expect(await listReports.handler({}, guestKey)).toEqual({ reports: [], nextCursor: null });

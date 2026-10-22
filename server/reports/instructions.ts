@@ -14,6 +14,7 @@ import { assertRunnableNow, specHash } from "./specCheck";
 import { liveGenerations } from "./generate";
 import type { ReportBlock } from "../../shared/reports";
 import { logger } from "../log";
+import { promoteSuggestion } from "./querySuggest";
 
 const slog = logger("reports");
 
@@ -28,7 +29,7 @@ const slog = logger("reports");
  */
 
 type Actor = { userId: string; role: string; keyId?: string | null };
-type Row = InstructionRow & { author_name: string | null };
+type Row = InstructionRow & { author_name: string | null; /** 065 (D527): a person's suggested query edit. */ suggested_query?: string | null };
 
 const SELECT = "SELECT i.*, u.display_name AS author_name FROM report_instructions i LEFT JOIN users u ON u.id = i.author_id";
 
@@ -39,8 +40,10 @@ function view(row: Row, userId: string, owner: boolean): ReportInstruction {
     // The run, its live events, and its steps are the owner's (review M1a: the prompt carries the doc);
     // the agent's own summary too, which may quote it. Others see the status and the outcome.
     agentRunId: owner ? row.agent_run_id : null,
-    summary: owner ? row.summary : null, error: row.error, appliedVersion: row.applied_version, autoApplied: row.auto_applied === 1,
-    createdAt: row.created_at, startedAt: row.started_at, finishedAt: row.finished_at, decidedAt: row.decided_at
+    // D527: a suggestion's summary is its author's own note to the owner.
+    summary: owner || row.suggested_query ? row.summary : null, error: row.error, appliedVersion: row.applied_version, autoApplied: row.auto_applied === 1,
+    createdAt: row.created_at, startedAt: row.started_at, finishedAt: row.finished_at, decidedAt: row.decided_at,
+    suggestedQuery: row.suggested_query ?? null
   };
 }
 
@@ -193,7 +196,9 @@ export function proposalView(reportId: string, instructionId: string, userId: st
   const current = parseSpec(report.spec_json);
   const stale = proposalStaleReason(row, report);
   const diff = diffSpecs(current, proposal.spec);
-  if (!owner) {
+  // D527: a suggested query edit is its author's own SQL and rows (no agent read the doc): they see it whole.
+  const suggestion = Boolean((row as Row).suggested_query);
+  if (!owner && !suggestion) {
     return {
       instructionId, spec: current, blocks: [], queries: [], results: [], currentResults: [], summary: null, outOfDate: stale !== null, ...(stale ? { staleReason: stale } : {}),
       redacted: { blocks: diff.blocks.length, queries: diff.queries.length }
@@ -221,7 +226,7 @@ export function proposalView(reportId: string, instructionId: string, userId: st
     }
     return byKey.get(query.key) ?? { queryKey: query.key, result: null, failed: null, stale: false };
   });
-  return { instructionId, spec, blocks, queries: diff.queries, results, currentResults, summary: owner ? proposal.summary : null, outOfDate: stale !== null, ...(stale ? { staleReason: stale } : {}) };
+  return { instructionId, spec, blocks, queries: diff.queries, results, currentResults, summary: owner || suggestion ? proposal.summary : null, outOfDate: stale !== null, ...(stale ? { staleReason: stale } : {}) };
 }
 
 /**
@@ -266,7 +271,8 @@ export function applyProposal(userId: string, reportId: string, instructionId: s
     const live = db.query("SELECT spec_json FROM reports WHERE id = ?").get(reportId) as { spec_json: string };
     if (row.base_spec_sha256 && specHash(live.spec_json) !== row.base_spec_sha256) throw new ReportError(409, "STALE_PROPOSAL", "The report changed since this was proposed");
     const committed = commitSpec({
-      reportId, userId, spec: proposal.spec, source: "edit", instructionId, stamp, runId,
+      // D527: a person's suggested SQL is a hand edit, not the agent's.
+      reportId, userId, spec: proposal.spec, source: (row as Row).suggested_query ? "manual" : "edit", instructionId, stamp, runId,
       docSnapshotId: proposal.docSnapshotId, results, note: row.summary
     });
     const at = now();
@@ -339,8 +345,10 @@ export function kick(reportId: string) {
       // A proposal that is out of date never blocks the queue (review M3).
       rejectStaleProposals(reportId);
       if (db.query("SELECT 1 FROM report_instructions WHERE report_id = ? AND status IN ('running','proposed')").get(reportId)) return;
-      const head = db.query("SELECT id FROM report_instructions WHERE report_id = ? AND status = 'queued' ORDER BY position, rowid LIMIT 1").get(reportId) as { id: string } | null;
+      const head = db.query("SELECT id, suggested_query FROM report_instructions WHERE report_id = ? AND status = 'queued' ORDER BY position, rowid LIMIT 1").get(reportId) as { id: string; suggested_query: string | null } | null;
       if (!head) return;
+      // D527: a suggested query edit holds its proposal already: it becomes proposed (or fails) with no agent run.
+      if (head.suggested_query) { promoteSuggestion(instructionRow(head.id)!); continue; }
       if (startEdit(head.id, { settled })) return;
       // Not started: still queued (the lock is busy: wait), or failed at once (try the next one).
       if (instructionRow(head.id)?.status === "queued") return;
