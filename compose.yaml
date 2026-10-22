@@ -6,6 +6,7 @@ services:
       args:
         APP_VERSION: ${APP_VERSION:-0.43.0}
         GIT_SHA: ${GIT_SHA:-development}
+        LOCAL_EMBEDDINGS_MODEL: ${LOCAL_EMBEDDINGS_MODEL:-include}
     container_name: mynotes
     restart: unless-stopped
     user: "1000:1000"

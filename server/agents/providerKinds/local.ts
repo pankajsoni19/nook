@@ -1,6 +1,6 @@
 import { config } from "../../config";
 import { LOCAL_BASE_URL, LOCAL_MODEL } from "../../../shared/localEmbedding";
-import { LOCAL_EMBED_BOUNDS, localEmbed, localEmbeddingStatus } from "../../knowledge/local/embedder";
+import { LOCAL_EMBED_BOUNDS, localEmbed, localEmbeddingStatus, localFilesProblem } from "../../knowledge/local/embedder";
 import { db } from "../../db";
 import { ProviderError } from "../loop";
 import { AgentError } from "../status";
@@ -41,6 +41,9 @@ export const localAdapter: ProviderAdapter = {
   },
   assertCreatable() {
     if (!config.localEmbeddings.enabled) throw new AgentError(409, "LOCAL_EMBEDDINGS_OFF", "Local embeddings are turned off on this server (LOCAL_EMBEDDINGS=off)", { field: "baseUrl" });
+    // An image built with LOCAL_EMBEDDINGS_MODEL=skip, or a LOCAL_EMBEDDINGS_DIR without the files: nothing to run.
+    const missing = localFilesProblem();
+    if (missing) throw new AgentError(409, "LOCAL_MODEL_MISSING", missing, { field: "baseUrl" });
   }
 };
 

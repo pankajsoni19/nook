@@ -59,7 +59,7 @@ export function KnowledgeSettings({ kbId, navigate, flash }: { kbId: string | nu
     </button>
   </li>;
   return <section className="settings-content agents-settings knowledge-settings" aria-labelledby={HUB_TITLE_ID}>
-    <div className="settings-section-heading"><span className="settings-icon"><BookOpen /></span><div><p>A knowledge base holds notes, text files, and pasted text that your agents can search. Its text is sent to the model provider to be indexed and whenever an agent quotes it.</p></div></div>
+    <div className="settings-section-heading"><span className="settings-icon"><BookOpen /></span><div><p>{KNOWLEDGE_INTRO}</p></div></div>
     <FormError message={error} />
     {status && !status.enabled && <p className="settings-warning">Chat is not configured on this server{status.reason ? " (see Settings → AI)" : ""}.</p>}
     {status?.enabled && !status.canChat && <p className="settings-warning">Chat is off for your role.</p>}
@@ -437,3 +437,10 @@ function TryIt({ kb }: { kb: KnowledgeDetail }) {
     </div>}
   </section>;
 }
+
+/**
+ * Settings → Knowledge's line (D548): where a base's text goes depends on how it searches. A model
+ * provider gets it to index; Local embeddings (on this server) and keyword search send it nowhere;
+ * an agent's model gets the passages it quotes either way.
+ */
+export const KNOWLEDGE_INTRO = "A knowledge base holds notes, text files, and pasted text that your agents can search. To be indexed, its text goes to the base's embedding provider, except with Local embeddings (run on this server) or keyword search, which send it nowhere. The passages an agent quotes go to that agent's model.";

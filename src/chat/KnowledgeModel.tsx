@@ -84,7 +84,7 @@ export function ModelSheet({ kb, onClose, onChanged }: { kb: KnowledgeDetail; on
     setError(null);
     const ok = await confirm.ask({
       title: `Change to ${name}?`,
-      message: `${count} ${count === 1 ? "source is" : "sources are"} embedded again with ${provider.name} · ${name}${sized ? `, ${size} dimensions` : ""}. ${changeEffect(provider)}`,
+      message: `${count} ${count === 1 ? "source is" : "sources are"} embedded again with ${provider.name} · ${name}${sized ? `, ${size} dimensions` : ""}. ${changeEffect(provider, kb)}`,
       confirmLabel: "Change model",
       danger: true
     });
@@ -136,7 +136,7 @@ export function ModelSheet({ kb, onClose, onChanged }: { kb: KnowledgeDetail; on
           <input id={ids.dims} type="number" inputMode="numeric" min={64} max={provider?.maxDims ?? 3072} step={1} value={dims} onChange={(event) => setDims(event.target.value)} aria-describedby={`${ids.dims}-limit`} />
           <p className="file-dialog-hint" id={`${ids.dims}-limit`}>{dimsLimitText(provider?.maxDims ?? 3072)}</p>
         </> : provider?.flavor === "local" ? null : <p className="file-dialog-hint">This model answers in its own size; the knowledge base adopts it{provider && provider.maxDims < 3072 ? ` (at most ${provider.maxDims.toLocaleString("en-US")}, an admin's limit: a larger answer stops indexing with an error)` : ""}.</p>}
-        <p className="file-dialog-hint">{provider ? changeEffect(provider) : MODEL_CHANGE_EFFECT}</p>
+        <p className="file-dialog-hint">{provider ? changeEffect(provider, kb) : MODEL_CHANGE_EFFECT}</p>
       </>}
       <footer className="file-dialog-actions">
         <button type="button" className="action-button secondary" onClick={onClose} disabled={busy}>Cancel</button>
@@ -205,10 +205,16 @@ export function SourceChunks({ kbId, sourceId, label }: { kbId: string; sourceId
   </div>;
 }
 
+/** The Re-index hour sentence of MODEL_CHANGE_EFFECT. */
+const HOUR_SENTENCE = " This counts as this hour's Re-index.";
+
 /**
  * What Change embedding model costs (D544): the usual effect, except that the local model spends no
- * tokens; it runs on this server, one passage at a time.
+ * tokens; it runs on this server, one passage at a time. D548: a keyword-only base, or one whose
+ * provider was removed, has no vectors to protect, so the change is not held to the Re-index hour
+ * (the server never waits there) and the sheet does not say it is.
  */
-export function changeEffect(provider: Pick<KnowledgeEmbeddingChoice, "flavor">): string {
-  return provider.flavor === "local" ? MODEL_CHANGE_EFFECT.replace("with the new model, at your token cost", "on this server (no token cost; about a second or two a passage)") : MODEL_CHANGE_EFFECT;
+export function changeEffect(provider: Pick<KnowledgeEmbeddingChoice, "flavor">, kb?: Pick<KnowledgeDetail, "keywordOnly" | "providerName">): string {
+  const effect = provider.flavor === "local" ? MODEL_CHANGE_EFFECT.replace("with the new model, at your token cost", "on this server (no token cost; about a second or two a passage)") : MODEL_CHANGE_EFFECT;
+  return kb && (kb.keywordOnly || kb.providerName === null) ? effect.replace(HOUR_SENTENCE, " No Re-index hour applies to this knowledge base.") : effect;
 }

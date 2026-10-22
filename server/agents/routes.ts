@@ -300,7 +300,7 @@ export function registerAgentRoutes(app: Hono<AppEnv>) {
     }
     return { settings: writeAgentSettings(c.get("user").id, patch, expectedRevision) };
   })));
-  app.get("/api/agents/admin/providers", handleRecovery(adminOnly(() => ({ providers: listProviders(), local: localStatus() }))));
+  app.get("/api/agents/admin/providers", handleRecovery(adminOnly(async () => ({ providers: listProviders(), local: await localStatus() }))));
   app.post("/api/agents/admin/providers", handle(adminOnly(async (c) => c.json({ provider: createProvider(c.get("user").id, await parseJson(c.req.raw, providerCreateSchema)) }, 201))));
   app.get("/api/agents/admin/providers/:providerId", handleRecovery(adminOnly((c) => ({ provider: providerSummary(providerRow(id(c, "providerId"))) }))));
   app.patch("/api/agents/admin/providers/:providerId", handleRecovery(adminOnly(async (c) => ({ provider: updateProvider(c.get("user").id, id(c, "providerId"), await parseJson(c.req.raw, providerPatchSchema)) }))));

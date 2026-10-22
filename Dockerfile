@@ -31,11 +31,18 @@ RUN bun install --frozen-lockfile --production \
 
 # D545: the local embedding model, fetched from its pinned commit and checked (size and sha256) at build
 # time, so a running Nook never downloads it. Root-owned in the image: the app can read it, not change it.
+# D548: LOCAL_EMBEDDINGS_MODEL=skip builds without it (135 MB less); the Local kind is then offered only
+# when LOCAL_EMBEDDINGS_DIR holds the verified files.
 FROM oven/bun:1.4.2-alpine@sha256:d888c0ae6c86d7866ff10c5aafdd9077b36aee6455b33dd270fb93c0dd5cef6f AS local-model
+ARG LOCAL_EMBEDDINGS_MODEL=include
 WORKDIR /app
 COPY shared/localEmbedding.ts ./shared/localEmbedding.ts
 COPY scripts/fetchLocalModel.ts ./scripts/fetchLocalModel.ts
-RUN bun scripts/fetchLocalModel.ts /app/models/multilingual-e5-small
+RUN case "$LOCAL_EMBEDDINGS_MODEL" in \
+      include) bun scripts/fetchLocalModel.ts /app/models/multilingual-e5-small ;; \
+      skip) mkdir -p /app/models ;; \
+      *) echo "LOCAL_EMBEDDINGS_MODEL must be include or skip" >&2; exit 1 ;; \
+    esac
 
 FROM oven/bun:1.4.2-alpine@sha256:d888c0ae6c86d7866ff10c5aafdd9077b36aee6455b33dd270fb93c0dd5cef6f AS production
 WORKDIR /app

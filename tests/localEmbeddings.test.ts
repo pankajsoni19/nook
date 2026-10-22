@@ -1,4 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createUser, db, request, type Session } from "./support/harness";
 import { retireUsersAfterFile } from "./support/retireUsers";
 import { startScriptedProvider } from "../scripts/fakeReportProvider";
@@ -101,6 +104,29 @@ describe("the LOCAL_EMBEDDINGS switch (D544)", () => {
       expect(await rejection(localEmbed(["hello"], "query"))).toContain("turned off on this server");
     } finally {
       config.localEmbeddings.enabled = true;
+    }
+  });
+});
+
+describe("an image built without the model (D548)", () => {
+  test("Settings → AI says why, the Kind is not offered, and adding one is refused", async () => {
+    const stub = config.localEmbeddings.stub;
+    const dir = config.localEmbeddings.dir;
+    const empty = mkdtempSync(join(tmpdir(), "nook-no-model-"));
+    config.localEmbeddings.stub = null;
+    config.localEmbeddings.dir = empty;
+    try {
+      const listed = await send(admin, "GET", "/agents/admin/providers");
+      expect(listed.body.local).toMatchObject({ allowed: true, available: false, added: false });
+      expect(listed.body.local.reason).toContain("LOCAL_EMBEDDINGS_MODEL=skip");
+      expect(listed.body.local.reason).toContain(empty);
+      const refused = await send(admin, "POST", "/agents/admin/providers", { name: "Local", baseUrl: LOCAL_BASE_URL });
+      expect(refused.status).toBe(409);
+      expect(refused.body.code).toBe("LOCAL_MODEL_MISSING");
+    } finally {
+      config.localEmbeddings.stub = stub;
+      config.localEmbeddings.dir = dir;
+      rmSync(empty, { recursive: true, force: true });
     }
   });
 });

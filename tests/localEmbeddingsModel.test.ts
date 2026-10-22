@@ -7,6 +7,7 @@ import { LOCAL_MODEL } from "../shared/localEmbedding";
 
 const { config } = await import("../server/config");
 const { localEmbed, localEmbedStats, resetLocalEmbedderForTests } = await import("../server/knowledge/local/embedder");
+const { verifiedProblem } = await import("../server/knowledge/local/model");
 
 /**
  * The real local model (D544, D546), opt-in because it loads 135 MB and takes seconds per text:
@@ -80,6 +81,9 @@ describe.skipIf(!enabled)("the real local model (opt-in)", () => {
       writeFileSync(join(copy, "tokenizer_config.json"), original.replace("512", "513"));
       config.localEmbeddings.dir = copy;
       expect(await rejection(localEmbed(["anything"], "document"))).toContain("does not match its pinned sha256");
+      // D548: Settings → AI's check finds it too (and the real files pass).
+      expect(await verifiedProblem(copy)).toContain("tokenizer_config.json in");
+      expect(await verifiedProblem(dir)).toBeNull();
     } finally {
       config.localEmbeddings.dir = dir;
       resetLocalEmbedderForTests();

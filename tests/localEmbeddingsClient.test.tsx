@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { breakable, capabilitiesHint, endpointLabel, isLocal, localOptionText, LOCAL_PROVIDER_TEXT, testText } from "../src/chat/AiSettings";
 import { claudeTemperatureWarning } from "../src/chat/AgentsSettings";
 import { changeEffect } from "../src/chat/KnowledgeModel";
+import { KNOWLEDGE_INTRO } from "../src/chat/KnowledgeSettings";
 import { MODEL_CHANGE_EFFECT } from "../shared/knowledge";
 import { knowledgeLine } from "../src/chat/knowledgeApi";
 import { DEFAULT_COMPAT } from "../shared/agents";
@@ -29,7 +30,7 @@ describe("the local provider in Settings → AI", () => {
     expect(localOptionText(status({}))).toBe("Built into Nook: knowledge bases only, nothing leaves the server");
     expect(localOptionText(status({ allowed: false, available: false }))).toBe("Turned off on this server (LOCAL_EMBEDDINGS=off)");
     expect(localOptionText(status({ added: true }))).toBe("Already added");
-    expect(localOptionText(status({ available: false, reason: "missing" }))).toBe("Built into Nook; its model files are not in place yet");
+    expect(localOptionText(status({ available: false, reason: "missing" }))).toBe("Its model files are not in place on this server (see below)");
     expect(LOCAL_PROVIDER_TEXT).toContain("nothing leaves the server");
     expect(LOCAL_PROVIDER_TEXT).toContain("384 dimensions, about 135 MB");
   });
@@ -43,6 +44,15 @@ describe("the local provider in Settings → AI", () => {
   test("Change embedding model says the local model costs no tokens", () => {
     expect(changeEffect({ flavor: "local" })).toBe("Every source is embedded again on this server (no token cost; about a second or two a passage). Search uses keywords only until that finishes, and the old vectors are deleted now. This counts as this hour's Re-index.");
     expect(changeEffect({})).toBe(MODEL_CHANGE_EFFECT);
+    // D548: no Re-index hour for a keyword-only base or one whose provider was removed.
+    expect(changeEffect({ flavor: "local" }, { keywordOnly: true, providerName: null })).toBe("Every source is embedded again on this server (no token cost; about a second or two a passage). Search uses keywords only until that finishes, and the old vectors are deleted now. No Re-index hour applies to this knowledge base.");
+    expect(changeEffect({}, { keywordOnly: false, providerName: null })).toContain("No Re-index hour applies");
+    expect(changeEffect({}, { keywordOnly: false, providerName: "OpenAI" })).toBe(MODEL_CHANGE_EFFECT);
+  });
+
+  test("Settings → Knowledge says where a base's text goes, by how it searches", () => {
+    expect(KNOWLEDGE_INTRO).toContain("except with Local embeddings (run on this server) or keyword search, which send it nowhere");
+    expect(KNOWLEDGE_INTRO).not.toContain("is sent to the model provider to be indexed");
   });
 
   test("code values wrap after _ - . / rather than mid-word", () => {

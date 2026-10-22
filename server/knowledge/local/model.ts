@@ -27,13 +27,36 @@ export function missingFile(dir: string): LocalModelFile | null {
 /** Why the model cannot load from `dir`, in an admin's words, or null. */
 export function filesProblem(dir: string): string | null {
   const missing = missingFile(dir);
-  return missing ? `The local model's files are not in place: ${missing.path} is missing or has another size in ${dir}. Run scripts/fetchLocalModel.ts there, or use the Docker image, which carries them.` : null;
+  return missing ? `The local model's files are not in place: ${missing.path} is missing or has another size in ${dir}. An image built with LOCAL_EMBEDDINGS_MODEL=skip has none: put them in LOCAL_EMBEDDINGS_DIR with scripts/fetchLocalModel.ts, or build with LOCAL_EMBEDDINGS_MODEL=include.` : null;
 }
 
 async function sha256Of(path: string): Promise<string> {
   const hasher = new Bun.CryptoHasher("sha256");
   for await (const chunk of Bun.file(path).stream()) hasher.update(chunk);
   return hasher.digest("hex");
+}
+
+/** The sha256 checks already made, by path, size, and modification time (Settings → AI asks often; a file changed since is checked again). */
+const verified = new Map<string, { size: number; mtimeMs: number; ok: boolean }>();
+
+/**
+ * Why the model in `dir` would not load, or null when every file is in place with its pinned size
+ * and sha256 (Settings → AI offers the Local kind only then). Each file is hashed once per change.
+ */
+export async function verifiedProblem(dir: string): Promise<string | null> {
+  const problem = filesProblem(dir);
+  if (problem) return problem;
+  for (const file of LOCAL_MODEL.files) {
+    const path = join(dir, file.path);
+    const { size, mtimeMs } = statSync(path);
+    let entry = verified.get(path);
+    if (!entry || entry.size !== size || entry.mtimeMs !== mtimeMs) {
+      entry = { size, mtimeMs, ok: await sha256Of(path) === file.sha256 };
+      verified.set(path, entry);
+    }
+    if (!entry.ok) return `The local model's file ${file.path} in ${dir} does not match its pinned sha256. Fetch it again with scripts/fetchLocalModel.ts.`;
+  }
+  return null;
 }
 
 /** Every file's size and sha256 against the pinned manifest; throws `MODEL_MISSING` or `MODEL_CHANGED`. */

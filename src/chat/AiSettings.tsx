@@ -327,8 +327,9 @@ function ProviderDialog({ provider, local, onCancel, onSaved }: { provider: Prov
         <span className="ai-label" id={ids.kind}>Kind</span>
         <Select<"endpoint" | "local"> labelledBy={ids.kind} label="Kind" value={kind} onChange={(value) => { setKind(value); if (value === "local" && !name.trim()) setName("Local embeddings"); setError(null); }} options={[
           { value: "endpoint", label: "Model provider endpoint", description: "OpenAI-compatible: OpenAI, Anthropic, Voyage AI, a proxy" },
-          { value: "local", label: "Local embeddings", description: localOptionText(local), disabled: !local?.allowed || local.added }
+          { value: "local", label: "Local embeddings", description: localOptionText(local), disabled: !local?.allowed || !local.available || local.added }
         ]} />
+        {local?.allowed && !local.available && !local.added && <p className="file-dialog-hint" role="note">Local embeddings: {local.reason}</p>}
       </>}
       <label htmlFor={ids.name}>Name</label>
       <input id={ids.name} value={name} maxLength={AGENT_BOUNDS.providerName} autoFocus autoComplete="off" placeholder={kind === "local" ? "Local embeddings" : "OpenAI"} onChange={(event) => setName(event.target.value)} />
@@ -411,7 +412,7 @@ export function localOptionText(local: LocalEmbeddingStatus | null): string {
   if (!local) return "Built into Nook";
   if (!local.allowed) return "Turned off on this server (LOCAL_EMBEDDINGS=off)";
   if (local.added) return "Already added";
-  return local.available ? "Built into Nook: knowledge bases only, nothing leaves the server" : "Built into Nook; its model files are not in place yet";
+  return local.available ? "Built into Nook: knowledge bases only, nothing leaves the server" : "Its model files are not in place on this server (see below)";
 }
 
 /** A code value that may wrap after `_`, `-`, `.`, or `/` rather than in the middle of a word (1280 px cards). */

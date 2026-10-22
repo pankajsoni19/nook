@@ -2,7 +2,7 @@ import { config } from "../../config";
 import { logger } from "../../log";
 import { ProviderError } from "../../agents/loop";
 import { LOCAL_MODEL, LOCAL_MODEL_BYTES, type LocalEmbeddingStatus } from "../../../shared/localEmbedding";
-import { filesProblem } from "./model";
+import { filesProblem, verifiedProblem } from "./model";
 import type { WorkerReply } from "./worker";
 
 /**
@@ -38,13 +38,19 @@ export const localEmbedStats = { embedded: 0, started: 0, loadMs: null as number
 
 const fail = (message: string) => new ProviderError("PROVIDER_ERROR", message);
 
-/** Whether this server allows the local model, and whether its files are in place (sizes only; the worker checks sha256). */
-export function localEmbeddingStatus(added: boolean): LocalEmbeddingStatus {
+/**
+ * Whether this server allows the local model, and whether its files are in place and verified (sizes
+ * and sha256, each file hashed once per change; the worker checks sha256 again on every load).
+ */
+export async function localEmbeddingStatus(added: boolean): Promise<LocalEmbeddingStatus> {
   const base = { model: LOCAL_MODEL.id, dims: LOCAL_MODEL.dims, bytes: LOCAL_MODEL_BYTES, added };
   if (!config.localEmbeddings.enabled) return { ...base, allowed: false, available: false, reason: "Turned off on this server (LOCAL_EMBEDDINGS=off)." };
-  const problem = config.localEmbeddings.stub ? null : filesProblem(config.localEmbeddings.dir);
+  const problem = config.localEmbeddings.stub ? null : await verifiedProblem(config.localEmbeddings.dir);
   return { ...base, allowed: true, available: problem === null, reason: problem };
 }
+
+/** The cheap check a new local provider must pass (the files in place at their sizes); null when it may be added. */
+export const localFilesProblem = () => config.localEmbeddings.stub ? null : filesProblem(config.localEmbeddings.dir);
 
 function stopWorker(reason: string) {
   if (idleTimer) clearTimeout(idleTimer);
