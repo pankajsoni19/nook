@@ -7,7 +7,7 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 
 **Current state (2026-10-16).**
 - **v0.42.1** is released (2026-10-16, fixes: Report owners title on Forward, the eval's Settings → AI fallback). **v0.42.0** (2026-10-15): PDFs as report docs and in `read_attachment_text`, `search_report_options`, Report owners paging. v0.41.0 brought PDF text in Files, `search_documents`, console parameters and Settings → Report owners.
-- Migrations: **001–063** are released and immutable (045 and 054 unused; 054 is reserved for Messages). Next free: **064** (lane DOCS), then 065.
+- Migrations: **001–063** are released and immutable (045 and 054 unused; 054 is reserved for Messages). Next free: **064** (lane DOCS), **065** (lane EDIT, if needed), **066** (lane FILTERS, if needed), then 067.
 - Development happens directly on `main`, pushed as each change passes its gates.
 
 ## In flight
@@ -17,10 +17,14 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
   - [ ] Changes: the **About** dropdown gains **"Add a new section"** (placed after a chosen block, or at the end), alongside the page and the existing blocks.
   - [ ] Changes: an instruction can carry **Nook note/file or Outline doc links**; the edit agent reads them, and they join the report's docs.
 
+- [ ] **Reports: delete a section from its header** (operator, 2026-10-22; lane EDIT): a trash icon on each block's header (title, text, chart, KPI, table) removes it after a confirm, as a new version (today only Changes → Arrange can).
+- [ ] **Reports: modify a query, not only view it** (operator, 2026-10-22, "research and build"; lane EDIT): owners edit SQL in Inspect → Query (today only Changes → Arrange → Edit SQL); research how team members below owner should change one (suggest an edit for the owner to apply, try it without saving).
+- [ ] **Reports: dynamic filters** (operator, 2026-10-22, "research and build"; lane FILTERS): research beyond D489's AI-added parameters (filters people add themselves, click a chart to filter, filters that narrow each other, table filters), plan in docs/plan/REPORT_FILTERS.md, then build after lane DOCS lands.
+
 ## Waiting on the operator
 
 - [ ] **Real-model eval of report generation** (D488 chart kinds, D489 parameters): only the scripted provider has run. Run `bun --no-env-file scripts/reportEval.ts --clickhouse <test ClickHouse>` on a host whose Nook has a working model provider (it falls back to Settings → AI; the local instance's OpenAI key is a placeholder), or set `REPORT_EVAL_*`, or regenerate reports on the VM (docs/OPERATIONS.md "Report generation eval"). Check: the five kind cases (`onboarding_funnel`, `cohort_retention`, `quota_attainment`, `latency_spread`, `plan_flow`) get fitting chart kinds, and a doc that names a window or a dimension gets a date range or filter. Tune the prompts from the scores.
-- [ ] **Report Lists** ([plan](docs/plan/REPORTS_ORG.md) phase 3, optional, migration 065 — 064 went to lane DOCS): a report in many lists; a list never grants access. Start only if the operator asks.
+- [ ] **Report Lists** ([plan](docs/plan/REPORTS_ORG.md) phase 3, optional, migration 067 — 064–066 went to lanes DOCS, EDIT and FILTERS): a report in many lists; a list never grants access. Start only if the operator asks.
 
 ## Small fixes
 
