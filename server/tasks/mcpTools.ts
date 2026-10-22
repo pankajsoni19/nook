@@ -519,7 +519,7 @@ export const taskTools: McpToolSpec[] = [
       });
     }
   }),
-  // Lane TASKS (D611): archiving hides a card and is undone by unarchive_card, so it is not a removal (D180).
+  // Lane TASKS (D627): archiving hides a card and is undone by unarchive_card, so it is not a removal (D180).
   defineTool({
     name: "archive_card",
     title: "Archive a card",

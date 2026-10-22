@@ -46,7 +46,9 @@
 /* New collection */
 .collection-new { display: flex; min-height: 0; flex-direction: column; }
 .collection-new-label { margin: 14px 20px 4px; color: #8d8d94; font-size: .72rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
-.collection-template-list { max-height: 46vh; }
+/* Rows take their natural height and the list scrolls: in the phone sheet the list's height is
+   bounded, and auto rows shrank to each row's 58 px minimum, so wrapped descriptions overlapped. */
+.collection-template-list { max-height: 46vh; grid-auto-rows: max-content; }
 .collection-template { grid-template-columns: 20px minmax(0, 1fr) 18px; min-height: 58px; padding: 8px 12px; }
 .collection-template span small { white-space: normal; }
 .collection-template-fields { color: #5f5f66 !important; }

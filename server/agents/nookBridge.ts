@@ -87,7 +87,7 @@ export const NOOK_NEVER_TOOLS: ReadonlySet<string> = new Set([
   "list_report_lists", "get_report_list", "add_report_to_list",
   // D575: a copy of a report is a person's own new report, not an agent's.
   "duplicate_report",
-  // D611: hiding a card from a board (and back) is for people and their own keys, not chat agents.
+  // D627: hiding a card from a board (and back) is for people and their own keys, not chat agents.
   "archive_card", "unarchive_card"
 ]);
 export const isBinTool = (name: string) => name.startsWith("bin_") || name.startsWith("restore_");

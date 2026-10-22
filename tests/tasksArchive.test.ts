@@ -365,7 +365,7 @@ describe("MCP and search keep archived cards, flagged (D607)", () => {
     expect(found.results).toEqual([expect.objectContaining({ id: old.id, is_archived: 1 })]);
   });
 
-  test("archive_card and unarchive_card (D611): tasks:write, edit level, audited with the key, items-scoped", async () => {
+  test("archive_card and unarchive_card (D627): tasks:write, edit level, audited with the key, items-scoped", async () => {
     const { createMcpApiKey } = await import("../server/mcp");
     const { invokeMcpToolForTests } = await import("../server/mcpTools");
     const { owner, member, boardId, todo } = await setup("McpArchive");
