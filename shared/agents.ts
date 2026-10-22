@@ -81,7 +81,7 @@ export type ProviderCompat = {
    * Anthropic). `api.anthropic.com` is Anthropic and `api.voyageai.com` is Voyage AI by host alone
    * (`providerFlavor`); anything else is plain OpenAI-compatible unless this says otherwise.
    */
-  flavor?: ProviderFlavor;
+  flavor?: CompatFlavor;
   /** D541: whether the provider makes embeddings (absent or true: it does). False: never offered for knowledge bases ("Embeddings: none"). */
   embeddings?: boolean;
   /** D542: whether the provider answers chat completions (absent or true: it does). False: embeddings only, never a chat or report model. */
@@ -95,9 +95,11 @@ export const REASONING_EFFORTS = ["omit", "none", "minimal", "low", "medium", "h
 export type ReasoningEffort = typeof REASONING_EFFORTS[number];
 export const DEFAULT_COMPAT: ProviderCompat = { tokenParam: "max_completion_tokens", streamUsage: true, supportsTools: true, contextTokens: 128_000 };
 
-/** D539: the kinds of endpoint Nook knows apart; null is a plain OpenAI-compatible one. */
+/** D539: the kinds of endpoint an admin may name on `compat.flavor` (a proxy); null is a plain OpenAI-compatible one. */
 export const PROVIDER_FLAVORS = ["anthropic", "voyage"] as const;
-export type ProviderFlavor = typeof PROVIDER_FLAVORS[number];
+export type CompatFlavor = typeof PROVIDER_FLAVORS[number];
+/** D539, D544: the kinds Nook knows apart; `local` (the model built into Nook) only by its `local:` base URL, never by `compat.flavor`. */
+export type ProviderFlavor = CompatFlavor | "local";
 /** The `anthropic-version` Nook sends to Anthropic (the Messages API's only stable version). */
 export const ANTHROPIC_VERSION = "2023-06-01";
 export const ANTHROPIC_HOST = "api.anthropic.com";
@@ -110,14 +112,16 @@ const hostOf = (baseUrl: string) => { try { return new URL(baseUrl).hostname.toL
 
 /** D539: which kind of endpoint a provider is: by host first (Anthropic, Voyage AI), else its explicit `compat.flavor`. */
 export function providerFlavor(baseUrl: string, compat?: { flavor?: ProviderFlavor | null } | null): ProviderFlavor | null {
+  // D544: the local model's address is `local://nook`, which no network endpoint can be.
+  if (/^\s*local:/i.test(baseUrl)) return "local";
   const host = hostOf(baseUrl);
   if (host === ANTHROPIC_HOST) return "anthropic";
   if (host === VOYAGE_HOST) return "voyage";
-  return compat?.flavor ?? null;
+  return compat?.flavor && compat.flavor !== "local" ? compat.flavor : null;
 }
 
 /** How the provider card names a known endpoint (null: a plain OpenAI-compatible one). */
-export const FLAVOR_LABELS: Record<ProviderFlavor, string> = { anthropic: "Anthropic (OpenAI-compatible endpoint)", voyage: "Voyage AI (embeddings only)" };
+export const FLAVOR_LABELS: Record<ProviderFlavor, string> = { anthropic: "Anthropic (OpenAI-compatible endpoint)", voyage: "Voyage AI (embeddings only)", local: "Local (built into Nook)" };
 
 /**
  * D539/D542: the compatibility defaults a new provider of a known kind starts with (the form's and the
@@ -127,6 +131,7 @@ export const FLAVOR_LABELS: Record<ProviderFlavor, string> = { anthropic: "Anthr
  * `output_dimension` in four sizes.
  */
 export function flavorDefaults(flavor: ProviderFlavor | null): Partial<ProviderCompat> {
+  if (flavor === "local") return { chat: false, supportsTools: false };
   if (flavor === "anthropic") return { tokenParam: "max_tokens", streamUsage: true, requiredToolChoice: false, namedToolChoice: false, embeddings: false, contextTokens: 200_000 };
   if (flavor === "voyage") return { chat: false, supportsTools: false, dimensionsParam: "output_dimension", embeddingSizes: [...VOYAGE_SIZES] };
   return {};
@@ -410,7 +415,7 @@ export type ProviderSummary = {
  * provider uses now; `models` is the admin's last model list (Test, or the models route) when the
  * server still has it, else null (the editor then suggests `defaultModel` and takes free text).
  */
-export type AgentProviderChoice = { id: string; name: string; isDefault: boolean; defaultModel: string; models: string[] | null };
+export type AgentProviderChoice = { id: string; name: string; isDefault: boolean; defaultModel: string; models: string[] | null; /** The provider's kind when it is not plain OpenAI-compatible (the editor warns about Claude's temperature). */ flavor?: ProviderFlavor };
 /**
  * A tool an agent picked (AC-B, plan §5.2): a remote server's tool, or one of Nook's own tools;
  * AC-E (Wave 44): a knowledge base (all of an agent's bases become one `search_knowledge` tool).

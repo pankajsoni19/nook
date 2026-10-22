@@ -54,12 +54,13 @@ export function sourceLabel(source: Pick<KnowledgeSource, "kind" | "title" | "ti
  * The list line of a base: "3 sources · 42 chunks · Ready". Sources in error or unavailable are named
  * instead of Ready (QA LOW-4): "1 source has an error · 2 sources unavailable".
  */
-export function knowledgeLine(kb: Pick<KnowledgeSummary, "sourceCount" | "chunkCount" | "status" | "counts">) {
+/** `short` (the list's rows): "1 error" for "1 source has an error", so a row's line fits a phone. */
+export function knowledgeLine(kb: Pick<KnowledgeSummary, "sourceCount" | "chunkCount" | "status" | "counts">, short = false) {
   const errors = kb.counts.error;
   const unavailable = kb.counts.unavailable;
   const problems = [
-    errors > 0 ? `${errors} ${errors === 1 ? "source has an error" : "sources have errors"}` : null,
-    unavailable > 0 ? `${unavailable} ${unavailable === 1 ? "source" : "sources"} unavailable` : null
+    errors > 0 ? (short ? `${errors} ${errors === 1 ? "error" : "errors"}` : `${errors} ${errors === 1 ? "source has an error" : "sources have errors"}`) : null,
+    unavailable > 0 ? (short ? `${unavailable} unavailable` : `${unavailable} ${unavailable === 1 ? "source" : "sources"} unavailable`) : null
   ].filter(Boolean);
   const errorLine = problems.join(" · ");
   const waiting = kb.counts.pending + kb.counts.indexing;

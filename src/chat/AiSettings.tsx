@@ -18,6 +18,7 @@ import { HUB_TITLE_ID } from "../settings/hubModel";
 import "./chat.css";
 import { notify } from "../ui/notify";
 import { FormError } from "../ui/FormError";
+import { LOCAL_BASE_URL, LOCAL_MODEL, LOCAL_MODEL_BYTES, type LocalEmbeddingStatus } from "../../shared/localEmbedding";
 
 /**
  * Settings → AI (admins; agent chat plan §4.1, §13.4): providers (name, base URL, a write-only API
@@ -37,6 +38,7 @@ export function AiSettings({ flash, tabs, tab, onSelectTab }: { flash: (message:
   const [status, setStatus] = useState<AgentsStatus | null>(null);
   const [serverCount, setServerCount] = useState<number | null>(null);
   const [providers, setProviders] = useState<ProviderSummary[] | null>(null);
+  const [local, setLocal] = useState<LocalEmbeddingStatus | null>(null);
   const [settings, setSettings] = useState<(AgentSettings & { revision: number }) | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<ProviderSummary | "new" | null>(null);
@@ -53,6 +55,7 @@ export function AiSettings({ flash, tabs, tab, onSelectTab }: { flash: (message:
       if (!next.enabled) return;
       const [list, policy] = await Promise.all([listProviders(), readSettings()]);
       setProviders(list.providers);
+      setLocal(list.local ?? null);
       setSettings(policy.settings);
       setError(null);
     } catch (reason) {
@@ -135,7 +138,7 @@ export function AiSettings({ flash, tabs, tab, onSelectTab }: { flash: (message:
         const embeds = providerEmbeds(provider.compat);
         return <li key={provider.id} className="security-card ai-provider">
           <div className="ai-provider-head">
-            <div><span className="ai-provider-name"><strong>{provider.name}</strong>{provider.isDefault && <span className="ai-badge">Default</span>}</span><small>{provider.baseUrl}</small></div>
+            <div><span className="ai-provider-name"><strong>{provider.name}</strong>{provider.isDefault && <span className="ai-badge">Default</span>}</span><small>{isLocal(provider) ? "Runs inside this Nook; nothing leaves the server" : provider.baseUrl}</small></div>
             <div className="ai-provider-actions">
               <button type="button" className="secondary-button" onClick={() => { void test(provider); }} disabled={result === "running"}>{result === "running" ? "Testing…" : "Test"}</button>
               {chats && <button type="button" className="secondary-button" onClick={() => { void probeTools(provider); }} disabled={probe === "running"}>{probe === "running" ? "Testing tools…" : "Test tool calling"}</button>}
@@ -147,12 +150,12 @@ export function AiSettings({ flash, tabs, tab, onSelectTab }: { flash: (message:
           <dl className="ai-provider-facts">
             <div><dt>Endpoint</dt><dd>{endpointLabel(provider)}</dd></div>
             <div><dt>Capabilities</dt><dd>{capabilitiesSummary(provider.compat)}</dd></div>
-            <div><dt>API key</dt><dd>{provider.hasSecret ? <code>{provider.hint ?? "Saved"}</code> : <span className="chat-muted">none</span>}</dd></div>
+            {!isLocal(provider) && <div><dt>API key</dt><dd>{provider.hasSecret ? <code>{provider.hint ?? "Saved"}</code> : <span className="chat-muted">none</span>}</dd></div>}
             {chats && <div><dt>Default model</dt><dd><code>{provider.defaultModel}</code></dd></div>}
-            {chats && <div><dt>Token parameter</dt><dd><code>{provider.compat.tokenParam}</code></dd></div>}
+            {chats && <div><dt>Token parameter</dt><dd><code>{breakable(provider.compat.tokenParam)}</code></dd></div>}
             {chats && <div><dt>Context</dt><dd>{provider.compat.contextTokens.toLocaleString()} tokens{provider.compat.streamUsage ? "" : " · usage estimated"}</dd></div>}
-            {embeds && <div><dt>Knowledge bases</dt><dd>{policySummary(provider.knowledge)}</dd></div>}
-            {embeds && provider.embeddingModel && <div><dt>Embedding model</dt><dd><code>{provider.embeddingModel}</code>{provider.compat.embeddingSizes ? ` · ${provider.compat.embeddingSizes.map((size) => size.toLocaleString("en-US")).join(", ")} dimensions` : ""}</dd></div>}
+            {embeds && <div><dt>Knowledge bases</dt><dd>{isLocal(provider) ? (provider.knowledge.enabled ? "Allowed" : "Not allowed") : policySummary(provider.knowledge)}</dd></div>}
+            {embeds && provider.embeddingModel && <div><dt>Embedding model</dt><dd><code>{breakable(provider.embeddingModel)}</code>{provider.compat.embeddingSizes ? ` · ${provider.compat.embeddingSizes.map((size) => size.toLocaleString("en-US")).join(", ")} dimensions` : provider.embeddingDims ? ` · ${provider.embeddingDims.toLocaleString("en-US")} dimensions` : ""}</dd></div>}
             {chats && <div><dt>Images</dt><dd>{visionSummary(provider.vision)}</dd></div>}
             {chats && <div><dt>Tool choice</dt><dd>{toolChoiceSummary(provider.compat)}</dd></div>}
             {chats && provider.compat.reasoningEffort && <div><dt>Reasoning effort</dt><dd><code>{provider.compat.reasoningEffort}</code></dd></div>}
@@ -171,7 +174,7 @@ export function AiSettings({ flash, tabs, tab, onSelectTab }: { flash: (message:
       <div className="settings-section-heading"><span className="settings-icon"><SlidersHorizontal /></span><div><h3 id="ai-policy-heading">Chat policy</h3><p>Who creates agents, who chats, daily token budgets, and the default provider.</p></div></div>
       {settings && <PolicyForm settings={settings} providers={providers ?? []} flash={flash} onSaved={(next) => setSettings(next)} />}
     </div>}
-    {editing && <ProviderDialog provider={editing === "new" ? null : editing} onCancel={() => setEditing(null)} onSaved={() => { setEditing(null); void load(); }} />}
+    {editing && <ProviderDialog provider={editing === "new" ? null : editing} local={local} onCancel={() => setEditing(null)} onSaved={() => { setEditing(null); void load(); }} />}
     {confirm.confirmElement}
   </section>;
 }
@@ -241,7 +244,9 @@ export const nookAutoPolicyText = () => `Each person's agents read what that per
 /** What the public-links policy does (Wave 43, AC-O1, D362), under its checkbox. */
 export const PUBLIC_LINKS_POLICY_TEXT = "Members and admins can then publish a frozen snapshot of one of their chats at a link anyone can open without signing in; tool results stay hidden unless they include them. Turning this off makes every link answer “not found” at once; the links are kept, so they work again if you turn it back on.";
 
-function ProviderDialog({ provider, onCancel, onSaved }: { provider: ProviderSummary | null; onCancel: () => void; onSaved: () => void }) {
+function ProviderDialog({ provider, local, onCancel, onSaved }: { provider: ProviderSummary | null; local: LocalEmbeddingStatus | null; onCancel: () => void; onSaved: () => void }) {
+  // D544: what is added: an endpoint (OpenAI-compatible, Anthropic, Voyage AI), or the model built into Nook. An existing provider keeps its kind.
+  const [kind, setKind] = useState<"endpoint" | "local">(provider && isLocal(provider) ? "local" : "endpoint");
   const [name, setName] = useState(provider?.name ?? "");
   const [baseUrl, setBaseUrl] = useState(provider?.baseUrl ?? DEFAULT_BASE_URL);
   const [apiKey, setApiKey] = useState("");
@@ -269,11 +274,14 @@ function ProviderDialog({ provider, onCancel, onSaved }: { provider: ProviderSum
     if (!touched.has("chat")) setChat(defaults.chat !== false);
     if (!touched.has("embeddings")) setEmbeddings(defaults.embeddings !== false);
   }
+  // A provider's own embedding model and size (API `embeddingModel`, `embeddingDims`): new knowledge bases start with them.
+  const [embeddingModel, setEmbeddingModel] = useState(provider?.embeddingModel ?? "");
+  const [embeddingDims, setEmbeddingDims] = useState(provider?.embeddingDims ? String(provider.embeddingDims) : "");
   const [knowledge, setKnowledge] = useState(() => policyDraft(provider?.knowledge));
   const [vision, setVision] = useState(() => visionDraft(provider?.vision));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const ids = { name: useId(), url: useId(), key: useId(), model: useId(), context: useId(), param: useId(), effort: useId() };
+  const ids = { name: useId(), url: useId(), key: useId(), model: useId(), context: useId(), param: useId(), effort: useId(), kind: useId(), embeddingModel: useId(), embeddingDims: useId() };
   useHistoryDialogGuard(true, onCancel, { blocked: busy });
 
   async function submit(event: FormEvent) {
@@ -283,13 +291,29 @@ function ProviderDialog({ provider, onCancel, onSaved }: { provider: ProviderSum
     if ("error" in policy) return setError(policy.error);
     const images = visionFromDraft(vision);
     if ("error" in images) return setError(images.error);
+    if (kind === "local") {
+      setBusy(true);
+      setError(null);
+      try {
+        if (provider) await updateProvider(provider.id, { name: name.trim(), knowledge: policy.policy, expectedRevision: provider.revision });
+        else await createProvider({ name: name.trim(), baseUrl: LOCAL_BASE_URL, knowledge: policy.policy });
+        onSaved();
+      } catch (reason) {
+        setError(errorCode(reason) === "REVISION_MISMATCH" ? "This provider changed elsewhere; close and reopen it." : messageOf(reason, "Could not save the provider"));
+        setBusy(false);
+      }
+      return;
+    }
+    if (!chat && !embeddings) return setError("A provider must answer chat, make embeddings, or both.");
+    const size = embeddingDims.trim() ? Number(embeddingDims) : null;
+    if (embeddings && size !== null && (!Number.isInteger(size) || size < 64 || size > 3072)) return setError("The embedding size is a whole number from 64 to 3,072.");
     setBusy(true);
     setError(null);
-    if (!chat && !embeddings) return setError("A provider must answer chat, make embeddings, or both.");
+    const own = embeddings ? { embeddingModel: embeddingModel.trim() || null, embeddingDims: size } : {};
     const compat = { tokenParam, streamUsage, contextTokens, reasoningEffort, chat, embeddings, ...(detected ? {} : { flavor: anthropicHeaders ? "anthropic" as const : provider?.compat.flavor === "voyage" ? "voyage" as const : null }) };
     try {
-      if (provider) await updateProvider(provider.id, { name: name.trim(), baseUrl: baseUrl.trim(), ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}), removeSecret, defaultModel: defaultModel.trim() || DEFAULT_MODEL, compat, vision: images.policy, knowledge: policy.policy, expectedRevision: provider.revision });
-      else await createProvider({ name: name.trim(), baseUrl: baseUrl.trim(), apiKey: apiKey.trim() || null, defaultModel: defaultModel.trim() || DEFAULT_MODEL, compat, vision: images.policy, knowledge: policy.policy });
+      if (provider) await updateProvider(provider.id, { name: name.trim(), baseUrl: baseUrl.trim(), ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}), removeSecret, defaultModel: defaultModel.trim() || DEFAULT_MODEL, ...own, compat, vision: images.policy, knowledge: policy.policy, expectedRevision: provider.revision });
+      else await createProvider({ name: name.trim(), baseUrl: baseUrl.trim(), apiKey: apiKey.trim() || null, defaultModel: defaultModel.trim() || DEFAULT_MODEL, ...own, compat, vision: images.policy, knowledge: policy.policy });
       setApiKey("");
       onSaved();
     } catch (reason) {
@@ -299,8 +323,20 @@ function ProviderDialog({ provider, onCancel, onSaved }: { provider: ProviderSum
   }
   return <ModalDialog title={provider ? "Edit provider" : "Add provider"} eyebrow="AI" onClose={onCancel} busy={busy} variant="sheet" className="chat-dialog">
     <form className="file-dialog-form ai-provider-form" onSubmit={submit} noValidate>
+      {!provider && <>
+        <span className="ai-label" id={ids.kind}>Kind</span>
+        <Select<"endpoint" | "local"> labelledBy={ids.kind} label="Kind" value={kind} onChange={(value) => { setKind(value); if (value === "local" && !name.trim()) setName("Local embeddings"); setError(null); }} options={[
+          { value: "endpoint", label: "Model provider endpoint", description: "OpenAI-compatible: OpenAI, Anthropic, Voyage AI, a proxy" },
+          { value: "local", label: "Local embeddings", description: localOptionText(local), disabled: !local?.allowed || local.added }
+        ]} />
+      </>}
       <label htmlFor={ids.name}>Name</label>
-      <input id={ids.name} value={name} maxLength={AGENT_BOUNDS.providerName} autoFocus autoComplete="off" placeholder="OpenAI" onChange={(event) => setName(event.target.value)} />
+      <input id={ids.name} value={name} maxLength={AGENT_BOUNDS.providerName} autoFocus autoComplete="off" placeholder={kind === "local" ? "Local embeddings" : "OpenAI"} onChange={(event) => setName(event.target.value)} />
+      {kind === "local" ? <>
+        <p className="file-dialog-hint">{LOCAL_PROVIDER_TEXT}</p>
+        {local && !local.available && <p className="settings-warning" role="note">{local.reason}</p>}
+        <ProviderKnowledgeFields providerId={provider?.id ?? null} draft={knowledge} onChange={setKnowledge} disabled={busy} fixedModel />
+      </> : <>
       <label htmlFor={ids.url}>Base URL</label>
       <input id={ids.url} value={baseUrl} maxLength={AGENT_BOUNDS.baseUrl} autoComplete="off" spellCheck={false} placeholder={DEFAULT_BASE_URL} onChange={(event) => changeUrl(event.target.value)} />
       <p className="file-dialog-hint">https only. A private host (Ollama, LiteLLM, vLLM on your network) must be listed in AGENT_ALLOWED_PRIVATE_HOSTS on the server.</p>
@@ -335,7 +371,15 @@ function ProviderDialog({ provider, onCancel, onSaved }: { provider: ProviderSum
         </>}
       </details>
       {chat && <ProviderVisionFields providerId={provider?.id ?? null} defaultModel={defaultModel.trim() || DEFAULT_MODEL} draft={vision} onChange={setVision} disabled={busy} />}
-      {embeddings && <ProviderKnowledgeFields providerId={provider?.id ?? null} draft={knowledge} onChange={setKnowledge} disabled={busy} />}
+      {embeddings && <>
+        <label htmlFor={ids.embeddingModel}>Embedding model</label>
+        <input id={ids.embeddingModel} value={embeddingModel} maxLength={AGENT_BOUNDS.model} autoComplete="off" spellCheck={false} placeholder={`${detected === "voyage" ? "voyage-3.5" : "text-embedding-3-small"} (default)`} onChange={(event) => setEmbeddingModel(event.target.value.replace(/\s+/g, ""))} />
+        <label htmlFor={ids.embeddingDims}>Embedding size (dimensions)</label>
+        <input id={ids.embeddingDims} type="number" inputMode="numeric" min={64} max={3072} value={embeddingDims} placeholder="512 (default)" onChange={(event) => setEmbeddingDims(event.target.value)} />
+        <p className="file-dialog-hint">New knowledge bases on this provider start with this model and size; their owners may choose others. {detected === "voyage" ? "Voyage AI takes 256, 512, 1,024, or 2,048." : "Models that take no size (not text-embedding-3) answer in their own."}</p>
+        <ProviderKnowledgeFields providerId={provider?.id ?? null} draft={knowledge} onChange={setKnowledge} disabled={busy} />
+      </>}
+      </>}
       <FormError message={error} />
       <footer className="file-dialog-actions">
         <button type="button" className="secondary-button" onClick={onCancel} disabled={busy}>Cancel</button>
@@ -356,6 +400,25 @@ export const REASONING_EFFORT_OPTIONS: Array<{ value: ReasoningEffort; label: st
   value, label: value === "omit" ? "Don't send" : value, ...(value === "omit" ? { description: "The model's default" } : value === "none" ? { description: "For models that refuse tools while reasoning" } : {})
 }));
 
+/** D544: whether a provider is the model built into Nook. */
+export const isLocal = (provider: Pick<ProviderSummary, "baseUrl">) => providerFlavor(provider.baseUrl) === "local";
+
+/** What the Add provider dialog says about the local model (D544, D546). */
+export const LOCAL_PROVIDER_TEXT = `Runs ${LOCAL_MODEL.id} (${LOCAL_MODEL.dims} dimensions, about ${Math.round(LOCAL_MODEL_BYTES / 1_000_000)} MB, multilingual) inside Nook: knowledge bases only, no API key, and nothing leaves the server. It uses one CPU core, one passage at a time (about 1 to 2 seconds each; searches go first), and about 0.8 GB of memory while in use; it costs no tokens.`;
+
+/** The Kind choice's line for the local model: why it cannot be added, when it cannot. */
+export function localOptionText(local: LocalEmbeddingStatus | null): string {
+  if (!local) return "Built into Nook";
+  if (!local.allowed) return "Turned off on this server (LOCAL_EMBEDDINGS=off)";
+  if (local.added) return "Already added";
+  return local.available ? "Built into Nook: knowledge bases only, nothing leaves the server" : "Built into Nook; its model files are not in place yet";
+}
+
+/** A code value that may wrap after `_`, `-`, `.`, or `/` rather than in the middle of a word (1280 px cards). */
+export function breakable(text: string) {
+  return text.split(/(?<=[_\-./])/).flatMap((part, index) => index === 0 ? [part] : [<wbr key={index} />, part]);
+}
+
 /** D539: what kind of endpoint a provider is, for its card. */
 export const endpointLabel = (provider: Pick<ProviderSummary, "baseUrl" | "compat">) => {
   const flavor = providerFlavor(provider.baseUrl, provider.compat);
@@ -372,7 +435,7 @@ export function capabilitiesSummary(compat: Pick<ProviderCompat, "chat" | "embed
 /** The dialog's line under the two capability boxes (D541, D542). */
 export function capabilitiesHint(chat: boolean, embeddings: boolean): string {
   if (chat && embeddings) return "Offered for chats, agents, and reports, and for knowledge bases.";
-  if (chat) return "Never offered for knowledge bases (Anthropic has no embeddings API). Add OpenAI or Voyage AI for meaning-based knowledge search.";
+  if (chat) return "Never offered for knowledge bases (Anthropic has no embeddings API). Add Local embeddings (built into Nook), OpenAI, or Voyage AI for meaning-based knowledge search.";
   if (embeddings) return "Only for knowledge bases: never a chat or report model, and never the default.";
   return "Choose at least one.";
 }
@@ -380,7 +443,8 @@ export function capabilitiesHint(chat: boolean, embeddings: boolean): string {
 /** What a new provider's address says about it (D539, D542). */
 export const FLAVOR_HINTS: Record<ProviderFlavor, string> = {
   anthropic: "Anthropic (OpenAI-compatible endpoint): Nook sends anthropic-version and x-api-key with every request, asks for tools with auto (its current models refuse forced tool choice), and does not use it for embeddings.",
-  voyage: "Voyage AI: embeddings only, sized with output_dimension (256, 512, 1,024, or 2,048). Use it for knowledge bases beside a chat provider."
+  voyage: "Voyage AI: embeddings only, sized with output_dimension (256, 512, 1,024, or 2,048). Use it for knowledge bases beside a chat provider.",
+  local: "Local embeddings run inside Nook: choose Local embeddings as the kind instead of typing an address."
 };
 
 /** One Test result as words (D542: an embeddings-only provider is asked for one embedding instead of a completion). */

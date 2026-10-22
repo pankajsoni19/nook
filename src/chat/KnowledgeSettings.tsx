@@ -54,7 +54,7 @@ export function KnowledgeSettings({ kbId, navigate, flash }: { kbId: string | nu
   const row = (kb: KnowledgeSummary) => <li key={kb.id}>
     <button type="button" className="agents-row" onClick={() => navigate({ ...toList, kbId: kb.id })}>
       <span className="agents-row-icon" aria-hidden="true"><BookOpen /></span>
-      <span className="agents-row-text"><strong>{kb.name}</strong><small>{kb.yourLevel !== "owner" ? `${kb.ownerName} · ${kb.yourLevel === "manage" ? "Manager" : "Can search"} · ` : ""}{knowledgeLine(kb)}</small></span>
+      <span className="agents-row-text"><strong>{kb.name}</strong><small>{kb.yourLevel !== "owner" ? `${kb.ownerName} · ${kb.yourLevel === "manage" ? "Manager" : "Can search"} · ` : ""}{knowledgeLine(kb, true)}</small></span>
       <StatusBadge status={kb.status === "indexing" ? (knowledgePaused(kb) ? "pending" : "indexing") : kb.counts.error > 0 || kb.status === "error" ? "error" : kb.status === "ready" ? "ready" : null} label={kb.status === "indexing" && knowledgePaused(kb) ? "Paused" : undefined} />
     </button>
   </li>;

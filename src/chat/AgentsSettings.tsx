@@ -95,6 +95,20 @@ export function providerOptions(providers: AgentProviderChoice[]): Option<string
 }
 
 /** The provider a run would use: the chosen one, else the default (also after the chosen one was deleted). */
+/**
+ * D539: Claude 4.7 and later refuse a temperature below 1 (HTTP 400). The editor says so when the
+ * agent's provider is Anthropic, its model is one of those (or not recognized), and the field is below 1.
+ */
+export function claudeTemperatureWarning(provider: Pick<AgentProviderChoice, "flavor" | "defaultModel"> | null, model: string, temperature: string): string | null {
+  if (provider?.flavor !== "anthropic" || temperature.trim() === "") return null;
+  const value = Number(temperature);
+  if (!Number.isFinite(value) || value >= 1) return null;
+  const id = model.trim() || provider.defaultModel;
+  const version = /claude-(?:[a-z]+-)?(\d+)(?:[-.](\d{1,2})(?!\d))?/i.exec(id);
+  if (version && Number(version[1]) + Number(version[2] ?? 0) / 10 < 4.7) return null;
+  return "Claude 4.7 and later refuse a temperature below 1 (the request fails). Leave it empty for the model's default, or use 1 or more.";
+}
+
 export const effectiveProvider = (providers: AgentProviderChoice[], providerId: string | null) =>
   providers.find((provider) => provider.id === providerId) ?? providers.find((provider) => provider.isDefault) ?? null;
 
@@ -267,6 +281,7 @@ function AgentEditor({ agentId, navigate, flash, canCreate, onOpenChat, keysRout
       <p className="file-dialog-hint">Model calls per answer. Without tools an answer is one call; the limit matters once tools arrive.</p>
       <label htmlFor={ids.temperature}>Temperature</label>
       <input id={ids.temperature} value={temperature} inputMode="decimal" autoComplete="off" placeholder="Provider default" onChange={(event) => setTemperature(event.target.value)} />
+      {providers && claudeTemperatureWarning(effectiveProvider(providers, providerId), model, temperature) && <p className="settings-warning" role="note">{claudeTemperatureWarning(effectiveProvider(providers, providerId), model, temperature)}</p>}
       <h4>Tools{catalog && <small> · {pickCounts(tools, catalog).total} picked</small>}</h4>
       {agent?.trifecta && <TrifectaBadge />}
       {agent && agent.hiddenTools > 0 && <p className="file-dialog-hint" role="note">{agent.hiddenTools === 1 ? "1 tool" : `${agent.hiddenTools} tools`} from servers or knowledge bases you can't use {agent.hiddenTools === 1 ? "is" : "are"} also picked. {agent.ownerName} manages {agent.hiddenTools === 1 ? "it" : "them"}; saving keeps {agent.hiddenTools === 1 ? "it" : "them"}.</p>}

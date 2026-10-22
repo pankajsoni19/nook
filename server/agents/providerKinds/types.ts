@@ -29,8 +29,24 @@ export type ProviderAdapter = {
   takesDimensions(model: string, compat: Pick<ProviderCompat, "dimensionsParam">): boolean;
   /** The `POST {baseUrl}/embeddings` body. */
   embeddingBody(model: string, dims: number | null, inputs: readonly string[], inputType: EmbeddingInputType | undefined, compat: Pick<ProviderCompat, "dimensionsParam">): Record<string, unknown>;
-  /** Test (Settings → AI): whether it reads the models list, and the completion's output tokens. */
-  test: { listModels: boolean; completionTokens: number };
+  /** Test (Settings → AI): whether it reads the models list, the completion's output tokens, and an embeddings-only kind's input. */
+  test: { listModels: boolean; completionTokens: number; embedInput?: string };
+  /**
+   * A kind that runs inside Nook (D544, the local model) sets these: no network address (`network`
+   * false: no egress check, no HTTP), one fixed base URL (at most one such provider; its kind never
+   * changes), no API key, capabilities an admin cannot change, no token budget (`metered` false: it
+   * costs no provider tokens), its only embedding models, its batch size, and its own `embed`.
+   */
+  network?: false;
+  fixedBaseUrl?: string;
+  takesApiKey?: false;
+  fixedCapabilities?: true;
+  metered?: false;
+  embeddingModels?: readonly string[];
+  batchSize?: number;
+  embed?: (model: string, dims: number | null, inputs: readonly string[], options: { inputType?: EmbeddingInputType; signal?: AbortSignal }) => Promise<{ vectors: Float32Array[]; tokens: number; estimated: boolean }>;
+  /** Refuses a new provider of this kind when the server forbids it (an `AgentError`). */
+  assertCreatable?: () => void;
 };
 
 /** Bearer auth, as every kind sends it (v0.43.0's headers). */

@@ -258,6 +258,24 @@ if (!["on", "off"].includes(agentMcpStdioRaw)) throw new Error("AGENT_MCP_STDIO 
 const agentMcpStdioFile = (process.env.AGENT_MCP_STDIO_FILE ?? "").trim() || null;
 if (agentMcpStdioRaw === "on" && !agentMcpStdioFile) throw new Error("AGENT_MCP_STDIO=on needs AGENT_MCP_STDIO_FILE (an absolute path to the declaration file)");
 if (agentMcpStdioFile && !agentMcpStdioFile.startsWith("/")) throw new Error("AGENT_MCP_STDIO_FILE must be an absolute path");
+/**
+ * The embedding model built into Nook (D544, D545). `LOCAL_EMBEDDINGS=off` forbids it: no local
+ * provider can be added, and one added before only fails ("turned off on this server"). On (the
+ * default), an admin still has to add it in Settings → AI. `LOCAL_EMBEDDINGS_DIR` holds its files
+ * (the Docker image carries them in /app/models/multilingual-e5-small); never inside DATA_DIR, which
+ * backups archive.
+ */
+export function parseLocalEmbeddings(env: Record<string, string | undefined>, dataRoot: string) {
+  const raw = (env.LOCAL_EMBEDDINGS ?? "on").trim().toLowerCase();
+  if (!["on", "off"].includes(raw)) throw new Error("LOCAL_EMBEDDINGS must be on or off");
+  const dirValue = env.LOCAL_EMBEDDINGS_DIR?.trim();
+  if (dirValue && !dirValue.startsWith("/")) throw new Error("LOCAL_EMBEDDINGS_DIR must be an absolute path");
+  const dir = resolve(dirValue || resolve(import.meta.dir, "..", "models", "multilingual-e5-small"));
+  const real = (path: string) => { try { return realpathSync(path); } catch { return resolve(path); } };
+  if (`${real(dir)}/`.startsWith(`${real(dataRoot)}/`)) throw new Error("LOCAL_EMBEDDINGS_DIR must be outside DATA_DIR: backups archive the data directory");
+  return { enabled: raw === "on", dir };
+}
+const localEmbeddings = parseLocalEmbeddings(process.env, dataDir);
 
 // Web Push (WAVES_10-12.md D65). auto: on only when APP_ORIGIN is https (browsers need a secure origin).
 const pushEnabledValue = process.env.PUSH_ENABLED?.trim() || "auto";
@@ -436,6 +454,8 @@ export const config = {
    * call, and the run caps. Tests switch these in process.
    */
   agents: { key: agentSecretsKey.key, source: agentSecretsKey.source, allowedPrivateHosts: agentAllowedPrivateHosts, imageProxyTestHosts: agentImageProxyTestHosts, maxConcurrentRuns: agentMaxConcurrentRuns, runTimeoutS: agentRunTimeoutS, stdio: agentMcpStdioRaw === "on", stdioFile: agentMcpStdioFile, auditRetentionDays: agentAuditRetentionDays },
+  /** The local embedding model (D544): allowed by `LOCAL_EMBEDDINGS`, its files in `dir`; `stub` (tests only) swaps the model for a hash embedding. Tests switch these in process. */
+  localEmbeddings: { enabled: localEmbeddings.enabled, dir: localEmbeddings.dir, stub: null as { delayMs: number } | null },
   signupRole,
   sessionDays: Math.max(1, Number(process.env.SESSION_DAYS ?? 14)),
   maxMarkdownBytes: Math.max(1024, Number(process.env.MAX_MARKDOWN_BYTES ?? 2_000_000)),

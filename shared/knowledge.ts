@@ -93,7 +93,7 @@ export type KnowledgeEmbeddingChoice = {
   /** D542: the only sizes this provider takes (Voyage AI: 256, 512, 1,024, 2,048, within `maxDims`); absent: any from 64 to `maxDims`. */
   sizes?: number[];
   /** D542/D543: the provider's kind (absent: OpenAI-compatible); it decides how a size is asked for (Voyage AI's `output_dimension`). */
-  flavor?: "anthropic" | "voyage";
+  flavor?: "anthropic" | "voyage" | "local";
 };
 
 /**
@@ -114,7 +114,7 @@ export const isKeywordOnly = (kb: { embeddingModel?: string; embedding_model?: s
 /** What a keyword-only base's page says (D541). */
 export const KEYWORD_ONLY_HINT = "Keyword search: add an embeddings provider for meaning-based search.";
 /** What New knowledge base says when no provider makes embeddings (D541): only an admin can add one. */
-export const NO_EMBEDDINGS_PROVIDER = "No model provider here makes embeddings (Claude has none), so new knowledge bases use keyword search. An admin can add an embeddings provider (OpenAI, or Voyage AI) in Settings → AI → Model providers; existing knowledge bases are not changed.";
+export const NO_EMBEDDINGS_PROVIDER = "No model provider here makes embeddings (Claude has none), so new knowledge bases use keyword search. An admin can add an embeddings provider in Settings → AI → Model providers: Local embeddings (built into Nook, nothing leaves the server), OpenAI, or Voyage AI; existing knowledge bases are not changed.";
 
 /** Voyage AI's models that take `output_dimension` (D542); its others answer in their own size. */
 export const VOYAGE_SIZED_MODEL = /^voyage-(?:4(?:-|$)|3-large|3\.5|code-3)/i;

@@ -8,6 +8,7 @@ import { assertBudget, chargeUsage, secondsToMidnight } from "../agents/runs";
 import { allowedSizes, embeddingConnection, embeddingDefaults, knowledgePolicyOf, parseKnowledgePolicy, rowCompat } from "../agents/providers";
 import { DEFAULT_KNOWLEDGE_POLICY, policyAllowsModel, policyMaxDims, providerEmbeds } from "../../shared/agents";
 import { ProviderError } from "../agents/loop";
+import { adapterOf, adapterOfProvider } from "../agents/providerKinds";
 import { AgentError, agentsStatus } from "../agents/status";
 import { chunkText, type Chunk, type ChunkFormat } from "./chunk";
 import { embedTexts, vectorToBlob } from "./embed";
@@ -288,14 +289,16 @@ async function indexSource(kb: KbRow, source: SourceRow): Promise<"done" | "paus
   if (chunks.length > 0 && provider) {
     try {
       const connection = embeddingConnection(provider.id);
+      // D544: a kind that spends no provider tokens (the local model) is not held to the token budget.
+      const metered = adapterOf(connection).metered !== false;
       const requested = takesDimensions(kb.embedding_model, { dimensionsParam: connection.compat.dimensionsParam, flavor: connection.flavor ?? undefined }) || vectored > 0 ? kb.dims : null;
       const result = await embedTexts(connection, kb.embedding_model, requested, chunks.map(embeddingInput), {
         inputType: "document",
         // Before every request (T314): over the owner's or the instance's budget nothing is sent.
         // 2026-10-08: nor when the base moved to another model meanwhile (no call to the old provider after a change).
-        beforeBatch: () => { if (modelChanged(kb)) throw new SourceError("MODEL_CHANGED", "The embedding model changed"); assertBudget(kb.owner_id); },
+        beforeBatch: () => { if (modelChanged(kb)) throw new SourceError("MODEL_CHANGED", "The embedding model changed"); if (metered) assertBudget(kb.owner_id); },
         afterBatch: (used, batch) => {
-          chargeUsage(kb.owner_id, `kb:${kb.id}`, { promptTokens: used, completionTokens: 0, estimated: false }, 0);
+          if (metered) chargeUsage(kb.owner_id, `kb:${kb.id}`, { promptTokens: used, completionTokens: 0, estimated: false }, 0);
           // 2026-10-08: a model that answers in its own size larger than the admin's limit for this
           // provider is stopped at its first answer (no further batch). A size the base already has
           // (grandfathered, made before the limit) is not refused.
@@ -417,6 +420,9 @@ function embeddingTarget(kb: KbRow, input: { providerId: string; model: string; 
   const model = input.model.trim();
   const compat = rowCompat(provider);
   if (!providerEmbeds(compat)) throw new AgentError(400, "NO_EMBEDDINGS", "This provider does not make embeddings", { field: "providerId" });
+  // D544: a kind with its own models (the local model) takes only those.
+  const own = adapterOfProvider(provider.base_url, compat).embeddingModels;
+  if (own && !own.includes(model)) throw new AgentError(400, "MODEL_NOT_OFFERED", `This provider has only ${own.join(", ")}`, { field: "model", allowed: own });
   // 2026-10-08: the admin's knowledge policy for the chosen provider (Settings → AI → Model providers).
   const policy = parseKnowledgePolicy(provider.compat_json);
   if (!policy.enabled) throw new AgentError(400, "PROVIDER_NOT_ALLOWED", "An admin does not allow this provider for knowledge bases", { field: "providerId" });
@@ -430,7 +436,8 @@ function embeddingTarget(kb: KbRow, input: { providerId: string; model: string; 
     ? input.dims ?? embeddingDefaults(provider, policy, compat).dims
     // A model that takes no `dimensions` answers in its own size; the base adopts it at the first answer
     // (a size over the limit then puts the sources in error). The stored size stays within the limit.
-    : Math.min(input.dims ?? kb.dims, cap);
+    // D544: a kind with its own model (the local one) knows that model's size.
+    : Math.min(input.dims ?? (own && provider.embedding_dims ? provider.embedding_dims : kb.dims), cap);
   return { provider, model, dims };
 }
 

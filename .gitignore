@@ -12,3 +12,6 @@ npm-debug.log*
 .DS_Store
 
 .claude/worktrees/
+
+# The local embedding model (scripts/fetchLocalModel.ts; the Docker image carries its own copy).
+models/

@@ -84,7 +84,7 @@ export function ModelSheet({ kb, onClose, onChanged }: { kb: KnowledgeDetail; on
     setError(null);
     const ok = await confirm.ask({
       title: `Change to ${name}?`,
-      message: `${count} ${count === 1 ? "source is" : "sources are"} embedded again with ${provider.name} · ${name}${sized ? `, ${size} dimensions` : ""}. ${MODEL_CHANGE_EFFECT}`,
+      message: `${count} ${count === 1 ? "source is" : "sources are"} embedded again with ${provider.name} · ${name}${sized ? `, ${size} dimensions` : ""}. ${changeEffect(provider)}`,
       confirmLabel: "Change model",
       danger: true
     });
@@ -104,7 +104,7 @@ export function ModelSheet({ kb, onClose, onChanged }: { kb: KnowledgeDetail; on
       <p className="file-dialog-hint">Now: {kb.keywordOnly ? "keyword search (no embeddings)" : `${kb.providerName ?? "a removed provider"} · ${kb.embeddingModel}, ${kb.dims} dimensions`}.</p>
       <span className="knowledge-field-label" id={`${ids.model}-providers`}>Provider</span>
       {providers === null ? <p className="chat-muted" role="status">Loading…</p> : <>
-        {providers.length === 0 && <p className="chat-muted">No model provider here makes embeddings for knowledge bases; an admin can add one (OpenAI, or Voyage AI) in Settings → AI → Model providers.</p>}
+        {providers.length === 0 && <p className="chat-muted">No model provider here makes embeddings for knowledge bases; an admin can add one (Local embeddings, OpenAI, or Voyage AI) in Settings → AI → Model providers.</p>}
         <div className="knowledge-modes" role="group" aria-labelledby={`${ids.model}-providers`}>
           {providers.map((item) => <button key={item.id} type="button" className={`knowledge-mode${item.id === providerId ? " active" : ""}`} aria-pressed={item.id === providerId}
             onClick={() => pick(item)}>{item.name}{item.isDefault ? " (default)" : ""}</button>)}
@@ -117,7 +117,7 @@ export function ModelSheet({ kb, onClose, onChanged }: { kb: KnowledgeDetail; on
           <div className="knowledge-modes" role="group" aria-labelledby={ids.model}>
             {(provider.models ?? []).map((name) => <button key={name} type="button" className={`knowledge-mode${name === model.trim() ? " active" : ""}`} aria-pressed={name === model.trim()} onClick={() => setModel(name)}>{name}</button>)}
           </div>
-          <p className="file-dialog-hint">An admin allows only these embedding models with {provider.name}.</p>
+          <p className="file-dialog-hint">{provider.flavor === "local" && !provider.sizes ? `${provider.name} runs this model on this server, at ${provider.embeddingDims.toLocaleString("en-US")} dimensions.` : `An admin allows only these embedding models with ${provider.name}.`}</p>
         </> : <>
           <label htmlFor={ids.model}>Model</label>
           <input id={ids.model} value={model} maxLength={KNOWLEDGE_BOUNDS.modelName} autoComplete="off" spellCheck={false} onChange={(event) => setModel(event.target.value)} />
@@ -135,8 +135,8 @@ export function ModelSheet({ kb, onClose, onChanged }: { kb: KnowledgeDetail; on
           <label htmlFor={ids.dims}>Dimensions</label>
           <input id={ids.dims} type="number" inputMode="numeric" min={64} max={provider?.maxDims ?? 3072} step={1} value={dims} onChange={(event) => setDims(event.target.value)} aria-describedby={`${ids.dims}-limit`} />
           <p className="file-dialog-hint" id={`${ids.dims}-limit`}>{dimsLimitText(provider?.maxDims ?? 3072)}</p>
-        </> : <p className="file-dialog-hint">This model answers in its own size; the knowledge base adopts it{provider && provider.maxDims < 3072 ? ` (at most ${provider.maxDims.toLocaleString("en-US")}, an admin's limit: a larger answer stops indexing with an error)` : ""}.</p>}
-        <p className="file-dialog-hint">{MODEL_CHANGE_EFFECT}</p>
+        </> : provider?.flavor === "local" ? null : <p className="file-dialog-hint">This model answers in its own size; the knowledge base adopts it{provider && provider.maxDims < 3072 ? ` (at most ${provider.maxDims.toLocaleString("en-US")}, an admin's limit: a larger answer stops indexing with an error)` : ""}.</p>}
+        <p className="file-dialog-hint">{provider ? changeEffect(provider) : MODEL_CHANGE_EFFECT}</p>
       </>}
       <footer className="file-dialog-actions">
         <button type="button" className="action-button secondary" onClick={onClose} disabled={busy}>Cancel</button>
@@ -203,4 +203,12 @@ export function SourceChunks({ kbId, sourceId, label }: { kbId: string; sourceId
       {chunks.length < total && <button type="button" className="action-button secondary" disabled={busy} onClick={() => { void load(chunks.length); }}>{busy ? "Loading…" : "Show more"}</button>}
     </>}
   </div>;
+}
+
+/**
+ * What Change embedding model costs (D544): the usual effect, except that the local model spends no
+ * tokens; it runs on this server, one passage at a time.
+ */
+export function changeEffect(provider: Pick<KnowledgeEmbeddingChoice, "flavor">): string {
+  return provider.flavor === "local" ? MODEL_CHANGE_EFFECT.replace("with the new model, at your token cost", "on this server (no token cost; about a second or two a passage)") : MODEL_CHANGE_EFFECT;
 }

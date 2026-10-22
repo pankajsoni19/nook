@@ -23,7 +23,19 @@ RUN bun run typecheck && bun test && bun run build
 FROM oven/bun:1.4.2-alpine@sha256:d888c0ae6c86d7866ff10c5aafdd9077b36aee6455b33dd270fb93c0dd5cef6f AS production-dependencies
 WORKDIR /app
 COPY package.json bun.lock ./
-RUN bun install --frozen-lockfile --production
+# D545: ONNX Runtime Web ships builds for browsers (WebGPU, WebGL, JSPI, asyncify) and source maps;
+# the server loads only its Node entry and the single-threaded SIMD WebAssembly (about 14 MB of 140).
+RUN bun install --frozen-lockfile --production \
+  && find node_modules/onnxruntime-web/dist -type f ! -name ort.node.min.mjs ! -name ort-wasm-simd-threaded.mjs ! -name ort-wasm-simd-threaded.wasm -delete \
+  && rm -rf node_modules/onnxruntime-web/lib
+
+# D545: the local embedding model, fetched from its pinned commit and checked (size and sha256) at build
+# time, so a running Nook never downloads it. Root-owned in the image: the app can read it, not change it.
+FROM oven/bun:1.4.2-alpine@sha256:d888c0ae6c86d7866ff10c5aafdd9077b36aee6455b33dd270fb93c0dd5cef6f AS local-model
+WORKDIR /app
+COPY shared/localEmbedding.ts ./shared/localEmbedding.ts
+COPY scripts/fetchLocalModel.ts ./scripts/fetchLocalModel.ts
+RUN bun scripts/fetchLocalModel.ts /app/models/multilingual-e5-small
 
 FROM oven/bun:1.4.2-alpine@sha256:d888c0ae6c86d7866ff10c5aafdd9077b36aee6455b33dd270fb93c0dd5cef6f AS production
 WORKDIR /app
@@ -39,6 +51,7 @@ COPY --chown=bun:bun --from=production-dependencies /app/package.json ./package.
 COPY --chown=bun:bun --from=build /app/dist ./dist
 COPY --chown=bun:bun server ./server
 COPY --chown=bun:bun shared ./shared
+COPY --from=local-model /app/models ./models
 RUN mkdir -p /data && chown bun:bun /data
 USER bun
 EXPOSE 2026

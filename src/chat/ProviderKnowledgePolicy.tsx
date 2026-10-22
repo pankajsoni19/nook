@@ -40,22 +40,23 @@ export function policySummary(policy: ProviderKnowledgePolicy): string {
   return `${models}, up to ${(policy.maxDims ?? KNOWLEDGE_POLICY_BOUNDS.maxDims).toLocaleString("en-US")} dimensions`;
 }
 
-export function ProviderKnowledgeFields({ providerId, draft, onChange, disabled }: { providerId: string | null; draft: PolicyDraft; onChange: (draft: PolicyDraft) => void; disabled?: boolean }) {
+/** `fixedModel` (D544, the local model): one model at its own size, so only whether knowledge bases may use it. */
+export function ProviderKnowledgeFields({ providerId, draft, onChange, disabled, fixedModel = false }: { providerId: string | null; draft: PolicyDraft; onChange: (draft: PolicyDraft) => void; disabled?: boolean; fixedModel?: boolean }) {
   const ids = { heading: useId(), models: useId(), dims: useId() };
   const [suggested, setSuggested] = useState<string[]>([]);
   // The provider's model list (the server keeps it ten minutes); none for a provider not saved yet, or when it cannot be reached.
   useEffect(() => {
-    if (!providerId) return;
+    if (!providerId || fixedModel) return;
     let cancelled = false;
     providerModels(providerId).then((result) => { if (!cancelled) setSuggested(embeddingSuggestions(result.models)); }, () => undefined);
     return () => { cancelled = true; };
-  }, [providerId]);
+  }, [providerId, fixedModel]);
   const options = [...new Set([...suggested, ...draft.models])].map((model) => ({ value: model, label: model }));
   const set = (patch: Partial<PolicyDraft>) => onChange({ ...draft, ...patch });
   return <div className="ai-knowledge-policy" role="group" aria-labelledby={ids.heading}>
     <span className="ai-label" id={ids.heading}>Knowledge bases</span>
     <label className="ai-check"><input type="checkbox" checked={draft.enabled} disabled={disabled} onChange={(event) => set({ enabled: event.target.checked })} />Knowledge bases may use this provider</label>
-    {draft.enabled && <>
+    {draft.enabled && !fixedModel && <>
       <span className="ai-sublabel" id={ids.models}>Allowed embedding models</span>
       <div className="ai-segments" role="group" aria-labelledby={ids.models}>
         <button type="button" className={`ai-segment${draft.anyModel ? " active" : ""}`} aria-pressed={draft.anyModel} disabled={disabled} onClick={() => set({ anyModel: true })}>Any model</button>
@@ -68,6 +69,6 @@ export function ProviderKnowledgeFields({ providerId, draft, onChange, disabled 
       <input id={ids.dims} type="number" inputMode="numeric" min={KNOWLEDGE_POLICY_BOUNDS.minDims} max={KNOWLEDGE_POLICY_BOUNDS.maxDims} step={1} value={draft.maxDims} disabled={disabled}
         placeholder={`${KNOWLEDGE_POLICY_BOUNDS.maxDims.toLocaleString("en-US")} (no limit)`} onChange={(event) => set({ maxDims: event.target.value })} />
     </>}
-    <p className="file-dialog-hint">A 3,072-dimension base takes six times the storage and memory of the 512 default. Knowledge bases already over a new limit keep working and are not embedded again; their owners are told, and Change embedding model offers only what is allowed.</p>
+    {!fixedModel && <p className="file-dialog-hint">A 3,072-dimension base takes six times the storage and memory of the 512 default. Knowledge bases already over a new limit keep working and are not embedded again; their owners are told, and Change embedding model offers only what is allowed.</p>}
   </div>;
 }

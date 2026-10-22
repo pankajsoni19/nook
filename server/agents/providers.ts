@@ -54,8 +54,9 @@ export function parseCompat(json: string | null): ProviderCompat {
 export function effectiveCompat(json: string | null, baseUrl: string): ProviderCompat {
   const compat = parseCompat(json);
   const adapter = adapterOfProvider(baseUrl, compat);
-  const embeds = compat.embeddings ?? adapter.capabilities.embeddings;
-  const chats = compat.chat ?? adapter.capabilities.chat;
+  // D544: a kind with fixed capabilities (the local model) reads as its kind says, whatever is stored.
+  const embeds = adapter.fixedCapabilities ? adapter.capabilities.embeddings : compat.embeddings ?? adapter.capabilities.embeddings;
+  const chats = adapter.fixedCapabilities ? adapter.capabilities.chat : compat.chat ?? adapter.capabilities.chat;
   const { embeddings: _embeddings, chat: _chat, ...rest } = compat;
   return {
     ...rest,
@@ -176,7 +177,10 @@ export type ProviderInput = {
  */
 function normalizeBaseUrl(value: string) {
   // D539/D543: as the address's kind saves it (Anthropic's and Voyage AI's without `/v1` get it).
-  const trimmed = adapterOfProvider(value).normalizeBaseUrl(value);
+  const adapter = adapterOfProvider(value);
+  const trimmed = adapter.normalizeBaseUrl(value);
+  // D544: a kind that runs inside Nook has no network address to check (and is never fetched).
+  if (adapter.network === false) return trimmed;
   try {
     checkSavedEndpoint(trimmed);
   } catch (error) {
@@ -207,13 +211,17 @@ export function createProvider(actorId: string, input: ProviderInput): ProviderS
     const baseUrl = normalizeBaseUrl(input.baseUrl ?? DEFAULT_BASE_URL);
     // D539/D542: a known endpoint (by host, or the form's explicit flavor) starts from its own defaults; the request's values win.
     const kind = adapterOfProvider(baseUrl, input.compat ?? null);
+    // D544: a kind the server may forbid (the local model), and at most one provider at a fixed address.
+    kind.assertCreatable?.();
+    if (kind.fixedBaseUrl && db.query("SELECT 1 FROM agent_providers WHERE base_url = ?").get(kind.fixedBaseUrl)) throw new AgentError(409, "PROVIDER_EXISTS", "This provider is already added", { field: "baseUrl" });
     const compat = effectiveCompat(JSON.stringify({ ...DEFAULT_COMPAT, ...kind.newProvider.compat, ...(input.compat ?? {}) }), baseUrl);
     // D542: an embeddings-only provider is never the default (chat and reports use the default); the first chat provider is.
     const chatCount = chatProviderCount();
     if (input.isDefault === true && !providerChats(compat)) throw new AgentError(409, "CHAT_NONE", "An embeddings-only provider cannot be the default; the default answers chats and reports", { field: "isDefault" });
     const makeDefault = providerChats(compat) && (input.isDefault === true || chatCount === 0);
     if (makeDefault) db.query("UPDATE agent_providers SET is_default = 0 WHERE is_default = 1").run();
-    const apiKey = input.apiKey?.trim() || null;
+    // D544: a kind without an API key (the local model) never stores one.
+    const apiKey = kind.takesApiKey === false ? null : input.apiKey?.trim() || null;
     const policy = mergedPolicy(DEFAULT_KNOWLEDGE_POLICY, input.knowledge);
     const vision = mergedVision(DEFAULT_VISION_POLICY, input.vision);
     db.query(`INSERT INTO agent_providers (id, name, base_url, api_key_ct, api_key_hint, default_model, embedding_model, embedding_dims, compat_json, is_default, created_at, updated_at)
@@ -232,11 +240,15 @@ export function updateProvider(actorId: string, id: string, input: Partial<Provi
   const updated = db.transaction(() => {
     const row = providerRow(id);
     if (row.revision !== input.expectedRevision) throw new AgentError(409, "REVISION_MISMATCH", "This provider changed elsewhere; reload and try again", { revision: row.revision });
-    const apiKey = input.apiKey?.trim() || null;
+    const nextUrl = input.baseUrl !== undefined ? normalizeBaseUrl(input.baseUrl) : row.base_url;
+    const before = adapterOfProvider(row.base_url, parseCompat(row.compat_json));
+    const after = adapterOfProvider(nextUrl, { ...parseCompat(row.compat_json), ...(input.compat ?? {}) } as ProviderCompat);
+    // D544: a provider at a fixed address (the local model) keeps its kind; nothing becomes one by an edit.
+    if (before !== after && (before.fixedBaseUrl || after.fixedBaseUrl)) throw new AgentError(400, "KIND_FIXED", "This provider's kind cannot change; add a new provider instead", { field: "baseUrl" });
+    const apiKey = after.takesApiKey === false ? null : input.apiKey?.trim() || null;
     const apiKeyCt = input.removeSecret ? null : apiKey ? sealSecret("provider", id, apiKey) : row.api_key_ct;
     const hint = input.removeSecret ? null : apiKey ? secretHint(apiKey) : row.api_key_hint;
     // D542: the default answers chats and reports, so it is never embeddings-only.
-    const nextUrl = input.baseUrl !== undefined ? normalizeBaseUrl(input.baseUrl) : row.base_url;
     const nextCompat = effectiveCompat(JSON.stringify({ ...parseCompat(row.compat_json), ...(input.compat ?? {}) }), nextUrl);
     if (!providerChats(nextCompat) && (input.isDefault === true || (row.is_default === 1 && input.isDefault !== false))) {
       throw new AgentError(409, "CHAT_NONE", row.is_default === 1 ? "Make another provider the default before turning chat off here" : "An embeddings-only provider cannot be the default; the default answers chats and reports", { field: input.isDefault === true ? "isDefault" : "compat" });
@@ -337,7 +349,8 @@ export function providerChoices(): AgentProviderChoice[] {
   // D542: embeddings-only providers are never offered as a chat or report model.
   return (db.query("SELECT id, name, default_model, base_url, compat_json FROM agent_providers ORDER BY is_default DESC, name COLLATE NOCASE, created_at").all() as Array<{ id: string; name: string; default_model: string; base_url: string; compat_json: string }>).filter(rowChats).map((row) => {
     const cached = modelCache.get(row.id)?.models.filter((model) => !NOT_CHAT.test(model)) ?? null;
-    return { id: row.id, name: row.name, isDefault: row.id === fallback, defaultModel: row.default_model, models: cached && cached.length ? cached.slice(0, 200) : null };
+    const kind = providerFlavor(row.base_url, parseCompat(row.compat_json));
+    return { id: row.id, name: row.name, isDefault: row.id === fallback, defaultModel: row.default_model, models: cached && cached.length ? cached.slice(0, 200) : null, ...(kind ? { flavor: kind } : {}) };
   });
 }
 
@@ -358,11 +371,13 @@ export function providerEmbeddingChoices(): KnowledgeEmbeddingChoice[] {
     if (sizes && sizes.length === 0) return [];
     const defaults = embeddingDefaults(row, policy, compat);
     const kind = providerFlavor(row.base_url, compat);
+    // D544: a kind with its own models (the local model) offers only those, and no free text.
+    const own = adapterFor(kind).embeddingModels;
     const cached = modelCache.get(row.id)?.models.filter((model) => NOT_CHAT.test(model)) ?? null;
     return [{
       id: row.id, name: row.name, isDefault: row.id === fallback, embeddingModel: defaults.model, embeddingDims: defaults.dims,
-      models: policy.models ? [...policy.models] : cached && cached.length ? cached.slice(0, 50) : null,
-      anyModel: policy.models === null, maxDims: policyMaxDims(policy),
+      models: policy.models ? [...policy.models] : own ? [...own] : cached && cached.length ? cached.slice(0, 50) : null,
+      anyModel: policy.models === null && !own, maxDims: policyMaxDims(policy),
       ...(sizes ? { sizes } : {}), ...(kind ? { flavor: kind } : {})
     }];
   });
@@ -414,7 +429,8 @@ export function effectiveModelOf(providerId: string | null, model: string | null
 export async function providerModels(id: string, options: { fresh?: boolean } = {}): Promise<{ models: string[]; cachedAt: string }> {
   const cached = modelCache.get(id);
   if (cached && !options.fresh && Date.now() - cached.at < MODEL_CACHE_MS) return { models: cached.models, cachedAt: new Date(cached.at).toISOString() };
-  const connection = connectionFor(id, null);
+  // The provider itself (an embeddings-only one never lists the default provider's models instead).
+  const connection = connectionFor(providerRow(id).id, null, "embeddings");
   const models = await listModels(connection);
   modelCache.set(id, { at: Date.now(), models });
   return { models, cachedAt: new Date().toISOString() };
@@ -459,7 +475,7 @@ export async function testProvider(id: string): Promise<ProviderTest> {
     const { model, dims } = embeddingDefaults(row, policy, connection.compat);
     const again = Date.now();
     try {
-      const answer = await embedTexts(connection, model, adapter.takesDimensions(model, connection.compat) ? dims : null, ["ok"]);
+      const answer = await embedTexts(connection, model, adapter.takesDimensions(model, connection.compat) ? dims : null, [adapter.test.embedInput ?? "ok"]);
       result.embeddings = { ok: true, model, dims: answer.vectors[0]?.length ?? null, latencyMs: Date.now() - again, error: null };
     } catch (error) {
       result.embeddings = { ok: false, model, dims: null, latencyMs: null, error: describe(error) };

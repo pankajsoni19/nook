@@ -7,3 +7,5 @@ data
 *.sqlite*
 npm-debug.log*
 
+models
+.claude

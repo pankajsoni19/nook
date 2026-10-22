@@ -1,12 +1,13 @@
 import { providerFlavor, type ProviderFlavor } from "../../../shared/agents";
 import { anthropicAdapter } from "./anthropic";
+import { localAdapter } from "./local";
 import { openaiAdapter } from "./openai";
 import type { ProviderAdapter } from "./types";
 import { voyageAdapter } from "./voyage";
 
 export type { EmbeddingInputType, ProviderAdapter, ProviderKind } from "./types";
 
-const ADAPTERS: Record<ProviderFlavor, ProviderAdapter> = { anthropic: anthropicAdapter, voyage: voyageAdapter };
+const ADAPTERS: Record<ProviderFlavor, ProviderAdapter> = { anthropic: anthropicAdapter, voyage: voyageAdapter, local: localAdapter };
 
 /** The adapter of a kind (D543); null, a plain OpenAI-compatible endpoint, is the OpenAI kind. */
 export const adapterFor = (flavor: ProviderFlavor | null | undefined): ProviderAdapter => (flavor ? ADAPTERS[flavor] : null) ?? openaiAdapter;

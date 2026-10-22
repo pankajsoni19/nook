@@ -7,13 +7,12 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 
 **Current state (2026-10-22).**
 - **v0.43.0** is released (2026-10-22): several docs per report, Add a new section and doc links in Changes, delete from the header, edit and suggest SQL, dynamic filters (slice 1).
-- Migrations: **001–066** are released and immutable (045 and 054 unused; 054 is reserved for Messages). Next free: **067** (lane CLAUDE needed none), **068** LISTS (built), **069** FILT2, **070** SMALL, **071** LOCALEMB.
+- Migrations: **001–066** are released and immutable (045 and 054 unused; 054 is reserved for Messages). Next free: **067** (lane CLAUDE needed none), **068** LISTS (built), **069** FILT2, **070** SMALL, **071** unused (lane LOCALEMB needed none).
 - Development happens directly on `main`, pushed as each change passes its gates.
 
 ## In flight
 
 - [ ] **Report filters, later slices** (lane FILT2, migration 069) (slice 1 shipped, D532–D537): linked filters, client-side table sort and contains, saved personal views, more filter types (number range, exclude, text contains, Add filter on dates), and concurrent parameter runs, ranked in [REPORT_FILTERS.md](docs/plan/REPORT_FILTERS.md) "Later". Started 2026-10-22.
-- [ ] **Local embedding model** (operator: "complete todo.md", 2026-10-22; lane LOCALEMB; lane CLAUDE landed: add it as another provider kind beside `compat.embeddings`, keyword-only bases (D541) move to it with Change embedding model, migration 071 if needed) (transformers.js + a small model, CPU) for meaning-based search with no outside provider.
 
 - [ ] **API keys, after lane KEYS (D585–D601)** (general keys' Edit adds rows with the password and a security notice, and no row has a dead dropdown):
   - [ ] Vault keys' Edit (`/settings/keys/vault`, `VaultGrantBuilder` `ceiling`) is still narrowing only, with the same pattern: the Vault dropdown is always disabled and Permission collapses to the held level plus Read. Decide whether vault keys may add access on Edit with re-authentication (vault grants have their own checks, `validateVaultGrants`, and protected environments), then apply D585/D587 there.
@@ -35,9 +34,14 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 ## Leftovers (lane CLAUDE)
 
 - [ ] Claude, checked only against a fake (lane CLAUDE, D539): on the VM, confirm Anthropic accepts `x-api-key` and `Authorization: Bearer` together on `/v1/chat/completions` and `/v1/models`, and Test tool calling reads "Tool calling works (auto)"; keys not scoped to a workspace also need `anthropic-workspace-id`, which Nook cannot send yet.
-- [ ] Agents on Claude 4.7+: a `temperature` below 1 is a 400 there; the agent editor could say so (or leave temperature out) when the agent's provider is Anthropic.
-- [ ] Voyage AI behind a proxy: `compat.flavor: "voyage"` and `dimensionsParam` are API-only (the editor offers only Anthropic's headers); and a provider's embedding model and size have no field in the editor (API `embeddingModel`, `embeddingDims`).
-- [ ] Button lint (found by lane CLAUDE, not new): at 390 px a Knowledge list row with a long status ("1 source · 0 chunks · 1 source has an error") wraps; at 1280 px a provider card's `max_completion_tokens` breaks mid-word (`overflow-wrap: anywhere` in a 160 px column).
+- [ ] Voyage AI behind a proxy: `compat.flavor: "voyage"` and `dimensionsParam` are API-only (the editor offers only Anthropic's headers). (A provider's embedding model and size now have fields, lane LOCALEMB D547.)
+
+## Leftovers (lane LOCALEMB)
+
+- [ ] Local embeddings (D544–D546) are checked against the real model only by the opt-in `LOCAL_EMBEDDINGS_MODEL_TEST=1 bun --no-env-file test tests/localEmbeddingsModel.test.ts` (and once in the image, by hand); the Docker verify stage has no model files. Run it on the VM after the 0.44.0 image lands, and index a real base there to see the CPU per passage on its cores.
+- [ ] The local model holds about 0.8 GB while loaded (the WASM heap about 0.55 GB, the tokenizer's 250,000-piece vocabulary about 0.22 GB in @huggingface/tokenizers' JS objects); it is let go after 10 idle minutes. A smaller tokenizer representation, or an English-only model (all-MiniLM-L6-v2, 23 MB, about twice as fast) as a second choice, would cut it; ONNX Runtime Web's own threads gave nothing on Bun 1.4.2, so it stays on one core.
+- [ ] Settings → Knowledge's intro still says a base's text "is sent to the model provider to be indexed"; a base on Local embeddings sends nothing. Say it per base (its page already names the provider).
+- [ ] Change embedding model's effect line says "This counts as this hour's Re-index" also when the base is keyword-only (or its provider was removed), where no hour applies (not new; the server is right).
 
 
 ## Watch (no work unless it shows up)

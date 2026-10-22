@@ -1,3 +1,4 @@
+import type { LocalEmbeddingStatus } from "../../shared/localEmbedding";
 import type { ToolCallingProbe } from "../../shared/reportsModel";
 import { api, ApiError, getCsrfToken, noteRequestOutcome } from "../api";
 import type { SqlResultDetail, ChatAttachmentInput, ProviderVisionPolicy, AgentApiUsage, AgentProviderChoice, AuditFacets, AuditRunDetail, AuditRunSummary, AgentDetail, AgentSettings, AgentSummary, AgentToolRef, ChatDetail, ChatMessage, ChatUpdateEvent, ChatSummary, DailyUsage, DeclaredStdioServer, LinkableKey, NookLink, ProviderCompat, ProviderKnowledgePolicy, ProviderSummary, PublicLinkState, RunEvent, ServerAuthKind, ServerAvailability, ToolCatalog, ToolPolicy, ToolServerSummary } from "../../shared/agents";
@@ -63,8 +64,9 @@ export const agentLink = (agentId: string) => api<{ link: NookLink; keys: Linkab
 export const setAgentLink = (agentId: string, nookKeyId: string | null) => api<{ link: NookLink }>(`/agents/${agentId}/link`, { method: "PUT", body: JSON.stringify({ nookKeyId }) });
 
 // Admin (Settings → AI).
-export type ProviderInput = { name: string; baseUrl?: string; apiKey?: string | null; defaultModel?: string; compat?: { [K in keyof ProviderCompat]?: ProviderCompat[K] | null }; isDefault?: boolean; knowledge?: Partial<ProviderKnowledgePolicy>; vision?: Partial<ProviderVisionPolicy> };
-export const listProviders = () => api<{ providers: ProviderSummary[] }>("/agents/admin/providers");
+export type ProviderInput = { name: string; baseUrl?: string; apiKey?: string | null; defaultModel?: string; embeddingModel?: string | null; embeddingDims?: number | null; compat?: { [K in keyof ProviderCompat]?: ProviderCompat[K] | null }; isDefault?: boolean; knowledge?: Partial<ProviderKnowledgePolicy>; vision?: Partial<ProviderVisionPolicy> };
+/** `local` (D544): whether this server allows the model built into Nook, whether its files are in place, and whether it is added. */
+export const listProviders = () => api<{ providers: ProviderSummary[]; local?: LocalEmbeddingStatus }>("/agents/admin/providers");
 export const createProvider = (input: ProviderInput) => api<{ provider: ProviderSummary }>("/agents/admin/providers", { method: "POST", body: JSON.stringify(input) });
 export const updateProvider = (id: string, input: Partial<ProviderInput> & { expectedRevision: number; removeSecret?: boolean }) => api<{ provider: ProviderSummary }>(`/agents/admin/providers/${id}`, { method: "PATCH", body: JSON.stringify(input) });
 export const deleteProvider = (id: string) => api<{ ok: true }>(`/agents/admin/providers/${id}`, { method: "DELETE", body: "{}" });

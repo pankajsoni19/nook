@@ -82,7 +82,7 @@ describe("Change embedding model's sheet under a policy", () => {
   test("a model list means pills only (no free text), the size input is capped, and the submit checks both", () => {
     const sheet = read("chat/KnowledgeModel.tsx");
     expect(sheet).toContain("provider && !provider.anyModel ? <>");
-    expect(sheet).toContain("An admin allows only these embedding models with {provider.name}.");
+    expect(sheet).toContain("`An admin allows only these embedding models with ${provider.name}.`");
     expect(sheet).toContain("max={provider?.maxDims ?? 3072}");
     expect(sheet).toContain("if (!provider.anyModel && !provider.models?.includes(name))");
     expect(sheet).toContain("size! > provider.maxDims");

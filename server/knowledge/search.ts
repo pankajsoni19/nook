@@ -2,6 +2,7 @@ import { db } from "../db";
 import { isKeywordOnly, KNOWLEDGE_BOUNDS, RRF_K, takesDimensions, type KnowledgeHit, type SourceKind } from "../../shared/knowledge";
 import { assertBudget, chargeUsage } from "../agents/runs";
 import { embeddingConnection } from "../agents/providers";
+import { adapterOf } from "../agents/providerKinds";
 import { AgentError } from "../agents/status";
 import { blobToVector, embedTexts } from "./embed";
 import { canReadSource, kbChangingModel, kbProvider, MODEL_CHANGING_NOTICE, ownerIsActive, PROVIDER_REMOVED_NOTICE, type KbRow } from "./service";
@@ -186,10 +187,12 @@ export async function searchBases(all: readonly KbRow[], query: string, k: numbe
     }
     try {
       const connection = embeddingConnection(provider.id);
+      // D544: the local model spends no provider tokens, so the budget neither refuses nor counts it.
+      const metered = adapterOf(connection).metered !== false;
       const result = await embedTexts(connection, first.embedding_model, takesDimensions(first.embedding_model, { dimensionsParam: connection.compat.dimensionsParam, flavor: connection.flavor ?? undefined }) ? first.dims : null, [text], {
         inputType: "query",
-        beforeBatch: () => assertBudget(payer.userId),
-        afterBatch: (tokens) => chargeUsage(payer.userId, `kb:${first.id}`, { promptTokens: tokens, completionTokens: 0, estimated: false }, 0, payer.keyId ?? ""),
+        beforeBatch: () => { if (metered) assertBudget(payer.userId); },
+        afterBatch: (tokens) => metered && chargeUsage(payer.userId, `kb:${first.id}`, { promptTokens: tokens, completionTokens: 0, estimated: false }, 0, payer.keyId ?? ""),
         signal
       });
       const query = result.vectors[0]!;

@@ -131,6 +131,13 @@ async function embedBatch(connection: ProviderConnection, model: string, dims: n
   return { vectors, tokens: reported ?? estimate(inputs), estimated: reported === null };
 }
 
+/** An in-process kind's answer, held to the same rules as a provider's: one vector per input, of `dims` when given. */
+function checked(result: EmbeddingResult, count: number, dims: number | null): EmbeddingResult {
+  if (result.vectors.length !== count) throw new ProviderError("PROVIDER_ERROR", "The model returned a different number of embeddings than inputs");
+  for (const vector of result.vectors) if (dims !== null && vector.length !== dims) throw new ProviderError("PROVIDER_ERROR", `The model returned ${vector.length} dimensions; this knowledge base uses ${dims}`);
+  return { ...result, vectors: result.vectors.map((vector) => normalizeVector(vector)) };
+}
+
 /**
  * Embeds `inputs` in batches (`batchSizeFor`: 64 at 512 dimensions, 10 at 3072). `beforeBatch` runs before each request (the budget check: a
  * refused batch costs nothing) and `afterBatch` after it (charging its tokens; since 2026-10-08 it also sees the
@@ -140,11 +147,13 @@ export async function embedTexts(connection: ProviderConnection, model: string, 
   const vectors: Float32Array[] = [];
   let tokens = 0;
   let estimated = false;
-  const size = batchSizeFor(dims);
+  // D543/D544: the kind's adapter may embed by itself (the local model) and in its own batch size.
+  const adapter = adapterOf(connection);
+  const size = adapter.batchSize ?? batchSizeFor(dims);
   for (let start = 0; start < inputs.length; start += size) {
     const batch = inputs.slice(start, start + size);
     hooks.beforeBatch?.(batch.length);
-    const result = await embedBatch(connection, model, dims, batch, hooks.signal, hooks.inputType);
+    const result = adapter.embed ? checked(await adapter.embed(model, dims, batch, { inputType: hooks.inputType, signal: hooks.signal }), batch.length, dims) : await embedBatch(connection, model, dims, batch, hooks.signal, hooks.inputType);
     hooks.afterBatch?.(result.tokens, result.vectors);
     vectors.push(...result.vectors);
     tokens += result.tokens;
