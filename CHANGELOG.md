@@ -2,6 +2,34 @@
 
 Release notes for Nook, newest first. Upgrade steps for each release are in [docs/OPERATIONS.md](docs/OPERATIONS.md#upgrades).
 
+## v0.44.0 — 2026-10-22
+
+**Claude, Voyage AI and local embeddings**
+
+- **Claude (Anthropic) endpoints just work**: Nook sends Anthropic's headers itself, reads its models list, and Test tool calling reads "Tool calling works (auto)" when forced tool choice is refused.
+- **Voyage AI** as an embeddings-only provider, and **Local embeddings**: a multilingual model built into Nook (no outside provider; `LOCAL_EMBEDDINGS_MODEL=skip` builds without it).
+- **Knowledge bases without embeddings**: keyword-only bases when no provider embeds; Change embedding model moves a base to vectors later. Providers say what they can do (chat, embeddings).
+- **One adapter per provider kind**; OpenAI's requests are pinned to v0.43.0 by golden tests.
+
+**Chat agents use data sources**
+
+- An admin opens a report data source to chat agents; an agent's owner picks it; the agent searches the schema and runs guarded SELECTs. Results show as a table in the chat (CSV, SQL, **Turn into a report**). Never over MCP or keys; tools outside Nook ask first after data was read.
+
+**Reports**
+
+- **Lists**: personal or shared, ordered lists of reports from any folder; a list never grants access.
+- **Duplicate report**: a copy you own, without sharing, schedule or history.
+- **Filters**: linked filters (choices follow earlier filters), table sort and contains, saved views and "my default view", number ranges, exclude, text contains, Add filter on dates, and readers' filter changes run side by side (4.9 s → 0.3 s for four readers).
+- A new section lands exactly where it's placed; a change to one block reads only its doc; "New" docs clear after a change reads them.
+
+**API keys**
+
+- **Edit can add permissions** (with your password), every dropdown works, and a security mail and bell notice say when a key gained access.
+
+**Upgrading**
+
+- Migrations **068** (report lists), **069** (filter views) and **073** (agent data sources) run once on the first boot; quick. **Back up first** (`./scripts/backup.sh --force`). The Docker image grows by about 157 MB with the local model (`LOCAL_EMBEDDINGS_MODEL=skip` to leave it out). See [Upgrading to 0.44.0](docs/OPERATIONS.md#upgrades).
+
 ## v0.43.0 — 2026-10-22
 
 **Several docs per report**

@@ -6,8 +6,8 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 - Contracts: [API](docs/plan/API_CONTRACTS.md) · [Threat model](docs/plan/THREAT_MODEL.md) · [Test plan](docs/plan/TEST_PLAN.md).
 
 **Current state (2026-10-22).**
-- **v0.43.0** is released (2026-10-22): several docs per report, Add a new section and doc links in Changes, delete from the header, edit and suggest SQL, dynamic filters (slice 1).
-- Migrations: **001–066** are released and immutable (045 and 054 unused; 054 is reserved for Messages). Next free: **067** (lane CLAUDE needed none), **068** LISTS (built), **069** FILT2 (built), **070** SMALL, **071** unused (lane LOCALEMB needed none).
+- **v0.44.0** is released (2026-10-22): Claude/Voyage/Local embeddings, keyword-only knowledge, chat agents on data sources, report Lists, Duplicate report, filters later slices, API key Edit adds permissions.
+- Migrations: **001–073** are released and immutable (045, 054, 067, 070, 071, 072 unused; 054 reserved for Messages). Next free: **074** (lane TASKS).
 - Development happens directly on `main`, pushed as each change passes its gates.
 
 ## In flight
@@ -32,7 +32,6 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 ## Small fixes (lane SMALL)
 
 - [ ] Inspect → "From the doc" (D518) needs the plan todo's `docRef` (`d2`); the scripted QA provider never sets it, so only a real model's runs show it. Check after the real-model eval.
-- [ ] Report lists (lane LISTS leftover, D550–D559): the docs site describes report organization only in release notes, so lists go into "What's new" at the 0.44.0 release (operator, at the release).
 
 ## Leftovers (lane CLAUDE)
 

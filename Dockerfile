@@ -46,7 +46,7 @@ RUN case "$LOCAL_EMBEDDINGS_MODEL" in \
 
 FROM oven/bun:1.4.2-alpine@sha256:d888c0ae6c86d7866ff10c5aafdd9077b36aee6455b33dd270fb93c0dd5cef6f AS production
 WORKDIR /app
-ARG APP_VERSION=0.43.0
+ARG APP_VERSION=0.44.0
 ARG GIT_SHA=development
 ENV NODE_ENV=production \
     PORT=2026 \
