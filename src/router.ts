@@ -3,8 +3,14 @@ import { formatBoardSearch, isDefaultBoardQuery, parseBoardSearch, type BoardQue
 import { formatHomeSearch, NEW_VIEW, parseMyWorkSearch, parseViewSearch, type TasksHome } from "./tasks/home/homeUrl";
 import { appName } from "./appName";
 
-/** Lane I: the Reports home's view: Unfiled, Shared with me, Favorites (phase 1), or one of the person's folders (its id). */
+/**
+ * Lane I: the Reports home's view: Unfiled, Shared with me, Favorites (phase 1), one of the person's folders (its id),
+ * or (phase 3, D558) a report list, `list:<id>` (/reports/lists/:id).
+ */
 export type ReportsFolderView = "unfiled" | "shared" | "favorites" | (string & {});
+/** Phase 3: the view of a report list, and the list a view names (null for any other view). */
+export const reportsListView = (listId: string): ReportsFolderView => `list:${listId.toLowerCase()}`;
+export const reportsListId = (view: ReportsFolderView | null | undefined): string | null => view?.startsWith("list:") ? view.slice(5) : null;
 
 /**
  * Report organization phase 1: the Reports list's filters in its URL query (?owner=&status=&datasource=&schedule=),
@@ -286,6 +292,7 @@ export function parseRoute(pathname: string, search = ""): Route {
     const list = (folder?: ReportsFolderView): Route => ({ app: "reports", reportId: null, ...(folder ? { folder } : {}), ...(filter ? { filter } : {}) });
     if (rest.length === 1 && (reportId === "unfiled" || reportId === "shared" || reportId === "favorites")) return list(reportId);
     if (rest.length === 2 && reportId === "folder" && folderId !== undefined && isRouteId(folderId)) return list(folderId.toLowerCase());
+    if (rest.length === 2 && reportId === "lists" && folderId !== undefined && isRouteId(folderId)) return list(reportsListView(folderId));
     return list();
   }
   return { app: "home" };
@@ -436,6 +443,8 @@ export function formatRoute(route: Route): string {
     if (route.reportId && isRouteId(route.reportId)) return `/reports/${route.reportId.toLowerCase()}${formatReportParams(route.params)}`;
     const query = formatReportsFilter(route.filter);
     if (route.folder === "unfiled" || route.folder === "shared" || route.folder === "favorites") return `/reports/${route.folder}${query}`;
+    const listId = reportsListId(route.folder);
+    if (listId && isRouteId(listId)) return `/reports/lists/${listId}${query}`;
     return `${route.folder && isRouteId(route.folder) ? `/reports/folder/${route.folder.toLowerCase()}` : "/reports"}${query}`;
   }
   if (route.app === "vault") {
@@ -555,7 +564,7 @@ export const routeFromLocation = (location: { pathname: string; search: string }
  * The part of a location `formatRoute` produces, to compare against it: the path, plus the query
  * on Tasks URLs (the only app whose URLs carry one).
  */
-const REPORTS_LIST_PATH = /^\/reports(\/(unfiled|shared|favorites|folder\/[^/]+))?\/?$/;
+const REPORTS_LIST_PATH = /^\/reports(\/(unfiled|shared|favorites|folder\/[^/]+|lists\/[^/]+))?\/?$/;
 const REPORT_PAGE_PATH = /^\/reports\/[0-9a-f-]{36}$/i;
 
 export function locationUrl(location: { pathname: string; search: string }) {

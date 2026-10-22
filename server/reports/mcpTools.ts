@@ -29,10 +29,11 @@ import { saveSchedule } from "./scheduler";
 import { listReportsPage, parseSpec as parseStoredSpec, setFavorite } from "./service";
 import { createFolder, listFolders, moveReportToFolder, updateFolder } from "./folders";
 import { addOwner, listOwners } from "./owners";
+import { addToList, listReportLists, reportListSummary } from "./lists";
 import { OWNER_REVIEW_LIMIT, ownerReview } from "./ownerReview";
 import { REPORT_FOLDER_NAME_MAX, REPORT_FOLDERS_PER_WORKSPACE, REPORT_PAGE_SIZE, REPORT_STATUSES } from "../../shared/reports";
 import { knownSpec } from "./specCheck";
-import type { ReportSpec } from "../../shared/reports";
+import type { ReportListSummary, ReportSpec } from "../../shared/reports";
 
 /** The spec as tools show it: only the fields the vocabulary names (review H1). */
 const parseSpec = (json: string): ReportSpec => knownSpec(parseStoredSpec(json));
@@ -61,6 +62,9 @@ const parseSpec = (json: string): ReportSpec => knownSpec(parseStoredSpec(json))
  * - Report organization phase 1: list_reports filters (owner, statuses, data source, scheduled,
  *   favorites, shared, folder) and pages by cursor; `star_report` and `unstar_report` (reports:write:
  *   the key owner's own Favorites, audited; a star needs a report they can open).
+ * - Phase 3 (D557): `list_report_lists` and `get_report_list` (reports:read: the lists the key owner can
+ *   see, and a list's reports they can open, in order) and `add_report_to_list` (reports:write: a list they
+ *   curate). Removing, reordering, renaming, deleting, and sharing lists stay in the app (D180).
  *
  * Writes are non-destructive (a version, a run, a queued instruction), audited with `via: "mcp"` and the
  * key, and counted against `report_write` (100 a day per key). Nothing is deleted over MCP but through
@@ -681,5 +685,72 @@ export const reportTools: McpToolSpec[] = [
     buckets: ["report_write"],
     inputSchema: z.object({ reportId }),
     handler: (args, key) => asOwner(key, () => setFavorite(key.userId, args.reportId.toLowerCase(), false, { keyId: key.keyId }))
+  }),
+  // Phase 3 (D550, D557): report lists. Read the lists and their reports (only those the key owner can open,
+  // T414), and add a report to a list they curate. No removal, reorder, rename, delete, or sharing over MCP (D180).
+  defineTool({
+    name: "list_report_lists",
+    title: "List report lists",
+    description: `The report lists the key owner can see: their own, and ones others shared with them or the whole team. A list groups reports without moving them and never gives access to them. Each list: id, name, owner ("me" or a name), the key owner's level (owner, edit: may add reports, view), visibility, how many of its reports they can open, and, for lists they curate, how many they can't (hidden; never which), and a link. Read a list's reports with get_report_list. ${UNTRUSTED}`,
+    scopes: ["reports:read"],
+    access: { mode: "list", lists: ["report"] },
+    write: false,
+    inputSchema: z.object({}),
+    handler: (_args, key) => {
+      if (!ownerHasReports(key.userId)) return { lists: [] };
+      const ids = keyContainerIds(key, "reports:read", "report");
+      // A key over chosen reports sees only the lists that hold one of them it can open.
+      return { lists: listReportLists(key.userId, { ids }).filter((list) => !ids || list.count > 0).map((list) => mcpList(list, key.userId)) };
+    }
+  }),
+  defineTool({
+    name: "get_report_list",
+    title: "Get a report list",
+    description: `One report list (from list_report_lists) and its reports in the list's order, 50 a page by default (at most 100): only the reports the key owner can open (id, title, status, owner, data source, last run, whether they starred it, link). When nextCursor is not null, pass it as cursor for the next page. ${UNTRUSTED}`,
+    scopes: ["reports:read"],
+    access: { mode: "list", lists: ["report"], related: ["listId"] },
+    write: false,
+    inputSchema: z.object({
+      listId: z.string().uuid().describe("The list (from list_report_lists)"),
+      cursor: z.string().min(1).max(200).optional().describe("nextCursor from the previous page"),
+      limit: z.number().int().min(1).max(REPORT_PAGE_SIZE).optional().describe("At most this many, default 50")
+    }),
+    handler: (args, key) => asOwner(key, () => {
+      const ids = keyContainerIds(key, "reports:read", "report");
+      const listId = args.listId.toLowerCase();
+      const list = reportListSummary(key.userId, listId, { ids });
+      if (ids && list.count === 0) throw new ReportError(404, "NOT_FOUND", "List not found");
+      const page = listReportsPage(key.userId, { listId, ids, limit: args.limit ?? 50, cursor: args.cursor ?? null });
+      return {
+        list: mcpList(list, key.userId),
+        reports: page.reports.map((report) => ({
+          id: report.id, title: report.title, status: report.status, owner: report.isOwner ? "me" : report.ownerName, datasource: report.datasourceName,
+          lastRunAt: report.lastRunAt, updatedAt: report.updatedAt, favorite: report.favorite, url: reportUrl(report.id)
+        })),
+        nextCursor: page.nextCursor
+      };
+    })
+  }),
+  defineTool({
+    name: "add_report_to_list",
+    title: "Add a report to a list",
+    description: "Adds a report the key owner can open to the end of a report list they curate (they own it, or it is shared with them at edit; from list_report_lists). Only the list changes: the report, its sharing, and who can open it stay as they are. Adding it twice changes nothing. Audited.",
+    scopes: ["reports:write"],
+    access: { mode: "items", items: reportItem, related: ["listId"] },
+    write: true,
+    buckets: ["report_write"],
+    inputSchema: z.object({ listId: z.string().uuid().describe("The list (from list_report_lists)"), reportId }),
+    handler: (args, key) => asOwner(key, () => {
+      const result = addToList(key.userId, args.listId.toLowerCase(), args.reportId.toLowerCase(), { keyId: key.keyId });
+      return { added: result.added, list: mcpList(result.list, key.userId) };
+    })
   })
 ];
+
+/** A list as the MCP tools show it. */
+function mcpList(list: ReportListSummary, userId: string) {
+  return {
+    id: list.id, name: list.name, owner: list.ownerId === userId ? "me" : list.ownerName, level: list.level, visibility: list.visibility,
+    reports: list.count, ...(list.hidden !== null ? { hidden: list.hidden } : {}), url: `${config.appOrigin}/reports/lists/${list.id}`
+  };
+}

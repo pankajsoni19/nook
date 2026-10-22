@@ -398,6 +398,8 @@ export type ReportListFilter = {
   shared?: boolean;
   folderId?: string;
   subtree?: boolean;
+  /** Phase 3 (D550): the reports in one list the caller can see, in the list's order (only those they can open). */
+  listId?: string;
 };
 /** One page of the Reports list; `nextCursor` (opaque) asks for the next, null at the end. */
 export type ReportListPage = { reports: ReportSummary[]; nextCursor: string | null };
@@ -424,6 +426,29 @@ export const REPORT_FOLDERS_PER_USER = 200;
 /** Phase 2: the shared tree holds at most this many live folders. */
 export const REPORT_FOLDERS_PER_WORKSPACE = 2000;
 export const REPORT_FOLDER_NAME_MAX = 120;
+
+/**
+ * Report organization phase 3 (migration 068, D550–D559): a list groups reports without moving them; a
+ * report sits in many lists. A list never grants access (D487, D550): `count` is the reports in it the
+ * caller can open; `hidden` (the live ones they can't) is shown only to its curators (the owner and people
+ * at `edit`), never their titles (D552). `level`: `owner` (rename, share, delete), `edit` (add, remove,
+ * reorder), or `view`.
+ */
+export type ReportListLevel = "owner" | "edit" | "view";
+export type ReportListVisibility = "private" | "selected" | "all_users";
+export type ReportListSummary = {
+  id: string; name: string; ownerId: string; ownerName: string; level: ReportListLevel; visibility: ReportListVisibility;
+  count: number; hidden: number | null; createdAt: string; updatedAt: string;
+};
+/** A list as the add-to-list picker shows it: a list the caller curates, and whether the report is in it. */
+export type ReportListChoice = { id: string; name: string; contains: boolean; ownerName: string; isOwner: boolean };
+export type ReportListShare = { kind: "user" | "group"; id: string; name: string; level: "view" | "edit" };
+export type ReportListSharing = { visibility: ReportListVisibility; shares: ReportListShare[] };
+export const REPORT_LIST_NAME_MAX = 120;
+/** D554: at most this many live lists a person owns, and reports in one list. */
+export const REPORT_LISTS_PER_USER = 300;
+export const REPORT_LIST_ITEMS_MAX = 5000;
+export const REPORT_LIST_SHARES_MAX = 100;
 
 export type ReportDetail = ReportSummary & {
   spec: ReportSpec;

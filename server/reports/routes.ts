@@ -17,6 +17,7 @@ import { registerReportViewRoutes } from "./viewRoutes";
 import { registerReportEditRoutes } from "./editRoutes";
 import { registerQueryEditRoutes } from "./queryEditRoutes";
 import { registerReportFolderRoutes } from "./folderRoutes";
+import { registerReportListRoutes } from "./listRoutes";
 import { ownerReview } from "./ownerReview";
 
 /**
@@ -57,7 +58,7 @@ const flag = z.enum(["1", "0", "true", "false"]).transform((value) => value === 
 /**
  * GET /api/reports (report organization phase 1): `q`, `owner` (an id, or `me`), `status` (comma-separated),
  * `datasource`, `scheduled` (1 or 0), `favorites=1`, `shared=1`, `folder` (an id, or `unfiled`) with
- * `subtree=1`, `cursor` (from the last page's `nextCursor`), and `limit` (at most REPORT_PAGE_SIZE).
+ * `subtree=1`, `list` (phase 3: a list's reports in its order), `cursor` (from the last page's `nextCursor`), and `limit` (at most REPORT_PAGE_SIZE).
  */
 const listSchema = z.object({
   q: z.string().max(200).optional(),
@@ -69,6 +70,7 @@ const listSchema = z.object({
   shared: flag.optional(),
   folder: z.union([z.literal("unfiled"), uuid]).optional(),
   subtree: flag.optional(),
+  list: uuid.optional(),
   cursor: z.string().max(200).optional(),
   limit: z.coerce.number().int().min(1).max(REPORT_PAGE_SIZE).optional()
 }).strict();
@@ -78,7 +80,7 @@ function listQuery(c: Context<AppEnv>): ReportListOptions {
   const userId = c.get("user").id;
   return {
     q: query.q, ownerId: query.owner === "me" ? userId : query.owner?.toLowerCase(), statuses: query.status, datasourceId: query.datasource?.toLowerCase(),
-    scheduled: query.scheduled, favorites: query.favorites, shared: query.shared, folderId: query.folder?.toLowerCase(), subtree: query.subtree,
+    scheduled: query.scheduled, favorites: query.favorites, shared: query.shared, folderId: query.folder?.toLowerCase(), subtree: query.subtree, listId: query.list?.toLowerCase(),
     cursor: query.cursor, limit: query.limit
   };
 }
@@ -160,6 +162,8 @@ export function registerReportRoutes(app: Hono<AppEnv>) {
   registerGenerateRoutes(app);
   // Lane I: report folders (literal /api/reports/folders paths, before /api/reports/:reportId).
   registerReportFolderRoutes(app);
+  // Phase 3 (D550): report lists (literal /api/reports/lists paths, before /api/reports/:reportId).
+  registerReportListRoutes(app);
   app.get("/api/reports/datasources", handle(() => ({ datasources: datasourceChoices() })));
   app.get("/api/reports", handle((c) => listReportsPage(c.get("user").id, listQuery(c))));
   app.post("/api/reports", handle(async (c) => {

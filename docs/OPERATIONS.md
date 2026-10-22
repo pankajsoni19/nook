@@ -613,13 +613,18 @@ Every image carries immutable numbered migrations under `server/migrations`. The
 
 ### Upgrading to 0.44.0
 
-0.44.0's migrations run once on the first boot, in order, before the HTTP server answers; they are recorded in `schema_migrations` and cannot be undone except by restoring a backup. **Back up first:** `./scripts/backup.sh --force`.
+0.44.0 adds report lists (lane LISTS, D550–D559: a person groups reports from any folder into named, ordered lists, shares a list with people and groups at view or edit, and finds it under Lists in the Reports nav; a list never gives access to a report) and linked filters and saved filter views (lane FILT2). Its migrations run once on the first boot, in order, before the HTTP server answers; they are recorded in `schema_migrations` and cannot be undone except by restoring a backup. **Back up first:** `./scripts/backup.sh --force`.
 
 | Migration | What it does | Cost |
 | --- | --- | --- |
+| **068** `report_lists` | Adds four empty tables: `report_lists` (a person's list: name, audience, Bin columns), `report_list_items` (the reports in a list and their order), `report_list_members` and `report_list_group_shares` (who else sees the list, at `view` or `edit`), with their indexes. It copies nothing and rewrites no table. | Quick at any size. |
 | **069** `report_filter_views` | Adds two tables (lane FILT2, report filters' later slices): `report_param_linked_options` (a linked filter's choices per its parents' values, at most 50 lists a report, the most recently used kept) and `report_param_views` (a reader's saved filter views: a name, the values as JSON of at most 16 KiB, and at most one "my default view" per person and report; names unique per person and report regardless of case). Both go with their report; views also go with their person. It copies nothing and rewrites no table. | Quick at any size. |
 
-If it fails, the server logs `Migration failed` with id 69 and does not start; it is transactional, so nothing is half applied. No new settings.
+If one fails, the server logs `Migration failed` with its id (68 or 69) and does not start; it is transactional, so nothing is half applied. No new settings.
+
+Check: `sqlite3 <data>/mynotes.sqlite "SELECT id, name FROM schema_migrations WHERE id >= 67 ORDER BY id;"` lists 68 `report_lists` and 69 `report_filter_views`.
+
+New MCP tools: `list_report_lists` and `get_report_list` (`reports:read`) and `add_report_to_list` (`reports:write`); existing keys with those scopes get them. A deleted list waits in its owner's Bin for 30 days (admins don't see other people's lists there).
 
 ### Upgrading to 0.43.0 (several docs per report, report edits, and report filters, migrations 064–066)
 

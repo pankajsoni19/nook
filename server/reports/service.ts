@@ -6,6 +6,7 @@ import { ownedReport, ownsReportSql, readableReport, readableReportSql, reportLe
 import { usableDatasource, type DatasourceRow } from "./datasources";
 import { ReportError } from "./errors";
 import { liveFolder } from "./folderAccess";
+import { readableList } from "./listAccess";
 import { adHocQueryId, killQuery, runGuarded } from "./runner";
 import { classify, GuardError } from "./sqlGuard";
 import { placeholderValue, type BoundParam } from "../../shared/reportParams";
@@ -55,6 +56,9 @@ export const FAVORITE_SQL = "EXISTS (SELECT 1 FROM report_favorites f WHERE f.us
 const SUMMARY_SELECT = `SELECT r.*, u.display_name AS owner_name, d.name AS datasource_name, ${SCHEDULED_SQL} AS schedule_cadence, ${FAVORITE_SQL} AS favorite,
     ${ownsReportSql("r")} AS is_owner, ${reportLevelSql("r")} AS level, (SELECT COUNT(*) FROM report_owners oc WHERE oc.report_id = r.id) AS owner_count
   FROM reports r CROSS JOIN users u ON u.id = r.owner_id LEFT JOIN report_datasources d ON d.id = r.datasource_id`;
+
+/** Phase 3 (D556): a list's reports, from its items in order; `list_position` keys its cursor. */
+const LIST_SUMMARY_SELECT = SUMMARY_SELECT.replace("SELECT r.*,", "SELECT r.*, li.position AS list_position,").replace("FROM reports r CROSS JOIN", "FROM report_list_items li CROSS JOIN reports r ON r.id = li.report_id CROSS JOIN");
 
 export type ReportListOptions = ReportListFilter & { ids?: readonly string[] | null; limit?: number; cursor?: string | null };
 
@@ -110,6 +114,10 @@ export function reportListSizes(options: ReportListOptions, userId: string, hand
  * (reports_owner, reports_status, reports_live_recent, the favorites' primary key).
  */
 export function reportListSql(options: ReportListOptions, sizes: ReportListSizes = {}) {
+  // Phase 3 (D550, D556): a list's page starts from its items in order (report_list_items_order), so every
+  // other filter is a per-row check on those rows; the readable check below still holds for each (D487).
+  const inList = Boolean(options.listId);
+  const big = (size: number | undefined) => inList || large(size, sizes);
   const where = [readableReportSql("r")];
   const params: Record<string, string | number | null> = {};
   const q = options.q?.trim().toLowerCase().slice(0, 200) ?? "";
@@ -119,22 +127,35 @@ export function reportListSql(options: ReportListOptions, sizes: ReportListSizes
   // written as `r.id IN (…)` so SQLite starts from it (report_owners_user, the favorites' key) and sorts it; a
   // large one as a per-row check, so it walks reports_live_recent and stops at the page (see reportListSizes).
   if (options.ownerId) {
-    where.push(large(sizes.owned, sizes) ? ownsReportSql("r", "$ownerId") : "r.id IN (SELECT o_f.report_id FROM report_owners o_f WHERE o_f.user_id = $ownerId)");
+    where.push(big(sizes.owned) ? ownsReportSql("r", "$ownerId") : "r.id IN (SELECT o_f.report_id FROM report_owners o_f WHERE o_f.user_id = $ownerId)");
     params.ownerId = options.ownerId;
   }
   if (options.statuses?.length) { where.push("r.status IN (SELECT value FROM json_each($statuses))"); params.statuses = JSON.stringify(options.statuses); }
   if (options.datasourceId) { where.push("r.datasource_id = $datasourceId"); params.datasourceId = options.datasourceId; }
   if (options.scheduled !== undefined) where.push(`${SCHEDULED_SQL} IS ${options.scheduled ? "NOT NULL" : "NULL"}`);
-  if (options.favorites) where.push(large(sizes.favorites, sizes) ? FAVORITE_SQL : "r.id IN (SELECT f_f.report_id FROM report_favorites f_f WHERE f_f.user_id = $userId)");
+  if (options.favorites) where.push(big(sizes.favorites) ? FAVORITE_SQL : "r.id IN (SELECT f_f.report_id FROM report_favorites f_f WHERE f_f.user_id = $userId)");
   if (options.shared) where.push(`NOT ${ownsReportSql("r")}`);
   // Phase 2 (D483): the shared tree; a folder lists the readable reports filed in it (T391). D501: a large
   // folder's `+` keeps SQLite off reports_folder (sorting thousands of rows) and on reports_live_recent.
-  const folderColumn = large(sizes.folder, sizes) ? "+r.folder_id" : "r.folder_id";
+  const folderColumn = big(sizes.folder) ? "+r.folder_id" : "r.folder_id";
   if (options.folderId === "unfiled") where.push("r.folder_id IS NULL");
   else if (options.folderId && options.subtree) {
     where.push(`${folderColumn} IN (${SUBTREE_SQL})`);
     params.folderId = options.folderId;
   } else if (options.folderId) { where.push(`${folderColumn} = $folderId`); params.folderId = options.folderId; }
+  if (inList) {
+    where.unshift("li.list_id = $listId");
+    params.listId = options.listId!;
+    if (options.cursor) {
+      const { at, id } = decodeCursor(options.cursor);
+      const position = Number(at);
+      if (!/^\d{1,9}$/.test(at) || !Number.isSafeInteger(position)) throw new ReportError(400, "INVALID", "That list position is not valid; load the list again");
+      where.push("(li.position > $cursorAt OR (li.position = $cursorAt AND li.report_id > $cursorId))");
+      params.cursorAt = position;
+      params.cursorId = id;
+    }
+    return { sql: `${LIST_SUMMARY_SELECT} WHERE ${where.join("\n  AND ")} ORDER BY li.position, li.report_id LIMIT $limit`, params };
+  }
   if (options.cursor) {
     const { at, id } = decodeCursor(options.cursor);
     where.push("(r.updated_at < $cursorAt OR (r.updated_at = $cursorAt AND r.id > $cursorId))");
@@ -147,11 +168,15 @@ export function reportListSql(options: ReportListOptions, sizes: ReportListSizes
 /** One page of the reports a person can open, newest change first, with the filters in use (keyset paged). */
 export function listReportsPage(userId: string, options: ReportListOptions = {}): ReportListPage {
   const limit = Math.min(Math.max(1, Math.floor(options.limit ?? REPORT_PAGE_SIZE)), REPORT_PAGE_SIZE);
-  const { sql, params } = reportListSql(options, reportListSizes(options, userId));
-  const rows = db.query(sql).all({ ...params, userId, limit: limit + 1 }) as SummaryRow[];
+  // Phase 3: a list the caller cannot see is the same 404 as a missing one.
+  if (options.listId) readableList(options.listId, userId);
+  const { sql, params } = reportListSql(options, options.listId ? {} : reportListSizes(options, userId));
+  const rows = db.query(sql).all({ ...params, userId, limit: limit + 1 }) as Array<SummaryRow & { list_position?: number }>;
   const more = rows.length > limit;
   const reports = rows.slice(0, limit).map((row) => summaryOf(row, userId));
-  return { reports, nextCursor: more ? encodeCursor(reports[reports.length - 1]!) : null };
+  const last = rows[limit - 1];
+  const nextCursor = !more || !last ? null : options.listId ? encodeCursor({ updatedAt: String(last.list_position), id: last.id }) : encodeCursor(reports[reports.length - 1]!);
+  return { reports, nextCursor };
 }
 
 /** The first page of the reports a person can open (at most REPORT_PAGE_SIZE), for callers that need no cursor. */

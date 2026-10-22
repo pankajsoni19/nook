@@ -1,5 +1,5 @@
 import { api, ApiError } from "../api";
-import type { CatalogTable, ConnectionTest, DatasourceChoice, DatasourceSummary, QueryOutcome, ReportDetail, ReportFolder, ReportFolderTree, ReportListFilter, ReportListPage, ReportSummary, SchemaSearchHit, SchemaSyncResult } from "../../shared/reports";
+import type { CatalogTable, ConnectionTest, DatasourceChoice, DatasourceSummary, QueryOutcome, ReportDetail, ReportFolder, ReportFolderTree, ReportListChoice, ReportListFilter, ReportListPage, ReportListSharing, ReportListSummary, ReportListVisibility, ReportSummary, SchemaSearchHit, SchemaSyncResult } from "../../shared/reports";
 import type { DocInput, DocServerChoice, DocState, GenerateStarted, GenerationRun } from "../../shared/reportsGenerate";
 
 /** The Reports API (docs/plan/API_CONTRACTS.md § Analytics reports, Wave 45). */
@@ -20,6 +20,7 @@ export function reportListSearch(query: ReportListQuery) {
   if (query.shared) params.set("shared", "1");
   if (query.folderId) params.set("folder", query.folderId);
   if (query.folderId && query.subtree) params.set("subtree", "1");
+  if (query.listId) params.set("list", query.listId);
   if (query.cursor) params.set("cursor", query.cursor);
   const text = params.toString().replace(/%2C/g, ",");
   return text ? `?${text}` : "";
@@ -36,6 +37,17 @@ export const createFolder = (name: string, parentId: string | null = null) => ap
 export const updateFolder = (id: string, patch: { name?: string; parentId?: string | null; position?: number }) => api<{ folder: ReportFolder }>(`/reports/folders/${id}`, json("PATCH", patch));
 export const deleteFolder = (id: string) => api<{ ok: true; purgeAfter: string; unfiled: number; subfolders: number }>(`/reports/folders/${id}`, { method: "DELETE", body: "{}" });
 export const fileReport = (id: string, folderId: string | null) => api<{ report: ReportSummary; previousFolderId: string | null }>(`/reports/${id}/folder`, json("PATCH", { folderId }));
+// Phase 3 (D550): report lists. A list never grants access: its pages and counts are the caller's.
+export const listLists = () => api<{ lists: ReportListSummary[] }>("/reports/lists");
+export const createList = (name: string) => api<{ list: ReportListSummary }>("/reports/lists", json("POST", { name }));
+export const renameList = (id: string, name: string) => api<{ list: ReportListSummary }>(`/reports/lists/${id}`, json("PATCH", { name }));
+export const deleteList = (id: string) => api<{ ok: true; purgeAfter: string }>(`/reports/lists/${id}`, { method: "DELETE", body: "{}" });
+export const addToList = (listId: string, reportId: string) => api<{ added: boolean; list: ReportListSummary }>(`/reports/lists/${listId}/items/${reportId}`, json("PUT", {}));
+export const removeFromList = (listId: string, reportId: string) => api<{ removed: boolean; list: ReportListSummary }>(`/reports/lists/${listId}/items/${reportId}`, { method: "DELETE", body: "{}" });
+export const moveInList = (listId: string, reportId: string, place: { beforeId?: string; afterId?: string }) => api<{ ok: true }>(`/reports/lists/${listId}/items/${reportId}`, json("PATCH", place));
+export const listChoices = (reportId: string) => api<{ lists: ReportListChoice[] }>(`/reports/${reportId}/lists`);
+export const getListSharing = (id: string) => api<{ sharing: ReportListSharing }>(`/reports/lists/${id}/sharing`);
+export const saveListSharing = (id: string, input: { visibility: ReportListVisibility; shares: Array<{ kind: "user" | "group"; id: string; level: "view" | "edit" }> }) => api<{ sharing: ReportListSharing }>(`/reports/lists/${id}/sharing`, json("PUT", input));
 export const updateReport = (id: string, patch: { title?: string; datasourceId?: string; expectedRevision: number }) => api<{ report: ReportDetail }>(`/reports/${id}`, json("PATCH", patch));
 export const deleteReport = (id: string) => api<{ ok: true; purgeAfter: string }>(`/reports/${id}`, { method: "DELETE", body: "{}" });
 export const datasourceChoices = () => api<{ datasources: DatasourceChoice[] }>("/reports/datasources");

@@ -1,6 +1,6 @@
 # Report organization at scale: favorites, shared folders, lists
 
-Status: **phases 1 and 2 shipped (2026-10-15)**, phase 3 planned. Phase 1 follows Tableau's favorites. **Phase 2 was simplified by the operator**: folders only group, permissions sit on each report, and reports can have several owners.
+Status: **phases 1 and 2 shipped (2026-10-15)**; **phase 3 (lists) built (2026-10-22, lane LISTS, migration 068)**. Phase 1 follows Tableau's favorites. **Phase 2 was simplified by the operator**: folders only group, permissions sit on each report, and reports can have several owners.
 - Content lives in shared folders whose access passes down to everything inside.
 - People keep personal shortcuts as favorites.
 - Optional lists group reports without moving them.
@@ -108,22 +108,38 @@ Next free ids at planning time: migration **061** (060 is the Files `document_ft
 - D483: The workspace-wide folder tree.
 - Leftovers, 2026-10-15: D500 (Settings → Report owners), D501 (the list at 50,000 reports), D502 (folder deletion is app-only, by policy); T399.
 
-## Phase 3: report lists (optional, migration 064)
+## Phase 3: report lists (migration 068)
 
-- **Tables:** `report_lists` and `report_list_items`.
-- **Sharing:** through `report_list_members` and `group_grants('report_list')`.
-- **A list never grants access:** its items are always filtered through `readableReportSql`.
-- **Name:** "Lists", because Nook already has a Collections module.
+**Built (2026-10-22, lane LISTS), migration 068.** A list groups reports without moving them, in an order its curators choose; a report sits in many lists. "Lists", because Nook already has Collections.
+
+**Data**
+- `report_lists(id, owner_id, name, visibility, created_at, updated_at, deleted_at, deleted_by, purge_after, purge_started_at)`: one owner; `visibility` is the reports' own audience (`private`, `selected`, `all_users`).
+- `report_list_items(list_id, report_id, position, added_by, added_at)`: primary key on both ids; `report_list_items_order (list_id, position, report_id)` is the list's order and its page's keyset; `report_list_items_report` serves the cascade when a report is purged.
+- `report_list_members(list_id, user_id, level)` and `report_list_group_shares(list_id, group_id, level)`, `level` `view` or `edit`.
+
+**Decisions**
+- **D550 A list never grants access** (D487 made concrete). Its page is `GET /api/reports?list=` through `readableReportSql`; its counts are per viewer; adding a report needs one the curator can open (the same 404 as a missing one), so no title ever enters a list unseen by the person who put it there. Sharing a list shares no report in it.
+- **D551 Sharing in the reports' shape, not `group_grants`.** `group_grants.resource_kind` has a CHECK listing its kinds, and 025's table has never been rebuilt (finding 3 above: the `access_grants_v` view, the 046 trigger, other tables' triggers). Lists copy `report_members` / `report_group_shares` (052) with their own levels: `view` sees the list, `edit` curates it (add, remove, reorder). `all_users` is every person at view, never guests (AUDIENCE_ALL_USERS); a Team viewer is capped at view (D266). Group pages count list shares, and the guest-join rule (T213) treats one as a grant.
+- **D552 "N reports you can't open", for curators only.** `hidden` is the live reports in the list the caller can't open, shown to its owner and people at `edit` (who would otherwise wonder why the list looks short, and may remove them by asking the owner), never to readers, never with titles, and never to an MCP key over chosen reports. Binned reports are not counted.
+- **D553 Delete goes to the owner's Bin; the owner restores.** A list is a person's, like a report (D419), and may be private, so the owner alone lists, restores, purges, and empties it; admins get no reach into it. This differs from folders (D483), which are the workspace's tree and so the admins'. Its items and shares wait in the Bin with it.
+- **D554 Limits:** 300 live lists per owner, 5,000 reports per list, 100 shares per list.
+- **D555 Order.** Positions are 0…n; a move splices the whole order and rewrites only the rows whose position changed (a move from the end of a 2,000-report list to its top: 13.7 ms of CPU; an add at its end, with the new counts: 5.7 ms). A curator moves a report they can open just before or after another they can open; the reports they can't open keep their places relative to each other. In the app: drag a row (an insertion line shows where it lands; only without a title search or filters), or Move up / Move down in the row's ⋯ menu (keyboards and phones).
+- **D556 Scale.** A list's page starts from `report_list_items_order` and checks the readable set and any filter per row, so it never sorts. The nav's lists come from their indexes (the owner's, `report_lists_audience`, the person's and their groups' shares), and every list's counts from one `GROUP BY` over their items (each item is checked once). Measured by `tests/reportLists.test.ts` (300 lists the viewer sees, one of 2,000 reports, 1,000 lists of others they don't): the nav 14.7 ms, a page of the 2,000-report list 2.0 ms, filtered 1.8 ms of CPU; no full scan.
+- **D557 MCP:** `list_report_lists` and `get_report_list` (reports:read) and `add_report_to_list` (reports:write, audited). Removing, reordering, renaming, deleting, and sharing are app-only (D180). None is offered to chat agents: a person's lists are their organisation of the Reports home.
+- **D558 UI.** **Lists** in the Reports nav under the folders (a list someone else owns names them), New list for members, and a ⋯ menu for the owner (Rename, Share list, Delete list). Each list is a URL, `/reports/lists/:id`, so Back and Forward step between lists, folders, and views at every width. **Add to list…** in a report row's ⋯ menu and an icon button beside the star on the report's page open a picker of the lists the caller curates (each a toggle, plus a new list's name); a report row dropped on a list in the nav adds it there (with Undo). A list's curators get Remove from list (with Undo) and the reorder above. On a phone the lists sit in the folder switcher's sheet; the picker and Share list are full-screen sheets and history layers (Back closes, Forward reopens).
+- **D559 Phone rows.** A Reports row at 390 px keeps its facts (status, data source, last change) on one line under the title: the data source ends in an ellipsis and the last change shows as "9m" (its full "9 minutes ago" in the tooltip), instead of wrapping onto a fourth line (TODO "Small fixes").
+
+**Threats:** T415 (a list leaks the reports in it), T416 (a list used to advertise or probe reports), T417 (list names reach people who can't open its reports); see docs/plan/THREAT_MODEL.md.
 
 ## Threats and decisions
 
-Phase 2's threats and decisions are listed in its section. Phase 1 adds D486 (Favorites) and T393 (favorites never leak, because they are filtered through `readableReportSql`). Phase 3 adds D487 (Lists never grant access).
+Phase 2's threats and decisions are listed in its section. Phase 1 adds D486 (Favorites) and T393 (favorites never leak, because they are filtered through `readableReportSql`). Phase 3 adds D487 (Lists never grant access), and as built D550–D559 and T415–T417 (its section above).
 
 ## Order and parallelism
 
 - **Phase 1** can run alongside the Files `document_fts` work (060), since they share no tables.
 - **Phase 2** follows phase 1. It touches `server/reports/access.ts`, `sharing.ts`, the folder files, the gates that change from `ownedReport` to `editableReport`, `server/team/*`, `server/access/*`, `src/reports/ShareSheet.tsx` and `src/access/*`.
-- **Phase 3** is optional.
+- **Phase 3** shipped on its own (migration 068), after phases 1 and 2.
 - Each phase is its own release-sized slice.
 
 ## Open questions

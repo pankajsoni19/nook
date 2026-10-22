@@ -7,13 +7,12 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 
 **Current state (2026-10-22).**
 - **v0.43.0** is released (2026-10-22): several docs per report, Add a new section and doc links in Changes, delete from the header, edit and suggest SQL, dynamic filters (slice 1).
-- Migrations: **001–066** are released and immutable (045 and 054 unused; 054 is reserved for Messages). Next free: **067** (lane CLAUDE), **068** LISTS, **069** FILT2, **070** SMALL, **071** LOCALEMB.
+- Migrations: **001–066** are released and immutable (045 and 054 unused; 054 is reserved for Messages). Next free: **067** (lane CLAUDE), **068** LISTS (built), **069** FILT2, **070** SMALL, **071** LOCALEMB.
 - Development happens directly on `main`, pushed as each change passes its gates.
 
 ## In flight
 
 - [ ] **Report filters, later slices** (lane FILT2, migration 069) (slice 1 shipped, D532–D537): linked filters, client-side table sort and contains, saved personal views, more filter types (number range, exclude, text contains, Add filter on dates), and concurrent parameter runs, ranked in [REPORT_FILTERS.md](docs/plan/REPORT_FILTERS.md) "Later". Started 2026-10-22.
-- [ ] **Report Lists** ([plan](docs/plan/REPORTS_ORG.md) phase 3; lane LISTS, migration 068): a report in many lists; a list never grants access.
 - [ ] **Reports: a personal copy of a report?** (lane EDIT research, D531): Metabase, Redash, and Tableau let people without edit rights save a copy and change that; Nook offers Suggest an edit instead. Lane SMALL builds **Duplicate report** (operator: "complete todo.md").
 - [ ] **Claude (Anthropic) as a model provider** (operator, 2026-10-22; lane CLAUDE):
   - [ ] Test says "anthropic-version header required": send `anthropic-version` (and `x-api-key`) automatically when the endpoint is Anthropic's.
@@ -38,9 +37,11 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 - [ ] Several docs (lane DOCS): a doc added in Doc settings stays "New" after a change that attached the same doc is applied (the edit read it, but only Regenerate stamps a doc's hash); decide whether an applied change should stamp it.
 - [ ] "Add a new section" after a block outside any section puts the section first among the sections, which render after every loose block (D516), so it can land below later loose blocks; placing it truly in between would need the loose blocks after the anchor to move into a section.
 - [ ] Inspect → "From the doc" (D518) needs the plan todo's `docRef` (`d2`); the scripted QA provider never sets it, so only a real model's runs show it. Check after the real-model eval.
-- [ ] Button lint on New report (found by lane DOCS, already on main before it): the "From a doc" / "Blank" mode buttons have under 12 px side padding, and at 390 px a Reports row's open button wraps ("title, Owner, Ready, data source").
+- [ ] Button lint on New report (found by lane DOCS, already on main before it): the "From a doc" / "Blank" mode buttons have under 12 px side padding. (The 390 px Reports row wrap is fixed, D559.)
 - [ ] The edit agent re-reads every report doc's newest snapshot on each change (up to 8 docs in its 60 KB share); a change that touches one block could carry only the doc its block came from once D518's mapping is reliable.
 - [ ] "Pick from Nook": before the Files index's first backfill after boot, the fallback scan can offer a scanned PDF by name (picking it gives the "no text layer" error).
+
+- [ ] Report lists (lane LISTS leftovers, D550–D559): the docs site describes report organization only in release notes, so lists go into "What's new" at the 0.44.0 release; Team → member access pages list a person's report shares but not their list shares (group pages count them); "New report" inside a list view does not add the new report to the list.
 
 ## Watch (no work unless it shows up)
 

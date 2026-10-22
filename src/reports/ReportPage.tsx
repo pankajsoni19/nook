@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
-import { CalendarClock, ChevronLeft, Crown, CircleStop, Cpu, Database, FileSearch, FileTerminal, FileText, GitCommitVertical, History, Link2, ListFilter, LoaderCircle, MessageSquarePlus, MessageSquare, Pencil, Play, RefreshCw, Share2, Sparkles, TableProperties, Trash2, TriangleAlert, Settings2, Ruler } from "lucide-react";
+import { CalendarClock, ChevronLeft, Crown, CircleStop, Cpu, Database, FileSearch, FileTerminal, FileText, GitCommitVertical, History, Link2, ListFilter, ListPlus, LoaderCircle, MessageSquarePlus, MessageSquare, Pencil, Play, RefreshCw, Share2, Sparkles, TableProperties, Trash2, TriangleAlert, Settings2, Ruler } from "lucide-react";
 import { AccountActions } from "../AppShell";
 import { appName } from "../appName";
 import { notifyBinned } from "../bin/binUndo";
@@ -17,6 +17,7 @@ import { ReportConsoleContext } from "./reportConsole";
 import { ReportEditContext, type ReportEditing } from "./reportBlockEdit";
 import { STATUS_LABELS } from "./ReportsHome";
 import { StarButton } from "./StarButton";
+import { AddToListSheet } from "./AddToListSheet";
 import { ReportGeneration } from "./ReportGeneration";
 import { SchemaBrowser } from "./SchemaBrowser";
 import { ModelSheet } from "./ModelSheet";
@@ -89,6 +90,9 @@ export function ReportPage({ reportId, displayName, flash, onBack, onSettings, o
   const composerFocus = useRef(false);
   // Share (the owner): the click copies the link first; `copyFailed` opens the panel with the link selected.
   const [sharing, setSharing] = useState<{ copyFailed: boolean } | null>(null);
+  // Phase 3 (D558): the add-to-list picker from the header.
+  const [addingToList, setAddingToList] = useState(false);
+  useLayerOpener("reports.addToList", (id) => { if (id === reportId) setAddingToList(true); });
   // Readers' "Copy link" when the clipboard refuses: the link in a small sheet.
   const [linkSheet, setLinkSheet] = useState(false);
   // Item 4: the SQL console is a panel on a report with blocks (⋯ → SQL console, Inspect → Open in console).
@@ -290,6 +294,7 @@ export function ReportPage({ reportId, displayName, flash, onBack, onSettings, o
           <h1 id="report-title">{report.title}</h1>
           {/* Phase 1 (D486): the caller's own star, optimistic. */}
           <StarButton reportId={report.id} title={report.title} favorite={report.favorite} onChange={(favorite) => setReport((current) => current && current.id === report.id ? { ...current, favorite } : current)} className="report-title-star" />
+          {canWrite && <button type="button" className="icon-button reports-star report-title-star report-title-list" aria-label={`Add ${report.title} to a list`} title="Add to list" onClick={() => setAddingToList(true)}><ListPlus aria-hidden="true" /></button>}
         </div>
         <p className="report-facts">
           <span className={`reports-status reports-status-${report.status}`}>{STATUS_LABELS[report.status]}</span>
@@ -347,6 +352,7 @@ export function ReportPage({ reportId, displayName, flash, onBack, onSettings, o
     {addFilterOpen && report && <AddFilterSheet reportId={report.id} onClose={() => setAddFilterOpen(false)} reopen={() => setAddFilterOpen(true)} onRequested={() => { setAddFilterOpen(false); openChanges(null); }} />}
     {metricsOpen && report && <MetricsSheet reportId={report.id} title={report.title} canEdit={ownerWrite} onClose={() => setMetricsOpen(false)} reopen={() => setMetricsOpen(true)} />}
     {runsAt && report && <RunsSheet key={runsAt.runId ?? ""} reportId={report.id} title={report.title} focusRunId={runsAt.runId} onClose={() => setRunsAt(null)} reopen={() => setRunsAt(lastRuns.current)} />}
+    {addingToList && report && <AddToListSheet reportId={report.id} title={report.title} canCreate={canWrite} onClose={() => setAddingToList(false)} onReopen={() => setAddingToList(true)} />}
     {sharing && report && <ShareSheet reportId={report.id} title={report.title} onClose={() => setSharing(null)} reopen={() => setSharing({ copyFailed: false })} link={reportLink(report.id)} copyFailed={sharing.copyFailed} flash={flash}
       canShare={ownerWrite} canManageOwners={canWrite && report.canManageOwners} onOwnersChanged={reloadReport} onLeft={reloadReport} />}
     {linkSheet && report && <LinkSheet url={reportLink(report.id)} title={report.title} onClose={() => setLinkSheet(false)} flash={flash} />}

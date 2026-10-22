@@ -105,6 +105,22 @@
 .reports-row-source svg, .reports-row-schedule svg { flex: none; width: 14px; height: 14px; color: #6f6f76; }
 .reports-row-schedule > span { color: #c9b98f; }
 .reports-row-meta time { color: #85858c; font-size: .8rem; white-space: nowrap; }
+.reports-row-source-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.reports-age-short { display: none; }
+@media (max-width: 760px) { .reports-age-long { display: none; } .reports-age-short { display: inline; } }
+/* Phase 3 (D555): a list's curators drag a row to reorder it; the insertion line shows where it lands. */
+.reports-row { position: relative; }
+.reports-row.drop-before::before, .reports-row.drop-after::before { content: ""; position: absolute; left: 8px; right: 8px; height: 2px; border-radius: 2px; background: #f2cc75; pointer-events: none; z-index: 1; }
+.reports-row.drop-before::before { top: -1px; }
+.reports-row.drop-after::before { bottom: -1px; }
+/* D552: a list's curators see how many reports in it they can't open (never which). */
+.reports-list-hidden { display: flex; align-items: center; gap: 8px; margin: -6px 0 14px; color: #9a9aa1; font-size: .82rem; }
+.reports-list-hidden svg { flex: none; width: 15px; height: 15px; color: #6f6f76; }
+/* Add to list: the Move sheet's options, then a new list's name and Create. */
+.report-list-new { display: flex; gap: 8px; padding: 4px 16px 0; }
+.report-list-new input { flex: 1 1 auto; min-width: 0; min-height: 40px; border: 1px solid #2c2c31; border-radius: 10px; padding: 0 12px; background: #131316; color: #ededee; font: inherit; font-size: .9rem; }
+.report-list-new input:focus-visible { outline: 2px solid var(--yellow); outline-offset: 1px; }
+.report-list-new .secondary-button { flex: none; }
 .reports-row-menu { justify-self: center; }
 
 /* Report organization phase 1: ☆/★ on rows and the report header (filled gold when on). */
@@ -165,12 +181,17 @@
   .reports-row-open { grid-template-columns: 36px minmax(0, 1fr); row-gap: 4px; }
   .reports-row-icon { grid-row: span 2; }
   .reports-row-title { grid-column: 2; }
-  .reports-row-meta { grid-column: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; min-width: 0; }
+  /* The facts stay on one line under the title (the data source ends in an ellipsis), so a row is never four lines tall. */
+  .reports-row-meta { grid-column: 2; display: flex; flex-wrap: nowrap; align-items: center; gap: 4px 10px; min-width: 0; }
+  .reports-row-meta > * { flex: none; }
+  .reports-row-meta > .reports-row-source { flex: 0 1 auto; min-width: 4.5em; }
+  .reports-row-meta > time { flex: none; }
   .reports-row-meta time { display: inline; }
   .reports-row-schedule:empty { display: none; }
 }
 @media (max-width: 760px), (pointer: coarse) {
   .reports-menu-compact { width: 44px; height: 44px; }
+  .report-list-new input { min-height: 44px; }
   .reports-row { grid-template-columns: minmax(0, 1fr) 44px 44px; }
   .reports-star { width: 44px; height: 44px; }
   .reports-nav-entry { grid-template-columns: minmax(0, 1fr) 44px; }

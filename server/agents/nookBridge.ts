@@ -82,7 +82,9 @@ export const NOOK_NEVER_TOOLS: ReadonlySet<string> = new Set([
   // Phase 2 (D482): who owns a report is for people and admins to decide, never an agent.
   "list_report_owners", "add_report_owner", "list_unmanaged_reports",
   // Report organization phase 1: a star is the owner's own shortcut on their Reports home, not an agent's.
-  "star_report", "unstar_report"
+  "star_report", "unstar_report",
+  // Phase 3 (D557): a person's report lists are their organisation of the Reports home, not an agent's.
+  "list_report_lists", "get_report_list", "add_report_to_list"
 ]);
 export const isBinTool = (name: string) => name.startsWith("bin_") || name.startsWith("restore_");
 const agentMayUse = (name: string) => NOOK_AGENT_TOOLS.has(name) && !NOOK_NEVER_TOOLS.has(name) && !isBinTool(name);

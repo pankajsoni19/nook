@@ -69,7 +69,7 @@ export type DocumentSummary = {
   updated_at: string;
 };
 export type BinItem = {
-  type: "note" | "document" | "card" | "board" | "collection" | "collection_row" | "calendar" | "event" | "vault" | "vault_environment" | "vault_secret" | "chat" | "agent" | "knowledge_base" | "report" | "report_folder";
+  type: "note" | "document" | "card" | "board" | "collection" | "collection_row" | "calendar" | "event" | "vault" | "vault_environment" | "vault_secret" | "chat" | "agent" | "knowledge_base" | "report" | "report_folder" | "report_list";
   id: string;
   title: string;
   folder_id: string | null;
