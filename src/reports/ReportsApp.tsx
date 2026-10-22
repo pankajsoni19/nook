@@ -67,7 +67,7 @@ export function ReportsApp({ displayName, role, navigate, flash, onHome, onSetti
     // Forward step through them and a shared link reproduces them.
     return <ReportPage key={route.reportId} reportId={route.reportId} {...account} flash={flash} onBack={back}
       params={route.params} onParams={(params, options) => { const next: ReportsRoute = { app: "reports", reportId: route.reportId, ...(params ? { params } : {}) }; if (formatRoute(next) !== formatRoute(route)) go(next, options); }}
-      onGone={() => go(reportsRoute(), { replace: true, removed: true })} />;
+      onGone={() => go(reportsRoute(), { replace: true, removed: true })} onOpenReport={(id) => go(reportsRoute(id))} />;
   }
   // Lane I: each folder view is its own entry, so Back and Forward step between folders.
   return <ReportsHome {...account} role={role} flash={flash} onHome={onHome} onOpen={(id) => go(reportsRoute(id))} onOpenDatasources={onOpenDatasources} onOpenToolServers={onOpenToolServers}

@@ -478,6 +478,21 @@ export type ReportDetail = ReportSummary & {
   canManageOwners: boolean;
 };
 
+/**
+ * D575: `POST /api/reports/:id/duplicate` (201) and MCP `duplicate_report`: the new report (the caller's)
+ * and what was copied. `docsLeftOut` names the docs an owner copying could not read; `docsHidden` counts
+ * the docs of a report copied by someone who is not one of its owners (they never see its docs, D456).
+ */
+export type ReportDuplicate = {
+  report: ReportDetail;
+  duplicate: {
+    sourceId: string; sourceVersion: number | null; results: number; docs: number;
+    docsLeftOut: Array<{ title: string }>; docsHidden: number;
+    /** The source's model choice: copied, there was none, or the copier's role may not choose a model. */
+    model: "copied" | "none" | "not_allowed";
+  };
+};
+
 export type ReportRun = {
   id: string;
   reportId: string;

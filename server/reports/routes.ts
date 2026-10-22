@@ -19,6 +19,7 @@ import { registerQueryEditRoutes } from "./queryEditRoutes";
 import { registerReportFolderRoutes } from "./folderRoutes";
 import { registerReportListRoutes } from "./listRoutes";
 import { ownerReview } from "./ownerReview";
+import { duplicateReport } from "./duplicate";
 
 /**
  * docs/plan/API_CONTRACTS.md § Analytics reports (Wave 45). Every route needs a session; mutations
@@ -43,6 +44,7 @@ const datasourceCreate = z.object({
 const datasourcePatch = datasourceCreate.partial().extend({ expectedRevision: z.number().int().min(1), removePassword: z.boolean().optional() }).strict();
 const previewSchema = z.object({ allowlist }).strict();
 const reportCreate = z.object({ title: line(REPORT_LIMITS.title), datasourceId: uuid, folderId: uuid.nullish() }).strict();
+const duplicateSchema = z.object({ title: line(REPORT_LIMITS.title).optional(), folderId: uuid.nullish() }).strict();
 const reportPatch = z.object({ title: line(REPORT_LIMITS.title).optional(), datasourceId: uuid.optional(), expectedRevision: z.number().int().min(1) }).strict();
 /** D490: `params` are the values of the statement's `{name:Type}` placeholders, by name (bound as `param_<name>`). */
 const consoleSchema = z.object({
@@ -176,6 +178,13 @@ export function registerReportRoutes(app: Hono<AppEnv>) {
     return { report: updateReport(c.get("user").id, reportId, await parseJson(c.req.raw, reportPatch)) };
   }));
   app.delete("/api/reports/:reportId", handle((c) => binReport(c.get("user").id, id(c, "reportId"))));
+  // D575: anyone who can read a report copies it into a new report they own.
+  app.post("/api/reports/:reportId/duplicate", handle(async (c) => {
+    const reportId = id(c, "reportId");
+    const input = await parseJson(c.req.raw, duplicateSchema);
+    const user = c.get("user");
+    return c.json(duplicateReport({ id: user.id, role: user.role }, reportId, { title: input.title ?? null, folderId: input.folderId?.toLowerCase() ?? null }), 201);
+  }));
   // Report organization phase 1 (D486): the caller's own star on a report they can open.
   app.put("/api/reports/:reportId/favorite", handle((c) => setFavorite(c.get("user").id, id(c, "reportId"), true)));
   app.delete("/api/reports/:reportId/favorite", handle((c) => setFavorite(c.get("user").id, id(c, "reportId"), false)));

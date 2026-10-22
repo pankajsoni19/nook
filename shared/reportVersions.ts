@@ -26,6 +26,8 @@ export type VersionHistoryItem = ReportVersion & {
   changeSummary: string | null;
   /** A rename (a `manual` version whose spec is unchanged): the new title (everyone sees the title). */
   renamedTo: string | null;
+  /** D575: owner: the first version of a duplicate names the report and version it was copied from ("“Revenue” v3"). */
+  duplicatedFrom?: string | null;
 };
 
 /** GET /api/reports/:id/versions/:n (the owner): the spec and the results stored for it. */
@@ -79,8 +81,9 @@ export const DIFF_LIMITS = { lines: 600, entries: 120, value: 240, words: 400 } 
 // ------------------------------------------------------------------------------------- labels
 
 /** The source in plain words: "Generated from the doc", "Regenerated", "Applied a change", "Edited by hand", "Restored v3". */
-export function versionSourceLabel(item: Pick<VersionHistoryItem, "source" | "regenerated" | "restoredFrom"> & { renamedTo?: string | null }): string {
+export function versionSourceLabel(item: Pick<VersionHistoryItem, "source" | "regenerated" | "restoredFrom"> & { renamedTo?: string | null; duplicatedFrom?: string | null }): string {
   if (item.renamedTo) return `Renamed to “${item.renamedTo}”`;
+  if (item.duplicatedFrom) return `Duplicated from ${item.duplicatedFrom}`;
   switch (item.source) {
     case "generate": return item.regenerated ? "Regenerated" : "Generated from the doc";
     case "edit": return "Applied a change";
@@ -98,6 +101,22 @@ export function versionWhoLabel(item: Pick<VersionHistoryItem, "source" | "asked
     return item.askedByName === item.createdByName && !item.autoApplied ? `Asked and applied by ${by}` : `Asked by ${item.askedByName} · ${applied}`;
   }
   return `By ${by}`;
+}
+
+// ---------------------------------------------------------------------------------- duplicates
+
+const DUPLICATE = /^Duplicated from (“[\s\S]*” v\d+)$/;
+
+/** D575: the note of a duplicate's first version, `Duplicated from “A” v3`, within the 300-character note (the title cut with …). */
+export function duplicateNote(title: string, version: number): string {
+  const room = 300 - `Duplicated from “” v${version}`.length;
+  const shown = title.length <= room ? title : `${title.slice(0, Math.max(0, room - 1))}…`;
+  return `Duplicated from “${shown}” v${version}`;
+}
+
+/** The “title” vN a duplicate note names, or null for any other note. */
+export function parseDuplicateNote(note: string | null): string | null {
+  return note ? DUPLICATE.exec(note)?.[1] ?? null : null;
 }
 
 // ------------------------------------------------------------------------------------- renames

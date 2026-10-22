@@ -83,7 +83,7 @@ export function reportFallbackFor(primary: Pick<ProviderConnection, "id" | "mode
 type Actor = { id: string; role: string };
 
 /** Whether a person may choose a report's model: their role may create agents and chat (review M1). */
-const mayChoose = (role: string) => {
+export const mayChoose = (role: string) => {
   const settings = readAgentSettings();
   return roleMayCreate(role, settings) && roleMayChat(role, settings);
 };

@@ -2854,6 +2854,19 @@ Migration **064** (`report_docs`, `report_instruction_docs`, `report_doc_snapsho
 
 **MCP.** `create_report { docRef?, serverId? (uuid or "nook"), docs?: [{ docRef, serverId, tool?, arg? }] ≤ 8, datasourceId, title? }` (docs, or docRef and serverId: `INVALID` otherwise). `add_report_instruction { reportId, text, blockId?, kind?, afterBlockId?, docs? ≤ 4 }`. `get_report` answers `docs: [{ id, position, title, source, serverId, serverName, ref, changed, addedVia }]` to the owner and `docs: null` to anyone else. No tool removes a doc.
 
+## Analytics reports: Duplicate report and small fixes (lane SMALL, D575–D584)
+
+No migration. Wire type: `ReportDuplicate` (`shared/reports.ts`).
+
+| Route | Body | Returns |
+| --- | --- | --- |
+| `POST /api/reports/:id/duplicate` | `{ title?: string (1–200, one line), folderId?: uuid \| null }` | 201 `{ report: ReportDetail, duplicate: { sourceId, sourceVersion, results, docs, docsLeftOut: [{ title }], docsHidden, model: "copied" \| "none" \| "not_allowed" } }`. Anyone who can read the report (any level) and whose role writes (Team viewers get the Wave 15 403); others 404 as for a missing report. The new report is the caller's: private, in Unfiled or the live folder given (404 otherwise), titled `title` or "Copy of <title>" (cut with … to 200). Copied: the spec (every block's provenance reset to `{ runId: null, version: 1 }`), the queries, each query's latest good result under one finished `refresh` run of the copy (their `createdAt` stays the source's), the selects' cached options, the data source (must be usable: 409 otherwise), and the model choice through `PUT …/model`'s own checks (`not_allowed` when the caller's role may not choose a model or the model is not allowed: the copy then uses the default). Docs: one of the source's owners gets the docs they can read (`ownerMayRead`), each with its hash and newest snapshot; `docsLeftOut` names the rest. Anyone else gets none (`docsHidden` counts them; D456). Not copied: sharing, owners, schedule, favorites, instructions and proposals, versions (the copy's version 1 is `initial` with the note `Duplicated from “<title>” v<N>`; `GET …/versions` answers `duplicatedFrom: "“<title>” v<N>"` to the copy's owners), runs, the metric catalog, parameter-set results. 409 `LIMIT_REACHED` at 500 live reports. Audited `reports.report.duplicate` (`id`, `sourceId`, `sourceVersion`, `owner`, `results`, `docs`, `docsLeftOut`, `docsHidden`, `model`, `folderId`; `via`, `keyId` over MCP). |
+| `GET /api/reports/nook-files` | | Before the Files index's first backfill a PDF is offered only once the index has read it with a text layer; `pdfsPending` (D581). |
+
+**MCP.** `duplicate_report { reportId, title?, folderId? }` (`reports:write`, counted in `report_write`; access by the source report's grant): the route above as the key's owner; answers `{ report: { id, title, folderId, url }, duplicate }`. Never offered to chat agents (`NOOK_NEVER_TOOLS`).
+
+**Behaviour.** D577: Apply stamps a New doc the change attached with the hash of the text it read. D578: a block outside any section that follows a section's block in the spec renders right after that section; "Add a new section" refuses new blocks that do not follow the chosen block. D580: a change to one block carries only that block's doc when its plan todo names it.
+
 ## Changes to existing note endpoints (Wave 4)
 
 - `DELETE /api/notes/:id`:

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
-import { CalendarClock, ChevronLeft, Crown, CircleStop, Cpu, Database, FileSearch, FileTerminal, FileText, GitCommitVertical, History, Link2, ListFilter, ListPlus, LoaderCircle, MessageSquarePlus, MessageSquare, Pencil, Play, RefreshCw, Share2, Sparkles, TableProperties, Trash2, TriangleAlert, Settings2, Ruler } from "lucide-react";
+import { CalendarClock, ChevronLeft, Copy, Crown, CircleStop, Cpu, Database, FileSearch, FileTerminal, FileText, GitCommitVertical, History, Link2, ListFilter, ListPlus, LoaderCircle, MessageSquarePlus, MessageSquare, Pencil, Play, RefreshCw, Share2, Sparkles, TableProperties, Trash2, TriangleAlert, Settings2, Ruler } from "lucide-react";
 import { AccountActions } from "../AppShell";
 import { appName } from "../appName";
 import { notifyBinned } from "../bin/binUndo";
@@ -30,6 +30,7 @@ import { MetricsSheet } from "./MetricsSheet";
 import { ReportCommandsContext, ReportOverflowMenu, type MenuItem, type ReportCommands } from "./reportCommands";
 import { ReportParamsContext } from "./ReportParamsBar";
 import { AddFilterSheet } from "./AddFilterSheet";
+import { DuplicateSheet, duplicateMessages } from "./DuplicateSheet";
 import { requestFilterRemoval } from "./reportEditApi";
 import { placeholderInput, placeholdersIn, placeholderValue } from "../../shared/reportParams";
 import type { ReportParamsSearch } from "../router";
@@ -43,6 +44,8 @@ type PageProps = {
   onSignOut: () => void;
   /** The report is gone (deleted here, or no longer readable): its entry is replaced by the list. */
   onGone: () => void;
+  /** D575: opens another report (a new history entry), e.g. the copy Duplicate made. */
+  onOpenReport?: (id: string) => void;
   /** D489: the parameter values in the URL, and a change to them (a new history entry; `replace` for a cleanup). */
   params?: ReportParamsSearch;
   onParams?: (params: ReportParamsSearch | undefined, options?: { replace?: boolean }) => void;
@@ -61,7 +64,7 @@ function saveDraft(id: string, sql: string) {
  * metadata statements: SHOW, DESCRIBE, EXISTS, EXPLAIN, and the allowed system tables), and the
  * Schema browser sheet. Charts and the spec arrive with waves 46 and 47.
  */
-export function ReportPage({ reportId, displayName, flash, onBack, onSettings, onSignOut, onGone, params, onParams }: PageProps) {
+export function ReportPage({ reportId, displayName, flash, onBack, onSettings, onSignOut, onGone, onOpenReport, params, onParams }: PageProps) {
   const paramsContext = useMemo(() => ({ search: params, onChange: onParams ?? (() => undefined) }), [params, onParams]);
   const { canWrite } = useRole();
   const [report, setReport] = useState<ReportDetail | null>(null);
@@ -80,6 +83,8 @@ export function ReportPage({ reportId, displayName, flash, onBack, onSettings, o
   // The table open in the schema browser, so Forward shows it again over the reopened sheet (D478).
   const schemaTable = useRef(newLayerReopenMemory<string>());
   const [renaming, setRenaming] = useState(false);
+  // D575: Duplicate (anyone who can read the report and whose role writes), a sheet with its own layer.
+  const [duplicating, setDuplicating] = useState(false);
   const confirm = useConfirm();
   const consoleId = useId();
   // Wave 48: the Changes panel (instructions, proposals, versions), aimed at a block or the whole report, and Share.
@@ -122,6 +127,7 @@ export function ReportPage({ reportId, displayName, flash, onBack, onSettings, o
   // D534: Add filter (the owner), a sheet with its own layer.
   const [addFilterOpen, setAddFilterOpen] = useState(false);
   useLayerOpener("reports.add-filter", () => setAddFilterOpen(true));
+  useLayerOpener("reports.duplicate", () => setDuplicating(true));
   // The header's actions that live in the viewer and the generation part (reportCommands.tsx).
   const [commands, setCommands] = useState<ReportCommands>({});
   const registry = useMemo(() => ({ set: (part: Partial<ReportCommands>) => setCommands((current) => ({ ...current, ...part })) }), []);
@@ -311,7 +317,7 @@ export function ReportPage({ reportId, displayName, flash, onBack, onSettings, o
           <button type="button" className="secondary-button report-wide-only" onClick={() => setVersionsOpen(true)}><GitCommitVertical aria-hidden="true" />Versions</button>
           {ownerWrite && <button type="button" className="secondary-button report-wide-only" onClick={share}><Share2 aria-hidden="true" />Share</button>}
           {commands.schedule && <button type="button" className="secondary-button report-wide-only" onClick={commands.schedule.open}><CalendarClock aria-hidden="true" />Schedule</button>}
-          <ReportOverflowMenu label="More report actions" items={overflowItems({ ownerWrite, owner: report.isOwner, commands, runs: () => openRuns(null), versions: () => setVersionsOpen(true), console: consoleInPanel(report) ? () => openConsole() : undefined, copyLink, share, rename: () => setRenaming(true), model: () => setModelOpen(true), metrics: report.isOwner ? () => setMetricsOpen(true) : undefined, remove: () => { void remove(); },
+          <ReportOverflowMenu label="More report actions" items={overflowItems({ ownerWrite, owner: report.isOwner, commands, runs: () => openRuns(null), versions: () => setVersionsOpen(true), console: consoleInPanel(report) ? () => openConsole() : undefined, copyLink, share, rename: () => setRenaming(true), duplicate: canWrite ? () => setDuplicating(true) : undefined, model: () => setModelOpen(true), metrics: report.isOwner ? () => setMetricsOpen(true) : undefined, remove: () => { void remove(); },
             owners: !ownerWrite && canWrite && report.canManageOwners ? () => setSharing({ copyFailed: false }) : undefined, addFilter: editing.addFilter })} />
         </div>
       </div>
@@ -358,6 +364,13 @@ export function ReportPage({ reportId, displayName, flash, onBack, onSettings, o
     {linkSheet && report && <LinkSheet url={reportLink(report.id)} title={report.title} onClose={() => setLinkSheet(false)} flash={flash} />}
     {consoleOpen && report && <ConsoleSheet title={report.title} onClose={() => setConsoleOpen(false)} reopen={() => setConsoleOpen(true)} blocked={running}>{consoleBody(true)}</ConsoleSheet>}
     {generating && report && <NewReportSheet sources={generating} reportId={report.id} initialSource={report.datasourceId} onCancel={() => setGenerating(null)} onCreated={() => { setGenerating(null); void load(); }} />}
+    {duplicating && report && <DuplicateSheet report={report} reopen={() => setDuplicating(true)} onCancel={() => setDuplicating(false)} onDuplicated={(result) => {
+      setDuplicating(false);
+      const { done, notes } = duplicateMessages(result);
+      notify.success(done);
+      for (const line of notes) notify.warning(line);
+      onOpenReport?.(result.report.id);
+    }} />}
     {renaming && report && <RenameSheet report={report} reopen={() => setRenaming(true)} onCancel={() => setRenaming(false)} onSaved={(next) => { setReport(next); setRenaming(false); }} />}
     {confirm.confirmElement}
   </main>;
@@ -379,9 +392,10 @@ export const consoleInPanel = (report: Pick<ReportDetail, "isOwner" | "spec">) =
 
 /**
  * The overflow menu's items: on a phone Runs, Versions, Share, and Schedule first (the header hides them there), then
- * Rename, Model, Check doc, Regenerate, and Move to Bin last (dangerous). Readers see Schedule only.
+ * Rename, Duplicate, Model, Check doc, Regenerate, and Move to Bin last (dangerous). Readers see Copy link, Schedule, and
+ * Duplicate (D575, when their role writes).
  */
-export function overflowItems({ ownerWrite, owner = false, commands, runs, versions, console: openConsole, copyLink, share, rename, model, metrics, remove, owners, addFilter }: { ownerWrite: boolean; owner?: boolean; commands: ReportCommands; runs?: () => void; versions?: () => void; console?: () => void; copyLink?: () => void; share: () => void; rename: () => void; model: () => void; /** E4: the Metrics view (the owner's). */ metrics?: () => void; remove: () => void; /** D534: Add filter (the owner's, a report with blocks). */ addFilter?: () => void;
+export function overflowItems({ ownerWrite, owner = false, commands, runs, versions, console: openConsole, copyLink, share, rename, duplicate, model, metrics, remove, owners, addFilter }: { ownerWrite: boolean; owner?: boolean; commands: ReportCommands; runs?: () => void; versions?: () => void; console?: () => void; copyLink?: () => void; share: () => void; rename: () => void; /** D575: Duplicate (every reader whose role writes). */ duplicate?: () => void; model: () => void; /** E4: the Metrics view (the owner's). */ metrics?: () => void; remove: () => void; /** D534: Add filter (the owner's, a report with blocks). */ addFilter?: () => void;
   /** Phase 2 (D482): an admin who is not an owner manages the owners (the Share sheet's Owners section alone). */ owners?: () => void }): MenuItem[] {
   const items: MenuItem[] = [];
   if (owners) items.push({ id: "owners", label: "Owners", icon: <Crown aria-hidden="true" />, onSelect: owners });
@@ -391,10 +405,12 @@ export function overflowItems({ ownerWrite, owner = false, commands, runs, versi
   if (versions) items.push({ id: "versions", label: "Versions", icon: <GitCommitVertical aria-hidden="true" />, onSelect: versions, narrowOnly: true });
   if (ownerWrite) items.push({ id: "share", label: "Share", icon: <Share2 aria-hidden="true" />, onSelect: share, narrowOnly: true });
   if (commands.schedule) items.push({ id: "schedule", label: commands.schedule.badge ? `Schedule (${commands.schedule.badge})` : "Schedule", icon: <CalendarClock aria-hidden="true" />, onSelect: commands.schedule.open, narrowOnly: true });
-  if (!ownerWrite) return items;
+  const duplicateItem: MenuItem | null = duplicate ? { id: "duplicate", label: "Duplicate", icon: <Copy aria-hidden="true" />, onSelect: duplicate } : null;
+  if (!ownerWrite) return duplicateItem ? [...items, duplicateItem] : items;
   if (addFilter) items.push({ id: "add-filter", label: "Add filter", icon: <ListFilter aria-hidden="true" />, onSelect: addFilter });
   if (openConsole) items.push({ id: "console", label: "SQL console", icon: <FileTerminal aria-hidden="true" />, onSelect: openConsole });
   items.push({ id: "rename", label: "Rename", icon: <Pencil aria-hidden="true" />, onSelect: rename });
+  if (duplicateItem) items.push(duplicateItem);
   items.push({ id: "model", label: "Model", icon: <Cpu aria-hidden="true" />, onSelect: model });
   if (owner && metrics) items.push({ id: "metrics", label: "Metrics", icon: <Ruler aria-hidden="true" />, onSelect: metrics });
   if (commands.checkDoc) items.push({ id: "check-doc", label: commands.checkDoc.busy ? "Checking the doc…" : "Check doc", icon: <FileSearch aria-hidden="true" />, onSelect: commands.checkDoc.run, disabled: commands.checkDoc.busy || Boolean(commands.regenerate?.busy) });

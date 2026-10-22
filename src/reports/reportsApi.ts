@@ -1,5 +1,5 @@
 import { api, ApiError } from "../api";
-import type { CatalogTable, ConnectionTest, DatasourceChoice, DatasourceSummary, QueryOutcome, ReportDetail, ReportFolder, ReportFolderTree, ReportListChoice, ReportListFilter, ReportListPage, ReportListSharing, ReportListSummary, ReportListVisibility, ReportSummary, SchemaSearchHit, SchemaSyncResult } from "../../shared/reports";
+import type { CatalogTable, ConnectionTest, DatasourceChoice, DatasourceSummary, QueryOutcome, ReportDetail, ReportDuplicate, ReportFolder, ReportFolderTree, ReportListChoice, ReportListFilter, ReportListPage, ReportListSharing, ReportListSummary, ReportListVisibility, ReportSummary, SchemaSearchHit, SchemaSyncResult } from "../../shared/reports";
 import type { DocInput, DocServerChoice, DocState, GenerateStarted, GenerationRun } from "../../shared/reportsGenerate";
 
 /** The Reports API (docs/plan/API_CONTRACTS.md § Analytics reports, Wave 45). */
@@ -49,6 +49,7 @@ export const listChoices = (reportId: string) => api<{ lists: ReportListChoice[]
 export const getListSharing = (id: string) => api<{ sharing: ReportListSharing }>(`/reports/lists/${id}/sharing`);
 export const saveListSharing = (id: string, input: { visibility: ReportListVisibility; shares: Array<{ kind: "user" | "group"; id: string; level: "view" | "edit" }> }) => api<{ sharing: ReportListSharing }>(`/reports/lists/${id}/sharing`, json("PUT", input));
 export const updateReport = (id: string, patch: { title?: string; datasourceId?: string; expectedRevision: number }) => api<{ report: ReportDetail }>(`/reports/${id}`, json("PATCH", patch));
+export const duplicateReport = (id: string, body: { title?: string; folderId?: string | null }) => api<ReportDuplicate>(`/reports/${id}/duplicate`, json("POST", body));
 export const deleteReport = (id: string) => api<{ ok: true; purgeAfter: string }>(`/reports/${id}`, { method: "DELETE", body: "{}" });
 export const datasourceChoices = () => api<{ datasources: DatasourceChoice[] }>("/reports/datasources");
 /** D490: `params` are the values of the statement's `{name:Type}` placeholders (bound as `param_<name>`). */

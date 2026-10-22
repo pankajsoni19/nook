@@ -45,7 +45,7 @@ function VersionFacts({ item, heading = false }: { item: VersionHistoryItem; hea
     <span className="report-vrow-who">{versionWhoLabel(item)} · <When iso={item.createdAt} /></span>
     {item.instructionText && <span className="report-vrow-ask">“{item.instructionText}”</span>}
     {item.changeSummary && <span className="report-vrow-change">{item.changeSummary}</span>}
-    {item.note && !item.renamedTo && <span className="report-vrow-note">{item.note}</span>}
+    {item.note && !item.renamedTo && !item.duplicatedFrom && <span className="report-vrow-note">{item.note}</span>}
     {item.model && <span className="report-vrow-meta">Model {item.model}</span>}
   </>;
 }

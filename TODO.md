@@ -13,7 +13,6 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 ## In flight
 
 - [ ] **Report filters, later slices** (lane FILT2, migration 069) (slice 1 shipped, D532–D537): linked filters, client-side table sort and contains, saved personal views, more filter types (number range, exclude, text contains, Add filter on dates), and concurrent parameter runs, ranked in [REPORT_FILTERS.md](docs/plan/REPORT_FILTERS.md) "Later". Started 2026-10-22.
-- [ ] **Reports: a personal copy of a report?** (lane EDIT research, D531): Metabase, Redash, and Tableau let people without edit rights save a copy and change that; Nook offers Suggest an edit instead. Lane SMALL builds **Duplicate report** (operator: "complete todo.md").
 - [ ] **Local embedding model** (operator: "complete todo.md", 2026-10-22; lane LOCALEMB; lane CLAUDE landed: add it as another provider kind beside `compat.embeddings`, keyword-only bases (D541) move to it with Change embedding model, migration 071 if needed) (transformers.js + a small model, CPU) for meaning-based search with no outside provider.
 
 - [ ] **API keys: editing a key's permissions** (operator, 2026-10-22; lane KEYS), at `/settings/keys/general`:

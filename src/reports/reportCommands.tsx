@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { MoreHorizontal } from "lucide-react";
 import { useHistoryDialogGuard } from "../ui/useHistoryDialogGuard";
 
@@ -76,6 +76,15 @@ export function ReportOverflowMenu({ items, label = "More actions", compact = fa
   const closeRef = useRef(close);
   closeRef.current = close;
   useHistoryDialogGuard(open, () => closeRef.current(false));
+  // D584: a menu right-aligned to a button near the left edge (a reader's ⋯ on a phone) would run off the
+  // screen: it opens to the right of the button instead.
+  const menuRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const menu = menuRef.current;
+    if (!open || !menu) return;
+    menu.classList.remove("opens-right");
+    if (menu.getBoundingClientRect().left < 8) menu.classList.add("opens-right");
+  }, [open]);
   useEffect(() => {
     if (!open) return undefined;
     const onClick = (event: MouseEvent) => { if (!(event.target instanceof Node && rootRef.current?.contains(event.target))) closeRef.current(false); };
@@ -110,7 +119,7 @@ export function ReportOverflowMenu({ items, label = "More actions", compact = fa
       }}>
       <MoreHorizontal aria-hidden="true" />
     </button>
-    {open && <div id={menuId} className="report-overflow-menu" role="menu" aria-label={label} onKeyDown={onKeyDown}>
+    {open && <div ref={menuRef} id={menuId} className="report-overflow-menu" role="menu" aria-label={label} onKeyDown={onKeyDown}>
       {items.map((item, index) => <button key={item.id} type="button" role="menuitem" disabled={item.disabled}
         className={`${item.danger ? "report-overflow-danger" : ""}${item.narrowOnly ? " report-narrow-only" : ""}${item.danger && index > 0 ? " report-overflow-separated" : ""}`.trim() || undefined}
         onClick={() => { setOpen(false); item.onSelect(); }}>

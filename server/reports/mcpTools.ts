@@ -30,6 +30,7 @@ import { listReportsPage, parseSpec as parseStoredSpec, setFavorite } from "./se
 import { createFolder, listFolders, moveReportToFolder, updateFolder } from "./folders";
 import { addOwner, listOwners } from "./owners";
 import { addToList, listReportLists, reportListSummary } from "./lists";
+import { duplicateReport } from "./duplicate";
 import { OWNER_REVIEW_LIMIT, ownerReview } from "./ownerReview";
 import { REPORT_FOLDER_NAME_MAX, REPORT_FOLDERS_PER_WORKSPACE, REPORT_PAGE_SIZE, REPORT_STATUSES } from "../../shared/reports";
 import { knownSpec } from "./specCheck";
@@ -594,6 +595,25 @@ export const reportTools: McpToolSpec[] = [
     handler: (args, key) => asOwner(key, () => {
       const moved = moveReportToFolder(key.userId, args.reportId, args.folderId?.toLowerCase() ?? null, { keyId: key.keyId });
       return { report: { id: moved.report.id, title: moved.report.title, folderId: moved.report.folderId, url: reportUrl(moved.report.id) }, previousFolderId: moved.previousFolderId };
+    })
+  }),
+  // D575: a reader's own copy of a report (never offered to chat agents).
+  defineTool({
+    name: "duplicate_report",
+    title: "Duplicate a report",
+    description: "Copies a report the key owner can open into a new report they own (private, in Unfiled or folderId), titled \"Copy of …\" unless title is given: its charts, queries, filters, latest results, and model choice, and, for one of its owners, the docs they can read. Sharing, owners, schedule, favorites, changes, and versions are not copied; the copy starts at version 1. Answers with the new report and what was copied or left out.",
+    scopes: ["reports:write"],
+    access: { mode: "items", items: reportItem, related: ["folderId"] },
+    write: true,
+    buckets: ["report_write"],
+    inputSchema: z.object({
+      reportId,
+      title: z.string().trim().min(1).max(REPORT_LIMITS.title).optional().describe("The copy's title; default \"Copy of\" and the report's title"),
+      folderId: z.string().uuid().nullable().optional().describe("A folder of the shared tree (from list_report_folders), or null for Unfiled (the default)")
+    }),
+    handler: (args, key) => asOwner(key, (role) => {
+      const copied = duplicateReport({ id: key.userId, role }, args.reportId.toLowerCase(), { title: args.title ?? null, folderId: args.folderId?.toLowerCase() ?? null }, { keyId: key.keyId });
+      return { report: { id: copied.report.id, title: copied.report.title, folderId: copied.report.folderId, url: reportUrl(copied.report.id) }, duplicate: copied.duplicate };
     })
   }),
   defineTool({

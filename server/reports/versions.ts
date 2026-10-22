@@ -1,7 +1,7 @@
 import { audit, db, now } from "../db";
 import type { ReportSpec, ResultColumn } from "../../shared/reports";
 import { INSTRUCTION_LIMITS, type VersionSource } from "../../shared/reportsEdit";
-import { diffSpecVersions, parseRenameNote, type VersionDiff, type VersionHistoryItem, type VersionSnapshot } from "../../shared/reportVersions";
+import { diffSpecVersions, parseDuplicateNote, parseRenameNote, type VersionDiff, type VersionHistoryItem, type VersionSnapshot } from "../../shared/reportVersions";
 import type { QueryResultView } from "../../shared/reportsView";
 import { logger, shortId } from "../log";
 import { isReportOwner, ownedReport, readableReport } from "./access";
@@ -142,6 +142,8 @@ function historyItem(row: HistoryRow, spec: ReportSpec, context: { currentJson: 
   const mine = row.instruction_author !== null && row.instruction_author === context.userId;
   // Only a rename's note is ours (Nook wrote it, never the agent): its new title is everyone's.
   const rename = row.source === "manual" ? parseRenameNote(row.note) : null;
+  // D575: a duplicate's first version names where it was copied from (the owner's, as the note).
+  const duplicatedFrom = owner && row.source === "initial" ? parseDuplicateNote(row.note) : null;
   return {
     version: row.version, source: row.source, instructionId: row.instruction_id, restoredFrom: row.restored_from,
     // Review L5: the note is the edit agent's summary, which may quote the doc: the owner's only.
@@ -154,7 +156,8 @@ function historyItem(row: HistoryRow, spec: ReportSpec, context: { currentJson: 
     runId: owner ? row.run_id : null,
     model: owner ? row.model : null,
     changeSummary: owner ? (rename ? `Title “${rename.before}” → “${rename.after}”` : context.changeSummary) : null,
-    renamedTo: rename?.after ?? null
+    renamedTo: rename?.after ?? null,
+    ...(duplicatedFrom ? { duplicatedFrom } : {})
   };
 }
 
