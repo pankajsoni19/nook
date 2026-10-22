@@ -56,6 +56,8 @@ import {
   restoreTaskItem,
   getBoard,
   saveBoardView,
+  archiveCard,
+  unarchiveCard,
   updateCard,
   moveCard,
   renameBoard,
@@ -432,6 +434,40 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
     }
   }
 
+  /**
+   * Archive or unarchive a card by hand (D610), from its ⋯ menu or its dialog. Archived, it leaves
+   * the board (or stays marked when archived cards are shown) and the toast offers Undo.
+   */
+  async function setArchived(cardId: string, archive: boolean, options: { undo?: boolean } = {}) {
+    const card = detailRef.current?.cards.find((item) => item.id === cardId);
+    const title = card?.title ?? "card";
+    try {
+      const { card: saved } = archive ? await archiveCard(cardId) : await unarchiveCard(cardId);
+      const showing = detailRef.current?.view?.showArchived ?? false;
+      setDetail((current) => {
+        if (!current) return current;
+        const delta = archive ? 1 : -1;
+        const board = { ...current.board, archived_count: Math.max(0, (current.board.archived_count ?? 0) + delta) };
+        const cards = archive && !showing
+          ? current.cards.filter((item) => item.id !== cardId)
+          : current.cards.map((item) => item.id === cardId ? { ...item, archived_at: saved.archived_at, done_at: saved.done_at } : item);
+        return { ...current, board, cards };
+      });
+      // Unarchiving a card the board does not list (archived cards hidden): fetch it.
+      if (!archive && !detailRef.current?.cards.some((item) => item.id === cardId)) void load();
+      if (archive) {
+        if (openCardIdRef.current === cardId) { lastOpenCardRef.current = null; onCloseCard(); }
+        setAnnouncement(`Archived ${title}`);
+        notify.success(`Archived “${title}”`, { action: { label: "Undo", onClick: () => { void setArchived(cardId, false, { undo: true }); } } });
+      } else {
+        setAnnouncement(`${title} is back on the board`);
+        notify.success(options.undo ? `“${title}” is back on the board` : `Restored “${title}” to the board`);
+      }
+    } catch (reason) {
+      notify.error(taskErrorMessage(reason, archive ? "Could not archive the card" : "Could not restore the card"));
+    }
+  }
+
   /** Board settings → Show auto-archived cards (D606): saved to this viewer's view, then the board reloads with or without them. */
   async function setShowArchived(showArchived: boolean) {
     try {
@@ -724,9 +760,11 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
       notify={notify}
       onMove={(card) => openDialog({ kind: "moveCard", cardId: card.id })}
       onDelete={removeCard}
+      onArchive={readOnly ? undefined : (card) => { void setArchived(card.id, true); }}
       onChanged={(card) => {
         // A card restored from the archive while archived cards are hidden is not on the board yet: fetch it.
-        if (!card.archived_at && !detailRef.current?.cards.some((item) => item.id === card.id)) void load();
+        const listed = detailRef.current?.cards.find((item) => item.id === card.id);
+        if (!card.archived_at && (!listed || listed.archived_at)) void load();
         setDetail((current) => current ? applyCardDetail(current, card) : current);
       }}
       tags={detail.tags ?? []}
@@ -827,6 +865,7 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
       onCancel={closeDialog}
     />}
     {dialog?.kind === "moveCard" && dialogCard && <MoveCardSheet card={dialogCard} columns={columns} cards={cards} onCancel={closeDialog} readOnly={readOnly} parentPicker={readOnly ? undefined : hierarchy.parentPicker(dialogCard)}
+      onArchive={readOnly ? undefined : () => { void setArchived(dialogCard.id, !dialogCard.archived_at); }}
       onCopyLink={() => { void copyCardLink(boardId, dialogCard.id, notify); }} onMove={async (columnId, place) => {
       const current = detailRef.current;
       setDialog(null);

@@ -208,7 +208,7 @@ export function BoardSettingsSheet({ board, owner, isOwner = owner, showAllLevel
           </label>}
           {onShowArchived && <label className="task-settings-toggle">
             <input type="checkbox" checked={showArchived} onChange={(event) => onShowArchived(event.target.checked)} />
-            <span>Show auto-archived cards<small>Only for you. They come back marked Archived; open one to restore it.{board.archived_count ? ` ${board.archived_count === 1 ? "1 card is" : `${board.archived_count} cards are`} archived on this board.` : ""}</small></span>
+            <span>Show archived cards<small>Only for you. They come back marked Archived; open one to restore it.{board.archived_count ? ` ${board.archived_count === 1 ? "1 card is" : `${board.archived_count} cards are`} archived on this board.` : ""}</small></span>
           </label>}
         </section>}
 

@@ -240,6 +240,8 @@ export type QueriedCard = {
   column_name: string;
   column_state: "todo" | "doing" | "done";
   is_done: 0 | 1;
+  /** When the card was archived (D605, D610), or null; archived cards still match. */
+  archived_at: string | null;
   position: number;
   title: string;
   description_excerpt: string;
@@ -393,7 +395,7 @@ export function runQuery(userId: string, query: TaskQuery, input: Omit<QueryInpu
     WHERE k.deleted_at IS NULL AND ${readableBoardPredicate} AND (${compiled.where}) AND ${boardScope}`;
   const rows = db.query(`SELECT k.id, k.board_id, b.name AS board_name, k.column_id, col.name AS column_name, ${COLUMN_STATE} AS column_state, col.is_done,
       k.position, k.title, k.description_excerpt, k.revision, k.created_by, cu.display_name AS creator_name,
-      k.due_on, k.due_time, k.due_tz, k.created_at, k.updated_at, k.parent_card_id, k.level,
+      k.due_on, k.due_time, k.due_tz, k.archived_at, k.created_at, k.updated_at, k.parent_card_id, k.level,
       (SELECT p.title FROM cards p WHERE p.id = k.parent_card_id AND p.board_id = k.board_id AND p.deleted_at IS NULL) AS parent_title,
       ${EFFECTIVE_SPRINT_SQL} AS sprint_id,
       (SELECT s.name FROM board_sprints s WHERE s.board_id = k.board_id AND s.id = ${EFFECTIVE_SPRINT_SQL}) AS sprint_name,

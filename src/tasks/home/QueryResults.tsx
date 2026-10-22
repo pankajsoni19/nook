@@ -2,6 +2,7 @@ import { useState } from "react";
 import { CalendarDays, ChevronDown, ChevronRight, Ellipsis, KanbanSquare } from "lucide-react";
 import { Avatars, FlagIcons, shortTimestamp } from "../boardViewParts";
 import type { BoardCard } from "../boardQuery";
+import { ArchivedChip } from "../CardFace";
 import { cardCountLabel, dueStatus } from "../taskActions";
 import { useRole } from "../../team/roleAccess";
 import { canChangeCard, type QueriedCard } from "./homeApi";
@@ -54,7 +55,7 @@ function ResultRow({ card, also, group, today, onOpenCard, onMoveCard }: { card:
   const names = people(card);
   return <li className={`task-group-row${card.is_done === 1 ? " done" : ""}`} data-card-id={card.id}>
     <button type="button" className="task-group-open" onClick={() => onOpenCard(card)} data-open-card={card.id}>
-      <span className="task-group-title"><FlagIcons flags={card.flags} /><span>{card.title}</span></span>
+      <span className="task-group-title"><FlagIcons flags={card.flags} /><span>{card.title}</span>{card.archived_at && <ArchivedChip at={card.archived_at} />}</span>
       <span className="task-group-meta">
         <span className="task-home-place">{group === "board" ? card.column_name : `${card.board_name} › ${card.column_name}`}</span>
         <Due card={card} today={today} />
@@ -115,7 +116,7 @@ function ResultTable({ cards, today, onOpenCard, onMoveCard }: Pick<QueryResults
               </span>
             </th>
             <td>{card.board_name}</td>
-            <td>{card.column_name}</td>
+            <td>{card.column_name}{card.archived_at && <> <ArchivedChip at={card.archived_at} /></>}</td>
             <td>{STATE_LABELS[card.column_state]}</td>
             <td className="task-table-people" title={names.join(", ")}>{names.length ? <><Avatars card={card as unknown as BoardCard} /><span className="task-table-names">{names.join(", ")}</span></> : <span className="task-table-empty">—</span>}</td>
             <td><Due card={card} today={today} /></td>

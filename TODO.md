@@ -56,8 +56,7 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 ## Leftovers (lane TASKS)
 
 - [ ] Auto-archived cards still count toward the 1,000-card board cap (D605), so a long-lived board fills up with them; decide whether archived cards leave the cap (and the board payload with "Show auto-archived cards" on stays bounded some other way) or get purged after a further period.
-- [ ] Tasks home (My work, views) and the relation picker list archived cards without the Archived mark (the API flags them: `archived_at`, `is_archived`); show the chip there too.
-- [ ] Only the sweep archives (D605): no manual "Archive" in a card's ⋯ menu. Add one if the operator wants it.
+- [ ] MCP has no tool to archive or unarchive a card (D610); `list_cards` and `search_cards` only read the flag. Add `archive_card` if agents need it.
 - [ ] "Show all levels on the board" is still per device (localStorage), while collapsed columns and "Show auto-archived cards" are per person on the server (`board_view_prefs`); move it there for one model.
 
 ## Leftovers (lane LOCALEMB)

@@ -14,6 +14,8 @@ export type QueriedCard = {
   column_name: string;
   column_state: TaskState;
   is_done: 0 | 1;
+  /** Archived (D605, D610): still listed, marked; older servers omit it. */
+  archived_at?: string | null;
   position: number;
   title: string;
   description_excerpt: string;

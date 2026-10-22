@@ -505,12 +505,12 @@ export async function patchColumn(userId: string, columnId: string, input: { nam
       if (state !== null) {
         // One statement writes both, so `is_done = (state = 'done')` always holds (T121).
         db.query("UPDATE board_columns SET state = ?, is_done = ?, updated_at = ? WHERE id = ?").run(state, state === "done" ? 1 : 0, timestamp, columnId);
-        // Its cards' done clocks (D603): they start now in a column that became done, and stop (with
-        // any archive undone) in one that no longer is.
+        // Its cards' done clocks (D603): they start now in a column that became done, and stop in one
+        // that no longer is. Archived cards stay archived (D610: an archive may be by hand).
         if (state === "done" && column.state !== "done") {
           db.query("UPDATE cards SET done_at = ? WHERE column_id = ? AND deleted_at IS NULL AND done_at IS NULL").run(timestamp, columnId);
         } else if (state !== "done" && column.state === "done") {
-          db.query("UPDATE cards SET done_at = NULL, archived_at = NULL WHERE column_id = ? AND deleted_at IS NULL").run(columnId);
+          db.query("UPDATE cards SET done_at = NULL WHERE column_id = ? AND deleted_at IS NULL").run(columnId);
         }
         if (input.isDone !== undefined) audit(userId, null, "task.column_done", { boardId: board.id, columnId, isDone: state === "done" });
         if (input.state !== undefined) audit(userId, null, "task.column_state", { boardId: board.id, columnId, state });

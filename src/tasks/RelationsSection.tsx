@@ -98,7 +98,7 @@ export function RelationAdder({ idPrefix, boardId, excludeCardId, excluded, disa
     const { results } = await searchCards(q, { boardId, ...(excludeCardId ? { excludeCardId } : {}), signal });
     return results.filter((result) => !excludedRef.current.has(result.id)).map((result) => {
       found.current.set(result.id, result);
-      const place = [result.board_id === boardId ? null : result.board_name, result.column_name, result.is_done === 1 ? "Done" : null].filter(Boolean).join(" · ");
+      const place = [result.board_id === boardId ? null : result.board_name, result.column_name, result.is_done === 1 ? "Done" : null, result.is_archived === 1 ? "Archived" : null].filter(Boolean).join(" · ");
       return { value: result.id, label: result.title, ...(place ? { description: place } : {}) };
     });
   }, [boardId, excludeCardId]);

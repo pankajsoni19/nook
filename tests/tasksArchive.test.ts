@@ -118,7 +118,7 @@ describe("auto-archive of done cards (D603–D605, D607)", () => {
     await call(owner, "POST", `/cards/${card.id}/move`, { columnId: done.id, afterCardId: null });
     expect(Date.parse(cardRow(card.id).done_at!)).toBeGreaterThan(Date.now() - 60_000);
 
-    // A column that becomes done starts its cards' clocks; one that stops being done clears them.
+    // A column that becomes done starts its cards' clocks; one that stops being done clears them (D610: archives stay).
     const other = await addCard(owner, boardId, doing.id, "In progress");
     await call(owner, "PATCH", `/columns/${doing.id}`, { state: "done" });
     expect(cardRow(other.id).done_at).not.toBeNull();
@@ -262,6 +262,47 @@ describe("auto-archive of done cards (D603–D605, D607)", () => {
     const audits = autoArchiveAudits(boardId);
     expect(audits.reduce((sum, row) => sum + Number(row.count), 0)).toBe(AUTO_ARCHIVE_BATCH + 19);
     expect(audits.length).toBe(2);
+  });
+});
+
+describe("archiving by hand (D610)", () => {
+  test("anyone who can edit archives a card in any column; it leaves the board, Undo (unarchive) brings it back; Tasks home still lists it, marked", async () => {
+    const { owner, member, stranger, boardId, todo, done } = await setup("Manual");
+    const card = await addCard(member, boardId, todo.id, "Archive me by hand");
+    expect((await call(stranger, "POST", `/cards/${card.id}/archive`)).status).toBe(404);
+    const archived = await call(member, "POST", `/cards/${card.id}/archive`);
+    expect(archived.status).toBe(200);
+    expect(archived.body.card.archived_at).not.toBeNull();
+    expect(cardRow(card.id)).toMatchObject({ column_id: todo.id, deleted_at: null });
+    const audit = db.query("SELECT metadata_json FROM audit_log WHERE actor_id = ? AND event_type = 'task.card_archive' ORDER BY rowid DESC LIMIT 1").get(member.userId) as { metadata_json: string };
+    expect(JSON.parse(audit.metadata_json)).toEqual({ boardId, cardId: card.id });
+    // Twice is a no-op (one audit row).
+    const firstAt = cardRow(card.id).archived_at;
+    await call(member, "POST", `/cards/${card.id}/archive`);
+    expect(cardRow(card.id).archived_at).toBe(firstAt);
+    expect(db.query("SELECT COUNT(*) AS count FROM audit_log WHERE event_type = 'task.card_archive' AND metadata_json LIKE ?").get(`%${card.id}%`)).toEqual({ count: 1 });
+
+    let board = (await call(owner, "GET", `/boards/${boardId}`)).body;
+    expect(board.cards.some((item: { id: string }) => item.id === card.id)).toBe(false);
+    expect(board.board.archived_count).toBe(1);
+    // The sweep never unarchives it, and a column leaving done keeps archives (the card stays hidden).
+    sweepAutoArchive();
+    expect(cardRow(card.id).archived_at).toBe(firstAt);
+    const inDone = await addCard(owner, boardId, done.id, "Done and archived by hand");
+    await call(owner, "POST", `/cards/${inDone.id}/archive`);
+    await call(owner, "PATCH", `/columns/${done.id}`, { state: "doing" });
+    expect(cardRow(inDone.id)).toMatchObject({ done_at: null });
+    expect(cardRow(inDone.id).archived_at).not.toBeNull();
+
+    // Tasks home (the cross-board query) still finds it, with archived_at.
+    const found = await call(owner, "POST", "/query", { q: `board:${boardId}` });
+    expect(found.status).toBe(200);
+    expect(found.body.cards.find((item: { id: string }) => item.id === card.id)?.archived_at).toBe(firstAt);
+
+    // Undo.
+    expect((await call(member, "POST", `/cards/${card.id}/unarchive`)).body.card.archived_at).toBeNull();
+    board = (await call(owner, "GET", `/boards/${boardId}`)).body;
+    expect(board.cards.some((item: { id: string }) => item.id === card.id)).toBe(true);
   });
 });
 

@@ -53,6 +53,26 @@ export function writeViewPrefs(userId: string, boardId: string, input: { collaps
 }
 
 /**
+ * `POST /cards/:k/archive` (edit, D610): archives a card by hand, in any column. Like the sweep it
+ * only sets `archived_at`: the card stays live where it is. Archiving an archived card is a no-op.
+ */
+export async function archiveCard(userId: string, cardId: string) {
+  const { board } = requireCardAt(cardId, userId, "edit");
+  return withBoardLock(board.id, () => {
+    const { card } = requireCardAt(cardId, userId, "edit");
+    if (!card.archived_at) {
+      db.transaction(() => {
+        const timestamp = new Date().toISOString();
+        db.query("UPDATE cards SET archived_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL").run(timestamp, timestamp, cardId);
+        db.query("UPDATE boards SET updated_at = ? WHERE id = ?").run(timestamp, board.id);
+        audit(userId, null, "task.card_archive", { boardId: board.id, cardId });
+      })();
+    }
+    return { card: cardDetail(cardId)! };
+  });
+}
+
+/**
  * `POST /cards/:k/unarchive` (edit, D605): puts an archived card back on the board where it is. In a
  * done column its done clock restarts now. A card that is not archived is a no-op (200, unchanged).
  */

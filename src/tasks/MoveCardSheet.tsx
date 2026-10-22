@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArrowDownToLine, ArrowUpToLine, Check, ChevronLeft, Columns3, Layers, Link as LinkIcon } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowDownToLine, ArrowUpToLine, Check, ChevronLeft, Columns3, Layers, Link as LinkIcon } from "lucide-react";
 import { ModalDialog } from "../files/Dialog";
 import { useHistoryDialogGuard } from "../ui/useHistoryDialogGuard";
 import { canEnterColumn } from "./taskActions";
@@ -31,12 +31,14 @@ type MoveCardSheetProps = {
    * the ⋯ menu offers Copy link only, never Move (which the server would refuse, READ_ONLY).
    */
   readOnly?: boolean;
+  /** Archive or unarchive the card (D610), for people who can edit it; the sheet closes first. */
+  onArchive?: () => void;
 };
 
 // "Move to…": a dialog on desktop, a full-screen sheet on phones. Lists the board's columns and
 // Top or Bottom; the current column is allowed, so a card can jump to the top or bottom of its own.
 // A column at its WIP limit is listed but disabled.
-export function MoveCardSheet({ card, columns, cards = [], onMove, onCancel, parentPicker, onCopyLink, readOnly = false }: MoveCardSheetProps) {
+export function MoveCardSheet({ card, columns, cards = [], onMove, onCancel, parentPicker, onCopyLink, readOnly = false, onArchive }: MoveCardSheetProps) {
   const [picking, setPicking] = useState(false);
   // Back on the "Set epic…" list returns to Move to… (as its Back to columns button does), not the board.
   useHistoryDialogGuard(picking, () => setPicking(false));
@@ -97,8 +99,12 @@ export function MoveCardSheet({ card, columns, cards = [], onMove, onCancel, par
   }
 
   return <ModalDialog title={`Move “${card.title}”`} eyebrow="Move to" onClose={onCancel} variant="sheet" busy={busy}>
-    {onCopyLink && <div className="move-list task-move-parent">
-      <button className="move-option" onClick={() => { onCopyLink(); onCancel(); }} disabled={busy}><LinkIcon aria-hidden="true" /><span>Copy link<small>A link to this card</small></span></button>
+    {(onCopyLink || onArchive) && <div className="move-list task-move-parent">
+      {onCopyLink && <button className="move-option" onClick={() => { onCopyLink(); onCancel(); }} disabled={busy}><LinkIcon aria-hidden="true" /><span>Copy link<small>A link to this card</small></span></button>}
+      {onArchive && <button className="move-option" onClick={() => { onCancel(); onArchive(); }} disabled={busy}>
+        {card.archived_at ? <ArchiveRestore aria-hidden="true" /> : <Archive aria-hidden="true" />}
+        <span>{card.archived_at ? "Unarchive" : "Archive"}<small>{card.archived_at ? "Put it back on the board" : "Hide it from the board; nothing is deleted"}</small></span>
+      </button>}
     </div>}
     {parentPicker && <div className="move-list task-move-parent">
       <button className="move-option" onClick={() => setPicking(true)} disabled={busy}><Layers aria-hidden="true" /><span>{parentPicker.label}<small>{parentPicker.currentParentId ? `Now: ${parentPicker.options.find((option) => option.id === parentPicker.currentParentId)?.title ?? "its parent"}` : "It has none now"}</small></span></button>

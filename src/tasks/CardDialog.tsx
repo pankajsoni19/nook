@@ -66,6 +66,8 @@ type CardDialogProps = {
   onClose: () => void;
   onMissing: () => void;
   onChanged: (card: CardDetail) => void;
+  /** Archive the card by hand (D610): the board hides it and offers Undo; the dialog closes. */
+  onArchive?: (card: CardDetail) => void;
   onMove: (card: CardDetail) => void;
   /** Moves the card to the Bin (the dialog confirms first) and closes it. */
   onDelete: (cardId: string) => Promise<void>;
@@ -115,7 +117,7 @@ const payloadCard = (reason: unknown) => reason instanceof ApiError && reason.pa
  * The description is Markdown shown through the notes renderer read-only (D44) and edited with
  * an explicit Save; a revision conflict offers Reload or Copy my text.
  */
-export function CardDialog({ userId, cardId, columns, columnId, boardOwner, boardLevel, onClose, onMissing, onChanged, onMove, onDelete, notify, tags, onTagsChange, onOpenRelated, onRelationsChanged, layout = "dialog", onExpand, onCollapse, hierarchy, sprints, initialView }: CardDialogProps) {
+export function CardDialog({ userId, cardId, columns, columnId, boardOwner, boardLevel, onClose, onMissing, onChanged, onArchive, onMove, onDelete, notify, tags, onTagsChange, onOpenRelated, onRelationsChanged, layout = "dialog", onExpand, onCollapse, hierarchy, sprints, initialView }: CardDialogProps) {
   const page = layout === "page";
   // Viewers and guests read the card: every write control is left out or shown as text, since the
   // server's write gate refuses those writes (403 ROLE_READ_ONLY), comments included. Members below
@@ -665,6 +667,7 @@ export function CardDialog({ userId, cardId, columns, columnId, boardOwner, boar
         </div>
         {card && <CopyCardLinkButton boardId={card.board_id} cardId={card.id} notify={notify} />}
         {card && !readOnly && <button className="icon-button" onClick={() => onMove(card)} aria-haspopup="dialog" aria-label="Move card" title="Move to…"><ArrowRightLeft /></button>}
+        {card && !readOnly && onArchive && !card.archived_at && <button className="icon-button" onClick={() => onArchive(card)} aria-label="Archive card" title="Archive: hide it from the board"><Archive /></button>}
         {card && !readOnly && <button className="icon-button" onClick={() => setConfirmDelete(true)} aria-haspopup="dialog" aria-label="Delete card" title="Move to the Bin"><Trash2 /></button>}
         {!page && onExpand && <button className="icon-button task-card-expand" onClick={onExpand} aria-label="Open as page" title="Open as page"><Maximize2 /></button>}
         {page && onCollapse && <button className="icon-button" onClick={onCollapse} aria-label="Collapse to a dialog" title="Collapse"><Minimize2 /></button>}
@@ -684,7 +687,7 @@ export function CardDialog({ userId, cardId, columns, columnId, boardOwner, boar
 
           {card.archived_at && <p className="task-card-archived" role="status">
             <Archive aria-hidden="true" />
-            <span>Auto-archived {relativeTime(card.archived_at)}. It is hidden from the board unless you show archived cards.</span>
+            <span>Archived {relativeTime(card.archived_at)}. It is hidden from the board unless you show archived cards.</span>
             {!readOnly && <button type="button" className="secondary-button task-small-button" disabled={restoring} onClick={() => { void restoreArchived(); }}><ArchiveRestore />{restoring ? "Restoring…" : "Restore to board"}</button>}
           </p>}
           <CardFields card={card} userId={userId} idPrefix={titleId} done={column?.is_done === 1} saving={savingDetails} onSave={saveDetails} tags={tags} owner={boardOwner} onTagsChange={onTagsChange} readOnly={readOnly} />

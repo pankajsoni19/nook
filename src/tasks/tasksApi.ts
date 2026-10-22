@@ -145,7 +145,9 @@ export const renameBoard = (boardId: string, name: string) => api<{ board: Board
 export const setAutoArchiveDays = (boardId: string, autoArchiveDays: number | null) => api<{ board: BoardSummary }>(`/tasks/boards/${boardId}`, json("PATCH", { autoArchiveDays }));
 /** Any reader (D602, D606): replaces the fields sent of the caller's own view of the board. */
 export const saveBoardView = (boardId: string, change: Partial<BoardView>) => api<{ view: BoardView }>(`/tasks/boards/${boardId}/view`, json("PUT", change));
-/** Puts an auto-archived card back on the board (D605); its done clock starts again. */
+/** Archives a card by hand (D610), in any column: hidden from the board, never deleted. */
+export const archiveCard = (cardId: string) => api<{ card: CardDetail }>(`/tasks/cards/${cardId}/archive`, json("POST", {}));
+/** Puts an archived card back on the board (D605); its done clock starts again. */
 export const unarchiveCard = (cardId: string) => api<{ card: CardDetail }>(`/tasks/cards/${cardId}/unarchive`, json("POST", {}));
 export type BoardReader = { id: string; displayName: string; /** Q7: the same-origin picture (web payload). */ avatarUrl?: string | null; /** Wave 36: an integration (web payload). */ isIntegration?: boolean };
 /**
@@ -234,7 +236,8 @@ export type RelatedCard = { id: string; board_id: string; board_name: string; ti
 export type CardRelation =
   | { id: string; type: RelationType; restricted: false; created_at: string; creator_name: string | null; card: RelatedCard }
   | { id: string; type: RelationType; restricted: true; created_at: string };
-export type CardSearchResult = { id: string; board_id: string; board_name: string; title: string; column_name: string | null; is_done: 0 | 1 };
+/** `is_archived` (D607): an archived card is still found, marked; older servers omit it. */
+export type CardSearchResult = { id: string; board_id: string; board_name: string; title: string; column_name: string | null; is_done: 0 | 1; is_archived?: 0 | 1 };
 
 export const getCard = (cardId: string) => api<CardView>(`/tasks/cards/${cardId}`);
 /**

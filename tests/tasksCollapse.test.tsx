@@ -117,6 +117,35 @@ describe("the filter bar keeps + Filter and the text box first (D608)", () => {
   });
 });
 
+describe("archiving by hand and the Archived mark (D610)", () => {
+  test("the card's ⋯ menu offers Archive, or Unarchive on an archived card, and runs it after closing; never for read-only", async () => {
+    const { MoveCardSheet } = await import("../src/tasks/MoveCardSheet");
+    const events: string[] = [];
+    const view = await render(<MoveCardSheet card={card("k1", "c-done")} columns={[done]} onMove={async () => undefined} onCancel={() => events.push("close")} onArchive={() => events.push("archive")} />);
+    const archive = [...view.container.ownerDocument.querySelectorAll("button.move-option")].find((button) => button.textContent?.startsWith("Archive"))!;
+    expect(archive.textContent).toContain("Hide it from the board");
+    await view.click(archive);
+    expect(events).toEqual(["close", "archive"]);
+    const archived = renderToStaticMarkup(<MoveCardSheet card={card("k1", "c-done", { archived_at: "2026-10-01T00:00:00.000Z" })} columns={[done]} onMove={async () => undefined} onCancel={noop} onArchive={noop} />);
+    expect(archived).toContain("Unarchive");
+    expect(renderToStaticMarkup(<MoveCardSheet card={card("k1", "c-done")} columns={[done]} onMove={async () => undefined} onCancel={noop} readOnly />)).not.toContain("Archive");
+  });
+
+  test("Tasks home rows and table mark archived cards", async () => {
+    const { QueryResults } = await import("../src/tasks/home/QueryResults");
+    const result = (archived_at: string | null) => ({
+      id: "k1", board_id: "b1", board_name: "Board", column_id: "c1", column_name: "Done", column_state: "done", is_done: 1, archived_at, position: 1, title: "Old card",
+      description_excerpt: "", revision: 1, created_by: null, creator_name: null, due_on: null, due_time: null, due_tz: null, due_at: null, assignees: [], tags: [], flags: [],
+      created_at: "", updated_at: "", parent_card_id: null, level: 0, parent_title: null, sprint_id: null, sprint_name: null, level_on_board: "owner"
+    });
+    for (const layout of ["list", "table"] as const) {
+      const markup = renderToStaticMarkup(<QueryResults {...{ cards: [result("2026-10-01T00:00:00.000Z")], layout, group: "none", today: "2026-10-22", userId: "u1", onLoadMore: noop, onOpenCard: noop, onMoveCard: noop, emptyText: "", hasMore: false, loadingMore: false } as never} />);
+      expect(markup).toContain('class="task-archived-chip"');
+      expect(renderToStaticMarkup(<QueryResults {...{ cards: [result(null)], layout, group: "none", today: "2026-10-22", userId: "u1", onLoadMore: noop, onOpenCard: noop, onMoveCard: noop, emptyText: "", hasMore: false, loadingMore: false } as never} />)).not.toContain("task-archived-chip");
+    }
+  });
+});
+
 describe("archived cards when shown (D605)", () => {
   test("the lane card is marked Archived and says so to screen readers; WIP never counts archived cards", () => {
     const archived = card("k1", "c-done", { archived_at: "2026-10-01T00:00:00.000Z" });

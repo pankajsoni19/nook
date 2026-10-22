@@ -13,7 +13,7 @@ import { registerTaskQueryRoutes } from "./queryRoutes";
 import { cardHierarchy } from "./hierarchy";
 import { COMMENT_MAX_BYTES, COMMENT_PAGE_SIZE, createComment, deleteComment, listComments, updateComment } from "./comments";
 import { avatarUrlsFor, integrationIdsAmong } from "../avatars";
-import { AUTO_ARCHIVE_MAX_DAYS, unarchiveCard, writeViewPrefs } from "./archive";
+import { archiveCard, AUTO_ARCHIVE_MAX_DAYS, unarchiveCard, writeViewPrefs } from "./archive";
 
 /** Web payloads only (MCP output unchanged): each comment author's picture, beside the name (QA U4). */
 function withAuthorAvatars<T extends { author_id: string | null }>(comments: T[]) {
@@ -431,6 +431,11 @@ export function registerTaskRoutes(app: Hono<AppEnv>) {
     const cardId = id(c, "cardId");
     const body = await parseJson(c.req.raw, cardPatchSchema);
     return respond(c, async () => withAssigneeAvatars(await patchCard(c.get("user").id, cardId, body)));
+  });
+
+  app.post("/api/tasks/cards/:cardId/archive", (c) => {
+    const cardId = id(c, "cardId");
+    return respond(c, async () => withAssigneeAvatars(await archiveCard(c.get("user").id, cardId)));
   });
 
   app.post("/api/tasks/cards/:cardId/unarchive", (c) => {

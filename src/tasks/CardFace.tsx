@@ -177,9 +177,9 @@ export function CardFace({ card, tags, done, today, excerptId, rollup, childLabe
   </div>;
 }
 
-/** "Archived" on a card the auto-archive sweep archived (D605), shown only when the viewer shows them. */
+/** "Archived" on an archived card (D605, D610), shown only when the viewer shows them, and in search and Tasks home. */
 export function ArchivedChip({ at }: { at: string }) {
   const date = new Date(at);
   const when = Number.isNaN(date.getTime()) ? "" : ` on ${date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`;
-  return <span className="task-archived-chip" title={`Auto-archived${when}`}><Archive aria-hidden="true" />Archived</span>;
+  return <span className="task-archived-chip" title={`Archived${when}`}><Archive aria-hidden="true" />Archived</span>;
 }
