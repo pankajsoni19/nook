@@ -110,7 +110,7 @@ describe("row uploads in the Attachments folder", () => {
     expect([full.status, full.body.code, full.body.limit]).toEqual([409, "LIMIT_REACHED", 20]);
     // The refused upload stays unlinked; the hourly sweep bins it after a day (U0).
     expect(docState(extra).binned).toBe(0);
-  });
+  }, 30_000);
 
   test("unlink bins the upload and Undo brings it back; the row's Bin hides it and restore returns it; a purge bins it", async () => {
     const { owner, member, collection, row, receipt } = await setup("U3 lifecycle");

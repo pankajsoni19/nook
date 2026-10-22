@@ -5,9 +5,9 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 - Plans of record: `DEVELOPMENT_PLAN.md`, `docs/plan/research/`, [reports plan](docs/plan/WAVES_45-48_REPORTS.md), [report theme](docs/plan/REPORT_THEME.md).
 - Contracts: [API](docs/plan/API_CONTRACTS.md) · [Threat model](docs/plan/THREAT_MODEL.md) · [Test plan](docs/plan/TEST_PLAN.md).
 
-**Current state (2026-10-22).**
-- **v0.44.0** is released (2026-10-22): Claude/Voyage/Local embeddings, keyword-only knowledge, chat agents on data sources, report Lists, Duplicate report, filters later slices, API key Edit adds permissions.
-- Migrations: **001–073** are released and immutable (045, 054, 067, 070, 071, 072 unused; 054 reserved for Messages). Next free: **075**; **074** is lane TASKS (built, unreleased).
+**Current state (2026-10-23).**
+- **v0.45.0** is released (2026-10-23): online S3 backups, Litestream and restore drills; Tasks collapse, filter order and archive; vault key Edit adds access; docs site restructure.
+- Migrations: **001–076** are released and immutable (045, 054, 067, 070, 071, 072, 075 unused; 054 reserved for Messages). Next free: **077**.
 - Development happens directly on `main`, pushed as each change passes its gates.
 
 ## In flight

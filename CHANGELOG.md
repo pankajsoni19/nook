@@ -2,6 +2,36 @@
 
 Release notes for Nook, newest first. Upgrade steps for each release are in [docs/OPERATIONS.md](docs/OPERATIONS.md#upgrades).
 
+## v0.45.0 — 2026-10-23
+
+**Backups**
+
+- **Online backups**: the server snapshots the database while running (no downtime), checks it, and packs it with the data folder; schedule and retention in `.env` (`BACKUP_INTERVAL`, `BACKUP_KEEP`), kept on disk, in S3 under `BACKUP_S3_PREFIX`, or both.
+- **Litestream**: continuous replication of the database to S3 with point-in-time restore (`LITESTREAM_ENABLED=true`).
+- **Restore drill**: a scheduled and on-demand check that a backup really restores; `backup-admin restore` for recovery. **Settings → Backups** shows it all, with Back up now; admins are alerted on failures.
+
+**Tasks**
+
+- **Collapse a column** to a narrow strip with its count (per person).
+- **Filter bar**: "+ Filter" and search stay first; applied filters follow.
+- **Archive**: cards in done columns auto-archive after 30 days (per board, on by default, including existing boards), or by hand with Undo; hidden from the board, never deleted; "Show archived cards" brings them back. MCP `archive_card`, `unarchive_card`.
+
+**Vault keys**
+
+- **Edit can add access** with your password: more vaults or environments, higher levels, protected environments, and values over MCP (with its own confirmation), with a security mail and bell notice.
+
+**Docs site**
+
+- Opens on what Nook does and its apps; release notes moved to their own page.
+
+**Fixes**
+
+- Collections → New collection: template rows no longer overlap on phones. Tasks' card sheet on phones no longer has a blank gap.
+
+**Upgrading**
+
+- Migrations **074** (task archive and column view state; every board gets auto-archive at 30 days, and done cards already older than that are archived on the first sweep — restorable; see the upgrade notes to turn it off) and **076** (vault key settings guard). **Back up first** (`./scripts/backup.sh --force`). The image grows by about 39 MB with Litestream (`LITESTREAM=skip` to leave it out). See [Upgrading to 0.45.0](docs/OPERATIONS.md#upgrades).
+
 ## v0.44.0 — 2026-10-22
 
 **Claude, Voyage AI and local embeddings**
