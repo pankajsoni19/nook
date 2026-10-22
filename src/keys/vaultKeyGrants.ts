@@ -36,14 +36,14 @@ export const grantableVaults = (vaults: readonly VaultChoice[]) => vaults.filter
  * each environment the creator reads. A protected one says so and is off until the key allows
  * protected environments.
  */
-export function envChoices(vault: VaultChoice | undefined, protectedAccess: boolean, protectedHint = "Protected: turn on “Allow protected environments” first") {
+export function envChoices(vault: VaultChoice | undefined, protectedAccess: boolean) {
   if (!vault) return [];
   const unprotected = vault.environments.filter((env) => !env.protected && reaches(env, "read"));
   return [
     { value: ALL_ENVS, label: "Every environment", description: unprotected.length ? "Every unprotected environment you can read, now and later" : "Every environment you can read here is protected: pick one by name", disabled: !unprotected.length },
     ...vault.environments.filter((env) => reaches(env, "read")).map((env) => ({
       value: env.id, label: env.name,
-      description: env.protected ? (protectedAccess ? "Protected: reachable because this key allows protected environments" : protectedHint) : undefined,
+      description: env.protected ? (protectedAccess ? "Protected: reachable because this key allows protected environments" : "Protected: turn on “Allow protected environments” first") : undefined,
       disabled: env.protected && !protectedAccess
     }))
   ];
@@ -65,11 +65,13 @@ export function fixedAccessReason(vault: VaultChoice | undefined, row: Pick<Vaul
 /**
  * The rows that add access to a vault key holding `held` (D620, a mirror of the server's
  * isVaultNarrowing per grant): a row no held row covers on the same vault, at the same or a higher
- * level, and on the same environment (or one environment under "every", on a key without protected
- * access). Empty when the edit only narrows, so no password is asked.
+ * level, and on the same environment, or one environment under "every" (on a key with protected
+ * access, only an environment that is not protected, D626; one not in `vaults` counts as protected).
+ * Empty when the edit only narrows, so no password is asked.
  */
-export function vaultRowsAddingAccess(held: readonly VaultGrantRow[], rows: readonly VaultGrantRow[], protectedAccess: boolean) {
-  return rows.filter((row) => !vaultRowsNarrow(held, [row], protectedAccess));
+export function vaultRowsAddingAccess(held: readonly VaultGrantRow[], rows: readonly VaultGrantRow[], protectedAccess: boolean, vaults: readonly VaultChoice[] = []) {
+  const isProtected = (vaultId: string, envId: string) => vaults.find((vault) => vault.id === vaultId)?.environments.find((env) => env.id === envId)?.protected ?? true;
+  return rows.filter((row) => !vaultRowsNarrow(held, [row], protectedAccess, isProtected));
 }
 
 /** The permission options of a row: write only where the creator writes (and never for a viewer). */
@@ -115,10 +117,10 @@ export function vaultGrantsToRows(grants: readonly VaultGrantView[]): VaultGrant
  * each row covered by a held one on the same vault, with the same or a lower permission, and the
  * same environment (or one environment for every one, on a key without protected access).
  */
-export function vaultRowsNarrow(ceiling: readonly VaultGrantRow[], rows: readonly VaultGrantRow[], protectedAccess: boolean) {
+export function vaultRowsNarrow(ceiling: readonly VaultGrantRow[], rows: readonly VaultGrantRow[], protectedAccess: boolean, isProtected: (vaultId: string, envId: string) => boolean = () => true) {
   return rows.every((row) => ceiling.some((held) => held.vaultId === row.vaultId
     && (held.permission === row.permission || (held.permission === "write" && row.permission === "read"))
-    && (held.envId === row.envId || (held.envId === ALL_ENVS && !protectedAccess))));
+    && (held.envId === row.envId || (held.envId === ALL_ENVS && row.envId !== ALL_ENVS && (!protectedAccess || !isProtected(row.vaultId, row.envId))))));
 }
 
 /** One line under the builder: what the key reaches, and what no vault key ever does. */

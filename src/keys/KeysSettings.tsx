@@ -390,19 +390,34 @@ function KeyActivity({ keyId, vault = false }: { keyId: string; vault?: boolean 
   </details>;
 }
 
-/** The two vault key settings (Wave 27): values over MCP (T191) and protected environments (D226). Narrowing only turns them off. */
-function VaultFlags({ mcpValues, protectedAccess, onMcpValues, onProtectedAccess, disabled, narrowing = false }: {
+/**
+ * The two vault key settings (Wave 27): values over MCP (T191) and protected environments (D226).
+ * In Edit (D625) turning one on adds access, so the dialog asks for the password, and values over MCP
+ * also asks for its own confirmation (`mcpConfirm`) on top of it.
+ */
+function VaultFlags({ mcpValues, protectedAccess, onMcpValues, onProtectedAccess, disabled, editing = false, mcpConfirm = null }: {
   mcpValues: boolean; protectedAccess: boolean; onMcpValues: (value: boolean) => void; onProtectedAccess: (value: boolean) => void; disabled: boolean;
-  /** Edit: a setting that is off stays off (turning one on needs a rotation). */
-  narrowing?: { mcpValues: boolean; protectedAccess: boolean } | false;
+  editing?: boolean;
+  /** Edit, while values over MCP is being turned on: the explicit confirmation. */
+  mcpConfirm?: { checked: boolean; onChange: (value: boolean) => void } | null;
 }) {
   return <fieldset className="keys-fieldset keys-vault-flags"><legend>Vault settings</legend>
     <label className="keys-switch"><span>Allow protected environments<small>Needed for a grant that names a protected environment (such as Production). A grant on every environment never reaches a protected one.</small></span>
-      <input type="checkbox" checked={protectedAccess} disabled={disabled || (narrowing !== false && !narrowing.protectedAccess)} onChange={(event) => onProtectedAccess(event.currentTarget.checked)} /></label>
+      <input type="checkbox" checked={protectedAccess} disabled={disabled} onChange={(event) => onProtectedAccess(event.currentTarget.checked)} /></label>
     <label className="keys-switch"><span>Allow MCP clients to read values<small className="keys-switch-warning">{MCP_VALUES_WARNING}</small></span>
-      <input type="checkbox" checked={mcpValues} disabled={disabled || (narrowing !== false && !narrowing.mcpValues)} onChange={(event) => onMcpValues(event.currentTarget.checked)} /></label>
-    {narrowing !== false && <small className="grant-note">Editing can only turn these off. Rotate the key to turn one on.</small>}
+      <input type="checkbox" checked={mcpValues} disabled={disabled} onChange={(event) => onMcpValues(event.currentTarget.checked)} /></label>
+    {mcpConfirm && <label className="keys-switch keys-mcp-confirm"><span>I understand that values this key reads over MCP go to that client's AI model provider</span>
+      <input type="checkbox" checked={mcpConfirm.checked} disabled={disabled} onChange={(event) => mcpConfirm.onChange(event.currentTarget.checked)} /></label>}
+    {editing && <small className="grant-note">Turning a setting on asks for your password; turning one off needs nothing.</small>}
   </fieldset>;
+}
+
+/** What the Edit dialog's note says adds access: rows, settings, or both (D585, D625). */
+export function addingLine(rowsLabel: string | null, rowCount: number, settings: readonly string[]) {
+  const parts = [...(rowsLabel ? [rowsLabel] : []), ...settings.map((setting) => `“${setting}”`)];
+  const subject = parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}` : parts[0] ?? "";
+  const plural = parts.length > 1 || rowCount > 1;
+  return `${subject} ${plural ? "add" : "adds"} access, so confirm it's you to save.`;
 }
 
 /**
@@ -591,9 +606,14 @@ function EditKeyDialog({ apiKey, policy, role, totpEnabled, onClose, onSaved }: 
   const [error, setError] = useState("");
   const reauth = useKeyReauth(totpEnabled);
   const heldProtected = Boolean(apiKey.vault?.protectedAccess);
-  const adding: Array<{ key: string }> = isVault ? vaultRowsAddingAccess(vaultCeiling, vaultRows, heldProtected) : rowsAddingAccess(held, rows);
+  const adding: Array<{ key: string }> = isVault ? vaultRowsAddingAccess(vaultCeiling, vaultRows, heldProtected, Array.isArray(vaults) ? vaults : []) : rowsAddingAccess(held, rows);
   const addingNumbers = adding.map((row) => (isVault ? vaultRows : rows).findIndex((item) => item.key === row.key) + 1);
   const rowWord = isVault ? ["Vault access", "Vault access rows"] : ["Permission", "Permissions"];
+  // D625: a vault setting turned on adds access too; values over MCP also needs its own confirmation.
+  const mcpTurningOn = isVault && mcpValues && !apiKey.vault?.allowMcpValueReads;
+  const protectedTurningOn = isVault && protectedAccess && !heldProtected;
+  const settingsAdding = [...(protectedTurningOn ? ["Allow protected environments"] : []), ...(mcpTurningOn ? ["Allow MCP clients to read values"] : [])];
+  const [mcpConfirmed, setMcpConfirmed] = useState(false);
   const daysLeft = apiKey.expiresAt ? Math.max(1, Math.ceil((Date.parse(apiKey.expiresAt) - Date.now()) / 86_400_000)) : null;
   const expiryChoices = [
     { value: "keep", label: daysLeft === null ? "Keep: no expiry" : `Keep: ${daysLeft} ${daysLeft === 1 ? "day" : "days"} left` },
@@ -626,8 +646,10 @@ function EditKeyDialog({ apiKey, policy, role, totpEnabled, onClose, onSaved }: 
     if (nextAllowlist.length && nextAllowlist.join("\n") !== (apiKey.ipAllowlist ?? []).join("\n")) body.ipAllowlist = nextAllowlist;
     if (!nextAllowlist.length && apiKey.ipAllowlist?.length) return setError("Removing the address limit widens the key. Rotate the key to change this.");
     if (!Object.keys(body).length) return onClose();
-    // D585: adding access confirms it's you, as New key does; narrowing never asks.
-    const widening = Boolean(body.grants) && adding.length > 0;
+    // D585, D625: adding access confirms it's you, as New key does; narrowing never asks.
+    if (mcpTurningOn && !mcpConfirmed) return setError("Confirm that MCP clients may read values.");
+    if (mcpTurningOn) body.confirmMcpValueReads = true;
+    const widening = (Boolean(body.grants) && adding.length > 0) || settingsAdding.length > 0;
     if (widening) {
       const notReady = reauth.blocked();
       if (notReady) return setError(notReady);
@@ -645,21 +667,20 @@ function EditKeyDialog({ apiKey, policy, role, totpEnabled, onClose, onSaved }: 
   }
 
   return <KeysDialog title={`Edit ${apiKey.name}`} description={isVault
-    ? "Add, change, or remove vault access, bring the expiry closer, or rename. Adding access asks for your password; the key keeps its secret. Rotate the key to turn a vault setting on or to add surfaces or addresses."
+    ? "Add, change, or remove vault access, turn its settings on or off, bring the expiry closer, or rename. Adding access asks for your password; the key keeps its secret. Rotate the key to add surfaces or addresses."
     : "Add, change, or remove permissions, bring the expiry closer, or rename. Adding access asks for your password; the key keeps its secret. Rotate the key to add surfaces or addresses."} onClose={onClose} busy={busy} wide>
     <form className="keys-form" onSubmit={submit} noValidate>
       <label className="keys-input">Name<input value={name} onChange={(event) => setName(event.target.value)} maxLength={80} required disabled={busy} autoComplete="off" /></label>
       <label className="keys-input">Description (optional)<input value={description} onChange={(event) => setDescription(event.target.value)} maxLength={200} disabled={busy} autoComplete="off" /></label>
       {apiKey.surfaces === "both" && <div className="keys-select-field"><span id="keys-edit-surface">Where it is used</span><Select<KeySurfaces> labelledBy="keys-edit-surface" label="Where it is used" value={surfaces} options={surfaceChoices} onChange={setSurfaces} disabled={busy} /></div>}
       {!isVault && <fieldset className="keys-fieldset"><legend>Access</legend><GrantBuilder rows={rows} onChange={setRows} role={role} policy={policy} disabled={busy} /></fieldset>}
-      {isVault && <fieldset className="keys-fieldset"><legend>Vault access</legend><VaultGrantBuilder rows={vaultRows} onChange={setVaultRows} vaults={vaults} role={role} protectedAccess={protectedAccess} disabled={busy} held={vaultCeiling}
-        protectedHint="Protected: this key does not allow protected environments. Rotate it to allow them." /></fieldset>}
-      {isVault && <VaultFlags mcpValues={mcpValues} protectedAccess={protectedAccess} onMcpValues={setMcpValues} onProtectedAccess={setProtectedAccess} disabled={busy}
-        narrowing={{ mcpValues: Boolean(apiKey.vault?.allowMcpValueReads), protectedAccess: Boolean(apiKey.vault?.protectedAccess) }} />}
+      {isVault && <fieldset className="keys-fieldset"><legend>Vault access</legend><VaultGrantBuilder rows={vaultRows} onChange={setVaultRows} vaults={vaults} role={role} protectedAccess={protectedAccess} disabled={busy} held={vaultCeiling} /></fieldset>}
+      {isVault && <VaultFlags mcpValues={mcpValues} protectedAccess={protectedAccess} onMcpValues={(value) => { setMcpValues(value); setMcpConfirmed(false); }} onProtectedAccess={setProtectedAccess} disabled={busy}
+        editing mcpConfirm={mcpTurningOn ? { checked: mcpConfirmed, onChange: setMcpConfirmed } : null} />}
       <div className="keys-select-field"><span id="keys-edit-expiry">Expiry</span><Select labelledBy="keys-edit-expiry" label="Expiry" value={expires} options={expiryChoices} onChange={setExpires} disabled={busy} /></div>
       <AllowlistField available={Boolean(policy.ipAllowlistAvailable)} pinned={policy.ipProxyPinned} value={allowlist} onChange={setAllowlist} disabled={busy} mode={apiKey.ipAllowlist?.length ? "narrow" : "create"} />
-      {adding.length > 0 && <>
-        <p className="grant-note keys-adding-note" role="note">{adding.length === 1 ? rowWord[0] : rowWord[1]} {addingNumbers.join(", ")} {adding.length === 1 ? "adds" : "add"} access, so confirm it's you to save.</p>
+      {(adding.length > 0 || settingsAdding.length > 0) && <>
+        <p className="grant-note keys-adding-note" role="note">{addingLine(adding.length ? `${adding.length === 1 ? rowWord[0] : rowWord[1]} ${addingNumbers.join(", ")}` : null, adding.length, settingsAdding)}</p>
         {reauth.fields(busy)}
       </>}
       <FormError message={error} />

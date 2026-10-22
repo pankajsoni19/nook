@@ -284,7 +284,7 @@ const VAULT_SCOPE_WORDS: Record<string, [string, string]> = {
   e: ["environment", "environments"],
   p: ["protected environment", "protected environments"]
 };
-const VAULT_FLAG_WORDS: Record<string, string> = { mcp_values: "Values over MCP", protected: "Protected environments" };
+const VAULT_FLAG_WORDS: Record<string, string> = { mcp_values: "MCP clients may read values", protected: "Protected environments allowed" };
 
 /** A vault key's added entries in words: "Read values: 1 vault (every environment) · Read and write values: 2 environments · Values over MCP". */
 export function describeAddedVaultGrants(entries: readonly string[]) {

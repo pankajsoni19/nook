@@ -443,7 +443,7 @@ describe("per-key limits, the alert, Activity, and Keys with access", () => {
 });
 
 describe("narrowing and rotating vault keys (D277, D278)", () => {
-  test("PATCH narrows (drop, write → read, every environment → one, flags off) without a password; widening grants asks for it (D620), flags never turn on", async () => {
+  test("PATCH narrows (drop, write → read, every environment → one, flags off) without a password; widening asks for it (D620, D625)", async () => {
     const owner = await createUser("VK narrow");
     const vault = await newVault(owner);
     const other = await newVault(owner);
@@ -454,22 +454,27 @@ describe("narrowing and rotating vault keys (D277, D278)", () => {
     expect((await patch({ grants: [{ module: "vault", permission: "read", vaultId: vault.id, envId: vault.envs.dev }] })).body.changed).toEqual(["grants"]);
     expect((await patch({ grants: [{ module: "vault", permission: "read", vaultId: vault.id, envId: vault.envs.staging }] })).status).toBe(401);
     expect((await patch({ allowMcpValueReads: false })).body.key.vault.allowMcpValueReads).toBe(false);
-    expect((await patch({ allowMcpValueReads: true })).body.code).toBe("WIDENING_NOT_ALLOWED");
-    expect((await patch({ protectedAccess: true })).body.code).toBe("WIDENING_NOT_ALLOWED");
-    expect((await patch({ allowMcpValueReads: true, password: owner.password })).body.code).toBe("WIDENING_NOT_ALLOWED");
+    // Values over MCP: its own confirmation first, then the password (D625).
+    expect((await patch({ allowMcpValueReads: true, password: owner.password })).body.code).toBe("MCP_VALUES_CONFIRM_REQUIRED");
+    expect((await patch({ allowMcpValueReads: true, confirmMcpValueReads: true })).status).toBe(401);
+    // Allowing protected environments with no grant on one changes nothing (kept only when needed).
+    expect((await patch({ protectedAccess: true })).body.changed).toEqual([]);
+    expect((await keysApi(owner, "GET", `/${key.id}`)).body.key.vault).toEqual({ allowMcpValueReads: false, protectedAccess: false });
     const general = createApiKey(owner.userId, { name: "G", surfaces: "mcp", grants: [{ module: "notes", permission: "read", resourceKind: null, resourceId: null }], expiresInDays: 30 });
     expect((await keysApi(owner, "PATCH", `/${general.id}`, { allowMcpValueReads: false })).status).toBe(400);
   });
 
-  test("an explicit protected grant never narrows from 'every environment' on a protectedAccess key", async () => {
+  test("on a protectedAccess key, 'every environment' narrows to an unprotected one without a password (D626)", async () => {
     const owner = await createUser("VK narrow protected");
     const vault = await newVault(owner);
     const key = await vaultKey(owner, [{ module: "vault", permission: "read", vaultId: vault.id }, { module: "vault", permission: "read", vaultId: vault.id, envId: vault.envs.prod }], { protectedAccess: true });
     expect(key.key.vault.protectedAccess).toBe(true);
-    // Dropping the prod grant is fine; replacing "every" with staging on this key adds access (it could be protected later), so it asks for the password (D620).
-    expect((await keysApi(owner, "PATCH", `/${key.id}`, { grants: [{ module: "vault", permission: "read", vaultId: vault.id, envId: vault.envs.staging }] })).status).toBe(401);
+    // Replacing "every" with staging (unprotected) narrows: the grant is stored unprotected, so it never reaches prod.
+    const narrowed = await keysApi(owner, "PATCH", `/${key.id}`, { grants: [{ module: "vault", permission: "read", vaultId: vault.id, envId: vault.envs.staging }, { module: "vault", permission: "read", vaultId: vault.id, envId: vault.envs.prod }] });
+    expect(narrowed.body.changed).toEqual(["grants"]);
+    expect(db.query("SELECT protected_at_grant FROM api_key_grants WHERE key_id = ? AND env_id = ?").get(key.id, vault.envs.staging)).toEqual({ protected_at_grant: 0 });
     // Wave 27 QA M2: dropping the last protected grant turns the flag off too.
-    expect((await keysApi(owner, "PATCH", `/${key.id}`, { grants: [{ module: "vault", permission: "read", vaultId: vault.id }] })).body.changed).toEqual(["grants", "vaultFlags"]);
+    expect((await keysApi(owner, "PATCH", `/${key.id}`, { grants: [{ module: "vault", permission: "read", vaultId: vault.id, envId: vault.envs.staging }] })).body.changed).toEqual(["grants", "vaultFlags"]);
     expect((await keysApi(owner, "GET", `/${key.id}`)).body.key.vault.protectedAccess).toBe(false);
   });
 

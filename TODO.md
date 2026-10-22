@@ -29,11 +29,6 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 
 - [ ] Inspect → "From the doc" (D518) needs the plan todo's `docRef` (`d2`); the scripted QA provider never sets it, so only a real model's runs show it. Check after the real-model eval.
 
-## Leftovers (lane VAULTKEY)
-
-- [ ] Edit still cannot turn a vault key's settings on (D621): "Allow protected environments" and "Allow MCP clients to read values" need Rotate, because the database trigger `api_keys_vault_flags_widen` (migration 038) refuses raising either flag. A migration that lets the server raise them after re-authentication would let Edit add a protected environment to any key; keep values over MCP (T191) behind its own confirm.
-- [ ] On a key that allows protected environments, replacing "every environment" with one unprotected environment counts as adding access (the D278 rule kept by D620), so it asks for the password although the new grant can never reach a protected environment (it is stored with `protected_at_grant = 0`). Relaxing `isVaultNarrowing` for an environment unprotected at the time would drop that prompt.
-
 ## Leftovers (lane CLAUDE)
 
 - [ ] Claude, checked only against a fake (lane CLAUDE, D539): on the VM, confirm Anthropic accepts `x-api-key` and `Authorization: Bearer` together on `/v1/chat/completions` and `/v1/models`, and Test tool calling reads "Tool calling works (auto)"; keys not scoped to a workspace also need `anthropic-workspace-id`, which Nook cannot send yet.

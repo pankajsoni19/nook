@@ -41,7 +41,7 @@ export function useVaultChoices(enabled = true) {
   return vaults;
 }
 
-export function VaultGrantBuilder({ rows, onChange, vaults, role, protectedAccess, disabled = false, held, protectedHint }: {
+export function VaultGrantBuilder({ rows, onChange, vaults, role, protectedAccess, disabled = false, held }: {
   rows: VaultGrantRow[];
   onChange: (rows: VaultGrantRow[]) => void;
   vaults: VaultChoice[] | "error" | null;
@@ -50,8 +50,6 @@ export function VaultGrantBuilder({ rows, onChange, vaults, role, protectedAcces
   disabled?: boolean;
   /** Edit: the key's rows when the dialog opened, so a vault the owner can no longer open still shows (and can be removed). */
   held?: readonly VaultGrantRow[];
-  /** What a protected environment says while the key does not allow them (Edit cannot turn the setting on, D621). */
-  protectedHint?: string;
 }) {
   if (vaults === "error") return <p className="form-error" role="alert">Could not load your vaults.</p>;
   if (vaults === null) return <p className="grant-empty" role="status">Loading your vaults…</p>;
@@ -67,7 +65,7 @@ export function VaultGrantBuilder({ rows, onChange, vaults, role, protectedAcces
   return <div className="grant-builder vault-grant-builder">
     {!choices.length && <p className="grant-empty">You have no vault to give a key access to. A key reaches only vaults you can read yourself.</p>}
     <ul className="grant-rows" aria-label="Vault access">
-      {rows.map((row, index) => <VaultRowEditor key={row.key} row={row} index={index} vaults={known} choices={choices} role={role} protectedAccess={protectedAccess} protectedHint={protectedHint} disabled={disabled}
+      {rows.map((row, index) => <VaultRowEditor key={row.key} row={row} index={index} vaults={known} choices={choices} role={role} protectedAccess={protectedAccess} disabled={disabled}
         onChange={(patch) => update(row.key, patch)} onRemove={() => onChange(rows.filter((item) => item.key !== row.key))} />)}
     </ul>
     <button type="button" className="action-button secondary grant-add" onClick={add} disabled={disabled || !choices.length || rows.length >= MAX_VAULT_GRANTS}><Plus aria-hidden="true" />Add vault access</button>
@@ -75,13 +73,13 @@ export function VaultGrantBuilder({ rows, onChange, vaults, role, protectedAcces
   </div>;
 }
 
-function VaultRowEditor({ row, index, vaults, choices, role, protectedAccess, protectedHint, disabled, onChange, onRemove }: {
-  row: VaultGrantRow; index: number; vaults: VaultChoice[]; choices: VaultChoice[]; role: string | undefined; protectedAccess: boolean; protectedHint: string | undefined; disabled: boolean;
+function VaultRowEditor({ row, index, vaults, choices, role, protectedAccess, disabled, onChange, onRemove }: {
+  row: VaultGrantRow; index: number; vaults: VaultChoice[]; choices: VaultChoice[]; role: string | undefined; protectedAccess: boolean; disabled: boolean;
   onChange: (patch: Partial<VaultGrantRow>) => void; onRemove: () => void;
 }) {
   const id = useId();
   const vault = vaults.find((item) => item.id === row.vaultId);
-  const envOptions = envChoices(vault, protectedAccess, protectedHint).map((option) => option.value === row.envId ? { ...option, disabled: false } : option);
+  const envOptions = envChoices(vault, protectedAccess).map((option) => option.value === row.envId ? { ...option, disabled: false } : option);
   // A held environment the owner can no longer open stays listed, so the row says what it holds.
   if (!envOptions.some((option) => option.value === row.envId)) envOptions.push({ value: row.envId, label: row.envId === ALL_ENVS ? "Every environment" : "An environment you cannot open now", description: undefined, disabled: false });
   // A held write row may always be lowered; write is offered only where the owner writes.

@@ -10,7 +10,7 @@ import type { ApiKey, KeyGrantView } from "../src/keys/keysApi";
 
 installDom("http://nook.test/settings/keys/vault");
 
-const { KeysSettings } = await import("../src/keys/KeysSettings");
+const { KeysSettings, addingLine } = await import("../src/keys/KeysSettings");
 const { fixedAccessReason, vaultRowsAddingAccess } = await import("../src/keys/vaultKeyGrants");
 const { act } = await import("react");
 
@@ -118,11 +118,40 @@ describe("Edit vault key: rows (D620, D623)", () => {
     expect(patches[0]!.body).toEqual({ grants: [{ module: "vault", permission: "write", vaultId: PAY, envId: "e-pay-dev" }] });
   });
 
+  test("turning on values over MCP asks for its own confirmation and the password; the body says both (D625)", async () => {
+    const patches: ApiCall[] = [];
+    routes(patches);
+    const view = await openEdit();
+    const flags = [...document.querySelectorAll<HTMLInputElement>(".keys-vault-flags input[type=\"checkbox\"]")];
+    expect(flags.every((box) => !box.disabled)).toBe(true);
+    expect(document.querySelector(".keys-mcp-confirm")).toBeNull();
+    await view.click(flags[1]!);
+    expect(document.querySelector(".keys-mcp-confirm")?.textContent).toContain("go to that client's AI model provider");
+    expect(document.querySelector(".keys-adding-note")?.textContent).toBe("“Allow MCP clients to read values” adds access, so confirm it's you to save.");
+    await typePassword("my password");
+    await view.click(view.button("Save")!);
+    expect(document.querySelector(".keys-dialog .form-error, .keys-dialog [role=\"alert\"]")?.textContent).toContain("Confirm that MCP clients may read values");
+    expect(patches).toHaveLength(0);
+    await view.click(document.querySelector<HTMLInputElement>(".keys-mcp-confirm input")!);
+    await view.click(view.button("Save")!);
+    await view.waitFor(() => patches.length === 1);
+    expect(patches[0]!.body).toEqual({ allowMcpValueReads: true, confirmMcpValueReads: true, password: "my password" });
+  });
+
+  test("addingLine names rows and settings", () => {
+    expect(addingLine("Vault access 3", 1, [])).toBe("Vault access 3 adds access, so confirm it's you to save.");
+    expect(addingLine("Vault access rows 2, 3", 2, ["Allow protected environments"])).toBe("Vault access rows 2, 3 and “Allow protected environments” add access, so confirm it's you to save.");
+    expect(addingLine(null, 0, ["Allow protected environments", "Allow MCP clients to read values"])).toBe("“Allow protected environments” and “Allow MCP clients to read values” add access, so confirm it's you to save.");
+  });
+
   test("vaultRowsAddingAccess mirrors the server's rule; fixedAccessReason only for a read row with no write to give", () => {
     const row = (vaultId: string, envId: string, permission: "read" | "write") => ({ key: `${vaultId}-${envId}-${permission}`, vaultId, envId, permission });
     const held = [row(PAY, "all", "write"), row(BILL, "e-bill-dev", "read")];
     expect(vaultRowsAddingAccess(held, [row(PAY, "e-pay-dev", "read")], false)).toEqual([]);
     expect(vaultRowsAddingAccess(held, [row(PAY, "e-pay-dev", "read")], true)).toHaveLength(1);
+    // D626: on a key with protected access, an unprotected environment under "every" narrows; a protected one adds.
+    expect(vaultRowsAddingAccess(held, [row(PAY, "e-pay-dev", "read")], true, vaults)).toEqual([]);
+    expect(vaultRowsAddingAccess(held, [row(PAY, "e-pay-prod", "read")], true, vaults)).toHaveLength(1);
     expect(vaultRowsAddingAccess(held, [row(BILL, "e-bill-dev", "write")], false)).toHaveLength(1);
     expect(vaultRowsAddingAccess(held, [row(BILL, "all", "read")], false)).toHaveLength(1);
     expect(fixedAccessReason(vaults[0], { envId: "e-pay-stg", permission: "read" }, "member")).toBe("Read only: you can only read here yourself");

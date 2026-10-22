@@ -25,7 +25,7 @@ import { readableDocumentPredicate } from "./documentAccess";
 import { whiteboardDisplayName } from "../shared/whiteboardScene";
 import { readableReportSql } from "./reports/access";
 import { editableCalendarPredicate, readableCalendarPredicate } from "./calendar/access";
-import { environmentOfVault, isVaultNarrowing, MAX_VAULT_KEY_GRANTS, recordKeyGrantEvents, validateVaultGrants, vaultEffectiveGrants, vaultGrantInactive, vaultGrantInput, vaultGrantNames, VaultKeyError, type VaultGrantInput } from "./vault/keys";
+import { environmentOfVault, environmentProtected, isVaultNarrowing, MAX_VAULT_KEY_GRANTS, recordKeyGrantEvents, validateVaultGrants, vaultEffectiveGrants, vaultGrantInactive, vaultGrantInput, vaultGrantNames, VaultKeyError, type VaultGrantInput } from "./vault/keys";
 import { shareReadableSql } from "./agents/sharing";
 import { logger } from "./log";
 
@@ -135,9 +135,11 @@ export const narrowKeySchema = z.object({
   /** Closer only; null keeps a key that has no expiry as it is (giving one no expiry would widen it). */
   expiresInDays: z.number().int().min(1).max(365).nullable().optional(),
   grants: z.array(anyGrantInput).min(1).max(MAX_GRANTS).optional(),
-  /** Vault keys: false turns a flag off; true is widening unless it is already on. */
+  /** Vault keys: false turns a flag off; true adds access unless it is already on (re-authentication, D625). */
   allowMcpValueReads: z.boolean().optional(),
   protectedAccess: z.boolean().optional(),
+  /** D625: turning values over MCP on also needs this explicit confirmation (T191). */
+  confirmMcpValueReads: z.literal(true).optional(),
   limits: z.object({ callsPerMinute: z.number().int().min(1).nullable().optional(), writesPerMinute: z.number().int().min(1).nullable().optional() }).strict().optional(),
   /** Adding a list, or a list inside the current one, narrows; null (removing it) widens and is refused (D278). */
   ipAllowlist: z.array(z.string().trim().min(1).max(64)).min(1).max(IP_ALLOWLIST_MAX).nullable().optional(),
@@ -777,6 +779,7 @@ export function narrowApiKey(userId: string, keyId: string, patch: z.infer<typeo
   const row = liveOwnKey(userId, keyId);
   const changed: string[] = [];
   const current = loadGrants(row.id);
+  const heldGrants = current;
   let nextGrants: Grant[] | null = null;
   let added: Grant[] = [];
   const protectedAccess = row.vault_protected_access === 1;
@@ -802,12 +805,13 @@ export function narrowApiKey(userId: string, keyId: string, patch: z.infer<typeo
     // protected environment on a key that allows them). It needs the re-authentication (the route's)
     // and the checks a new vault key's grants get: the owner's current access to that vault and
     // environment at that level (404 when they cannot read it), and, for a protected environment,
-    // "Allow protected environments" on the key (which Edit never turns on, D621).
-    const nextProtected = protectedAccess && patch.protectedAccess !== false;
-    const widening = unique.filter((grant) => !isVaultNarrowing(current, [grant], protectedAccess));
+    // "Allow protected environments" on the key, which the same edit may turn on (D625).
+    const nextProtected = patch.protectedAccess ?? protectedAccess;
+    const turningProtectedOn = nextProtected && !protectedAccess;
+    const widening = unique.filter((grant) => !isVaultNarrowing(current, [grant], protectedAccess)
+      // Turning the setting on: a named protected environment not yet reachable becomes reachable.
+      || (turningProtectedOn && grant.envId != null && !grant.protectedAtGrant && environmentProtected(grant.resourceId!, grant.envId)));
     if (widening.length) {
-      if (actorId !== userId) throw new KeyError(403, "WIDENING_NOT_ALLOWED", "Only the key's owner can add vault access to it");
-      if (!options.widen && !options.dryRun) throw new KeyError(400, "WIDENING_NOT_ALLOWED", "Adding access to a key needs your password. Confirm it and save again.");
       checkCreatePolicy(userId, row.role, { surfaces: patch.surfaces ?? row.surfaces }, readPolicies());
       let validated: ReturnType<typeof validateVaultGrants>;
       try {
@@ -911,20 +915,32 @@ export function narrowApiKey(userId: string, keyId: string, patch: z.infer<typeo
       changed.push("ipAllowlist");
     }
   }
-  // Vault flags (D278, D621): only ever turned off here, even with the password; turning one on is a
-  // rotation or a new key (the database refuses it too: api_keys_vault_flags_widen, migration 038).
+  // Vault flags (D278, D625): turned off freely; turning one on adds access, so it needs the
+  // re-authentication like an added grant, and values over MCP also its own confirmation
+  // (`confirmMcpValueReads`, T191). "Allow protected environments" is kept only while a grant reaches
+  // a protected environment (as at creation), so turning it on counts only then. The database refuses
+  // any raise the server did not confirm (migration 076).
   let flags: VaultFlags | null = null;
+  const addedFlags: Array<"mcp_values" | "protected"> = [];
   if (patch.allowMcpValueReads !== undefined || patch.protectedAccess !== undefined) {
     if (row.kind !== "vault") throw new KeyError(400, "INVALID", "Only vault keys have these settings");
     const current = { allowMcpValueReads: row.allow_mcp_value_reads === 1, protectedAccess };
     const next = { allowMcpValueReads: patch.allowMcpValueReads ?? current.allowMcpValueReads, protectedAccess: patch.protectedAccess ?? current.protectedAccess };
-    if ((next.allowMcpValueReads && !current.allowMcpValueReads) || (next.protectedAccess && !current.protectedAccess)) {
-      throw new KeyError(400, "WIDENING_NOT_ALLOWED", "Editing a key can only turn these settings off. Rotate the key or create a new one to turn one on.");
+    if (next.protectedAccess && !current.protectedAccess && !(nextGrants ?? heldGrants).some((grant) => grant.protectedAtGrant === true)) next.protectedAccess = false;
+    if (next.allowMcpValueReads && !current.allowMcpValueReads) {
+      if (patch.confirmMcpValueReads !== true) throw new KeyError(400, "MCP_VALUES_CONFIRM_REQUIRED", "Confirm that MCP clients may read values: they are sent to that client's AI model provider.");
+      addedFlags.push("mcp_values");
     }
+    if (next.protectedAccess && !current.protectedAccess) addedFlags.push("protected");
     if (next.allowMcpValueReads !== current.allowMcpValueReads || next.protectedAccess !== current.protectedAccess) {
       flags = next;
       changed.push("vaultFlags");
     }
+  }
+  // D620, D625: adding vault access (grants or a setting) is the owner's, after re-authentication.
+  if (row.kind === "vault" && (added.length || addedFlags.length)) {
+    if (actorId !== userId) throw new KeyError(403, "WIDENING_NOT_ALLOWED", "Only the key's owner can add vault access to it");
+    if (!options.widen && !options.dryRun) throw new KeyError(400, "WIDENING_NOT_ALLOWED", "Adding access to a key needs your password. Confirm it and save again.");
   }
   // Wave 27 QA M2: narrowing away every grant that reached a protected environment turns the flag
   // off too, as creation and rotation store it only when needed.
@@ -936,30 +952,43 @@ export function narrowApiKey(userId: string, keyId: string, patch: z.infer<typeo
   if (patch.name !== undefined && patch.name !== row.name) changed.push("name");
   const description = patch.description === undefined ? row.description : (patch.description?.trim() || null);
   if (patch.description !== undefined && description !== row.description) changed.push("description");
-  if (!changed.length) return { changed, added: [] as Grant[], kind: row.kind };
+  if (!changed.length) return { changed, added: [] as Grant[], addedFlags: [] as typeof addedFlags, kind: row.kind };
   // A linked key still holding "Run agents" (one linked before the rule) must drop it or be unlinked (review M1).
   assertRunGrantUnlinked(row.id, nextGrants ?? current);
-  if (options.dryRun) return { changed, added, kind: row.kind };
+  if (options.dryRun) return { changed, added, addedFlags, kind: row.kind };
   db.transaction(() => {
     const timestamp = now();
     const scopes = nextGrants ? grantsToScopes(nextGrants) : null;
     db.query(`UPDATE mcp_api_keys SET name = ?, description = ?, surfaces = ?, expires_at = ?, limits_json = ?, ip_allowlist = ?, scopes = COALESCE(?, scopes) WHERE id = ? AND user_id = ?`)
       .run(name, description, surfaces, expiresAt, Object.keys(limits).length ? JSON.stringify(limits) : null, allowlist ? JSON.stringify(allowlist) : null, scopes ? JSON.stringify(scopes) : null, row.id, userId);
+    const writeFlags = () => {
+      if (!flags) return;
+      // D625: a raise is confirmed to the database for this key only while this transaction runs
+      // (migration 076's trigger refuses any other), and the row never outlives it.
+      if (addedFlags.length) db.query("INSERT INTO vault_key_flag_confirmations (key_id, created_at) VALUES (?, ?)").run(row.id, timestamp);
+      db.query("UPDATE mcp_api_keys SET allow_mcp_value_reads = ?, vault_protected_access = ? WHERE id = ?").run(flags.allowMcpValueReads ? 1 : 0, flags.protectedAccess ? 1 : 0, row.id);
+      if (addedFlags.length) db.query("DELETE FROM vault_key_flag_confirmations WHERE key_id = ?").run(row.id);
+    };
+    // A setting turned on goes first (a grant on a protected environment needs it); one turned off
+    // goes after the grants (kept protected grants were written while it was still on).
+    if (addedFlags.length) writeFlags();
     if (nextGrants) {
       db.query("DELETE FROM api_key_grants WHERE key_id = ?").run(row.id);
       insertGrantRows(row.id, nextGrants, timestamp);
     }
-    if (flags) db.query("UPDATE mcp_api_keys SET allow_mcp_value_reads = ?, vault_protected_access = ? WHERE id = ?").run(flags.allowMcpValueReads ? 1 : 0, flags.protectedAccess ? 1 : 0, row.id);
-    if (added.length && nextGrants && row.kind === "vault") {
-      // D622: a vault key that gained access. The audit keeps the grants before and after (vault and
-      // environment ids, never a name or a value); the event, bell, and mail say counts only; each
-      // vault that gained the key records it in its Activity.
-      const entries = addedVaultEntries(added);
+    if (!addedFlags.length) writeFlags();
+    if (row.kind === "vault" && (added.length || addedFlags.length)) {
+      // D622, D625: a vault key that gained access. The audit keeps the grants and settings before and
+      // after (vault and environment ids, never a name or a value); the event, bell, and mail say
+      // counts only; each vault that gained the key records it in its Activity.
+      const entries = addedVaultEntries(added, addedFlags);
+      const after = nextGrants ?? current;
+      const flagsBefore = { allowMcpValueReads: row.allow_mcp_value_reads === 1, protectedAccess };
       recordAccessEvent({ actorId, via: "web", action: "key.updated", targetUserId: userId, keyId: row.id,
-        meta: { fields: changed, grantsBefore: current.length, grantsAfter: nextGrants.length, added: entries } }, timestamp);
-      audit(actorId, null, "vault.keys.update", { keyId: row.id, fields: changed, grantsBefore: vaultGrantIds(current), grantsAfter: vaultGrantIds(nextGrants), added: entries });
-      recordKeyGrantEvents(row.id, userId, added, "apikey.update");
-      notifyAccess({ userId, kind: "key_access_added", actorId: null, keyId: row.id, count: added.length }, timestamp);
+        meta: { fields: changed, grantsBefore: current.length, grantsAfter: after.length, added: entries } }, timestamp);
+      audit(actorId, null, "vault.keys.update", { keyId: row.id, fields: changed, grantsBefore: vaultGrantIds(current), grantsAfter: vaultGrantIds(after), flagsBefore, flagsAfter: flags ?? flagsBefore, added: entries });
+      if (added.length) recordKeyGrantEvents(row.id, userId, added, "apikey.update");
+      notifyAccess({ userId, kind: "key_access_added", actorId: null, keyId: row.id, count: added.length + addedFlags.length }, timestamp);
     } else if (added.length && nextGrants) {
       // D586: adding access is its own event, with the scopes before and after; the secret stays.
       recordAccessEvent({ actorId, via: "web", action: "key.updated", targetUserId: userId, keyId: row.id,
@@ -974,7 +1003,7 @@ export function narrowApiKey(userId: string, keyId: string, patch: z.infer<typeo
       audit(actorId, null, "key.narrowed", { keyId: row.id, fields: changed });
     }
   })();
-  return { changed, added, kind: row.kind };
+  return { changed, added, addedFlags, kind: row.kind };
 }
 
 /** Withdraws the pending proposals a key made (review M1), when it stops working. */

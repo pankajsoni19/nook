@@ -13,7 +13,7 @@ const { addedVaultEntries, describeAddedVaultGrants, describeKeyAdditions } = aw
  * before the password (404 when they cannot read it), then re-authenticated, audited as
  * `vault.keys.update` with the grants before and after, recorded in each vault's Activity, and told
  * to the owner by a security mail and a bell line with counts only. Narrowing stays password-free;
- * the vault settings still only turn off.
+ * the vault settings turn on with the password too (D625), values over MCP after its own confirmation.
  */
 
 beforeEach(() => {
@@ -107,22 +107,56 @@ describe("PATCH /api/keys/:id adds vault access after re-authentication (D620)",
     expect(grantRows(key.id)).toContain(`write:${shared.id}:${shared.envs.staging}`);
   });
 
-  test("a protected environment needs a key that allows them; Edit never turns the settings on, even with the password", async () => {
+  test("Edit turns on protected environments with the password, in the same save as the protected grant (D625)", async () => {
     const owner = await createUser("VKE protected owner");
     const vault = await newVault(owner);
     const plain = await vaultKey(owner, [{ module: "vault", permission: "read", vaultId: vault.id }]);
-    const prod: VaultGrantBody = { module: "vault", permission: "read", vaultId: vault.id, envId: vault.envs.prod };
+    const prod: VaultGrantBody = { module: "vault", permission: "write", vaultId: vault.id, envId: vault.envs.prod };
     const every: VaultGrantBody = { module: "vault", permission: "read", vaultId: vault.id };
-    expect((await api(owner, "PATCH", `/keys/${plain.id}`, { password: owner.password, grants: [every, { ...prod, permission: "write" }] })).body.code).toBe("PROTECTED_ACCESS_REQUIRED");
-    expect((await api(owner, "PATCH", `/keys/${plain.id}`, { password: owner.password, protectedAccess: true })).body.code).toBe("WIDENING_NOT_ALLOWED");
-    const flagged = await vaultKey(owner, [every, { module: "vault", permission: "read", vaultId: vault.id, envId: vault.envs.staging }, prod], { protectedAccess: true });
-    // Drop prod (no password), then add it back at write with the password.
-    expect((await api(owner, "PATCH", `/keys/${flagged.id}`, { grants: [every, prod] })).status).toBe(200);
-    const added = await api(owner, "PATCH", `/keys/${flagged.id}`, { password: owner.password, grants: [every, { ...prod, permission: "write" }] });
+    // A protected grant without the setting is refused before the password.
+    expect((await api(owner, "PATCH", `/keys/${plain.id}`, { password: "wrong", grants: [every, prod] })).body.code).toBe("PROTECTED_ACCESS_REQUIRED");
+    // With the setting, it asks for the password.
+    expect((await api(owner, "PATCH", `/keys/${plain.id}`, { protectedAccess: true, grants: [every, prod] })).status).toBe(401);
+    expect(auditRows(owner.userId, "vault.keys.update_failed").map((meta) => meta.keyId)).toEqual([plain.id]);
+    const added = await api(owner, "PATCH", `/keys/${plain.id}`, { password: owner.password, protectedAccess: true, grants: [every, prod] });
     expect(added.status).toBe(200);
-    expect(added.body.key.vault.protectedAccess).toBe(true);
-    expect(db.query("SELECT protected_at_grant FROM api_key_grants WHERE key_id = ? AND env_id = ?").get(flagged.id, vault.envs.prod)).toEqual({ protected_at_grant: 1 });
-    expect(auditRows(owner.userId, "vault.keys.update").at(-1)!.added).toEqual(["vault:write@1p"]);
+    expect(added.body.changed).toEqual(["grants", "vaultFlags"]);
+    expect(added.body.key.vault).toEqual({ allowMcpValueReads: false, protectedAccess: true });
+    expect(db.query("SELECT protected_at_grant FROM api_key_grants WHERE key_id = ? AND env_id = ?").get(plain.id, vault.envs.prod)).toEqual({ protected_at_grant: 1 });
+    const [audit] = auditRows(owner.userId, "vault.keys.update");
+    expect(audit).toMatchObject({ added: ["vault:write@1p", "vault:flag:protected"], flagsBefore: { protectedAccess: false }, flagsAfter: { protectedAccess: true } });
+    // The confirmation row never outlives the save.
+    expect(db.query("SELECT COUNT(*) AS n FROM vault_key_flag_confirmations").get()).toEqual({ n: 0 });
+    // Narrowing back to an unprotected environment needs no password (D626) and turns the setting off (nothing needs it).
+    const narrowed = await api(owner, "PATCH", `/keys/${plain.id}`, { grants: [{ module: "vault", permission: "read", vaultId: vault.id, envId: vault.envs.staging }] });
+    expect(narrowed.body.changed).toEqual(["grants", "vaultFlags"]);
+    expect(narrowed.body.key.vault.protectedAccess).toBe(false);
+  });
+
+  test("Edit turns on values over MCP with its own confirmation and the password; mail and bell say so (D625)", async () => {
+    const owner = await createUser("VKE mcp owner");
+    const vault = await newVault(owner);
+    const key = await vaultKey(owner, [{ module: "vault", permission: "read", vaultId: vault.id }]);
+    const mail = await import("../server/mail");
+    const { listAccessNotices } = await import("../server/access/notices");
+    expect((await api(owner, "PATCH", `/keys/${key.id}`, { password: owner.password, allowMcpValueReads: true })).body.code).toBe("MCP_VALUES_CONFIRM_REQUIRED");
+    expect((await api(owner, "PATCH", `/keys/${key.id}`, { allowMcpValueReads: true, confirmMcpValueReads: true })).status).toBe(401);
+    mail.setMailTransportForTests(async () => ({ id: "msg_1" }));
+    try {
+      const saved = await api(owner, "PATCH", `/keys/${key.id}`, { password: owner.password, allowMcpValueReads: true, confirmMcpValueReads: true });
+      expect(saved.status).toBe(200);
+      expect(saved.body.key.vault.allowMcpValueReads).toBe(true);
+    } finally {
+      mail.setMailTransportForTests(null);
+    }
+    expect(auditRows(owner.userId, "vault.keys.update").at(-1)).toMatchObject({ fields: ["vaultFlags"], added: ["vault:flag:mcp_values"], flagsAfter: { allowMcpValueReads: true } });
+    expect(accessActions(key.id)).toEqual(["key.created", "key.updated"]);
+    const queued = db.query("SELECT payload FROM mail_outbox WHERE user_id = ? AND template = 'security.api_key_access_added'").all(owner.userId) as Array<{ payload: string }>;
+    expect(JSON.parse(queued[0]!.payload).added).toEqual(["vault:flag:mcp_values"]);
+    const bell = listAccessNotices(owner.userId, { unread: false, limit: 20 }).map((notice) => notice.title).filter((title) => title.includes("key"));
+    expect(bell).toEqual(["Access was added to your vault key “Deploy”: MCP clients may read values. If this wasn't you, revoke it in Settings → API keys."]);
+    // Turning it off needs nothing.
+    expect((await api(owner, "PATCH", `/keys/${key.id}`, { allowMcpValueReads: false })).body.key.vault.allowMcpValueReads).toBe(false);
   });
 
   test("narrowing needs no password, stays key.narrowed, and sends no mail or bell", async () => {

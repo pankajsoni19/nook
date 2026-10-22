@@ -170,15 +170,25 @@ export function environmentOfVault(vaultId: string, envId: string) {
 }
 
 /**
- * Whether `next` only narrows `current` (D278) for a vault key (a grant it does not cover adds access, D620): each next grant is covered by a held
- * one on the same vault with an equal or higher permission, and the same environment; a held grant
- * over every environment covers one environment only on a key without `protectedAccess` (on such a
- * key an explicit grant could reach a protected environment the "every" grant never did).
+ * Whether `next` only narrows `current` (D278) for a vault key (a grant it does not cover adds access,
+ * D620): each next grant is covered by a held one on the same vault with an equal or higher
+ * permission, and the same environment, or one environment under a held "every environment" grant.
+ * On a key with `protectedAccess` that one environment must be unprotected now (D626, amending
+ * D278): such a grant is stored with `protected_at_grant = 0`, so it never reaches a protected
+ * environment, even one protected later; a protected one is an addition (the password, and the
+ * checks a new key's grant gets).
  */
-export function isVaultNarrowing(current: readonly Grant[], next: readonly Grant[], protectedAccess: boolean) {
+export function isVaultNarrowing(current: readonly Grant[], next: readonly Grant[], protectedAccess: boolean, envProtected: (vaultId: string, envId: string) => boolean = environmentProtected) {
   return next.every((grant) => current.some((held) => held.module === "vault" && grant.module === "vault" && held.resourceId === grant.resourceId
     && (held.permission === grant.permission || (held.permission === "write" && grant.permission === "read"))
-    && ((held.envId ?? null) === (grant.envId ?? null) || ((held.envId ?? null) === null && !protectedAccess))));
+    && ((held.envId ?? null) === (grant.envId ?? null)
+      || ((held.envId ?? null) === null && grant.envId != null && (!protectedAccess || !envProtected(grant.resourceId!, grant.envId))))));
+}
+
+/** Whether an environment of a vault is protected now (a missing one counts as protected, so it is never a narrowing). */
+export function environmentProtected(vaultId: string, envId: string) {
+  const row = db.query("SELECT protected FROM vault_environments WHERE id = ? AND vault_id = ?").get(envId, vaultId) as { protected: number } | null;
+  return row ? row.protected === 1 : true;
 }
 
 // ------------------------------------------------------------------ keys with access to a vault

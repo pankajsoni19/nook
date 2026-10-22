@@ -687,7 +687,7 @@ describe("review 27: migration 038", () => {
     fresh.transaction(() => vaultKeysMigration.up(fresh))();
     fresh.transaction(() => vaultKeysMigration.up(fresh))();
     const triggers = (database: Database) => (database.query("SELECT name FROM sqlite_master WHERE type = 'trigger' AND (name LIKE 'api_keys_vault_%' OR name LIKE 'api_key_grants_vault_%') ORDER BY name").all() as Array<{ name: string }>).map((row) => row.name);
-    expect(triggers(fresh)).toEqual(["api_key_grants_vault_shape", "api_key_grants_vault_shape_update", "api_keys_vault_flags_insert", "api_keys_vault_flags_widen", "api_keys_vault_person_only"]);
+    expect(triggers(fresh)).toEqual(["api_key_grants_vault_shape", "api_key_grants_vault_shape_update", "api_keys_vault_flags_general_update", "api_keys_vault_flags_insert", "api_keys_vault_flags_widen", "api_keys_vault_person_only"]);
     expect(registeredMigrationIds.indexOf(38)).toBe(registeredMigrationIds.indexOf(37) + 1);
     fresh.close();
 
@@ -699,7 +699,9 @@ describe("review 27: migration 038", () => {
     runMigrations(late);
     late.exec("DELETE FROM schema_migrations WHERE id IN (31, 37, 38)");
     runMigrations(late);
-    expect(triggers(late)).toEqual(["api_key_grants_vault_shape", "api_key_grants_vault_shape_update", "api_keys_vault_flags_insert", "api_keys_vault_flags_widen", "api_keys_vault_person_only"]);
+    expect(triggers(late)).toEqual(["api_key_grants_vault_shape", "api_key_grants_vault_shape_update", "api_keys_vault_flags_general_update", "api_keys_vault_flags_insert", "api_keys_vault_flags_widen", "api_keys_vault_person_only"]);
+    // D625: 038's re-run keeps migration 076's widen trigger (the confirmed raise), never the old one.
+    expect((late.query("SELECT sql FROM sqlite_master WHERE name = 'api_keys_vault_flags_widen'").get() as { sql: string }).sql).toContain("vault_key_flag_confirmations");
     const columns = (late.query("PRAGMA table_info(mcp_api_keys)").all() as Array<{ name: string }>).map((row) => row.name);
     expect(columns).toContain("vault_protected_access");
     late.close();
