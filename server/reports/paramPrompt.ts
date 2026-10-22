@@ -1,4 +1,5 @@
 import { DATE_PRESETS, PARAM_LIMITS } from "../../shared/reportParams";
+import { CLICKABLE_KINDS } from "../../shared/reports";
 
 /**
  * What the generation and edit agents are taught about report parameters (spec v3, D489). Kept in its
@@ -16,6 +17,7 @@ export function PARAMETER_RULES(mode: "report" | "change"): string[] {
     "- multi_select {id, label, type: \"multi_select\", chType: \"Array(String)\", default: [], optionsQuery} for a dimension; [] is All. select (one value, chType String or an integer type), number (chType Int64, Float64, …; min?, max?), and text (one line) exist too.",
     "- optionsQuery: a SELECT whose first column lists the choices, e.g. SELECT DISTINCT route FROM db.t WHERE route != '' ORDER BY route LIMIT 200. No placeholders in it.",
     "- Queries read parameters only as typed ClickHouse placeholders, never as text you write into the SQL: a date range `period` gives {period_from:Date} and {period_to:Date}, both days included: `WHERE ts >= {period_from:Date} AND ts < {period_to:Date} + 1` (or `toDate(ts) BETWEEN {period_from:Date} AND {period_to:Date}`). A multi-select `routes`: `AND (empty({routes:Array(String)}) OR route IN {routes:Array(String)})`, so All keeps every row. A select or number: `{id:<chType>}`. With a date range, never also hard-code the window (`now() - INTERVAL 30 DAY`).",
+    `- Click to filter (D536): a ${CLICKABLE_KINDS.join(", ")} chart or a table that shows every value of a dimension a select or multi-select filters by (its x, or series) may carry clickFilter {param, column}: a reader's click on a bar, slice, point, or row sets that filter for the other blocks. Its own query must not read that parameter (the clicked chart keeps every category and highlights the picked ones).${mode === "change" ? " Set or clear it with set_click_filter {id, clickFilter: {param, column} | null}." : ""}`,
     "- A previous-period comparison is the same number of days just before: `ts >= {period_from:Date} - (dateDiff('day', {period_from:Date}, {period_to:Date}) + 1) AND ts < {period_from:Date}`.",
     "- Every placeholder must be a declared parameter with exactly its chType, and every parameter must be read by a query (each query that should follow the filter reads it). run_sql binds placeholders to the defaults of its `parameters` argument (the same list as the spec's)" + (mode === "change" ? ", or of the report's current parameters when you leave it out." : "; pass it whenever the SQL has placeholders.") + " Before saving, Nook runs every query with the defaults and once with other values.",
     ...(mode === "change"

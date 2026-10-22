@@ -4,9 +4,9 @@ import { ownedReport } from "./access";
 import { usableDatasource } from "./datasources";
 import { ReportError } from "./errors";
 import { applyPatch, changedBlockIds, changedQueryKeys, diffSpecs, opsSummary, parsePatch, sectionsChanged, withoutUnusedQueries } from "./patch";
-import { takeRunLock } from "./refresh";
+import { queryResults, takeRunLock } from "./refresh";
 import { parseSpec } from "./service";
-import { checkSpecShape, validateSpec } from "./specValidate";
+import { checkSpecShape, clickFilterColumnErrors, validateSpec } from "./specValidate";
 import { forValidation, reattach } from "./specCheck";
 import { commitSpec, refuseWhileRunning } from "./versions";
 
@@ -35,6 +35,10 @@ export async function manualEdit(userId: string, reportId: string, input: { patc
     refuseWhileRunning(reportId);
     const shape = checkSpecShape(forValidation(spec));
     if (!shape.ok) throw new ReportError(400, "INVALID", shape.errors[0] ?? "The change is not valid", { details: shape.errors });
+    // D536: a click filter's column must be in its block's stored result (nothing re-runs for it).
+    const stored = new Map(queryResults(reportId, current).flatMap((item) => item.result ? [[item.queryKey, item.result] as const] : []));
+    const columnErrors = clickFilterColumnErrors(shape.spec, stored);
+    if (columnErrors.length) throw new ReportError(400, "INVALID", columnErrors[0]!, { details: columnErrors });
     // Review H1: only the validated spec is saved (provenance and authors put back by id and key).
     const saved = commitSpec({ reportId, userId, spec: reattach(shape.spec, spec), source: "manual", expectedRevision: input.expectedRevision });
     audit(userId, null, "reports.spec.manual", { reportId, version: saved.version, ops: opsSummary(parsed.patch.ops), ...keyMeta });

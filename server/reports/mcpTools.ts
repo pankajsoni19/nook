@@ -24,6 +24,7 @@ import { METRIC_ID, METRIC_LIMITS, type CatalogMetricInput } from "../../shared/
 import { queryResults, reportRun, startRefresh } from "./refresh";
 import { OPTION_SEARCH, paramResults, runParamSet, searchParamOptions } from "./params";
 import { reachOf } from "../../shared/reportParams";
+import { requestAddFilter, requestRemoveFilter } from "./filterRequest";
 import { saveSchedule } from "./scheduler";
 import { listReportsPage, parseSpec as parseStoredSpec, setFavorite } from "./service";
 import { createFolder, listFolders, moveReportToFolder, updateFolder } from "./folders";
@@ -431,6 +432,34 @@ export const reportTools: McpToolSpec[] = [
       docs: z.array(mcpDoc).max(REPORT_DOC_LIMITS.instructionDocs).optional().describe("Docs the agent reads for this change (at most 4)")
     }),
     handler: ({ reportId: id, text, blockId, kind, afterBlockId, docs }, key) => asOwner(key, async (role) => ({ instruction: await addInstruction({ userId: key.userId, role, keyId: key.keyId }, id, { text, blockId: blockId ?? null, kind, afterBlockId: afterBlockId ?? null, docs: docs ?? [] }) }))
+  }),
+  defineTool({
+    name: "add_report_filter",
+    title: "Add a filter to a report",
+    description: "The report owner's Add filter (D534): a multi-select filter (default All) over one text or whole-number column of a table the report's queries read (`table` as db.table, from get_report's SQL). Nook writes its options query from the catalog, runs it first, and queues a change for the edit agent, which puts the filter into the queries that read the table; Nook then checks that every changed query's result with All is identical to today's before the proposal waits in Changes (never auto-applied; apply with apply_report_proposal). Readers will see the column's values. Returns the instruction; follow it with get_report_instruction. Uses the key owner's AI budget.",
+    scopes: ["reports:write"],
+    access: { mode: "items", items: reportItem, related: ["parameterId"] },
+    write: true,
+    buckets: ["report_write"],
+    inputSchema: z.object({
+      reportId,
+      table: z.string().min(3).max(260).describe("The table, db.table"),
+      column: z.string().min(1).max(200).describe("The column to filter by"),
+      label: z.string().min(1).max(60).optional().describe("The filter's label (default: from the column name)"),
+      parameterId: z.string().regex(/^[a-z][a-z0-9_]{0,29}$/).optional().describe("The parameter id (default: from the column name)")
+    }),
+    handler: ({ reportId: id, table, column, label, parameterId: paramId }, key) => asOwner(key, async (role) => ({ instruction: await requestAddFilter({ userId: key.userId, role, keyId: key.keyId }, id, { table, column, ...(label ? { label } : {}), ...(paramId ? { id: paramId } : {}) }) }))
+  }),
+  defineTool({
+    name: "remove_report_filter",
+    title: "Ask to remove a report filter",
+    description: "The report owner's Remove filter (D534): queues a change for the edit agent to remove a multi-select filter and take its condition out of the queries; Nook checks each changed query's result equals today's result with the filter at All. Nothing is removed until the owner applies the proposal (apply_report_proposal); never auto-applied. Returns the instruction.",
+    scopes: ["reports:write"],
+    access: { mode: "items", items: reportItem, related: ["parameterId"] },
+    write: true,
+    buckets: ["report_write"],
+    inputSchema: z.object({ reportId, parameterId: z.string().regex(/^[a-z][a-z0-9_]{0,29}$/).describe("The filter's parameter id (from get_report)") }),
+    handler: ({ reportId: id, parameterId }, key) => asOwner(key, async (role) => ({ instruction: await requestRemoveFilter({ userId: key.userId, role, keyId: key.keyId }, id, parameterId) }))
   }),
   defineTool({
     name: "apply_report_proposal",

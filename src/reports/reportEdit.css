@@ -167,3 +167,42 @@
 .report-query-edit-note { display: grid; gap: 6px; }
 .report-query-edit-note label { font-size: .8rem; color: var(--report-muted); }
 .report-query-edit-note textarea { width: 100%; min-height: 64px; resize: vertical; border: 1px solid var(--report-border); border-radius: 10px; padding: 10px; background: var(--report-raised); color: var(--report-text); font: inherit; }
+
+/* D534 (lane FILTERS): Add filter, a sheet like New report's (620 px from 761 px; a bottom sheet on a phone). */
+@media (min-width: 761px) {
+  .file-dialog.reports-dialog.report-add-filter { width: min(620px, calc(100vw - 32px)); max-height: min(820px, calc(100dvh - 48px)); }
+}
+.report-add-filter-form { min-height: 0; flex: 1 1 auto; display: flex; flex-direction: column; gap: 0; }
+.report-add-filter-body { min-height: 0; flex: 1 1 auto; overflow: auto; display: grid; align-content: start; gap: 10px; padding-bottom: 4px; }
+.report-add-filter-form > .file-dialog-actions { border-top: 1px solid var(--border); margin-top: 6px; }
+.report-add-filter-columns { display: grid; gap: 4px; max-height: min(320px, 38dvh); overflow: auto; border: 1px solid var(--border); border-radius: 10px; padding: 4px; background: var(--bg); }
+.report-add-filter-column { display: grid; gap: 2px; min-width: 0; min-height: 44px; width: 100%; border: 1px solid transparent; border-radius: 8px; padding: 6px 10px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.report-add-filter-column:hover { background: var(--panel-hover); }
+.report-add-filter-column:focus-visible { outline: 2px solid var(--yellow); outline-offset: -2px; }
+.report-add-filter-column.selected { border-color: var(--yellow-dim); background: color-mix(in srgb, var(--yellow) 10%, var(--panel)); }
+.report-add-filter-name { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: .9rem; }
+.report-add-filter-name code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.report-add-filter-meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: .76rem; }
+.report-add-filter-empty { margin: 0; padding: 10px; color: var(--muted); font-size: .86rem; }
+.report-add-filter-toggle { display: flex; align-items: center; gap: 10px; min-height: 40px; cursor: pointer; }
+.report-add-filter-toggle input { width: 18px; height: 18px; min-height: 0; flex: none; }
+.report-add-filter-preview { display: grid; gap: 8px; min-width: 0; border-top: 1px solid var(--border); padding-top: 10px; }
+.report-add-filter-preview .reports-loading, .report-add-filter-preview .form-error { display: flex; align-items: center; gap: 8px; margin: 0; }
+.report-add-filter-preview svg { width: 16px; height: 16px; flex: none; }
+.report-add-filter-values-head { margin: 2px 0 0; color: var(--muted); font-size: .8rem; }
+.report-add-filter-values { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.report-add-filter-values li { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; background: var(--panel-raised); font-size: .8rem; }
+.report-add-filter-values .report-add-filter-more { border-style: dashed; background: transparent; color: var(--muted); }
+.report-add-filter-exposure { display: flex; align-items: flex-start; gap: 8px; margin: 0; color: var(--muted); font-size: .84rem; overflow-wrap: anywhere; }
+.report-add-filter-exposure svg { margin-top: 2px; color: var(--yellow); }
+
+/* D534, D535: a filter proposal's facts: what was checked on each changed query, and the queries left as they are. */
+.report-proposal-filter { display: grid; gap: 8px; border: 1px solid var(--report-border); border-radius: 12px; padding: 12px; background: var(--report-surface); }
+.report-proposal-filter h3 { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: .95rem; }
+.report-proposal-filter-reach { margin: 0; color: var(--report-muted); font-size: .84rem; }
+.report-proposal-filter ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.report-proposal-filter li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; min-width: 0; font-size: .86rem; }
+.report-proposal-filter-ok { display: inline-flex; align-items: center; gap: 6px; color: var(--report-good, #4ade80); font-weight: 600; }
+.report-proposal-filter-ok svg { color: #4ade80; }
+.report-proposal-filter-note { color: var(--report-muted); }
+.report-proposal-filter-sub { margin: 4px 0 0; color: var(--report-soft); font-size: .8rem; font-weight: 600; }

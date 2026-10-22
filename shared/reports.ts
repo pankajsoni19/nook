@@ -90,6 +90,8 @@ export const KINDS_WITH_X2: readonly ChartKind[] = ["heatmap", "sankey", "treema
 export const STACKABLE_KINDS: readonly ChartKind[] = ["area", "bar", "stacked_bar", "horizontal_bar"];
 /** Kinds that may split into small multiples (`facet`). */
 export const FACETABLE_KINDS: readonly ChartKind[] = ["line", "bar", "area"];
+/** D536: kinds whose categories or series a click can filter by (one category axis or slices; not faceted). */
+export const CLICKABLE_KINDS: readonly ChartKind[] = ["bar", "stacked_bar", "horizontal_bar", "pie", "line", "area"];
 export const STACK_MODES = ["normal", "percent"] as const;
 export type StackMode = typeof STACK_MODES[number];
 
@@ -207,8 +209,16 @@ export type ChartBlock = BlockBase & {
   stack?: StackMode;
   /** line, bar, area: one small chart per value of this column, on a shared y scale. */
   facet?: string;
+  /** D536: clicking a category (its x) or a series sets this select or multi-select parameter. */
+  clickFilter?: ClickFilter;
 };
-export type TableBlock = BlockBase & { type: "table"; queryKey: string; columns?: string[]; formats?: Record<string, ValueFormat> };
+/**
+ * D536 (lane FILTERS): what clicking a chart's category or series, or a table's row, filters by: the
+ * parameter (a select or multi-select its own queries never read) and the column whose value it takes
+ * (a chart's x or series; one of a table's columns).
+ */
+export type ClickFilter = { param: string; column: string };
+export type TableBlock = BlockBase & { type: "table"; queryKey: string; columns?: string[]; formats?: Record<string, ValueFormat>; /** D536 */ clickFilter?: ClickFilter };
 export type ReportBlock = MarkdownBlock | KpiBlock | ChartBlock | TableBlock;
 export const BLOCK_TYPES = ["markdown", "kpi", "chart", "table"] as const;
 export type BlockType = typeof BLOCK_TYPES[number];

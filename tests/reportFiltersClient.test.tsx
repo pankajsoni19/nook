@@ -97,3 +97,64 @@ describe("D533: what each filter reaches", () => {
     expect(document.querySelector(".ui-popup .report-param-reach, .ui-sheet .report-param-reach")?.textContent).toBe("Filters all 2 blocks");
   });
 });
+
+const { AddFilterSheet, readByText } = await import("../src/reports/AddFilterSheet");
+const { FilterFacts } = await import("../src/reports/ProposalSheet");
+
+describe("D534: Add filter", () => {
+  const COLUMNS = {
+    columns: [
+      { table: "eval_top_routes.requests", column: "route", type: "LowCardinality(String)", chType: "Array(String)", comment: "", readBy: ["routes", "errors"], sensitive: false },
+      { table: "eval_top_routes.requests", column: "status", type: "UInt16", chType: "Array(UInt32)", comment: "", readBy: ["routes", "errors"], sensitive: false },
+      { table: "eval_top_routes.requests", column: "user_email", type: "String", chType: "Array(String)", comment: "", readBy: ["routes", "errors"], sensitive: true }
+    ],
+    queries: 2, slotsLeft: 8
+  };
+  const PREVIEW = { preview: { column: COLUMNS.columns[0], optionsQuery: "SELECT …", sample: ["healthz", "digest", "search", "orders"], optionCount: 4, truncated: false, distinct: 4, suggested: { id: "route", label: "Route" } } };
+
+  test("readByText", () => {
+    expect(readByText(2, 2)).toBe("read by all 2 queries");
+    expect(readByText(3, 5)).toBe("read by 3 of 5 queries");
+    expect(readByText(1, 1)).toBe("read by the report's query");
+  });
+
+  test("columns from the catalog (personal-looking ones hidden until asked), sample values and the exposure note, then the request", async () => {
+    const api = mockApi({
+      [`GET /reports/${REPORT_ID}/filters/columns`]: () => COLUMNS,
+      [`POST /reports/${REPORT_ID}/filters/preview`]: () => PREVIEW,
+      [`POST /reports/${REPORT_ID}/filters`]: (call) => ({ instruction: { id: "i1", text: "Add a filter", request: { kind: "add_filter", ...(call.body as object) } } })
+    });
+    let requested = 0;
+    const view = await render(<AddFilterSheet reportId={REPORT_ID} onClose={() => undefined} onRequested={() => { requested += 1; }} />);
+    await view.waitFor(() => document.querySelectorAll(".report-add-filter-column").length === 2);
+    const names = () => [...document.querySelectorAll(".report-add-filter-column code")].map((item) => item.textContent);
+    expect(names()).toEqual(["route", "status"]);
+    expect(document.querySelector(".report-add-filter-meta")?.textContent).toBe("eval_top_routes.requests · LowCardinality(String) · read by all 2 queries");
+    expect(document.querySelector(".report-add-filter-toggle")?.textContent).toContain("Show 1 column that looks personal");
+    await view.click(document.querySelector(".report-add-filter-toggle input")!);
+    expect(names()).toEqual(["route", "status", "user_email"]);
+    expect(view.button("Ask for the filter")!.disabled).toBe(true);
+    await view.click(document.querySelector(".report-add-filter-column")!);
+    await view.waitFor(() => document.querySelector(".report-add-filter-values"));
+    expect([...document.querySelectorAll(".report-add-filter-values li")].map((item) => item.textContent)).toEqual(["healthz", "digest", "search", "orders"]);
+    expect(document.querySelector(".report-add-filter-exposure")?.textContent).toBe("Readers will see the values of eval_top_routes.requests.route.");
+    expect((document.querySelector(".report-add-filter-preview input") as HTMLInputElement).value).toBe("Route");
+    await view.click(view.button("Ask for the filter")!);
+    await view.waitFor(() => requested === 1);
+    expect(api.calls.find((call) => call.method === "POST" && call.path.endsWith("/filters"))?.body).toEqual({ table: "eval_top_routes.requests", column: "route", label: "Route" });
+  });
+
+  test("the proposal's facts: default results unchanged on each changed query, the value it ran with, and the untouched queries", async () => {
+    await render(<FilterFacts filter={{
+      request: { kind: "add_filter", id: "route", label: "Route", table: "eval_top_routes.requests", column: "route", chType: "Array(String)", optionsQuery: "" },
+      checked: [{ key: "errors", rows: 1, otherValue: "digest", otherRows: 1 }],
+      untouched: [{ key: "routes", reason: "Shows every route; clicking it sets the filter" }],
+      reach: { blocks: 1, total: 2 }
+    }} />);
+    const text = document.querySelector(".report-proposal-filter")?.textContent ?? "";
+    expect(text).toContain("New filterRoute");
+    expect(text).toContain("Filters 1 of 2 blocks; it starts at All.");
+    expect(text).toContain("errorsDefault results unchangedRan with Route = digest: 1 row");
+    expect(text).toContain("Not filteredroutesShows every route; clicking it sets the filter");
+  });
+});

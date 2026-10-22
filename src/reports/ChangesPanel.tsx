@@ -258,7 +258,7 @@ function InstructionItem({ report, item, canApply, queuedIndex, queuedCount, onM
   return <li className={`report-instruction report-instruction-${item.status}`}>
     <div className="report-instruction-head">
       <span className={`reports-status report-instruction-status-${item.status}`}>{item.status === "running" && <LoaderCircle className="spin" aria-hidden="true" />}{instructionStatusText(item, canApply)}</span>
-      <span className="report-instruction-target">{item.kind === "add" ? addTargetLabel(report, item.afterBlockId) : blockLabel(report, item.blockId)}</span>
+      <span className="report-instruction-target">{item.request ? (item.request.kind === "add_filter" ? "Add filter" : "Remove filter") : item.kind === "add" ? addTargetLabel(report, item.afterBlockId) : blockLabel(report, item.blockId)}</span>
       <span className="report-instruction-meta">{item.isMine ? "You" : item.authorName ?? "Someone"}{item.via === "mcp" ? " via MCP" : ""} · {timeAgo(item.createdAt)}</span>
     </div>
     <p className="report-instruction-text">{item.text}</p>

@@ -1,12 +1,12 @@
 import { z } from "zod";
 import { db, now } from "../db";
 import {
-  BLOCK_ID, BLOCK_INTENTS, COMPARE_LABEL_MAX, BLOCK_WIDTHS, blockKeys, CHART_KINDS, defaultIntent, defaultWidth, FACETABLE_KINDS, isNumericType, isTimeType, KINDS_WITH_X2, KINDS_WITHOUT_X, ordinalColumn, ordinalX,
+  BLOCK_ID, BLOCK_INTENTS, CLICKABLE_KINDS, COMPARE_LABEL_MAX, BLOCK_WIDTHS, blockKeys, CHART_KINDS, defaultIntent, defaultWidth, FACETABLE_KINDS, isNumericType, isTimeType, KINDS_WITH_X2, KINDS_WITHOUT_X, ordinalColumn, ordinalX,
   QUERY_KEY, REPORT_LIMITS, reportLayout, SECTION_LIMITS, SPEC_FORMAT, STACK_MODES, STACKABLE_KINDS, UNIT, VALUE_FORMATS,
   type AutoFix, type BlockIntent, type ChartBlock, type ChartKind, type QueryOutcome, type ReportBlock, type ReportSpec, type ResultColumn
 } from "../../shared/reports";
 import { MAX_FACETS, MAX_HEATMAP_SIDE, MAX_SCATTER_SERIES, MAX_SERIES } from "../../shared/reportTheme";
-import { bindValues, DATE_PRESETS, defaultValues, MULTI_SELECT_TYPES, NUMBER_TYPES, PARAM_ID, PARAM_LIMITS, SCALAR_SELECT_TYPES, todayUtc, validDay, type BoundParam, type ReportParameter } from "../../shared/reportParams";
+import { bindValues, DATE_PRESETS, defaultValues, MULTI_SELECT_TYPES, NUMBER_TYPES, PARAM_ID, PARAM_LIMITS, readsOf, SCALAR_SELECT_TYPES, todayUtc, validDay, type BoundParam, type ReportParameter } from "../../shared/reportParams";
 import { paramSetsToCheck, parameterErrors, runOptionsQuery } from "./params";
 import { runToday } from "./paramZone";
 import { findCycle, histogramBins } from "../../shared/reportStats";
@@ -63,6 +63,8 @@ const base = {
   legacy: z.boolean().optional()
 };
 /** KPI comparison text: one plain line, no markup. */
+/** D536: what a click on a chart's category or series, or a table row, filters by. */
+const clickFilter = z.object({ param: z.string().regex(PARAM_ID, "must be a parameter id"), column }).strict();
 const compareLabel = z.string().trim().min(1).max(COMPARE_LABEL_MAX).refine((value) => !/[<>{}\u0000-\u001f\u007f]/.test(value), "must be plain text on one line (no markup)");
 
 // Strict (wave 48 review H1): a field the vocabulary does not name (html, style, a formatter, a note)
@@ -80,9 +82,9 @@ const blockSchema = z.discriminatedUnion("type", [
     // Round 2 (D462): checkSpecShape refuses each on the kinds it does not belong to.
     x2: column.optional(), midpoint: z.number().finite().optional(), cohort: z.boolean().optional(), target: column.optional(), max: z.number().finite().positive().optional(),
     ranges: z.array(column).min(1).max(3).optional(), start: z.boolean().optional(), total: z.boolean().optional(), yUnits: z.array(unit).length(2).optional(),
-    stack: z.enum(STACK_MODES).optional(), facet: column.optional()
+    stack: z.enum(STACK_MODES).optional(), facet: column.optional(), clickFilter: clickFilter.optional()
   }).strict(),
-  z.object({ ...base, type: z.literal("table"), queryKey, columns: z.array(column).max(REPORT_LIMITS.tableColumns).optional(), formats: z.record(z.string(), format).optional() }).strict()
+  z.object({ ...base, type: z.literal("table"), queryKey, columns: z.array(column).max(REPORT_LIMITS.tableColumns).optional(), formats: z.record(z.string(), format).optional(), clickFilter: clickFilter.optional() }).strict()
 ]);
 // Spec v3 (D489): the parameters. Strict like blocks; a value is checked against its type in checkSpecShape.
 const paramBase = { id: z.string().regex(PARAM_ID, "must match [a-z][a-z0-9_]{0,29}"), label: z.string().trim().min(1).max(PARAM_LIMITS.label) };
@@ -122,6 +124,9 @@ const blockBase = {
 };
 
 /** One v2 block as JSON Schema (submit_report's blocks, submit_patch's add_block). */
+/** D536: a chart's or table's click filter as JSON Schema. */
+const clickFilterProp = { type: "object", additionalProperties: false, required: ["param", "column"], description: "Clicking a category (x), series, or table row sets this select or multi-select parameter (one the block's own query never reads) to the clicked value of column", properties: { param: { type: "string" }, column: { type: "string" } } };
+
 export const BLOCK_JSON_SCHEMA: Record<string, unknown> = {
   anyOf: [
     { type: "object", additionalProperties: false, required: ["id", "type", "markdown"], properties: { ...blockBase, type: { const: "markdown" }, markdown: { type: "string", maxLength: REPORT_LIMITS.markdown } } },
@@ -151,10 +156,11 @@ export const BLOCK_JSON_SCHEMA: Record<string, unknown> = {
         total: { type: "boolean", description: "waterfall: add an ending total bar" },
         yUnits: { type: "array", minItems: 2, maxItems: 2, items: unitProp, description: "combo: the unit of each measure; they must be the same" },
         stack: { enum: [...STACK_MODES], description: "area, bar: normal = stacked, percent = 100% stacked shares" },
-        facet: { ...columnProp, description: "line, bar, area: one small chart per value (at most 12), shared y scale" }
+        facet: { ...columnProp, description: "line, bar, area: one small chart per value (at most 12), shared y scale" },
+        clickFilter: clickFilterProp
       }
     },
-    { type: "object", additionalProperties: false, required: ["id", "type", "title", "queryKey"], properties: { ...blockBase, type: { const: "table" }, queryKey: { type: "string" }, columns: { type: "array", maxItems: REPORT_LIMITS.tableColumns, items: columnProp }, formats: { type: "object", additionalProperties: formatProp } } }
+    { type: "object", additionalProperties: false, required: ["id", "type", "title", "queryKey"], properties: { ...blockBase, type: { const: "table" }, queryKey: { type: "string" }, columns: { type: "array", maxItems: REPORT_LIMITS.tableColumns, items: columnProp }, formats: { type: "object", additionalProperties: formatProp }, clickFilter: clickFilterProp } }
   ]
 };
 
@@ -269,6 +275,8 @@ export function checkSpecShape(raw: unknown): { ok: true; spec: ReportSpec } | {
   // Spec v3: parameters (unique ids, defaults of their type) and every placeholder a query holds.
   const parameters = parsed.data.parameters as ReportParameter[];
   errors.push(...parameterErrors(parameters, parsed.data.queries));
+  // D536: click filters name a select or multi-select the block's own queries never read, over its x, series, or a shown column.
+  errors.push(...clickFilterErrors(parsed.data.blocks as ReportBlock[], parameters, parsed.data.queries));
   if (errors.length) return { ok: false, errors: errors.slice(0, MAX_ERRORS) };
   const spec: ReportSpec = {
     version: 1,
@@ -290,6 +298,44 @@ export function checkSpecShape(raw: unknown): { ok: true; spec: ReportSpec } | {
     })
   };
   return { ok: true, spec };
+}
+
+/** D536: a click filter's parameter, its block's kind and column, and that the block never filters itself. */
+export function clickFilterErrors(blocks: readonly ReportBlock[], parameters: readonly ReportParameter[], queries: ReadonlyArray<{ key: string; sql: string }>): string[] {
+  const errors: string[] = [];
+  for (const block of blocks) {
+    if (block.type !== "chart" && block.type !== "table") continue;
+    const click = block.clickFilter;
+    if (!click) continue;
+    const say = (text: string) => errors.push(`block ${block.id}: clickFilter ${text}`);
+    const param = parameters.find((item) => item.id === click.param);
+    if (!param) { say(`names ${click.param}, which is not one of the report's parameters`); continue; }
+    if (param.type !== "select" && param.type !== "multi_select") { say(`must name a select or multi-select parameter (${click.param} is a ${param.type})`); continue; }
+    if (block.type === "chart") {
+      if (!CLICKABLE_KINDS.includes(block.kind)) say(`is for ${CLICKABLE_KINDS.join(", ")} charts, not ${block.kind}`);
+      else if (block.facet) say("is not for a faceted chart");
+      else if (click.column !== block.x && click.column !== block.series) say(`column must be the chart's x (${block.x ?? "none"})${block.series ? ` or series (${block.series})` : ""}`);
+    } else if (block.columns?.length && !block.columns.includes(click.column)) say(`column ${click.column} must be one of the table's columns`);
+    const own = queries.filter((query) => blockKeys(block).includes(query.key));
+    if (own.some((query) => readsOf(query.sql, [param]).length)) say(`cannot filter by ${click.param}: the block's own query reads it (a clicked chart highlights its choice and keeps every category)`);
+  }
+  return errors;
+}
+
+/** D536: a click filter's column is in its block's result, and whole numbers for an integer parameter. */
+export function clickFilterColumnErrors(spec: Pick<ReportSpec, "blocks" | "parameters">, results: ReadonlyMap<string, Pick<QueryOutcome, "columns">>): string[] {
+  const errors: string[] = [];
+  for (const block of spec.blocks) {
+    if ((block.type !== "chart" && block.type !== "table") || !block.clickFilter) continue;
+    const result = results.get(block.queryKey);
+    const param = spec.parameters.find((item) => item.id === block.clickFilter!.param);
+    if (!result || !param || (param.type !== "select" && param.type !== "multi_select")) continue;
+    const type = result.columns.find((item) => item.name === block.clickFilter!.column)?.type;
+    if (type === undefined) { errors.push(`block ${block.id}: clickFilter column ${block.clickFilter.column} is not in the result of ${block.queryKey}`); continue; }
+    const element = /^Array\((.*)\)$/.exec(param.chType)?.[1] ?? param.chType;
+    if (/Int/.test(element) && !/^(Nullable\(|LowCardinality\()*U?Int(8|16|32|64)\)*$/.test(type)) errors.push(`block ${block.id}: clickFilter column ${block.clickFilter.column} is ${type}; ${param.id} takes whole numbers`);
+  }
+  return errors;
 }
 
 /** Round 2's per-kind fields (D462): each field only on its kinds, the measures each kind reads, and the columns it needs. */
@@ -728,7 +774,7 @@ export async function validateSpec(row: DatasourceRow, raw: unknown, context: { 
       errors.push(`query ${query.key} with parameters ${sets.other.label}: ${failure(error)} (every query must also run when a reader changes the parameters)`);
     }
   }
-  errors.push(...checkColumns(spec, results));
+  errors.push(...checkColumns(spec, results), ...clickFilterColumnErrors(spec, results));
   if (errors.length) return { ok: false, errors: errors.slice(0, MAX_ERRORS) };
   const design = checkDesign(spec, results, { changedBlockIds: context.changedBlockIds });
   if (design.errors.length) return { ok: false, errors: design.errors };

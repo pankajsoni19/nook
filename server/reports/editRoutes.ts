@@ -15,6 +15,8 @@ import { getSharing, setSharing } from "./sharing";
 import { addOwner, listOwners, removeOwner } from "./owners";
 import { getVersion, listVersions, previewVersion, previousVersion, restoreVersion, versionDiff } from "./versions";
 import { ownedReport } from "./access";
+import { filterColumns, previewFilter, requestAddFilter, requestRemoveFilter } from "./filterRequest";
+import { PARAM_ID, PARAM_LIMITS } from "../../shared/reportParams";
 
 /**
  * docs/plan/API_CONTRACTS.md § Analytics reports, Wave 48: instructions to the edit agent (the queue,
@@ -36,6 +38,10 @@ const instructionCreate = z.object({
   kind: z.enum(INSTRUCTION_KINDS).optional(), afterBlockId: z.string().regex(BLOCK_ID).nullish(),
   docs: z.array(docInputSchema).max(REPORT_DOC_LIMITS.instructionDocs).optional()
 }).strict();
+/** D534: a catalog column, as `db.table` and its name (checked against the report's tables and the catalog). */
+const catalogName = z.string().min(1).max(260).refine((value) => !/[\u0000-\u001f\u007f`]/.test(value), "must be a plain name");
+const filterColumnSchema = z.object({ table: catalogName.refine((value) => value.includes("."), "must be db.table"), column: catalogName }).strict();
+const filterCreateSchema = filterColumnSchema.extend({ label: z.string().trim().min(1).max(PARAM_LIMITS.label).optional(), id: z.string().regex(PARAM_ID).optional() }).strict();
 const reorderSchema = z.object({ ids: z.array(uuid).max(INSTRUCTION_LIMITS.queued * 2) }).strict();
 const autoApplySchema = z.object({ autoApply: z.boolean() }).strict();
 const emptySchema = z.object({}).strict();
@@ -59,6 +65,25 @@ export function registerReportEditRoutes(app: Hono<AppEnv>) {
     const reportId = id(c, "reportId");
     const body = await parseJson(c.req.raw, instructionCreate);
     return c.json({ instruction: await addInstruction({ userId: user.id, role: user.role }, reportId, { text: body.text, blockId: body.blockId ?? null, kind: body.kind, afterBlockId: body.afterBlockId ?? null, docs: body.docs ?? [] }, c.req.raw.signal) }, 201);
+  }));
+  // D534 (lane FILTERS): Add filter and Remove filter, the owner's; a request becomes an instruction the edit agent answers with a proposal.
+  app.get("/api/reports/:reportId/filters/columns", handle(async (c) => filterColumns(id(c, "reportId"), c.get("user").id)));
+  app.post("/api/reports/:reportId/filters/preview", handle(async (c) => {
+    const reportId = id(c, "reportId");
+    const body = await parseJson(c.req.raw, filterColumnSchema);
+    return { preview: await previewFilter(reportId, c.get("user").id, body) };
+  }));
+  app.post("/api/reports/:reportId/filters", handle(async (c) => {
+    const user = c.get("user");
+    const reportId = id(c, "reportId");
+    const body = await parseJson(c.req.raw, filterCreateSchema);
+    return c.json({ instruction: await requestAddFilter({ userId: user.id, role: user.role }, reportId, body) }, 201);
+  }));
+  app.delete("/api/reports/:reportId/filters/:paramId", handle(async (c) => {
+    const user = c.get("user");
+    const paramId = c.req.param("paramId") ?? "";
+    if (!PARAM_ID.test(paramId)) throw new ReportError(404, "NOT_FOUND", "Not found");
+    return { instruction: await requestRemoveFilter({ userId: user.id, role: user.role }, id(c, "reportId"), paramId) };
   }));
   app.post("/api/reports/:reportId/instructions/reorder", handle(async (c) => {
     const reportId = id(c, "reportId");

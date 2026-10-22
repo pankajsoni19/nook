@@ -291,7 +291,7 @@ ul.report-block-problem { display: block; padding-left: 18px; }
 .report-param-reach { margin: 0; padding: 8px 12px; border-top: 1px solid var(--report-border); color: var(--report-muted); font-size: .78rem; }
 .report-param-field .report-param-reach, .report-params-fields > .report-param-reach { padding: 0; border-top: 0; }
 /* D534: the owner's "+ Filter" ends the bar: a chip's height and radius, dashed (it adds a filter; it filters nothing). */
-.report-params-add { display: inline-flex; align-items: center; gap: 6px; flex: none; min-height: 36px; padding: 0 14px 0 12px; border: 1px dashed var(--report-border); border-radius: 999px; background: transparent; color: var(--report-soft); font: inherit; font-size: .84rem; white-space: nowrap; cursor: pointer; }
+.report-params-add { display: inline-flex; align-items: center; gap: 6px; flex: none; min-height: 36px; padding: 0 14px 0 12px; border: 1px dashed color-mix(in srgb, var(--report-muted) 50%, transparent); border-radius: 999px; background: transparent; color: var(--report-soft); font: inherit; font-size: .84rem; white-space: nowrap; cursor: pointer; }
 .report-params-add svg { width: 15px; height: 15px; flex: none; }
 .report-params-add:hover { border-color: var(--report-muted); color: var(--report-text); }
 .report-params-add:focus-visible { outline: 2px solid var(--report-accent); outline-offset: 1px; }

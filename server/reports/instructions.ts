@@ -18,6 +18,8 @@ import { liveGenerations } from "./generate";
 import type { ReportBlock } from "../../shared/reports";
 import { logger } from "../log";
 import { promoteSuggestion } from "./querySuggest";
+import { parseFilterRequest } from "./filterChecks";
+import type { FilterRequest } from "../../shared/reportsEdit";
 
 const slog = logger("reports");
 
@@ -33,6 +35,7 @@ const slog = logger("reports");
 
 type Actor = { userId: string; role: string; keyId?: string | null };
 type Row = InstructionRow & { author_name: string | null; /** 065 (D527): a person's suggested query edit. */ suggested_query?: string | null };
+const requestOf = (row: { request_json?: string | null }) => parseFilterRequest(row.request_json);
 type DocRow = { id: string; instruction_id: string; source: "nook" | "server"; server_id: string | null; ref: string; title: string | null; bytes: number; joined_doc_id: string | null; join_note: string | null; server_name: string | null };
 
 const DOC_SELECT = `SELECT d.id, d.instruction_id, d.source, d.server_id, d.ref, d.title, d.bytes, d.joined_doc_id, d.join_note, s.name AS server_name
@@ -65,7 +68,9 @@ function view(row: Row, userId: string, owner: boolean, docs: readonly DocRow[] 
     // D527: a suggestion's summary is its author's own note to the owner.
     summary: owner || row.suggested_query ? row.summary : null, error: row.error, appliedVersion: row.applied_version, autoApplied: row.auto_applied === 1,
     createdAt: row.created_at, startedAt: row.started_at, finishedAt: row.finished_at, decidedAt: row.decided_at,
-    suggestedQuery: row.suggested_query ?? null
+    suggestedQuery: row.suggested_query ?? null,
+    // D534: the owner's Add filter or Remove filter request (column names and a label the owner chose).
+    request: requestOf(row)
   };
 }
 
@@ -99,6 +104,8 @@ export type InstructionInput = {
   kind?: InstructionKind; afterBlockId?: string | null;
   /** D517: docs the edit agent reads with the report's docs (at most 4), read now with the author's access. */
   docs?: DocInput[] | null;
+  /** D534: the owner's structured filter request (filterRequest.ts builds it; never from a client body). */
+  request?: FilterRequest | null;
 };
 
 /**
@@ -131,8 +138,8 @@ export async function addInstruction(actor: Actor, reportId: string, input: Inst
   db.transaction(() => {
     if (queuedNow() >= INSTRUCTION_LIMITS.queued) throw new ReportError(429, "LIMIT_REACHED", `At most ${INSTRUCTION_LIMITS.queued} instructions can wait at once`);
     const position = ((db.query("SELECT max(position) AS position FROM report_instructions WHERE report_id = ?").get(reportId) as { position: number | null }).position ?? 0) + 1;
-    db.query(`INSERT INTO report_instructions (id, report_id, block_id, text, author_id, via, key_id, status, position, kind, after_block_id, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?)`).run(id, reportId, blockId, text, actor.userId, actor.keyId ? "mcp" : "web", actor.keyId ?? null, position, kind, afterBlockId, at, at);
+    db.query(`INSERT INTO report_instructions (id, report_id, block_id, text, author_id, via, key_id, status, position, kind, after_block_id, created_at, updated_at, request_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)`).run(id, reportId, blockId, text, actor.userId, actor.keyId ? "mcp" : "web", actor.keyId ?? null, position, kind, afterBlockId, at, at, input.request ? JSON.stringify(input.request) : null);
     resolved.forEach((doc, index) => {
       const fetched = read[index]!;
       db.query(`INSERT INTO report_instruction_docs (id, instruction_id, position, source, server_id, tool, arg, ref, title, sha256, bytes, markdown, created_at)
@@ -286,7 +293,11 @@ export function proposalView(reportId: string, instructionId: string, userId: st
     }
     return byKey.get(query.key) ?? { queryKey: query.key, result: null, failed: null, stale: false };
   });
-  return { instructionId, spec, blocks, queries: diff.queries, results, currentResults, summary: owner || suggestion ? proposal.summary : null, outOfDate: stale !== null, ...(stale ? { staleReason: stale } : {}) };
+  return {
+    instructionId, spec, blocks, queries: diff.queries, results, currentResults, summary: owner || suggestion ? proposal.summary : null, outOfDate: stale !== null, ...(stale ? { staleReason: stale } : {}),
+    // D535: a filter request's checks, untouched queries, and reach (the owner asked for it; only owners file one).
+    ...(owner && proposal.filter ? { filter: proposal.filter } : {})
+  };
 }
 
 /**
@@ -381,7 +392,8 @@ function settled(row: InstructionRow) {
   if (row.status === "proposed") {
     const report = db.query("SELECT auto_apply FROM reports WHERE id = ? AND deleted_at IS NULL").get(row.report_id) as { auto_apply: number } | null;
     // Only an owner's own instructions apply themselves (D453; phase 2: any owner, applied as them): a commenter's always waits for review.
-    if (report?.auto_apply === 1 && row.author_id && isReportOwner(row.report_id, row.author_id)) {
+    // D534: a filter request never applies itself; the owner reviews its checks in Changes.
+    if (report?.auto_apply === 1 && row.author_id && isReportOwner(row.report_id, row.author_id) && !requestOf(row)) {
       try {
         applyProposal(row.author_id, row.report_id, row.id, { auto: true, keyId: row.key_id ?? undefined });
         return;

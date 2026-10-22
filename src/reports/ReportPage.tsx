@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
-import { CalendarClock, ChevronLeft, Crown, CircleStop, Cpu, Database, FileSearch, FileTerminal, FileText, GitCommitVertical, History, Link2, LoaderCircle, MessageSquarePlus, MessageSquare, Pencil, Play, RefreshCw, Share2, Sparkles, TableProperties, Trash2, TriangleAlert, Settings2, Ruler } from "lucide-react";
+import { CalendarClock, ChevronLeft, Crown, CircleStop, Cpu, Database, FileSearch, FileTerminal, FileText, GitCommitVertical, History, Link2, ListFilter, LoaderCircle, MessageSquarePlus, MessageSquare, Pencil, Play, RefreshCw, Share2, Sparkles, TableProperties, Trash2, TriangleAlert, Settings2, Ruler } from "lucide-react";
 import { AccountActions } from "../AppShell";
 import { appName } from "../appName";
 import { notifyBinned } from "../bin/binUndo";
@@ -28,6 +28,8 @@ import { newVersionsMemory, VersionsSheet } from "./VersionsSheet";
 import { MetricsSheet } from "./MetricsSheet";
 import { ReportCommandsContext, ReportOverflowMenu, type MenuItem, type ReportCommands } from "./reportCommands";
 import { ReportParamsContext } from "./ReportParamsBar";
+import { AddFilterSheet } from "./AddFilterSheet";
+import { requestFilterRemoval } from "./reportEditApi";
 import { placeholderInput, placeholdersIn, placeholderValue } from "../../shared/reportParams";
 import type { ReportParamsSearch } from "../router";
 
@@ -113,6 +115,9 @@ export function ReportPage({ reportId, displayName, flash, onBack, onSettings, o
   useLayerOpener("reports.runs", (runId) => openRuns(runId || null));
   useLayerOpener("reports.model", () => setModelOpen(true));
   useLayerOpener("reports.metrics", () => setMetricsOpen(true));
+  // D534: Add filter (the owner), a sheet with its own layer.
+  const [addFilterOpen, setAddFilterOpen] = useState(false);
+  useLayerOpener("reports.add-filter", () => setAddFilterOpen(true));
   // The header's actions that live in the viewer and the generation part (reportCommands.tsx).
   const [commands, setCommands] = useState<ReportCommands>({});
   const registry = useMemo(() => ({ set: (part: Partial<ReportCommands>) => setCommands((current) => ({ ...current, ...part })) }), []);
@@ -135,9 +140,23 @@ export function ReportPage({ reportId, displayName, flash, onBack, onSettings, o
   // Changing the report (refresh, schedule, regenerate, apply, edits, the console) is its owner's (D455).
   const ownerWrite = canWrite && Boolean(report?.isOwner);
   // Lane EDIT (D525–D529): Remove from a header and Edit SQL (the owner); Suggest an edit (the comment level).
+  // D534: Remove filter asks first, then queues the request and opens Changes on it.
+  const removeFilter = useCallback(async (paramId: string) => {
+    const label = report?.spec.parameters.find((param) => param.id === paramId)?.label ?? paramId;
+    if (!await confirm.ask({ title: `Remove the filter ${label}?`, message: "Nook's edit agent takes it out of the queries that read it and checks every block shows what it shows with All. You review the change in Changes before anything is removed.", confirmLabel: "Ask to remove it" })) return;
+    try {
+      await requestFilterRemoval(reportId, paramId);
+      notify.success("Removal requested; Nook proposes it in Changes");
+      openChanges(null);
+    } catch (reason) {
+      notify.error(messageOf(reason, "Could not ask to remove the filter"));
+    }
+  }, [confirm, openChanges, report?.spec.parameters, reportId]);
+  const hasBlocks = Boolean(report?.spec.blocks.length);
   const editing = useMemo<ReportEditing>(() => ({
-    canEdit: ownerWrite, canSuggest: canWrite && !report?.isOwner && Boolean(rights?.canComment) && rights?.level === "comment", onChanged: reloadReport, openChanges
-  }), [canWrite, openChanges, ownerWrite, reloadReport, report?.isOwner, rights?.canComment, rights?.level]);
+    canEdit: ownerWrite, canSuggest: canWrite && !report?.isOwner && Boolean(rights?.canComment) && rights?.level === "comment", onChanged: reloadReport, openChanges,
+    ...(ownerWrite && hasBlocks ? { addFilter: () => setAddFilterOpen(true), removeFilter: (paramId: string) => { void removeFilter(paramId); } } : {})
+  }), [canWrite, hasBlocks, openChanges, ownerWrite, reloadReport, removeFilter, report?.isOwner, rights?.canComment, rights?.level]);
   useEffect(() => { if (report) document.title = `${report.title} · Reports · ${appName()}`; }, [report]);
   useEffect(() => { saveDraft(reportId, sql); }, [reportId, sql]);
 
@@ -288,7 +307,7 @@ export function ReportPage({ reportId, displayName, flash, onBack, onSettings, o
           {ownerWrite && <button type="button" className="secondary-button report-wide-only" onClick={share}><Share2 aria-hidden="true" />Share</button>}
           {commands.schedule && <button type="button" className="secondary-button report-wide-only" onClick={commands.schedule.open}><CalendarClock aria-hidden="true" />Schedule</button>}
           <ReportOverflowMenu label="More report actions" items={overflowItems({ ownerWrite, owner: report.isOwner, commands, runs: () => openRuns(null), versions: () => setVersionsOpen(true), console: consoleInPanel(report) ? () => openConsole() : undefined, copyLink, share, rename: () => setRenaming(true), model: () => setModelOpen(true), metrics: report.isOwner ? () => setMetricsOpen(true) : undefined, remove: () => { void remove(); },
-            owners: !ownerWrite && canWrite && report.canManageOwners ? () => setSharing({ copyFailed: false }) : undefined })} />
+            owners: !ownerWrite && canWrite && report.canManageOwners ? () => setSharing({ copyFailed: false }) : undefined, addFilter: editing.addFilter })} />
         </div>
       </div>
 
@@ -325,6 +344,7 @@ export function ReportPage({ reportId, displayName, flash, onBack, onSettings, o
       {versionsOpen && report && <VersionsSheet report={report} canRestore={ownerWrite} onClose={() => setVersionsOpen(false)} reopen={() => setVersionsOpen(true)} layerKey="reports.versions" memory={versionsMemory.current}
         onRestored={() => { setVersionsOpen(false); reloadReport(); }} />}
     </ReportRunsContext.Provider>
+    {addFilterOpen && report && <AddFilterSheet reportId={report.id} onClose={() => setAddFilterOpen(false)} reopen={() => setAddFilterOpen(true)} onRequested={() => { setAddFilterOpen(false); openChanges(null); }} />}
     {metricsOpen && report && <MetricsSheet reportId={report.id} title={report.title} canEdit={ownerWrite} onClose={() => setMetricsOpen(false)} reopen={() => setMetricsOpen(true)} />}
     {runsAt && report && <RunsSheet key={runsAt.runId ?? ""} reportId={report.id} title={report.title} focusRunId={runsAt.runId} onClose={() => setRunsAt(null)} reopen={() => setRunsAt(lastRuns.current)} />}
     {sharing && report && <ShareSheet reportId={report.id} title={report.title} onClose={() => setSharing(null)} reopen={() => setSharing({ copyFailed: false })} link={reportLink(report.id)} copyFailed={sharing.copyFailed} flash={flash}
@@ -355,7 +375,7 @@ export const consoleInPanel = (report: Pick<ReportDetail, "isOwner" | "spec">) =
  * The overflow menu's items: on a phone Runs, Versions, Share, and Schedule first (the header hides them there), then
  * Rename, Model, Check doc, Regenerate, and Move to Bin last (dangerous). Readers see Schedule only.
  */
-export function overflowItems({ ownerWrite, owner = false, commands, runs, versions, console: openConsole, copyLink, share, rename, model, metrics, remove, owners }: { ownerWrite: boolean; owner?: boolean; commands: ReportCommands; runs?: () => void; versions?: () => void; console?: () => void; copyLink?: () => void; share: () => void; rename: () => void; model: () => void; /** E4: the Metrics view (the owner's). */ metrics?: () => void; remove: () => void;
+export function overflowItems({ ownerWrite, owner = false, commands, runs, versions, console: openConsole, copyLink, share, rename, model, metrics, remove, owners, addFilter }: { ownerWrite: boolean; owner?: boolean; commands: ReportCommands; runs?: () => void; versions?: () => void; console?: () => void; copyLink?: () => void; share: () => void; rename: () => void; model: () => void; /** E4: the Metrics view (the owner's). */ metrics?: () => void; remove: () => void; /** D534: Add filter (the owner's, a report with blocks). */ addFilter?: () => void;
   /** Phase 2 (D482): an admin who is not an owner manages the owners (the Share sheet's Owners section alone). */ owners?: () => void }): MenuItem[] {
   const items: MenuItem[] = [];
   if (owners) items.push({ id: "owners", label: "Owners", icon: <Crown aria-hidden="true" />, onSelect: owners });
@@ -366,6 +386,7 @@ export function overflowItems({ ownerWrite, owner = false, commands, runs, versi
   if (ownerWrite) items.push({ id: "share", label: "Share", icon: <Share2 aria-hidden="true" />, onSelect: share, narrowOnly: true });
   if (commands.schedule) items.push({ id: "schedule", label: commands.schedule.badge ? `Schedule (${commands.schedule.badge})` : "Schedule", icon: <CalendarClock aria-hidden="true" />, onSelect: commands.schedule.open, narrowOnly: true });
   if (!ownerWrite) return items;
+  if (addFilter) items.push({ id: "add-filter", label: "Add filter", icon: <ListFilter aria-hidden="true" />, onSelect: addFilter });
   if (openConsole) items.push({ id: "console", label: "SQL console", icon: <FileTerminal aria-hidden="true" />, onSelect: openConsole });
   items.push({ id: "rename", label: "Rename", icon: <Pencil aria-hidden="true" />, onSelect: rename });
   items.push({ id: "model", label: "Model", icon: <Cpu aria-hidden="true" />, onSelect: model });

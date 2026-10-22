@@ -61,11 +61,38 @@ export type PatchOp =
   /** Merges `set` into the parameter (its id stays). */
   | { op: "update_parameter"; id: string; set: Record<string, unknown> }
   /** Removes the parameter; queries that still read it are refused until they stop. */
-  | { op: "remove_parameter"; id: string };
+  | { op: "remove_parameter"; id: string }
+  /** D536: what clicking the chart or table filters by (null: nothing). */
+  | { op: "set_click_filter"; id: string; clickFilter: { param: string; column: string } | null };
 export type PatchOpName = PatchOp["op"];
-export const PATCH_OPS: readonly PatchOpName[] = ["add_block", "update_block", "remove_block", "move_block", "add_query", "update_query", "remove_query", "add_section", "update_section", "remove_section", "add_parameter", "update_parameter", "remove_parameter"];
+export const PATCH_OPS: readonly PatchOpName[] = ["add_block", "update_block", "remove_block", "move_block", "add_query", "update_query", "remove_query", "add_section", "update_section", "remove_section", "add_parameter", "update_parameter", "remove_parameter", "set_click_filter"];
 
-export type ReportPatch = { ops: PatchOp[]; summary?: string };
+/** D534: a filter request's queries the agent left unfiltered, each with its reason (shown in the review). */
+export type PatchUntouched = { key: string; reason: string };
+export type ReportPatch = { ops: PatchOp[]; summary?: string; untouched?: PatchUntouched[] };
+
+// ------------------------------------------------------------------------------- filters (D534)
+
+/**
+ * The owner's structured request behind an instruction (`report_instructions.request_json`, migration
+ * 066): Add filter (a multi-select over one catalog column; its options query built by Nook from catalog
+ * identifiers) or Remove filter. The label is data in the agent's prompt, never instructions.
+ */
+export type AddFilterRequest = { kind: "add_filter"; id: string; label: string; table: string; column: string; chType: string; optionsQuery: string };
+export type RemoveFilterRequest = { kind: "remove_filter"; id: string; label: string };
+export type FilterRequest = AddFilterRequest | RemoveFilterRequest;
+
+/** D535: what Nook checked on each changed query before a filter proposal was stored. */
+export type FilterQueryCheck = { key: string; /** Rows with the filter at All (identical to the result before the change). */ rows: number; /** The value it also ran with (null for a removal). */ otherValue: string | null; otherRows: number | null };
+/** A filter proposal's review facts (ProposalView.filter). */
+export type ProposalFilterView = {
+  request: FilterRequest;
+  checked: FilterQueryCheck[];
+  /** Queries left as they are: the agent's reason, or Nook's ("does not read …"). */
+  untouched: PatchUntouched[];
+  /** Blocks the filter reaches after the change, of the chart, KPI, and table blocks. */
+  reach: { blocks: number; total: number };
+};
 
 // ------------------------------------------------------------------------------- instructions
 
@@ -111,6 +138,8 @@ export type ReportInstruction = {
   decidedAt: string | null;
   /** D527: a person's suggested edit of this saved query (no agent run; its proposal is the person's SQL). */
   suggestedQuery?: string | null;
+  /** D534: the owner's Add filter or Remove filter request behind it (null for every other instruction). */
+  request?: FilterRequest | null;
 };
 
 export type BlockChangeKind = "added" | "updated" | "removed" | "moved";
@@ -138,6 +167,8 @@ export type ProposalView = {
    * current one), just how many blocks and queries it changes.
    */
   redacted?: { blocks: number; queries: number };
+  /** D534, D535: a filter request's checks, its untouched queries, and its reach. */
+  filter?: ProposalFilterView;
 };
 
 /** GET /api/reports/:id/instructions: the thread, the caller's rights, and the auto-apply switch. */
@@ -197,3 +228,28 @@ export const INSTRUCTION_STATUS_TEXT: Record<InstructionStatus, string> = {
 export const VERSION_SOURCE_TEXT: Record<VersionSource, string> = {
   initial: "First saved", generate: "Generated from the doc", edit: "Agent edit", restore: "Restored", manual: "Edited by hand"
 };
+
+/** D534: a catalog column Add filter offers (GET /api/reports/:id/filters/columns). */
+export type FilterColumn = {
+  /** `db.table`, as the report's queries read it. */
+  table: string;
+  column: string;
+  /** The column's ClickHouse type, and the parameter type it binds as (`Array(String)`, `Array(Int64)`, …). */
+  type: string;
+  chType: string;
+  comment: string;
+  /** The used queries that read its table. */
+  readBy: string[];
+  /** Named or commented like an email, phone, token, password, or secret (T409): hidden unless asked for. */
+  sensitive: boolean;
+};
+export type FilterColumnsView = { columns: FilterColumn[]; /** The report's used queries. */ queries: number; /** Parameters left before the limit of 8. */ slotsLeft: number };
+/** D534: the options Nook would give the filter (POST /api/reports/:id/filters/preview). */
+export type FilterPreview = { column: FilterColumn; optionsQuery: string; sample: string[]; optionCount: number; truncated: boolean; distinct: number; suggested: { id: string; label: string } };
+
+export const FILTER_LIMITS = {
+  /** A column with more distinct values than this is refused (T409). */
+  distinct: 100_000,
+  /** Sample values the sheet shows. */
+  sample: 12
+} as const;

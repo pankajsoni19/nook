@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Check, TriangleAlert, X } from "lucide-react";
+import { Check, CircleCheck, TriangleAlert, X } from "lucide-react";
 import { Markdown, type RenderContext } from "../chat/markdown/render";
 import { ModalDialog } from "../files/Dialog";
 import { notify } from "../ui/notify";
 import { useHistoryDialogGuard } from "../ui/useHistoryDialogGuard";
 import type { ReportBlock, ReportDetail } from "../../shared/reports";
-import type { BlockChange, ProposalView, ReportInstruction } from "../../shared/reportsEdit";
+import type { BlockChange, ProposalFilterView, ProposalView, ReportInstruction } from "../../shared/reportsEdit";
 import type { QueryResultView } from "../../shared/reportsView";
 import { applyProposal, getProposal, rejectProposal } from "./reportEditApi";
 import { codeOf, messageOf } from "./reportsApi";
@@ -64,6 +64,32 @@ export function NewSectionInPlace({ report, proposal, afterBlockId, results, pal
       <div className="report-diff-new-blocks">{loose.map((block) => <BlockPreview key={block.id} block={block} results={results} palette={palette} lookup={lookup} />)}</div>
     </div>}
     {next && <p className="report-diff-context">Then “{next.title}”</p>}
+  </section>;
+}
+
+/** "Filters 1 of 2 blocks" and so on (the bar's own words). */
+const blocksText = (reach: ProposalFilterView["reach"]) => reach.blocks === reach.total ? `Filters all ${countText(reach.total, "block")}` : `Filters ${reach.blocks} of ${countText(reach.total, "block")}`;
+
+/**
+ * D534, D535: what a filter request's proposal did and what Nook checked: the filter (its column),
+ * how many blocks it reaches, each changed query with "Default results unchanged ✓" and the value it
+ * also ran with, and the queries left as they are with the reason.
+ */
+export function FilterFacts({ filter }: { filter: ProposalFilterView }) {
+  const request = filter.request;
+  return <section className="report-proposal-filter" aria-label="The filter">
+    <h3><span className="reports-status">{request.kind === "add_filter" ? "New filter" : "Filter removed"}</span>{request.label}{request.kind === "add_filter" && <code>{request.table}.{request.column}</code>}</h3>
+    {request.kind === "add_filter" && <p className="report-proposal-filter-reach">{blocksText(filter.reach)}; it starts at All.</p>}
+    <p className="report-proposal-filter-sub">{request.kind === "add_filter" ? "Queries that take the filter" : "Queries it is taken out of"}</p>
+    <ul>{filter.checked.map((item) => <li key={item.key}>
+      <code>{item.key}</code>
+      <span className="report-proposal-filter-ok"><CircleCheck aria-hidden="true" />Default results unchanged</span>
+      {item.otherValue !== null && <span className="report-proposal-filter-note">{`Ran with ${request.label} = ${item.otherValue || "(blank)"}: ${countText(item.otherRows ?? 0, "row")}`}</span>}
+    </li>)}</ul>
+    {filter.untouched.length > 0 && <>
+      <p className="report-proposal-filter-sub">Not filtered</p>
+      <ul>{filter.untouched.map((item) => <li key={item.key}><code>{item.key}</code><span className="report-proposal-filter-note">{item.reason}</span></li>)}</ul>
+    </>}
   </section>;
 }
 
@@ -126,7 +152,9 @@ export function ProposalSheet({ report, instructionId, instruction, canApply, on
         {proposal.summary && <p className="report-proposal-summary">{proposal.summary}</p>}
         {proposal.outOfDate && <p className="report-proposal-stale" role="note"><TriangleAlert aria-hidden="true" />{proposal.staleReason ?? "The report changed since this was proposed"}. It is rejected when the queue moves on; ask again.</p>}
         {instruction?.kind === "add" && !proposal.redacted && <NewSectionInPlace report={report} proposal={proposal} afterBlockId={instruction.afterBlockId} results={after} palette={palette} lookup={lookupAfter} />}
-        {(instruction?.kind === "add" ? proposal.blocks.filter((change) => change.change !== "added") : proposal.blocks).map((change) => <section key={change.blockId} className={`report-diff-block report-diff-${change.change}`} aria-label={`${CHANGE_TEXT[change.change]}: ${change.after?.title ?? change.before?.title ?? change.blockId}`}>
+        {proposal.filter && <FilterFacts filter={proposal.filter} />}
+        {/* D535: a filter's blocks draw the same as now at All (checked), so only its facts and SQL show. */}
+        {(proposal.filter ? [] : instruction?.kind === "add" ? proposal.blocks.filter((change) => change.change !== "added") : proposal.blocks).map((change) => <section key={change.blockId} className={`report-diff-block report-diff-${change.change}`} aria-label={`${CHANGE_TEXT[change.change]}: ${change.after?.title ?? change.before?.title ?? change.blockId}`}>
           <h3><span className="reports-status">{CHANGE_TEXT[change.change]}</span>{change.after?.title ?? change.before?.title ?? change.blockId}</h3>
           <div className={`report-diff-sides${change.before && change.after && change.change !== "moved" ? " report-diff-two" : ""}`}>
             {change.before && change.change !== "moved" && <div className="report-diff-side"><span className="report-diff-label">Before</span><BlockPreview block={change.before} results={before} palette={palette} lookup={lookupBefore} /></div>}

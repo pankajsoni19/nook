@@ -35,9 +35,15 @@ const opSchema = z.discriminatedUnion("op", [
   // Spec v3 (D489): parameters, validated with the whole spec after the patch.
   z.object({ op: z.literal("add_parameter"), parameter: objectArg.refine((value) => typeof value.id === "string" && typeof value.type === "string", "a parameter needs a string id and type"), after: name.nullish() }),
   z.object({ op: z.literal("update_parameter"), id: name, set: objectArg }),
-  z.object({ op: z.literal("remove_parameter"), id: name })
+  z.object({ op: z.literal("remove_parameter"), id: name }),
+  // D536: a chart's or table's click filter (validated with the whole spec).
+  z.object({ op: z.literal("set_click_filter"), id: name, clickFilter: z.object({ param: name, column: z.string().min(1).max(200) }).nullable() })
 ]);
-export const patchSchema = z.object({ ops: z.array(opSchema).min(1).max(INSTRUCTION_LIMITS.ops), summary: z.string().max(INSTRUCTION_LIMITS.summary).optional() });
+export const patchSchema = z.object({
+  ops: z.array(opSchema).min(1).max(INSTRUCTION_LIMITS.ops), summary: z.string().max(INSTRUCTION_LIMITS.summary).optional(),
+  // D534: a filter request's queries left unfiltered, with the agent's reason (shown in the review).
+  untouched: z.array(z.object({ key: name, reason: z.string().max(200) })).max(20).optional()
+});
 
 /** update_block's `set`: any v2 block field (none required; no field outside the vocabulary). */
 const BLOCK_SET_JSON_SCHEMA: Record<string, unknown> = (() => {
@@ -55,6 +61,7 @@ export const PATCH_JSON_SCHEMA: Record<string, unknown> = {
   required: ["ops"],
   properties: {
     summary: { type: "string", maxLength: INSTRUCTION_LIMITS.summary, description: "One line: what the patch changes" },
+    untouched: { type: "array", maxItems: 20, description: "A filter request only: each query you leave unfiltered, with why", items: { type: "object", additionalProperties: false, required: ["key", "reason"], properties: { key: { type: "string" }, reason: { type: "string", maxLength: 200 } } } },
     ops: {
       type: "array", minItems: 1, maxItems: INSTRUCTION_LIMITS.ops,
       items: {
@@ -71,7 +78,8 @@ export const PATCH_JSON_SCHEMA: Record<string, unknown> = {
           { type: "object", additionalProperties: false, required: ["op", "id"], properties: { op: { const: "remove_section" }, id: { type: "string" } } },
           { type: "object", additionalProperties: false, required: ["op", "parameter"], properties: { op: { const: "add_parameter" }, parameter: PARAMETER_JSON_SCHEMA, after: { type: ["string", "null"], description: "The parameter id to insert after; null for the first" } } },
           { type: "object", additionalProperties: false, required: ["op", "id", "set"], properties: { op: { const: "update_parameter" }, id: { type: "string" }, set: { type: "object", description: "Fields to change: label, default, optionsQuery, chType, min, max, maxLength" } } },
-          { type: "object", additionalProperties: false, required: ["op", "id"], properties: { op: { const: "remove_parameter" }, id: { type: "string" } } }
+          { type: "object", additionalProperties: false, required: ["op", "id"], properties: { op: { const: "remove_parameter" }, id: { type: "string" } } },
+          { type: "object", additionalProperties: false, required: ["op", "id", "clickFilter"], properties: { op: { const: "set_click_filter" }, id: { type: "string", description: "A chart or table block" }, clickFilter: { type: ["object", "null"], additionalProperties: false, required: ["param", "column"], properties: { param: { type: "string" }, column: { type: "string" } }, description: "null clears it" } } }
         ]
       }
     }
@@ -227,6 +235,18 @@ export function applyPatch(spec: ReportSpec, patch: ReportPatch, author: ReportQ
         if (at < 0) return fail(`no parameter with id ${op.id}`);
         const { id: _id, ...set } = op.set;
         parameters[at] = { ...parameters[at]!, ...set } as ReportParameter & Record<string, unknown>;
+        break;
+      }
+      case "set_click_filter": {
+        const at = indexOf(op.id);
+        if (at < 0) return fail(`no block with id ${op.id}`);
+        const block = blocks[at]!;
+        if (block.type !== "chart" && block.type !== "table") return fail("only a chart or a table filters on a click");
+        if (op.clickFilter) blocks[at] = { ...block, clickFilter: { param: op.clickFilter.param, column: op.clickFilter.column } };
+        else {
+          const { clickFilter: _cleared, ...rest } = block as typeof block & { clickFilter?: unknown };
+          blocks[at] = rest as typeof block;
+        }
         break;
       }
       case "remove_parameter": {

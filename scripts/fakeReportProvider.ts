@@ -249,6 +249,9 @@ export const qaEditScript: Script = (context) => {
   const instruction = (text(turn?.content).match(/<instruction>\n([\s\S]*?)\n<\/instruction>/)?.[1] ?? "").toLowerCase();
   const target = /The instruction is about block `([^`]+)`/.exec(context.system)?.[1] ?? null;
   const patch = () => {
+    // D534: the owner's Add filter or Remove filter request (structured, in the prompt).
+    const filter = filterRequestPatch(context.system);
+    if (filter) return filter;
     // D516: "Add a new section": a section with net revenue by country, placed where the prompt says.
     if (context.system.includes("The instruction asks for a NEW SECTION")) {
       const sectionAfter = /add_section \{after: (?:null|"([^"]+)")\}/.exec(context.system)?.[1] ?? null;
@@ -279,6 +282,59 @@ export const qaEditScript: Script = (context) => {
   if (context.forced === "submit_patch" || context.lastTool?.name === "run_sql" || !instruction.includes("revenue by country")) return { content: "Proposing the change.", toolCalls: [{ name: "submit_patch", arguments: patch() }] };
   return { content: "Checking the SQL first.", toolCalls: [{ name: "run_sql", arguments: { sql: QA_EDIT_SQL, purpose: "Net revenue per country" } }] };
 };
+
+type SpecInPrompt = { queries: Array<{ key: string; sql: string }>; blocks: Array<{ id: string; type: string; queryKey?: string; kind?: string; x?: string; series?: string }> };
+
+/** Adds `condition` to a simple query's WHERE (first, ANDed), or a WHERE before GROUP BY / ORDER BY / LIMIT. */
+export function withCondition(sql: string, condition: string): string {
+  const where = /\bWHERE\b/i.exec(sql);
+  if (where) return `${sql.slice(0, where.index + where[0].length)} ${condition} AND${sql.slice(where.index + where[0].length)}`;
+  const tail = /\n?\s*\b(GROUP BY|ORDER BY|LIMIT)\b/i.exec(sql);
+  return tail ? `${sql.slice(0, tail.index)}\nWHERE ${condition}${sql.slice(tail.index)}` : `${sql}\nWHERE ${condition}`;
+}
+
+/** Takes a filter's condition out of a query again (Remove filter), with the AND or WHERE that joined it. */
+export function withoutCondition(sql: string, id: string): string {
+  const term = String.raw`\(empty\(\{${id}:[^}]+\}\) OR [^()]+? IN \{${id}:[^}]+\}\)`;
+  return sql.replace(new RegExp(String.raw`\bWHERE ${term} AND `), "WHERE ").replace(new RegExp(String.raw` AND ${term}`), "").replace(new RegExp(String.raw`\n?WHERE ${term}`), "");
+}
+
+/**
+ * D534: the scripted answer to a structured filter request. Add filter: the parameter exactly as asked;
+ * the condition in every query that reads the table, except one that groups by the filtered column
+ * (its chart shows every value: it is left untouched with that reason, and gets clickFilter, D536).
+ * Remove filter: the parameter and its condition go. Null when the prompt holds no filter request.
+ */
+export function filterRequestPatch(system: string) {
+  const raw = /<request>([\s\S]*?)<\/request>/.exec(system)?.[1];
+  if (!system.includes("## The filter request") || !raw) return null;
+  const request = JSON.parse(raw) as { kind: string; id: string; label: string; table?: string; column?: string; chType?: string; optionsQuery?: string };
+  const specText = /## The current report\n([\s\S]*?)\n\n## The filter request/.exec(system)?.[1] ?? "{}";
+  const spec = JSON.parse(specText) as SpecInPrompt;
+  if (request.kind === "remove_filter") {
+    const ops = [
+      { op: "remove_parameter", id: request.id },
+      ...spec.queries.filter((query) => query.sql.includes(`{${request.id}:`)).map((query) => ({ op: "update_query", key: query.key, sql: withoutCondition(query.sql, request.id) }))
+    ];
+    return { summary: `Remove the filter ${request.label}`, ops };
+  }
+  const placeholder = `{${request.id}:${request.chType}}`;
+  const condition = `(empty(${placeholder}) OR ${request.column} IN ${placeholder})`;
+  const reads = spec.queries.filter((query) => query.sql.includes(request.table!));
+  const groups = (sql: string) => new RegExp(String.raw`GROUP BY[^\n]*\b${request.column}\b`, "i").test(sql);
+  const filtered = reads.filter((query) => !groups(query.sql));
+  const kept = reads.filter((query) => groups(query.sql));
+  const clickable = spec.blocks.filter((block) => kept.some((query) => query.key === block.queryKey) && (block.type === "table" || (block.type === "chart" && ["bar", "stacked_bar", "horizontal_bar", "pie", "line", "area"].includes(block.kind ?? "") && block.x === request.column)));
+  return {
+    summary: `Add a ${request.label} filter to ${filtered.map((query) => query.key).join(", ")}`,
+    ops: [
+      { op: "add_parameter", parameter: { id: request.id, label: request.label, type: "multi_select", chType: request.chType, default: [], optionsQuery: request.optionsQuery } },
+      ...filtered.map((query) => ({ op: "update_query", key: query.key, sql: withCondition(query.sql, condition) })),
+      ...clickable.map((block) => ({ op: "set_click_filter", id: block.id, clickFilter: { param: request.id, column: request.column } }))
+    ],
+    untouched: kept.map((query) => ({ key: query.key, reason: `Shows every ${request.column}; clicking it sets the filter` }))
+  };
+}
 
 /** The QA instance's fixed sequence (see the file comment). */
 export const qaScript: Script = (context) => {
