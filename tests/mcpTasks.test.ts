@@ -72,7 +72,8 @@ const auditRows = (actorId: string, eventType: string) => (db.query("SELECT meta
 // Uploads everywhere U0 (D402): the generic attachment reads come with every host module's read scope.
 const ATTACHMENT_READS = ["list_attachments", "read_attachment_text"];
 const TASK_READ_TOOLS = ["get_card", "list_boards", "list_cards", "list_children", "list_sprints", "list_views", "query_cards", "search_cards"];
-const TASK_WRITE_TOOLS = ["comment_on_card", "create_card", "create_sprint", "link_attachment", "link_cards", "manage_tags", "move_card", "set_wip_limit", "start_sprint", "update_card"];
+// archive_card and unarchive_card (D611) hide and restore; neither deletes.
+const TASK_WRITE_TOOLS = ["archive_card", "comment_on_card", "create_card", "create_sprint", "link_attachment", "link_cards", "manage_tags", "move_card", "set_wip_limit", "start_sprint", "unarchive_card", "update_card"];
 
 describe("MCP task tools", () => {
   test("task tools appear only for task scopes, write implies read, and there is nothing that deletes", async () => {

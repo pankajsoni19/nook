@@ -17,6 +17,7 @@ import { reactionGlyph } from "../../shared/reactions";
 import { QUERY_LIMITS, TASK_FLAGS, type CardFilter } from "../../shared/taskQuery";
 import { filterBoardCardIds } from "./cardQuery";
 import { attachmentSchema, cardCreateSchema, cardMoveSchema, cardPatchSchema, columnPatchSchema, commentCreateSchema, isCalendarDate, tagCreateSchema, tagPatchSchema } from "./routes";
+import { archiveCard, unarchiveCard } from "./archive";
 import { cardDetail, createCard, deleteCard, getBoard, getCard, listBoards, moveCard, patchCard, patchColumn, requireOwnedBoard, TaskError, type CardSummary } from "./service";
 import { createTag, listBoardTags, TAG_COLORS, updateTag, type BoardTag } from "./tags";
 import { taskViewTools } from "./viewMcpTools";
@@ -517,6 +518,35 @@ export const taskTools: McpToolSpec[] = [
         return { card: { id: card.id, column_id: card.column_id, position: card.position } };
       });
     }
+  }),
+  // Lane TASKS (D611): archiving hides a card and is undone by unarchive_card, so it is not a removal (D180).
+  defineTool({
+    name: "archive_card",
+    title: "Archive a card",
+    description: "Archive a card on a board where the user can edit cards: it is hidden from the board (unless a person shows archived cards), never deleted, and keeps its column, comments, files, and relations. list_cards and search_cards still list it with archived: true. Undo with unarchive_card. Archiving an archived card changes nothing.",
+    scopes: ["tasks:write"],
+    access: { mode: "items", items: [{ arg: "cardId", kind: "card" }] },
+    write: true,
+    dailyBucket: "task_write",
+    inputSchema: z.object({ cardId: uuid }).strict(),
+    handler: async ({ cardId }, key) => service(key, async () => {
+      const { card } = await archiveCard(key.userId, cardId);
+      return { card: { id: card.id, column_id: card.column_id, archived: card.archived_at !== null, archived_at: card.archived_at } };
+    })
+  }),
+  defineTool({
+    name: "unarchive_card",
+    title: "Unarchive a card",
+    description: "Put an archived card back on its board where it is (edit level). In a done column its auto-archive clock starts again. A card that is not archived is unchanged.",
+    scopes: ["tasks:write"],
+    access: { mode: "items", items: [{ arg: "cardId", kind: "card" }] },
+    write: true,
+    dailyBucket: "task_write",
+    inputSchema: z.object({ cardId: uuid }).strict(),
+    handler: async ({ cardId }, key) => service(key, async () => {
+      const { card } = await unarchiveCard(key.userId, cardId);
+      return { card: { id: card.id, column_id: card.column_id, archived: card.archived_at !== null, archived_at: card.archived_at } };
+    })
   }),
   defineTool({
     name: "link_cards",

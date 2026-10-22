@@ -612,6 +612,9 @@
 .task-subtask-add > svg { flex: none; width: 16px; color: #85858c; }
 .task-subtask-add input { flex: 1; min-width: 0; height: 40px; border: 1px solid #2c2c31; border-radius: 9px; padding: 0 10px; background: #141416; color: inherit; font: inherit; font-size: .86rem; }
 .task-move-parent { padding-bottom: 0; }
+/* The card ⋯ sheet's actions (Copy link, Archive, Set parent) keep their own height on phones, so
+   the column list sits right under them; the shared sheet rule lets every .move-list grow. */
+.file-dialog-sheet .move-list.task-move-parent { flex: none; }
 .task-tree-toggle { width: 28px; height: 28px; flex: none; }
 .task-tree-toggle svg { width: 15px; }
 .task-tree-spacer { flex: none; width: 28px; }

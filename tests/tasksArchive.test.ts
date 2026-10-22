@@ -364,4 +364,35 @@ describe("MCP and search keep archived cards, flagged (D607)", () => {
     const found = await run("search_cards", { query: "Mcp archived card" });
     expect(found.results).toEqual([expect.objectContaining({ id: old.id, is_archived: 1 })]);
   });
+
+  test("archive_card and unarchive_card (D611): tasks:write, edit level, audited with the key, items-scoped", async () => {
+    const { createMcpApiKey } = await import("../server/mcp");
+    const { invokeMcpToolForTests } = await import("../server/mcpTools");
+    const { owner, member, boardId, todo } = await setup("McpArchive");
+    const card = await addCard(owner, boardId, todo.id, "Agent tidies this");
+    const writer = createMcpApiKey(member.userId, "Tidy agent", ["tasks:read", "tasks:write"]);
+    const reader = createMcpApiKey(member.userId, "Read agent", ["tasks:read"]);
+    const run = async (name: string, args: Record<string, unknown>, keyId = writer.id) => {
+      const result = await invokeMcpToolForTests(name, args, keyId);
+      return { isError: result.isError === true, value: JSON.parse(result.content[0]!.text) as Record<string, any> };
+    };
+    // A read-only key cannot call it.
+    expect((await run("archive_card", { cardId: card.id }, reader.id)).isError).toBe(true);
+    const archived = await run("archive_card", { cardId: card.id });
+    expect(archived.isError).toBe(false);
+    expect(archived.value.card).toMatchObject({ id: card.id, column_id: todo.id, archived: true });
+    expect(cardRow(card.id)).toMatchObject({ column_id: todo.id, deleted_at: null });
+    const audit = (event: string) => JSON.parse((db.query("SELECT metadata_json FROM audit_log WHERE actor_id = ? AND event_type = ? ORDER BY rowid DESC LIMIT 1").get(member.userId, event) as { metadata_json: string }).metadata_json);
+    expect(audit("task.card_archive")).toEqual({ boardId, cardId: card.id, via: "mcp", keyId: writer.id });
+    expect((await call(owner, "GET", `/boards/${boardId}`)).body.cards.some((item: { id: string }) => item.id === card.id)).toBe(false);
+    const back = await run("unarchive_card", { cardId: card.id });
+    expect(back.value.card).toMatchObject({ id: card.id, archived: false, archived_at: null });
+    expect(audit("task.card_unarchive")).toEqual({ boardId, cardId: card.id, via: "mcp", keyId: writer.id });
+    // A card on a board the key's user cannot open is NOT_FOUND.
+    const other = await setup("McpArchiveOther");
+    const foreign = await addCard(other.owner, other.boardId, other.todo.id, "Not yours");
+    const refused = await run("archive_card", { cardId: foreign.id });
+    expect(refused.isError).toBe(true);
+    expect(cardRow(foreign.id).archived_at).toBeNull();
+  });
 });
