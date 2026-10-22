@@ -294,14 +294,16 @@ describe("runs with parameters", () => {
     expect(limited).toBe(2);
   });
 
-  test("another run holding the report's lock answers 409 RUN_IN_PROGRESS", async () => {
+  test("D571: a refresh holding the report's lock does not block a reader's set (it runs under the reader's query slots)", async () => {
     const reportId = await seededReport();
     let release!: () => void;
     fake.state.hold = new Promise<void>((resolve) => { release = resolve; });
     const running = refresh.startRefresh(owner.userId, reportId, { trigger: "user" });
-    const blocked = await send(viewer, "POST", `/reports/${reportId}/param-runs`, { values: { period: { preset: "7d" } } });
-    expect(blocked).toMatchObject({ status: 409, body: { code: "RUN_IN_PROGRESS" } });
+    const pending = send(viewer, "POST", `/reports/${reportId}/param-runs`, { values: { period: { preset: "7d" } } });
+    await Bun.sleep(100);
     release();
+    fake.state.hold = null;
+    expect((await pending).status).toBe(200);
     await running.done;
   });
 

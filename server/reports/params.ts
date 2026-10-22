@@ -12,9 +12,9 @@ import { queryIdFor } from "./clickhouse";
 import { usableDatasource, type DatasourceRow } from "./datasources";
 import { asReportError, ReportError } from "./errors";
 import {
-  BUSY_WAIT_MS, capRows, HEARTBEAT_MS, LEASE_MS, paramsJson, parseParams, pool, REFRESH_CONCURRENCY, reportResults, runQueryId, takeRunLock
+  BUSY_WAIT_MS, capRows, paramsJson, parseParams, pool, REFRESH_CONCURRENCY, reportResults, runQueryId
 } from "./refresh";
-import { killQuery, runGuarded } from "./runner";
+import { runGuarded } from "./runner";
 import { parseSpec } from "./service";
 import { classify, GuardError } from "./sqlGuard";
 import { reportToday } from "./paramZone";
@@ -35,10 +35,10 @@ import { reportToday } from "./paramZone";
  *   values it reads) in any set, so a filter change runs only the queries that read it. A result is
  *   fresh while its SQL is the saved SQL and it is newer than the report's last default run; a run
  *   fills the missing ones.
- * - **Runs.** Read access is enough (D489): a run takes the report's one-run lock (409 RUN_IN_PROGRESS
- *   while another runs; the client retries), runs under the caller's query slots and the data source's
- *   limits, and is rate-limited per person (PARAM_RUNS.perMinute). Its run row is removed when it ends
- *   (the Runs history stays the owner's refreshes); the audit log keeps `reports.params.run`.
+ * - **Runs.** Read access is enough (D489). D571: a run takes no report lock; it runs under the caller's
+ *   query slots and the data source's limits beside other readers' runs and the owner's refresh, a query
+ *   already in flight with the same key is awaited, and runs are rate-limited per person (PARAM_RUNS.perMinute).
+ *   No run row is written (the Runs history stays the owner's refreshes); the audit log keeps `reports.params.run`.
  * - **Pruning.** The PARAM_RUNS.setsKept most recently used sets per report are kept, none unused for
  *   PARAM_RUNS.setDays days.
  */
@@ -617,9 +617,12 @@ export function pruneParamSets(reportId?: string, nowMs = Date.now()): number {
   return removed;
 }
 
+/** D571: the parameter-set queries running now, by report and D532 key (a second reader awaits the first run). */
+const runningQueries = new Map<string, Promise<boolean>>();
+
 /**
  * Runs a report with a reader's parameter values (POST …/param-runs, MCP): the set's missing queries
- * (or every one with `force`), under the report's run lock, and answers with the set's results. The
+ * (or every one with `force`), under the caller's query slots (D571), and answers with the set's results. The
  * default set never runs here (it is Refresh all's, the owner's).
  */
 export async function runParamSet(userId: string, reportId: string, given: Record<string, unknown> | null | undefined, options: { trigger: RunTrigger; force?: boolean }): Promise<ParamResultsView> {
@@ -634,30 +637,26 @@ export async function runParamSet(userId: string, reportId: string, given: Recor
   if (!keys.length) return paramResults(reportId, userId, given);
   const datasource = usableDatasource(report.datasource_id);
   rateLimit(userId);
-  const run = takeRunLock({ reportId, kind: "refresh", trigger: options.trigger, userId, queryKeys: [`~p:${set.hash.slice(0, 12)}`, ...keys] });
+  // D571: no report lock. Each reader's set runs under their own query slots (runner.ts: two at a time
+  // per person, eight in all) beside other readers' sets and the owner's refresh; a query already in
+  // flight with the same SQL and values (its D532 key) is awaited, not run twice.
+  const runId = crypto.randomUUID();
   const at = now();
   db.query(`INSERT INTO report_param_sets (report_id, set_hash, values_json, bound_json, created_at, last_used_at) VALUES (?, ?, ?, ?, ?, ?)
     ON CONFLICT (report_id, set_hash) DO UPDATE SET last_used_at = excluded.last_used_at`).run(reportId, set.hash, canonicalValues(spec.parameters, set.values), JSON.stringify(boundRecord(set.bound)), at, at);
   const controller = new AbortController();
   const inFlight = new Set<string>();
-  const heartbeat = setInterval(() => {
-    const renewed = db.query("UPDATE report_runs SET lease_until = ? WHERE id = ? AND status = 'running'").run(new Date(Date.now() + LEASE_MS).toISOString(), run.id).changes;
-    if (!renewed && !controller.signal.aborted) controller.abort();
-  }, HEARTBEAT_MS);
-  (heartbeat as { unref?: () => void }).unref?.();
-  controller.signal.addEventListener("abort", () => { for (const queryId of inFlight) void killQuery(datasource, queryId); }, { once: true });
   const queries = spec.queries.filter((query) => keys.includes(query.key));
   let succeeded = 0;
-  try {
-    await pool(queries, REFRESH_CONCURRENCY, async (query) => {
-      if (controller.signal.aborted) return;
-      if (await runOne(datasource, report, query, set, run.id, userId, controller, inFlight)) succeeded += 1;
-    });
-  } finally {
-    clearInterval(heartbeat);
-    // The lock is released by removing the run: a reader's filter change is not a refresh in Runs.
-    db.query("DELETE FROM report_runs WHERE id = ?").run(run.id);
-  }
+  await pool(queries, REFRESH_CONCURRENCY, async (query) => {
+    const key = `${reportId}\u0000${queryHashOf(query.sql, set.bound)}`;
+    let job = runningQueries.get(key);
+    if (!job) {
+      job = runOne(datasource, report, query, set, runId, userId, controller, inFlight).finally(() => runningQueries.delete(key));
+      runningQueries.set(key, job);
+    }
+    if (await job) succeeded += 1;
+  });
   audit(userId, null, "reports.params.run", { reportId, setHash: set.hash.slice(0, 16), trigger: options.trigger, queries: queries.length, failed: queries.length - succeeded });
   if (plog.enabled("debug")) plog.debug("Parameter set run", { report: reportId.slice(0, 8), set: set.hash.slice(0, 8), queries: queries.length, failed: queries.length - succeeded });
   try { pruneParamSets(reportId); } catch { /* retention is best effort */ }

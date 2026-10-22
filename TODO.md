@@ -7,12 +7,10 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 
 **Current state (2026-10-22).**
 - **v0.43.0** is released (2026-10-22): several docs per report, Add a new section and doc links in Changes, delete from the header, edit and suggest SQL, dynamic filters (slice 1).
-- Migrations: **001–066** are released and immutable (045 and 054 unused; 054 is reserved for Messages). Next free: **067** (lane CLAUDE needed none), **068** LISTS (built), **069** FILT2, **070** SMALL, **071** unused (lane LOCALEMB needed none).
+- Migrations: **001–066** are released and immutable (045 and 054 unused; 054 is reserved for Messages). Next free: **067** (lane CLAUDE needed none), **068** LISTS (built), **069** FILT2 (built), **070** SMALL, **071** unused (lane LOCALEMB needed none).
 - Development happens directly on `main`, pushed as each change passes its gates.
 
 ## In flight
-
-- [ ] **Report filters, later slices** (lane FILT2, migration 069) (slice 1 shipped, D532–D537): linked filters, client-side table sort and contains, saved personal views, more filter types (number range, exclude, text contains, Add filter on dates), and concurrent parameter runs, ranked in [REPORT_FILTERS.md](docs/plan/REPORT_FILTERS.md) "Later". Started 2026-10-22.
 
 - [ ] **API keys, after lane KEYS (D585–D601)** (general keys' Edit adds rows with the password and a security notice, and no row has a dead dropdown):
   - [ ] Vault keys' Edit (`/settings/keys/vault`, `VaultGrantBuilder` `ceiling`) is still narrowing only, with the same pattern: the Vault dropdown is always disabled and Permission collapses to the held level plus Read. Decide whether vault keys may add access on Edit with re-authentication (vault grants have their own checks, `validateVaultGrants`, and protected environments), then apply D585/D587 there.
@@ -35,6 +33,16 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 
 - [ ] Claude, checked only against a fake (lane CLAUDE, D539): on the VM, confirm Anthropic accepts `x-api-key` and `Authorization: Bearer` together on `/v1/chat/completions` and `/v1/models`, and Test tool calling reads "Tool calling works (auto)"; keys not scoped to a workspace also need `anthropic-workspace-id`, which Nook cannot send yet.
 - [ ] Voyage AI behind a proxy: `compat.flavor: "voyage"` and `dimensionsParam` are API-only (the editor offers only Anthropic's headers). (A provider's embedding model and size now have fields, lane LOCALEMB D547.)
+
+## Leftovers (lane FILT2)
+
+- [ ] Remove filter (`DELETE …/filters/:paramId`, D534) still takes only multi-selects: a text-contains, date-range, or number-range filter is removed by asking in Changes. A removal of a date range cannot be identity-checked (its default narrowed the results), so it would need the same "review by hand" path as D570.
+- [ ] Add filter does not offer a number range (D567); generation and the edit agent write them. Offer it on numeric columns (Float, Decimal, and wide integers), with the identity check at Any.
+- [ ] Add filter on a DateTime column filters by `toDate(col)` in the data source's zone, while the presets resolve in the report's zone (D570); write `toDate(col, '<report zone>')` when the two differ.
+- [ ] Narrow by (D562) recognizes a parent only when its options query lists one plain column of one table (Add filter's shape, or `SELECT DISTINCT col FROM db.t`); an agent-written options query with an expression is not offered.
+- [ ] Save as report default (D566) is a manual edit, so the design rules run on every block that reads a changed default and can refuse it (e.g. a KPI without a unit); the sheet shows the refusal, but the owner has to fix the block first.
+- [ ] The new filter types (D567–D569) and linked lists (D560) are proven against the fake ClickHouse and by hand on the QA ClickHouse 26.6; add a `CLICKHOUSE_TEST_URL` variant (`-inf`/`inf` Float64 ends, the `_not` flag, `positionCaseInsensitive` on LowCardinality).
+- [ ] Saved views are app-only (D565). A read-only MCP `list_report_views` would be safe (the key owner's own views) if an agent needs them.
 
 ## Leftovers (lane LOCALEMB)
 

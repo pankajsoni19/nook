@@ -70,7 +70,7 @@ Parameters stay the only mechanism: every filter is a spec v3 parameter bound as
 2. **Table sort and contains, client side:** over loaded rows, state in the URL (`?t.<block>=col.desc`, replace), "within the first N rows" when truncated; personal. **Shipped** (lane FILT2, D563, D564).
 3. **Saved views:** per-viewer named value sets and "my default view" (`report_param_views`); only the owner's "Save as report default" changes the spec. **Shipped** (lane FILT2, D565, D566, migration 069).
 4. **More types:** `number_range`, multi-select exclude, text contains, Add filter on Date/DateTime as a date_range (reviewed by hand, no identity check). **Shipped** (lane FILT2, D567–D570).
-5. **Concurrent parameter runs** under the caller's query slots, measured after F1.
+5. **Concurrent parameter runs** under the caller's query slots, measured after F1. **Shipped** (lane FILT2, D571: 4.86 s → 0.34 s for four readers at once).
 
 ## What not to do
 
