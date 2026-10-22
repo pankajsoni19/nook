@@ -114,7 +114,7 @@ Back up first (`./scripts/backup.sh --force`), pull, rebuild, and let migrations
 
 ## What's new
 
-Release notes for every version are in [CHANGELOG.md](CHANGELOG.md). Latest (v0.44.0):
+Release notes for every version are in [CHANGELOG.md](CHANGELOG.md) and on the [docs site](https://pankajsoni19.github.io/nook/releases.html). Latest (v0.44.0):
 
 - **Claude, Voyage AI and Local embeddings** (a model built into Nook); keyword-only knowledge bases without embeddings.
 - **Chat agents query report data sources** (admin-controlled, guarded), with result tables and Turn into a report.

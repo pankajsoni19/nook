@@ -1,6 +1,6 @@
 # Nook implementation tracker
 
-Only open work lives here. Remove an item once it is done. Shipped work is in [CHANGELOG.md](CHANGELOG.md), the docs site ("What's new"), and `git log`.
+Only open work lives here. Remove an item once it is done. Shipped work is in [CHANGELOG.md](CHANGELOG.md), the docs site's [release notes](https://pankajsoni19.github.io/nook/releases.html), and `git log`.
 
 - Plans of record: `DEVELOPMENT_PLAN.md`, `docs/plan/research/`, [reports plan](docs/plan/WAVES_45-48_REPORTS.md), [report theme](docs/plan/REPORT_THEME.md).
 - Contracts: [API](docs/plan/API_CONTRACTS.md) · [Threat model](docs/plan/THREAT_MODEL.md) · [Test plan](docs/plan/TEST_PLAN.md).
@@ -28,8 +28,6 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
   - [ ] Litestream continuous replication of the SQLite database to S3 (same bucket, its own prefix), with point-in-time restore.
   - [ ] Restore drill: a command that restores the latest backup (archive or Litestream) into a scratch instance and verifies it.
 - [ ] **Vault keys: Edit can add access** (operator, 2026-10-22: "allow, wherever possible target ease of use"; lane VAULTKEY): same as general keys (D585): add rows and widen with the password, refuse what the owner can't grant, security mail and bell notice.
-
-- [ ] **Docs site: features first, release notes out of the way** (operator, 2026-10-22; lane DOCSITE): https://pankajsoni19.github.io/nook/ opens on ~40 "What's new in vX" entries before the apps; lead with what Nook does and each app, keep one "What's new" (latest) link, and move older release notes to their own page.
 
 ## Waiting on the operator
 
@@ -85,3 +83,5 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
   - The Docker verify image has no `docs/` and no `git`, so guard with `test.skipIf` / `Bun.which`.
   - Use `tests/support/agentRuns.ts` and `clock.ts` for timing-sensitive tests, and `cpuTime.ts` for work budgets.
 - **TODO.md.** Remove an item in the same commit that ships it.
+- **Docs site (`site/`, GitHub Pages).** `index.html` is features first: a new app or module gets a section under "Using Nook" and a nav entry (`tests/docsSite.test.ts` checks every module); operator setup goes under Self-hosting or Operations.
+- **Release notes on a release.** With the version bump: `CHANGELOG.md` gets the full entry and README's "What's new" its three bullets. On the docs site, add a `<section id="whats-new-X-Y-Z">` at the top of `site/releases.html` (and its link at the top of that page's "Release notes" nav), replace the `#whats-new` box on `site/index.html` with the same short notes (keep its "All release notes" link and id), and bump the `v…` badges, the footers, the "What's new in v…" nav entry, and the hero's "New in" pill. Upgrade steps go in `docs/OPERATIONS.md` and the Upgrading section. `bun --no-env-file test tests/docsSite.test.ts` checks that the two pages agree with `package.json`.
