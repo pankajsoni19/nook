@@ -83,7 +83,8 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 - **Tests.**
   - Run with `bun --no-env-file test`.
   - Tests that spawn `bun` use `--no-env-file`.
-  - The Docker verify image has no `docs/` and no `git`, so guard with `test.skipIf` / `Bun.which`.
+  - The Docker verify image has no `docs/` and no `git`, so guard with `test.skipIf` / `Bun.which`. It does copy `scripts/` and `evals/`; a test that imports another repo folder needs that folder added to the Dockerfile's `verify` stage.
+  - Run `docker build --target verify -t nook-verify-<lane> .` before a release (it must pass; remove the image after).
   - Use `tests/support/agentRuns.ts` and `clock.ts` for timing-sensitive tests, and `cpuTime.ts` for work budgets.
 - **TODO.md.** Remove an item in the same commit that ships it.
 - **Docs site (`site/`, GitHub Pages).** `index.html` is features first: a new app or module gets a section under "Using Nook" and a nav entry (`tests/docsSite.test.ts` checks every module); operator setup goes under Self-hosting or Operations.

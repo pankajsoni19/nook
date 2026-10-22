@@ -17,6 +17,10 @@ COPY src ./src
 COPY shared ./shared
 COPY server ./server
 COPY tests ./tests
+# The tests import the fakes they share with the QA instances (scripts/fakeReportProvider.ts, fakeDocMcp.ts,
+# buttonMetrics.ts) and the report eval harness (evals/), and tests/testPorts.test.ts scans scripts/.
+COPY scripts ./scripts
+COPY evals ./evals
 COPY bunfig.toml ./
 RUN bun run typecheck && bun test && bun run build
 

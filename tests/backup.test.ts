@@ -131,7 +131,8 @@ describe("an online backup to the local folder", () => {
     expect(left).toEqual([names[3]!, names[2]!]);
     expect(existsSync(legacy)).toBe(true);
     expect(existsSync(other)).toBe(true);
-  });
+    // Four full backups: under a loaded host (the Docker verify stage runs the whole suite) they pass 5 s.
+  }, 30_000);
 
   test("refuses below the free-disk floor, counts failures, and one job runs at a time", async () => {
     const made = fixture("floor");
