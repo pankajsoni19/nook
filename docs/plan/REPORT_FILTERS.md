@@ -96,7 +96,7 @@ Parameters stay the only mechanism: every filter is a spec v3 parameter bound as
 - New `filterRequest.ts`: options query from the catalog; `POST /api/reports/:id/filters` (owner) validates column/type, runs the options query, queues the instruction; `DELETE /api/reports/:id/filters/:param` queues removal.
 - `edit.ts`: the structured-request prompt section and the DF4 checks before a proposal is stored.
 - `patch.ts`: a `set_click_filter` op.
-- MCP: `get_report` returns `reach` and `clickFilter`; `add_report_filter` and `remove_report_filter` (`reports:write`, owner), returning the instruction id.
+- MCP: `get_report` returns `reach` and `clickFilter`; `add_report_filter` (`reports:write`, owner), returning the instruction. Remove filter stays in the app (D180): no MCP tool, and `apply_report_proposal` refuses a removal proposal.
 
 ## UI changes (slice 1)
 

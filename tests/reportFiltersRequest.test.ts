@@ -226,7 +226,8 @@ describe("Add filter: the eval case top_routes, \"add a filter on requests.route
     const proposal = (await send(owner, "GET", `/reports/${reportId}/instructions/${instructionId}/proposal`)).body.proposal;
     expect(proposal.filter).toEqual({
       request: asked.body.instruction.request,
-      checked: [{ key: "errors", rows: 1, otherValue: "healthz", otherRows: 1 }],
+      // healthz (the most common value) gives the error rate no data (the query excludes it); digest, the next, does.
+      checked: [{ key: "errors", rows: 1, otherValue: "digest", otherRows: 1 }],
       untouched: [{ key: "routes", reason: "Shows every route; clicking it sets the filter" }],
       reach: { blocks: 1, total: 2 }
     });
@@ -289,7 +290,7 @@ describe("Add filter: the eval case top_routes, \"add a filter on requests.route
     expect(spec.blocks.some((block) => "clickFilter" in block)).toBe(false);
   });
 
-  test("MCP: add_report_filter and remove_report_filter are the owner's (reports:write); get_report shows clickFilter and reach", async () => {
+  test("MCP: add_report_filter is the owner's (reports:write); get_report shows clickFilter and reach; removing a filter stays in the app (D180)", async () => {
     const reportId = await seededReport();
     const tool = (name: string) => reportTools.find((item) => item.name === name)!;
     const key = (session: Session) => ({ keyId: `k-${session.userId.slice(0, 6)}`, userId: session.userId, name: "k", scopes: ["reports:read", "reports:write"] as never });
@@ -301,13 +302,14 @@ describe("Add filter: the eval case top_routes, \"add a filter on requests.route
     const report = await tool("get_report").handler({ reportId }, key(owner)) as Json;
     expect(report.reach).toEqual({ route: ["errors"] });
     expect(report.blocks.find((block: Json) => block.id === "routes").clickFilter).toEqual({ param: "route", column: "route" });
-    await expect(Promise.resolve(tool("remove_report_filter").handler({ reportId, parameterId: "route" }, key(commenter)))).rejects.toMatchObject({ code: "NOT_FOUND" });
-    const removed = await tool("remove_report_filter").handler({ reportId, parameterId: "route" }, key(owner)) as Json;
-    expect(removed.instruction.request).toEqual({ kind: "remove_filter", id: "route", label: "Route" });
-    await waitStatus(removed.instruction.id, ["proposed"]);
-    // Nothing is removed until the owner applies it.
+    // No MCP tool removes a filter, and a removal asked for in the app is applied in the app only.
+    expect(reportTools.some((item) => /remove/.test(item.name))).toBe(false);
+    const removal = await send(owner, "DELETE", `/reports/${reportId}/filters/route`);
+    await waitStatus(removal.body.instruction.id, ["proposed"]);
+    await expect(Promise.resolve(tool("apply_report_proposal").handler({ reportId, instructionId: removal.body.instruction.id }, key(owner)))).rejects.toMatchObject({ code: "INVALID" });
     expect(specOf(reportId).parameters.map((param) => param.id)).toEqual(["route"]);
-    await send(owner, "POST", `/reports/${reportId}/instructions/${removed.instruction.id}/reject`, {});
+    expect((await send(owner, "POST", `/reports/${reportId}/instructions/${removal.body.instruction.id}/apply`, {})).status).toBe(200);
+    expect(specOf(reportId).parameters).toEqual([]);
   });
 });
 

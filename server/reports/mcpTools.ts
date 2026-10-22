@@ -24,7 +24,7 @@ import { METRIC_ID, METRIC_LIMITS, type CatalogMetricInput } from "../../shared/
 import { queryResults, reportRun, startRefresh } from "./refresh";
 import { OPTION_SEARCH, paramResults, runParamSet, searchParamOptions } from "./params";
 import { reachOf } from "../../shared/reportParams";
-import { requestAddFilter, requestRemoveFilter } from "./filterRequest";
+import { requestAddFilter } from "./filterRequest";
 import { saveSchedule } from "./scheduler";
 import { listReportsPage, parseSpec as parseStoredSpec, setFavorite } from "./service";
 import { createFolder, listFolders, moveReportToFolder, updateFolder } from "./folders";
@@ -449,17 +449,6 @@ export const reportTools: McpToolSpec[] = [
       parameterId: z.string().regex(/^[a-z][a-z0-9_]{0,29}$/).optional().describe("The parameter id (default: from the column name)")
     }),
     handler: ({ reportId: id, table, column, label, parameterId: paramId }, key) => asOwner(key, async (role) => ({ instruction: await requestAddFilter({ userId: key.userId, role, keyId: key.keyId }, id, { table, column, ...(label ? { label } : {}), ...(paramId ? { id: paramId } : {}) }) }))
-  }),
-  defineTool({
-    name: "remove_report_filter",
-    title: "Ask to remove a report filter",
-    description: "The report owner's Remove filter (D534): queues a change for the edit agent to remove a multi-select filter and take its condition out of the queries; Nook checks each changed query's result equals today's result with the filter at All. Nothing is removed until the owner applies the proposal (apply_report_proposal); never auto-applied. Returns the instruction.",
-    scopes: ["reports:write"],
-    access: { mode: "items", items: reportItem, related: ["parameterId"] },
-    write: true,
-    buckets: ["report_write"],
-    inputSchema: z.object({ reportId, parameterId: z.string().regex(/^[a-z][a-z0-9_]{0,29}$/).describe("The filter's parameter id (from get_report)") }),
-    handler: ({ reportId: id, parameterId }, key) => asOwner(key, async (role) => ({ instruction: await requestRemoveFilter({ userId: key.userId, role, keyId: key.keyId }, id, parameterId) }))
   }),
   defineTool({
     name: "apply_report_proposal",

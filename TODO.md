@@ -23,9 +23,7 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 
 ## Small fixes
 
-- [ ] Add filter's "ran with one value" check (D535) picks the filter's most common value, which a query may exclude (the eval's `healthz` gives an empty error rate): pick a value the changed query's own result holds, where it shows the column.
 - [ ] Add filter is only proven against the scripted agent and the QA ClickHouse by hand: add a `CLICKHOUSE_TEST_URL` variant of tests/reportFiltersRequest.test.ts that seeds `eval_top_routes` and runs the identity check on a real server (ORDER BY ties, Decimal and Float rows).
-- [ ] A bar chart's value labels overlap at 390 px when six bars carry "498 orders" each (seen in lane FILTERS' QA, not caused by it): drop the unit or the labels when they would collide.
 - [ ] Several docs (lane DOCS): a doc added in Doc settings stays "New" after a change that attached the same doc is applied (the edit read it, but only Regenerate stamps a doc's hash); decide whether an applied change should stamp it.
 - [ ] "Add a new section" after a block outside any section puts the section first among the sections, which render after every loose block (D516), so it can land below later loose blocks; placing it truly in between would need the loose blocks after the anchor to move into a section.
 - [ ] Inspect → "From the doc" (D518) needs the plan todo's `docRef` (`d2`); the scripted QA provider never sets it, so only a real model's runs show it. Check after the real-model eval.

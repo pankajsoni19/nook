@@ -312,6 +312,8 @@ export function applyProposal(userId: string, reportId: string, instructionId: s
   const report = ownedReport(reportId, userId);
   const row = proposedRow(reportId, instructionId);
   const proposal = storedProposal(row);
+  // D180, D534: removing a filter is applied in the app, never over MCP.
+  if (options.keyId && requestOf(row)?.kind === "remove_filter") throw new ReportError(400, "INVALID", "Removing a filter is applied in Nook, not over MCP");
   refuseWhileRunning(reportId);
   const stale = (reason: string): never => {
     rejectStale(row, reason);

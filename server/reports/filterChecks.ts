@@ -136,12 +136,20 @@ export function resultFingerprint(outcome: { columns: readonly ResultColumn[]; r
   return stableJson({ columns: outcome.columns.map((column) => [column.name, column.type]), rows: createHash("sha256").update(rows.join("\n")).digest("hex") });
 }
 
+/** D535: the most common filter values tried for "runs with one value picked", until one gives the query data. */
+export const FILTER_CHECK_VALUES = 5;
+/** A result with data: a row with at least one value that is not NULL (an aggregate over no rows is NULL). */
+const hasData = (rows: readonly unknown[][]) => rows.some((row) => row.some((cell) => cell !== null && cell !== undefined));
+
 type CheckContext = { datasource: DatasourceRow; userId: string; runId: string; today: string; signal?: AbortSignal };
 
 /**
  * D535: every changed query's result with the filter at All equals the old query's result today (both
  * run now, with the same bound defaults; a removal compares with the old query at All), and an added
- * filter's query runs with one value picked. Answers the refusals, or the checks for the review.
+ * filter's query runs with one value picked: the most common values are tried in turn (at most
+ * FILTER_CHECK_VALUES) until one gives the query data (a row with a value that is not NULL), so the
+ * review names a value that shows something; when none does, the last one counts as long as it ran
+ * without an error (an empty result is still a run). Answers the refusals, or the checks for the review.
  */
 export async function filterIdentityChecks(before: ReportSpec, after: ReportSpec, request: FilterRequest, newResults: ReadonlyMap<string, QueryOutcome>, context: CheckContext): Promise<{ errors: string[]; checked: FilterQueryCheck[] }> {
   const oldQueries = new Map(before.queries.map((query) => [query.key, query]));
@@ -154,15 +162,15 @@ export async function filterIdentityChecks(before: ReportSpec, after: ReportSpec
   const run = (query: ReportQuery, bound: BoundParam[], tag: string) => runGuarded(context.datasource, query.sql, {
     classes: ["select"], maxRows: Math.min(context.datasource.max_rows, 10_000), queryId: queryIdFor(tag, short, query.key), userId: context.userId, signal: context.signal, params: bound
   });
-  let other: string | null = null;
+  let candidates: string[] = [];
   if (request.kind === "add_filter") {
     try {
-      other = (await runOptionsQuery(context.datasource, request.optionsQuery, { userId: context.userId, queryId: queryIdFor("fltchk", short, request.id), signal: context.signal })).options[0] ?? null;
+      candidates = (await runOptionsQuery(context.datasource, request.optionsQuery, { userId: context.userId, queryId: queryIdFor("fltchk", short, request.id), signal: context.signal })).options.slice(0, FILTER_CHECK_VALUES);
     } catch (error) {
       if (context.signal?.aborted) throw error;
       return { errors: [`The filter's options query failed: ${asReportError(error).message.slice(0, 300)}`], checked: [] };
     }
-    if (other === null) return { errors: ["The filter's options query returned no values"], checked: [] };
+    if (!candidates.length) return { errors: ["The filter's options query returned no values"], checked: [] };
   }
   const errors: string[] = [];
   const checked: FilterQueryCheck[] = [];
@@ -182,16 +190,23 @@ export async function filterIdentityChecks(before: ReportSpec, after: ReportSpec
       continue;
     }
     let otherRows: number | null = null;
-    if (request.kind === "add_filter") {
+    let other: string | null = null;
+    let failed = false;
+    for (const candidate of candidates) {
       try {
-        const picked = bindValues(after.parameters, { ...defaultValues(after.parameters), [request.id]: [other!] }, context.today);
-        otherRows = (await run(query, picked, "fltone")).rows.length;
+        const picked = bindValues(after.parameters, { ...defaultValues(after.parameters), [request.id]: [candidate] }, context.today);
+        const outcome = await run(query, picked, "fltone");
+        other = candidate;
+        otherRows = outcome.rows.length;
+        if (hasData(outcome.rows)) break;
       } catch (error) {
         if (context.signal?.aborted) throw error;
-        errors.push(`Query ${query.key} fails with ${request.label} = ${other!.slice(0, 60)}: ${asReportError(error).message.slice(0, 200)}`);
-        continue;
+        errors.push(`Query ${query.key} fails with ${request.label} = ${candidate.slice(0, 60)}: ${asReportError(error).message.slice(0, 200)}`);
+        failed = true;
+        break;
       }
     }
+    if (failed) continue;
     checked.push({ key: query.key, rows: fresh.rows.length, otherValue: request.kind === "add_filter" ? other : null, otherRows });
   }
   return { errors, checked };

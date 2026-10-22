@@ -75,8 +75,8 @@ export const NOOK_NEVER_TOOLS: ReadonlySet<string> = new Set([
   "add_report_instruction", "apply_report_proposal", "reject_report_proposal", "update_report_query", "update_report_metric",
   // D530: a suggested query edit runs SQL too (T402).
   "suggest_report_query",
-  // D534: Add filter and Remove filter are the owner's requests to the report's edit agent.
-  "add_report_filter", "remove_report_filter",
+  // D534: Add filter is the owner's request to the report's edit agent (Remove filter is app-only, D180).
+  "add_report_filter",
   // Lane I: a report's folder is its owner's organisation of the Reports home, not an agent's.
   "create_report_folder", "move_report_to_folder", "update_report_folder",
   // Phase 2 (D482): who owns a report is for people and admins to decide, never an agent.

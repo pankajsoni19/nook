@@ -310,7 +310,9 @@ export function ReportView({ report, canWrite, generating = false, initial, read
     return Object.fromEntries(parameters.map((param) => [param.id, { blocks: data.filter((block) => blockKeys(block).some((key) => queryReach[param.id]?.includes(key))).length, total: data.length }]));
   }, [blocks, parameters, queryReach]);
   const changedParams = useMemo(() => withParams ? parameters.filter((param) => !isDefaultSet([param], { [param.id]: values[param.id] ?? param.default })) : [], [parameters, values, withParams]);
-  const notFilteredBy = (block: DataBlock) => changedParams.filter((param) => !blockKeys(block).some((key) => queryReach[param.id]?.includes(key)));
+  // A chart or table whose click sets the filter is its source: its highlight says what is picked, so it shows no "Not filtered by" for it.
+  const notFilteredBy = (block: DataBlock) => changedParams.filter((param) => !blockKeys(block).some((key) => queryReach[param.id]?.includes(key))
+    && !(isClickable(block) && block.clickFilter?.param === param.id));
 
   // D536: click to filter. A click pushes a URL entry (Back undoes it); clicks closer than 300 ms are one (TF4);
   // a value the options do not list is refused here as the server would (TF3).

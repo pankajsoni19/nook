@@ -171,7 +171,30 @@ describe("D534: Add filter", () => {
 });
 
 const { clickedValue, pickedValues } = await import("../src/reports/clickFilter");
-const { buildChartOption, paletteFor } = await import("../src/reports/chartOption");
+const { barTipFit, buildChartOption, paletteFor } = await import("../src/reports/chartOption");
+
+describe("D538: bar value labels never collide", () => {
+  const six = [498, 498, 498, 498, 497, 497];
+  test("a phone tile drops the unit, then compacts, then hides the labels; a desktop tile keeps them whole", () => {
+    // Half-width tiles: 1585 (≈765 px) and 1280 (≈589 px) keep "498 orders"; 390 (≈332 px) drops the unit.
+    expect(barTipFit(six, 6, "number", "orders", 765)).toBe("full");
+    expect(barTipFit(six, 6, "number", "orders", 589)).toBe("full");
+    expect(barTipFit(six, 6, "number", "orders", 332)).toBe("short");
+    expect(barTipFit([1234, 2345, 3456, 4567, 5678, 6789], 6, "number", "orders", 242)).toBe("tiny");
+    expect(barTipFit(six, 12, "number", "orders", 120)).toBe("none");
+    expect(barTipFit(six, 6, "number", "orders", undefined)).toBe("full");
+  });
+
+  test("the option follows the fit: no unit at 332 px, no labels when even 1.2K would touch", () => {
+    const chart = { id: "c", type: "chart" as const, title: "Orders", intent: "compare" as const, kind: "bar" as const, queryKey: "q", x: "country", y: ["orders"], format: "number" as const, unit: "orders" };
+    const data = { columns: [{ name: "country", type: "String" }, { name: "orders", type: "UInt64" }], rows: six.map((value, at) => [`C${at}`, String(value)]) };
+    const label = (width: number) => (buildChartOption(chart, data, paletteFor("dark"), { width }).option as { series: Array<{ label: { show: boolean; formatter: (p: { value: number }) => string } }> }).series[0]!.label;
+    expect(label(589).formatter({ value: 498 })).toBe("498 orders");
+    expect(label(332).formatter({ value: 498 })).toBe("498");
+    expect(label(332).show).toBe(true);
+    expect(label(100).show).toBe(false);
+  });
+});
 
 describe("D536: click to filter", () => {
   const COUNTRY = { id: "country", label: "Country", type: "multi_select" as const, chType: "Array(String)", default: [] as string[], optionsQuery: "SELECT DISTINCT country FROM analytics.orders" };
@@ -238,8 +261,8 @@ describe("D536: click to filter", () => {
     expect(pushes).toEqual([{ country: ["DE"] }]);
     await view.waitFor(() => document.querySelector(".report-row-picked"));
     expect(document.querySelector(".report-row-picked td")?.textContent).toBe("DE");
-    // The KPI follows the filter; the chart and table (its click sources) say they are not filtered by it.
-    expect(notes()).toEqual(["Orders: -", "By country: Not filtered by Country", "Countries: Not filtered by Country"]);
+    // The KPI follows the filter; the chart and table are its click sources: their highlight says it, with no "Not filtered by".
+    expect(notes()).toEqual(["Orders: -", "By country: -", "Countries: -"]);
     // Keyboard: rows are focusable; Enter on a picked row clears it (after the 300 ms that make two clicks one).
     await Bun.sleep(320);
     const row = document.querySelector<HTMLTableRowElement>(".report-row-picked")!;

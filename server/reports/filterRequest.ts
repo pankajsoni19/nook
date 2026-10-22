@@ -159,7 +159,7 @@ export async function requestAddFilter(actor: Actor, reportId: string, input: { 
   return instruction;
 }
 
-/** DELETE …/filters/:paramId (the owner; MCP `remove_report_filter`): a multi-select filter, removed by the edit agent and checked against its All results. */
+/** DELETE …/filters/:paramId (the owner, in the app only: D180 keeps removals off MCP): a multi-select filter, removed by the edit agent and checked against its All results. */
 export async function requestRemoveFilter(actor: Actor, reportId: string, paramId: string): Promise<ReportInstruction> {
   const report = ownerActor(actor, reportId);
   const spec = parseSpec(report.spec_json);

@@ -441,6 +441,15 @@ export function buildChartOption(block: ChartBlock, data: ChartData, theme: Char
     return number === null ? "" : compactValue(number, format);
   });
   const lineLabel = endFit.short ? { ...labelStyle, formatter: shortLabel } : labelStyle;
+  // Value labels on top of vertical bars never collide (as D492/D493 for line ends and horizontal bars):
+  // in a narrow tile they drop the unit, then compact (498 → 498, 1,234 → 1.2K), then go (the axis and tooltip carry the value).
+  const barTips = barTipFit(bars && !horizontal && series.length === 1 && !stacked ? series[0]!.values : [], categories.length, format, unit, size.width);
+  const tinyLabel = named(`label:${format ?? "number"}:tiny`, (params: { value?: unknown }) => {
+    const raw = Array.isArray(params.value) ? params.value[params.value.length - 1] : params.value;
+    const number = toNumber(raw);
+    return number === null ? "" : tinyValue(number, format);
+  });
+  const barLabel = barTips === "short" ? { ...labelStyle, formatter: shortLabel } : barTips === "tiny" ? { ...labelStyle, formatter: tinyLabel } : labelStyle;
   const endGutter = endFit.gutter;
   const percentAxis = percent ? { min: 0, max: 1 } : {};
   const echartsSeries: Array<Record<string, unknown>> = series.map((item, at) => {
@@ -458,13 +467,13 @@ export function buildChartOption(block: ChartBlock, data: ChartData, theme: Char
         // A 2 px gap in the surface colour between touching bars and stack segments (1 px border each side).
         itemStyle: { color, borderRadius: radius, borderColor: ink.surface, borderWidth: MARKS.bar.gap / 2 },
         emphasis: { focus: "series" },
-        label: { show: tips && categories.length <= TIP_LABELS, position: horizontal ? "right" : "top", ...labelStyle },
+        label: { show: tips && categories.length <= TIP_LABELS && barTips !== "none", position: horizontal ? "right" : "top", ...barLabel },
         data: item.values.map((value, position) => {
           const highlight = pickedCategories === null && emphasisCategory !== null && categories[position] === emphasisCategory;
           const grey = dimmed(position);
           const extreme = tips && categories.length > TIP_LABELS && position === top;
           if (!highlight && !extreme && !grey) return value;
-          return { value, ...(highlight ? { itemStyle: { color: theme.series[0] } } : grey ? { itemStyle: { color: theme.emphasisMuted } } : {}), ...(extreme ? { label: { show: true, position: horizontal ? "right" : "top", ...labelStyle } } : {}) };
+          return { value, ...(highlight ? { itemStyle: { color: theme.series[0] } } : grey ? { itemStyle: { color: theme.emphasisMuted } } : {}), ...(extreme ? { label: { show: true, position: horizontal ? "right" : "top", ...(barTips === "none" ? labelStyle : barLabel) } } : {}) };
         })
       };
     }
@@ -506,6 +515,27 @@ export function buildChartOption(block: ChartBlock, data: ChartData, theme: Char
     yAxis: horizontal ? { ...categoryAxis, inverse: true } : { ...valueAxis, ...percentAxis },
     series: echartsSeries
   }, categories.length);
+}
+
+/** A bar's value with no unit, compacted from 1,000 for plain numbers (the narrowest bar label). */
+export function tinyValue(value: number, format: ValueFormat | undefined): string {
+  return Math.abs(value) >= 1000 && (format === undefined || format === "number" || format === "integer") ? compactNumber.format(value) : compactValue(value, format);
+}
+
+/**
+ * How vertical bars' value labels fit their tile: "full" (with the unit), "short" (no unit), "tiny"
+ * (no unit, compacted), or "none" when even that would touch the next bar's label. Unknown width: full.
+ * The plot takes the tile less about 56 px of axis and padding; a label needs its width plus 6 px.
+ */
+export function barTipFit(values: ReadonlyArray<number | null>, count: number, format: ValueFormat | undefined, unit: string | undefined, width?: number): "full" | "short" | "tiny" | "none" {
+  const numbers = values.filter((value): value is number => value !== null);
+  if (width === undefined || !numbers.length || count < 1) return "full";
+  const slot = (width - 56) / count - 6;
+  const widest = (text: (value: number) => string) => Math.max(...numbers.map((value) => labelWidth(text(value))));
+  if (widest((value) => compactValue(value, format, unit)) <= slot) return "full";
+  if (unit && widest((value) => compactValue(value, format)) <= slot) return "short";
+  if (widest((value) => tinyValue(value, format)) <= slot) return "tiny";
+  return "none";
 }
 
 /** The gap between a line's last dot and its end label, px. */

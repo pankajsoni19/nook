@@ -17,9 +17,7 @@ test("no write tool's name offers a forbidden verb", () => {
   expect(writes.length).toBeGreaterThan(30);
   for (const spec of writes) expect({ name: spec.name, forbidden: FORBIDDEN_WRITE_NAME.test(spec.name) }).toEqual({ name: spec.name, forbidden: false });
   // Nor does any tool delete (the Bin is the only removal, and it is always reversible).
-  // D534: remove_report_filter is the one name with "remove": it only queues a proposal the report's owner applies in the app (or rejects); it removes nothing.
-  for (const spec of mcpToolSpecs.filter((item) => item.name !== "remove_report_filter")) expect(spec.name).not.toMatch(/(^|_)delete(_|$)|remove|base64/);
-  expect(mcpToolSpecs.find((item) => item.name === "remove_report_filter")?.description).toContain("Nothing is removed until the owner applies the proposal");
+  for (const spec of mcpToolSpecs) expect(spec.name).not.toMatch(/(^|_)delete(_|$)|remove|base64/);
 });
 
 test("the Wave 19 tools are exactly these, each with its scopes, all-of scopes, and buckets", () => {
