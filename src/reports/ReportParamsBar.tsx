@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, ListFilter, LoaderCircle, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { Bookmark, Check, ChevronDown, ListFilter, LoaderCircle, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { ModalDialog } from "../files/Dialog";
 import type { ReportParamsSearch } from "../router";
 import { Select } from "../ui/Select";
@@ -217,10 +217,13 @@ type BarProps = {
   onAddFilter?: () => void;
   /** D534: the owner's "Remove filter" on a multi-select's sheet. */
   onRemoveFilter?: (param: ReportParameter) => void;
+  /** D565: open the reader's saved views, and the one on show (its name on the chip). */
+  onViews?: () => void;
+  viewName?: string | null;
 };
 
 /** The control bar: pills from 761 px, the Filters button and sheet on a phone. */
-export function ReportParamsBar({ reportId, parameters, values, busy, onChange, timeZone = "UTC", reach = NO_REACH, onAddFilter, onRemoveFilter }: BarProps) {
+export function ReportParamsBar({ reportId, parameters, values, busy, onChange, timeZone = "UTC", reach = NO_REACH, onAddFilter, onRemoveFilter, onViews, viewName = null }: BarProps) {
   const options = useParamOptions(reportId, parameters, true, values);
   const [sheet, setSheet] = useState<Sheet>(null);
   const [phoneOpen, setPhoneOpen] = useState(false);
@@ -234,6 +237,8 @@ export function ReportParamsBar({ reportId, parameters, values, busy, onChange, 
     <div className="report-params-chips">
       {parameters.map((param) => <ParamField key={param.id} param={param} value={values[param.id] ?? param.default} options={options} variant="chip" disabled={false}
         onChange={(value) => set(param, value)} onSheet={setSheet} />)}
+      {onViews && <span className={`report-param${viewName ? " active" : ""}`}><button type="button" className="ui-select ui-select-chip report-param-multi report-params-views" aria-haspopup="dialog" onClick={onViews}
+        aria-label={viewName ? `Saved views: ${viewName} on show` : "Saved views"}><Bookmark className="report-params-views-icon" aria-hidden="true" /><span className="ui-select-value">{viewName ? `View: ${viewName}` : "Views"}</span><ChevronDown className="ui-select-chevron" aria-hidden="true" /></button></span>}
       {addButton("report-params-add-chip")}
       {!isDefault && <button type="button" className="secondary-button report-params-reset" onClick={reset}><RotateCcw aria-hidden="true" />Reset to defaults</button>}
       {busy && <span className="report-params-busy" role="status"><LoaderCircle className="spin" aria-hidden="true" />Updating…</span>}
@@ -251,7 +256,8 @@ export function ReportParamsBar({ reportId, parameters, values, busy, onChange, 
     {sheet?.kind === "multi" && <MultiSelectSheet param={sheet.param} value={values[sheet.param.id] as string[]} options={options[sheet.param.id]} onClose={() => setSheet(null)}
       onApply={(value) => { setSheet(null); set(sheet.param, value); }} onRemove={onRemoveFilter ? () => { const param = sheet.param; setSheet(null); onRemoveFilter(param); } : undefined} />}
     {phoneOpen && <ParamsSheet parameters={parameters} values={values} options={options} onClose={() => setPhoneOpen(false)} reopen={() => setPhoneOpen(true)}
-      onApply={(next) => { setPhoneOpen(false); onChange(next); }} onRemove={onRemoveFilter ? (param) => { setPhoneOpen(false); onRemoveFilter(param); } : undefined} />}
+      onApply={(next) => { setPhoneOpen(false); onChange(next); }} onRemove={onRemoveFilter ? (param) => { setPhoneOpen(false); onRemoveFilter(param); } : undefined}
+      onViews={onViews ? () => { setPhoneOpen(false); onViews(); } : undefined} viewName={viewName} />}
   </div></LinkContext.Provider></ReachContext.Provider></ZoneContext.Provider></ReportIdContext.Provider>;
 }
 
@@ -311,7 +317,7 @@ function MultiSelectSheet({ param, value, options, onApply, onClose, onRemove }:
 }
 
 /** The phone's sheet: every parameter as a field over a draft; Show results applies it. */
-function ParamsSheet({ parameters, values, options, onApply, onClose, reopen, onRemove }: { parameters: readonly ReportParameter[]; values: ParamValues; options: OptionsState; onApply: (values: ParamValues) => void; onClose: () => void; reopen: () => void; onRemove?: (param: ReportParameter) => void }) {
+function ParamsSheet({ parameters, values, options, onApply, onClose, reopen, onRemove, onViews, viewName = null }: { parameters: readonly ReportParameter[]; values: ParamValues; options: OptionsState; onApply: (values: ParamValues) => void; onClose: () => void; reopen: () => void; onRemove?: (param: ReportParameter) => void; onViews?: () => void; viewName?: string | null }) {
   const [draft, setDraft] = useState<ParamValues>(values);
   const [sheet, setSheet] = useState<Sheet>(null);
   useHistoryDialogGuard(true, onClose, { reopen, layerKey: "reports.params" });
@@ -322,6 +328,8 @@ function ParamsSheet({ parameters, values, options, onApply, onClose, reopen, on
   const shown = linked ? { ...options, ...own } : options;
   return <LinkContext.Provider value={{ parameters, values: draft }}><ModalDialog title="Filters" eyebrow="Report" onClose={onClose} variant="sheet" className="reports-dialog report-params-sheet">
     <div className="report-params-fields">
+      {onViews && <div className="report-param-field"><span className="report-param-label">Saved views</span>
+        <button type="button" className="ui-select ui-select-field report-param-multi report-params-views" aria-haspopup="dialog" onClick={onViews}><Bookmark className="report-params-views-icon" aria-hidden="true" /><span className="ui-select-value">{viewName ?? "Views"}</span><ChevronDown className="ui-select-chevron" aria-hidden="true" /></button></div>}
       {parameters.map((param) => <ParamField key={param.id} param={param} value={draft[param.id] ?? param.default} options={shown} variant="field" disabled={false}
         onChange={(value) => set(param, value)} onSheet={setSheet} />)}
     </div>

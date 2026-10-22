@@ -1,8 +1,14 @@
 import { api } from "../api";
 import type { ReportRun } from "../../shared/reports";
 import { PAGE_METRICS_RUN_MARKER } from "../../shared/reportsMetrics";
-import type { ProvenanceView, ReportResultsView, RunHistoryView, ScheduleInput, ScheduleView } from "../../shared/reportsView";
+import type { ParamView, ParamViewsView, ProvenanceView, ReportResultsView, RunHistoryView, ScheduleInput, ScheduleView } from "../../shared/reportsView";
 import type { ParamOptions, ParamSetInfo, ParamValues } from "../../shared/reportParams";
+
+/** D565: the caller's saved views of a report (personal). */
+export const listViews = (id: string) => api<ParamViewsView>(`/reports/${id}/views`);
+export const saveView = (id: string, input: { name: string; values: ParamValues; isDefault?: boolean }) => api<{ view: ParamView }>(`/reports/${id}/views`, { method: "POST", body: JSON.stringify(input) });
+export const updateView = (id: string, viewId: string, input: { name?: string; isDefault?: boolean }) => api<{ view: ParamView }>(`/reports/${id}/views/${viewId}`, { method: "PATCH", body: JSON.stringify(input) });
+export const removeView = (id: string, viewId: string) => api<{ ok: true }>(`/reports/${id}/views/${viewId}`, { method: "DELETE", body: "{}" });
 
 /** The Wave 47 report routes (server/reports/viewRoutes.ts): results, refresh, runs, provenance, and the schedule. */
 

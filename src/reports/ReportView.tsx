@@ -23,6 +23,8 @@ import { canonicalValues, isDefaultSet, optionParentsOf, reachOf, valuesFromSear
 import { dropUnlinked, parentsKey, parentValuesOf } from "./linkedFilters";
 import { CONTAINS_CHARS, containsKey, formatSort, parseSort, sortKey } from "./tableView";
 import { TABLE_KEY } from "../router";
+import { activeView, defaultOps, useReportViews, viewValues, ViewsSheet } from "./ReportViews";
+import { editSpec } from "./reportEditApi";
 
 /** D563: a table block's sort (raw `column.desc`) and contains text from the URL, and how to change them. */
 type TableControl = { sort: string | undefined; contains: string; onSort: (raw: string | null) => void; onContains: (text: string) => void };
@@ -342,6 +344,27 @@ export function ReportView({ report, canWrite, generating = false, initial, read
 
   // Lane EDIT (D525): the owner removes a block or a section from its header (never the last block).
   const editing = useReportEditing();
+
+  // D565, D566: saved views. The default view opens the report when its URL names no values (replacing that entry, once).
+  const views = useReportViews(report.id, withParams);
+  const [viewsOpen, setViewsOpen] = useState(false);
+  useLayerOpener("reports.views", () => setViewsOpen(true));
+  const defaultApplied = useRef(false);
+  useEffect(() => {
+    if (defaultApplied.current || !views.loaded || !withParams) return;
+    defaultApplied.current = true;
+    const mine = views.views.find((view) => view.isDefault);
+    const named = Object.keys(paramsContext?.search ?? {}).some((key) => !TABLE_KEY.test(key));
+    if (mine && !named) pushValues(viewValues(parameters, mine), { replace: true });
+  }, [views.loaded, views.views, withParams, paramsContext?.search, parameters, pushValues]);
+  const shownView = views.views.length ? activeView(parameters, values, views.views) : null;
+  const saveAsDefault = async () => {
+    await editSpec(report.id, defaultOps(parameters, values), report.revision);
+    notify.success("Saved as the report's defaults (a new version)");
+    // The values on show are now the defaults: the URL keeps only the tables' state.
+    paramsContext?.onChange(Object.keys(tableEntries(paramsContext.search)).length ? tableEntries(paramsContext.search) : undefined, { replace: true });
+    editing?.onChanged();
+  };
   const removal = useHeaderRemoval(report, editing?.onChanged ?? noChange);
   const canRemove = Boolean(editing?.canEdit) && !readOnly && blocks.length > 1;
   // D534: the owner's Add filter and Remove filter (not on a past version or in tests without a URL).
@@ -401,7 +424,10 @@ export function ReportView({ report, canWrite, generating = false, initial, read
   if (!blocks.length) return null;
   return <section className={`report-view report-theme-${palette.mode}`} style={cssVars} aria-label="Report">
     {(withParams || (canAddFilter && paramsContext !== null)) && <ReportParamsBar reportId={report.id} parameters={parameters} values={values} busy={Boolean(pending)} onChange={changeParams} timeZone={view?.timeZone}
-      reach={blockReach} onAddFilter={canAddFilter ? editing?.addFilter : undefined} onRemoveFilter={canAddFilter && editing?.removeFilter ? (param) => editing.removeFilter!(param.id) : undefined} />}
+      reach={blockReach} onAddFilter={canAddFilter ? editing?.addFilter : undefined} onRemoveFilter={canAddFilter && editing?.removeFilter ? (param) => editing.removeFilter!(param.id) : undefined}
+      onViews={withParams ? () => setViewsOpen(true) : undefined} viewName={shownView?.name ?? null} />}
+    {viewsOpen && withParams && <ViewsSheet reportId={report.id} parameters={parameters} values={values} views={views.views} canSaveDefault={views.canSaveDefault && Boolean(editing?.canEdit)}
+      onApply={(next) => pushValues(next)} onChanged={views.reload} onSaveDefault={saveAsDefault} onClose={() => setViewsOpen(false)} reopen={() => setViewsOpen(true)} />}
     {!readOnly && <div className="report-view-toolbar">
       <p className="report-view-status" role="status">
         {busy ? <span className="report-view-running"><LoaderCircle className="spin" aria-hidden="true" />{!running || running.kind === "generate" ? "Generating…" : previewVersionOf(running.queryKeys) !== null ? `Running v${previewVersionOf(running.queryKeys)} on today's data…` : running.queryKeys?.[0] === PAGE_METRICS_RUN_MARKER ? "Re-reading metrics…" : running.queryKeys?.length ? `Re-running ${running.queryKeys.join(", ")}…` : "Refreshing…"}</span>

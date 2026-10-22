@@ -5,6 +5,7 @@
  */
 import type { ReportResult, ReportRun, ReportSchedule } from "./reports";
 import type { DocPageInfo } from "./reportsGenerate";
+import type { ParamValues } from "./reportParams";
 
 /**
  * What a block shows for one query: the last good result (`result`), and the newest attempt when it
@@ -31,3 +32,9 @@ export type ScheduleInput = { cadence: string; atTime: string | null; weekday: n
 
 /** GET /api/reports/:id/runs: the kept runs, newest first, and the schedule. */
 export type RunHistoryView = { runs: ReportRun[]; schedule: ScheduleView };
+
+/** D565: a reader's saved view of a report's filters (report_param_views), personal. */
+export type ParamView = { id: string; name: string; values: ParamValues; isDefault: boolean; createdAt: string; updatedAt: string };
+/** GET /api/reports/:id/views: the caller's own views, and whether they may make values the report's defaults (the owner). */
+export type ParamViewsView = { views: ParamView[]; canSaveDefault: boolean };
+export const VIEW_LIMITS = { name: 60, perReport: 20, valuesBytes: 16_000 } as const;

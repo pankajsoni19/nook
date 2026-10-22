@@ -95,7 +95,11 @@ export const ROLE_READ_ONLY_ALLOWED_WRITES: readonly AllowedWrite[] = [
   { method: "PUT", path: "/api/reports/:reportId/favorite", roles: ["viewer"], why: "own favorite on a readable report" },
   { method: "DELETE", path: "/api/reports/:reportId/favorite", roles: ["viewer"], why: "own favorite" },
   // D489: read access runs a report with other parameter values (a date range, a filter); nothing is changed.
-  { method: "POST", path: "/api/reports/:reportId/param-runs", roles: ["viewer"], why: "run a readable report with other parameter values (reads only)" }
+  { method: "POST", path: "/api/reports/:reportId/param-runs", roles: ["viewer"], why: "run a readable report with other parameter values (reads only)" },
+  // D565: a reader's own saved views of a readable report (personal; the report is never changed).
+  { method: "POST", path: "/api/reports/:reportId/views", roles: ["viewer"], why: "own saved view of a readable report" },
+  { method: "PATCH", path: "/api/reports/:reportId/views/:viewId", roles: ["viewer"], why: "own saved view" },
+  { method: "DELETE", path: "/api/reports/:reportId/views/:viewId", roles: ["viewer"], why: "own saved view" }
 ];
 
 /**

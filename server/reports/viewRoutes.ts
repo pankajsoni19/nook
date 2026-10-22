@@ -18,6 +18,7 @@ import { getSchedule, saveSchedule } from "./scheduler";
 import { runHistory, runLog } from "./runHistory";
 import { storedPlan } from "./planner";
 import { paramResults, reportParamOptions, runParamSet, searchParamOptions } from "./params";
+import { listViews, removeView, saveView, updateView } from "./views";
 
 /**
  * docs/plan/API_CONTRACTS.md § Analytics reports (Wave 47): what the viewer reads (each query's last
@@ -31,6 +32,8 @@ const refreshSchema = z.object({ queryKey: z.string().regex(QUERY_KEY).nullish()
 /** Spec v3 (D489): a reader's parameter values (checked against the report's parameters by params.ts). */
 const valuesSchema = z.record(z.string().max(40), z.unknown()).refine((value) => Object.keys(value).length <= 16, "at most 16 values");
 const paramRunSchema = z.object({ values: valuesSchema, force: z.boolean().optional() }).strict();
+const viewSaveSchema = z.object({ name: z.string().max(200), values: valuesSchema, isDefault: z.boolean().optional() }).strict();
+const viewPatchSchema = z.object({ name: z.string().max(200).optional(), isDefault: z.boolean().optional() }).strict();
 
 /** `?values=<JSON object>` on GET …/results; absent is the default set. */
 function queryValues(raw: string | undefined): Record<string, unknown> | null {
@@ -132,6 +135,14 @@ export function registerReportViewRoutes(app: Hono<AppEnv>) {
     const view = await runParamSet(userId, reportId, input.values, { trigger: "user", force: input.force });
     return isOwner(reportId, userId) || !view.running ? view : { ...view, running: forReader(view.running) };
   }));
+  // D565: a reader's own saved views (read access; personal; the app only, never MCP).
+  app.get("/api/reports/:reportId/views", handle((c) => listViews(id(c, "reportId"), c.get("user").id, c.get("user").role)));
+  app.post("/api/reports/:reportId/views", handle(async (c) => {
+    const input = await parseJson(c.req.raw, viewSaveSchema);
+    return c.json({ view: saveView(id(c, "reportId"), c.get("user").id, input) }, 201);
+  }));
+  app.patch("/api/reports/:reportId/views/:viewId", handle(async (c) => ({ view: updateView(id(c, "reportId"), c.get("user").id, id(c, "viewId"), await parseJson(c.req.raw, viewPatchSchema)) })));
+  app.delete("/api/reports/:reportId/views/:viewId", handle((c) => { removeView(id(c, "reportId"), c.get("user").id, id(c, "viewId")); return { ok: true }; }));
   app.get("/api/reports/:reportId/parameters/:paramId/options", handle(async (c) => {
     const paramId = c.req.param("paramId") ?? "";
     if (!/^[a-z][a-z0-9_]{0,29}$/.test(paramId)) throw new ReportError(404, "NOT_FOUND", "Not found");
