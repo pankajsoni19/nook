@@ -18,6 +18,11 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 
 - [ ] **Provider code per kind** (operator, 2026-10-22; lane LOCALEMB, step 0): one adapter file per provider kind (OpenAI-compatible default, Anthropic, Voyage, local); golden tests pin OpenAI's requests to v0.43.0 so other kinds can't change them.
 
+- [ ] **Tasks boards** (operator, 2026-10-22; lane TASKS, migration 074 if needed):
+  - [ ] Collapse and expand a column: collapsed, it is narrow, hides its cards, and shows its name and card count; the state is kept.
+  - [ ] Filter bar order: the "+ Filter" selector (and the search box) stay on the left; applied filter chips come after them, so the selector never moves.
+  - [ ] Board settings: auto-archive cards in a done/completed column after N days (default 30); auto-archived cards are hidden from the board, with a board-settings checkbox to show them.
+
 ## Waiting on the operator
 
 - [ ] **Real-model check of chat agents on data sources** (lane AGENTSQL, D592): only the scripted provider has called the data tools. On a host with a working model, give an agent a data source (Settings → Report data sources → Chat agents may use this data source) and check that it searches before it queries, aggregates in SQL rather than paging raw rows, and summarizes instead of repeating the table.
