@@ -1,6 +1,7 @@
 import { audit, db, now } from "../db";
 import { relationTypeFor, storedRelation, type RelationKind, type RelationType, type StoredRelation } from "./relations";
-import { getBoard, limitReached, requireCardAt, requireReadableCard, TaskError, withBoardLock } from "./service";
+import { getBoard, limitReached, requireCardAt, requireReadableBoard, requireReadableCard, TaskError, withBoardLock } from "./service";
+import { readViewPrefs } from "./archive";
 import { AUDIENCE_ALL_USERS } from "../team/roles";
 import { groupGrantExists } from "../access/groups";
 import { avatarUrlsFor, integrationIdsAmong } from "../avatars";
@@ -190,8 +191,8 @@ export function relationCountsForBoard(boardId: string, userId: string) {
 }
 
 /** `GET /boards/:b` (and MCP `list_cards`): the board with each card's relation counts for this viewer. */
-export function getBoardWithRelationCounts(userId: string, boardId: string) {
-  const detail = getBoard(userId, boardId);
+export function getBoardWithRelationCounts(userId: string, boardId: string, options: { includeArchived?: boolean } = {}) {
+  const detail = getBoard(userId, boardId, options);
   const counts = relationCountsForBoard(boardId, userId);
   return { ...detail, cards: detail.cards.map((card) => ({ ...card, ...(counts.get(card.id) ?? { relation_count: 0, open_blockers: 0 }) })) };
 }
@@ -206,11 +207,15 @@ export type BoardPayloadUser = { display_name: string; can_read: 0 | 1; avatar_u
  * `assignees[]` objects. `can_read` is per board, so one entry serves every card.
  */
 export function boardPayload(userId: string, boardId: string) {
-  const detail = getBoardWithRelationCounts(userId, boardId);
+  requireReadableBoard(boardId, userId);
+  // The viewer's own view (D602, D606): collapsed columns, and auto-archived cards only when they show them.
+  const view = readViewPrefs(boardId, userId);
+  const detail = getBoardWithRelationCounts(userId, boardId, { includeArchived: view.showArchived });
   const users: Record<string, BoardPayloadUser> = {};
-  const cards = detail.cards.map(({ board_id: _board, assignees, assignee_id: _id, assignee_name: _name, ...card }) => {
+  // Lane TASKS (D605): `done_at` is left out and `archived_at` sent only when set, so the trim holds.
+  const cards = detail.cards.map(({ board_id: _board, assignees, assignee_id: _id, assignee_name: _name, done_at: _done, archived_at: archivedAt, ...card }) => {
     for (const assignee of assignees) users[assignee.id] ??= { display_name: assignee.display_name, can_read: assignee.can_read };
-    return { ...card, assignee_ids: assignees.map((assignee) => assignee.id) };
+    return { ...card, ...(archivedAt ? { archived_at: archivedAt } : {}), assignee_ids: assignees.map((assignee) => assignee.id) };
   });
   // Wave 35 (D299): each assignee's picture, beside the name the map already carries.
   const avatars = avatarUrlsFor(Object.keys(users));
@@ -219,5 +224,5 @@ export function boardPayload(userId: string, boardId: string) {
     entry.avatar_url = avatars.get(id) ?? null;
     if (integrations.has(id)) entry.is_integration = true;
   }
-  return { ...detail, cards, users };
+  return { ...detail, cards, users, view };
 }

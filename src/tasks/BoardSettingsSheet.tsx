@@ -1,6 +1,6 @@
 import type { Notifier } from "../ui/notify";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { Check, Columns3, Layers, Mail, Minus, Pencil, Plus, Share2, Trash2, X } from "lucide-react";
+import { Archive, Check, Columns3, Layers, Mail, Minus, Pencil, Plus, Share2, Trash2, X } from "lucide-react";
 import { MuteEmailsToggle } from "../notifications/emailMutes";
 import { trapTabKey, useDialogFocus } from "../files/Dialog";
 import { Select } from "../ui/Select";
@@ -16,7 +16,7 @@ import {
   type StructurePreset
 } from "../../shared/boardStructure";
 import { structureOf } from "./hierarchyModel";
-import { taskErrorMessage, updateBoardStructure, type BoardSummary } from "./tasksApi";
+import { setAutoArchiveDays, taskErrorMessage, updateBoardStructure, type BoardSummary } from "./tasksApi";
 import { FormError } from "../ui/FormError";
 
 type BoardSettingsSheetProps = {
@@ -28,6 +28,11 @@ type BoardSettingsSheetProps = {
   /** Per viewer (D126): show epics and nested subtasks as board cards. */
   showAllLevels: boolean;
   onShowAllLevels: (value: boolean) => void;
+  /** Per viewer, saved to their own view of the board (D606): list auto-archived cards, marked. */
+  showArchived?: boolean;
+  onShowArchived?: (value: boolean) => void;
+  /** Auto-archive saved (D604): the board summary as the server returned it. */
+  onBoardSaved?: (board: BoardSummary) => void;
   onClose: () => void;
   /** A dialog is open over the sheet (Complete sprint): it handles Escape, and the sheet waits. */
   suspended?: boolean;
@@ -63,7 +68,7 @@ export function structurePreview(structure: BoardStructure) {
  * 390 px and a right-hand panel on desktop; the board's dialog guard closes it on Back (D69). Only
  * the owner edits; everyone sees the structure and the per-viewer display option.
  */
-export function BoardSettingsSheet({ board, owner, isOwner = owner, showAllLevels, onShowAllLevels, onClose, onRename, onShare, onDelete, onAddColumn, onStructureSaved, notify, sprintsSection, suspended = false }: BoardSettingsSheetProps) {
+export function BoardSettingsSheet({ board, owner, isOwner = owner, showAllLevels, onShowAllLevels, showArchived = false, onShowArchived, onBoardSaved, onClose, onRename, onShare, onDelete, onAddColumn, onStructureSaved, notify, sprintsSection, suspended = false }: BoardSettingsSheetProps) {
   const saved = structureOf(board);
   const [draft, setDraft] = useState<BoardStructure>(saved);
   const [error, setError] = useState<string | null>(null);
@@ -193,12 +198,18 @@ export function BoardSettingsSheet({ board, owner, isOwner = owner, showAllLevel
 
         {saved.sprints && sprintsSection}
 
-        {saved.levels.length > 1 && <section className="task-settings-section" aria-labelledby={`${titleId}-display`}>
+        <AutoArchiveSection board={board} owner={owner} notify={notify} onSaved={onBoardSaved} titleId={titleId} />
+
+        {(saved.levels.length > 1 || onShowArchived) && <section className="task-settings-section" aria-labelledby={`${titleId}-display`}>
           <h3 id={`${titleId}-display`}>Display</h3>
-          <label className="task-settings-toggle">
+          {saved.levels.length > 1 && <label className="task-settings-toggle">
             <input type="checkbox" checked={showAllLevels} onChange={(event) => onShowAllLevels(event.target.checked)} />
             <span>Show all levels on the board<small>Only for you, on this device. Off: columns show {saved.levels[saved.workLevel]!.plural.toLowerCase()} only.</small></span>
-          </label>
+          </label>}
+          {onShowArchived && <label className="task-settings-toggle">
+            <input type="checkbox" checked={showArchived} onChange={(event) => onShowArchived(event.target.checked)} />
+            <span>Show auto-archived cards<small>Only for you. They come back marked Archived; open one to restore it.{board.archived_count ? ` ${board.archived_count === 1 ? "1 card is" : `${board.archived_count} cards are`} archived on this board.` : ""}</small></span>
+          </label>}
         </section>}
 
         <section className="task-settings-section" aria-labelledby={`${titleId}-email`}>
@@ -224,4 +235,63 @@ export function BoardSettingsSheet({ board, owner, isOwner = owner, showAllLevel
       </div>
     </aside>
   </>;
+}
+
+/**
+ * Board settings → Done cards (D604): the owner or a manager turns auto-archive on or off and sets
+ * the days (1–365, 30 by default); everyone else reads the rule. Saved on its own, like Sprint defaults.
+ */
+function AutoArchiveSection({ board, owner, notify, onSaved, titleId }: { board: BoardSummary; owner: boolean; notify: Notifier; onSaved?: (board: BoardSummary) => void; titleId: string }) {
+  const savedDays = board.auto_archive_days === undefined ? 30 : board.auto_archive_days;
+  const [enabled, setEnabled] = useState(savedDays !== null);
+  const [days, setDays] = useState(String(savedDays ?? 30));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const parsed = /^\d+$/.test(days.trim()) ? Number(days.trim()) : NaN;
+  const valid = !enabled || (parsed >= 1 && parsed <= 365);
+  const next = enabled ? parsed : null;
+  const dirty = next !== savedDays;
+  if (board.auto_archive_days === undefined) return null;
+
+  async function save() {
+    if (!valid) {
+      setError("Use a whole number of days from 1 to 365.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const { board: updated } = await setAutoArchiveDays(board.id, next);
+      onSaved?.(updated);
+      notify.success(next === null ? "Auto-archive is off" : `Done cards are archived after ${next === 1 ? "1 day" : `${next} days`}`);
+    } catch (reason) {
+      setError(taskErrorMessage(reason, "Could not save auto-archive"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <section className="task-settings-section" aria-labelledby={`${titleId}-archive`}>
+    <h3 id={`${titleId}-archive`}><Archive aria-hidden="true" />Done cards</h3>
+    {!owner && <p className="task-settings-note">{savedDays === null
+      ? "Auto-archive is off: cards stay in done columns until someone moves them."
+      : `Cards in a done column for ${savedDays === 1 ? "1 day" : `${savedDays} days`} are archived: hidden from the board, never deleted.`} Only the owner or a manager changes this.</p>}
+    {owner && <>
+      <label className="task-settings-toggle">
+        <input type="checkbox" checked={enabled} disabled={busy} onChange={(event) => { setEnabled(event.target.checked); setError(null); }} />
+        <span>Auto-archive cards in done columns<small>Hidden from the board, never deleted. A card moved out of a done column, or restored, starts over.</small></span>
+      </label>
+      {enabled && <div className="task-card-field task-archive-days">
+        <label htmlFor={`${titleId}-archive-days`}>Archive after (days)</label>
+        <input id={`${titleId}-archive-days`} className="task-settings-input" type="number" inputMode="numeric" min={1} max={365} step={1} value={days} disabled={busy}
+          aria-invalid={!valid || undefined} onChange={(event) => { setDays(event.target.value); setError(null); }}
+          onKeyDown={(event) => { if (event.key === "Enter" && dirty && valid) { event.preventDefault(); void save(); } }} />
+      </div>}
+      <FormError message={error ?? (valid ? null : "Use a whole number of days from 1 to 365.")} className="file-dialog-error" />
+      {dirty && <span className="task-settings-actions">
+        <button type="button" className="secondary-button" disabled={busy} onClick={() => { setEnabled(savedDays !== null); setDays(String(savedDays ?? 30)); setError(null); }}>Reset</button>
+        <button type="button" className="primary-button" disabled={busy || !valid} onClick={() => { void save(); }}>{busy ? "Saving…" : "Save"}</button>
+      </span>}
+    </>}
+  </section>;
 }

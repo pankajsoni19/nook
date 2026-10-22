@@ -4,6 +4,7 @@ import { levelName } from "../../shared/boardStructure";
 import { parentTitleOf, structureOfData, treeRows, type BoardCard, type BoardData } from "./boardQuery";
 import type { BoardSort, BoardSortField } from "./boardUrl";
 import { assigneeNames, Avatars, DueChip, FlagIcons, shortTimestamp, TagChips } from "./boardViewParts";
+import { ArchivedChip } from "./CardFace";
 
 type BoardTableProps = {
   board: BoardData;
@@ -90,7 +91,7 @@ export function BoardTable({ board, cards, sort, today, onSort, onOpenCard, onCa
                 <button type="button" className="icon-button task-table-more" onClick={(event) => onCardMenu(card, event.currentTarget)} aria-haspopup="dialog" aria-label={`More actions for “${card.title}”`} title="More actions"><Ellipsis /></button>
               </span>
             </th>
-            <td>{column?.name ?? ""}</td>
+            <td>{column?.name ?? ""}{card.archived_at && <> <ArchivedChip at={card.archived_at} /></>}</td>
             <td className="task-table-people" title={names.join(", ")}>{names.length ? <><Avatars card={card} /><span className="task-table-names">{names.join(", ")}</span></> : <span className="task-table-empty">—</span>}</td>
             <td><DueChip card={card} today={today} done={done} /></td>
             <td><TagChips tagIds={card.tag_ids} board={board} max={2} /></td>

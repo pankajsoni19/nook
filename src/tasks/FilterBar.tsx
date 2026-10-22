@@ -105,6 +105,17 @@ export function FilterBar({ board, context, filter, onChange, shown, total }: Fi
   }
 
   return <div ref={barRef} className="task-filter-bar" role="group" aria-label="Filters">
+    {/* The order never changes (operator, 2026-10-22, D608): "+ Filter" and the text box first, so
+        they stay put; the applied filters after them, then the one being edited, Clear, and the count. */}
+    <Select<string> variant="chip" className="task-filter-add" label="Add filter" placeholder="+ Filter" value={null} searchable={false}
+      options={Object.entries(FILTER_FIELDS).filter(([, item]) => !item.available || item.available(board)).map(([key, item]) => ({ value: key, label: item.label, icon: <ListFilter /> }))}
+      onChange={(key) => setEditing(key as FilterKey)} />
+    {searchEnabled && <label className="task-filter-text">
+      <Search aria-hidden="true" />
+      <input type="search" value={text} maxLength={100} placeholder="Filter cards" aria-label="Filter cards by text"
+        onChange={(event) => { typedRef.current = true; setText(event.target.value); }}
+        onKeyDown={(event) => { if (event.key === "Escape" && text) { event.preventDefault(); event.stopPropagation(); typedRef.current = true; setText(""); } }} />
+    </label>}
     {chips.map(({ term, index }) => {
       const label = chipLabel(term, board, context);
       const editable = !term.negate && term.key in FILTER_FIELDS;
@@ -116,9 +127,6 @@ export function FilterBar({ board, context, filter, onChange, shown, total }: Fi
         <button type="button" className="task-filter-chip-remove" onClick={() => { if (editing === term.key) setEditing(null); onChange(withoutTerm(filter, index)); }} aria-label={`Remove filter: ${label}`}><X /></button>
       </span>;
     })}
-    {!editing && <Select<string> variant="chip" className="task-filter-add" label="Add filter" placeholder="+ Filter" value={null} searchable={false}
-      options={Object.entries(FILTER_FIELDS).filter(([, item]) => !item.available || item.available(board)).map(([key, item]) => ({ value: key, label: item.label, icon: <ListFilter /> }))}
-      onChange={(key) => setEditing(key as FilterKey)} />}
     {editing && field && <span className="task-filter-editor" role="group" aria-label={`${field.label} filter`}>
       <span className="task-filter-editor-label">{field.label} is</span>
       <Combobox<string> multiple defaultOpen label={`${field.label} filter values`} placeholder={`Choose ${field.label.toLowerCase()}…`} value={values}
@@ -134,12 +142,6 @@ export function FilterBar({ board, context, filter, onChange, shown, total }: Fi
       </span>}
       <button type="button" className="icon-button task-filter-done" onClick={() => setEditing(null)} aria-label="Done editing the filter" title="Done"><Check /></button>
     </span>}
-    {searchEnabled && <label className="task-filter-text">
-      <Search aria-hidden="true" />
-      <input type="search" value={text} maxLength={100} placeholder="Filter cards" aria-label="Filter cards by text"
-        onChange={(event) => { typedRef.current = true; setText(event.target.value); }}
-        onKeyDown={(event) => { if (event.key === "Escape" && text) { event.preventDefault(); event.stopPropagation(); typedRef.current = true; setText(""); } }} />
-    </label>}
     {hasFilter && <button type="button" className="task-filter-clear" onClick={() => { typedRef.current = false; setText(""); setEditing(null); onChange({ terms: [] }); }}>Clear</button>}
     <span className="task-filter-count" role="status" aria-live="polite">{hasFilter ? `${shown} of ${total} ${total === 1 ? "card" : "cards"}` : ""}</span>
   </div>;

@@ -90,6 +90,9 @@ export type CardRow = {
   due_tz: string | null;
   /** Legacy mirror of the first assignee (D102); read `card_assignees` instead. */
   assignee_id: string | null;
+  /** Migration 074 (D603, D605). */
+  done_at: string | null;
+  archived_at: string | null;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;

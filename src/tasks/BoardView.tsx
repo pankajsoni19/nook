@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, ChevronLeft, CircleCheck, Gauge, Pencil, Plus, RotateCcw, Settings2, Trash2, TriangleAlert } from "lucide-react";
+import { ArrowLeft, ArrowRight, ChevronLeft, ChevronsLeftRight, ChevronsRightLeft, CircleCheck, Gauge, Pencil, Plus, RotateCcw, Settings2, Trash2, TriangleAlert } from "lucide-react";
 import { BoardSettingsSheet } from "./BoardSettingsSheet";
 import { useBoardHierarchy } from "./useBoardHierarchy";
 import { useBoardSprints } from "./useBoardSprints";
@@ -55,6 +55,7 @@ import {
   deleteColumn,
   restoreTaskItem,
   getBoard,
+  saveBoardView,
   updateCard,
   moveCard,
   renameBoard,
@@ -273,6 +274,11 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
   const laneCards: CardSummary[] = (filtered || sprintScoped) && result ? result.cards : cards;
   const laneCardsRef = useRef(laneCards);
   laneCardsRef.current = laneCards;
+  // The viewer's collapsed columns (D602), from their own saved view of the board.
+  const collapsed = useMemo(() => new Set(detail?.view?.collapsedColumnIds ?? []), [detail?.view?.collapsedColumnIds]);
+  const collapsedRef = useRef(collapsed);
+  collapsedRef.current = collapsed;
+  const showArchived = detail?.view?.showArchived ?? false;
   // Hierarchy (17A): which levels the lanes show, chips, nesting by drag, and the card dialog's checklist.
   const hierarchy = useBoardHierarchy({
     detail, detailRef, setDetail, notify, load, onOpenCard,
@@ -330,7 +336,7 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
    * Optimistic move: the card jumps at once and the server's position replaces the local one. A
    * 409 (someone else changed the column) or any failure rolls back, says so, and reloads.
    */
-  async function move(cardId: string, columnId: string, afterCardId: string | null, options: { focus?: boolean } = {}) {
+  async function move(cardId: string, columnId: string, afterCardId: string | null, options: { focus?: boolean; announce?: string } = {}) {
     const current = detailRef.current;
     if (!current || isNoopMove(current.cards, cardId, columnId, afterCardId)) return;
     const before = current.cards;
@@ -348,7 +354,7 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
         return result.positions ? applyPositions(moved, result.positions) : moved;
       });
       if (moveChangesBlockers(before, current.columns, cardId, columnId)) void load();
-      setAnnouncement(`Moved to ${place}`);
+      setAnnouncement(options.announce ?? `Moved to ${place}`);
     } catch (reason) {
       setCards(() => before);
       const code = taskErrorCode(reason);
@@ -393,7 +399,47 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
     if (!current) return;
     const target = keyboardMoveTarget(laneCardsRef.current, current.columns, card.id, key);
     if (!target || refuseFull(card.id, target.columnId)) return;
+    if (target.columnId !== card.column_id && collapsedRef.current.has(target.columnId) && !phone) {
+      // Into a collapsed column (D602): to its top, like a drop on the strip; focus goes to the strip.
+      const name = current.columns.find((column) => column.id === target.columnId)?.name ?? "the column";
+      void move(card.id, target.columnId, null, { announce: `Moved to the top of ${name}, which is collapsed` });
+      window.setTimeout(() => document.querySelector<HTMLElement>(`[data-column-id="${target.columnId}"] .task-column-strip`)?.focus(), 0);
+      return;
+    }
     void move(card.id, target.columnId, target.afterCardId, { focus: true });
+  }
+
+  /**
+   * Collapse or expand a column for this viewer (D602): at once on screen, then saved to their own
+   * view of the board; a failed save puts it back and says so.
+   */
+  async function toggleCollapsed(columnId: string) {
+    const current = detailRef.current;
+    if (!current) return;
+    const before = current.view?.collapsedColumnIds ?? [];
+    const collapsing = !before.includes(columnId);
+    const next = collapsing ? [...before, columnId] : before.filter((id) => id !== columnId);
+    const name = current.columns.find((column) => column.id === columnId)?.name ?? "Column";
+    setDetail((value) => value ? { ...value, view: { collapsedColumnIds: next, showArchived: value.view?.showArchived ?? false } } : value);
+    setAnnouncement(`${name} ${collapsing ? "collapsed" : "expanded"}`);
+    if (!collapsing) window.setTimeout(() => document.querySelector<HTMLElement>(`[data-column-id="${columnId}"] .task-column-collapse`)?.focus(), 0);
+    else if (!phone) window.setTimeout(() => document.querySelector<HTMLElement>(`[data-column-id="${columnId}"] .task-column-strip`)?.focus(), 0);
+    try {
+      await saveBoardView(boardId, { collapsedColumnIds: next });
+    } catch (reason) {
+      setDetail((value) => value ? { ...value, view: { collapsedColumnIds: before, showArchived: value.view?.showArchived ?? false } } : value);
+      notify.error(taskErrorMessage(reason, `Could not ${collapsing ? "collapse" : "expand"} ${name}`));
+    }
+  }
+
+  /** Board settings → Show auto-archived cards (D606): saved to this viewer's view, then the board reloads with or without them. */
+  async function setShowArchived(showArchived: boolean) {
+    try {
+      await saveBoardView(boardId, { showArchived });
+      await load();
+    } catch (reason) {
+      notify.error(taskErrorMessage(reason, "Could not change the archived cards setting"));
+    }
   }
 
   /**
@@ -566,7 +612,7 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
         <span className="eyebrow">{board && !owner ? `${board.owner_name}’s board` : "Board"}</span>
         <h1 id="task-board-title" title={board?.name}>{board?.name ?? "Loading…"}</h1>
       </div>
-      {board && <span className="task-board-count">{cardCountLabel(board.card_count)}</span>}
+      {board && <span className="task-board-count">{cardCountLabel(showArchived ? board.card_count : board.card_count - (board.archived_count ?? 0))}</span>}
       {detail && !readOnly && <button className="primary-button task-new-card" onClick={() => setComposer({ columnId: null })} aria-haspopup="dialog" aria-label="New card" title="New card"><Plus /><span>New card</span></button>}
       {detail && !phone && viewSwitch}
       {board && <span className="task-board-actions">
@@ -610,8 +656,9 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
       {columns.map((column, index) => {
         // The cards on screen; a WIP limit counts every live card (QA 0.9.0).
         const badge = columnBadge(columnCards(shownLane, column.id).length, columnCards(cards, column.id).length, column.wip_limit);
-        return <button key={column.id} id={`task-tab-${column.id}`} className={index === shownColumn ? "active" : ""} aria-current={index === shownColumn ? "true" : undefined} onClick={() => showColumn(index)}>
-          <span>{column.name}</span><b className={badge.wip ? `task-wip ${badge.wip}` : undefined} aria-label={badge.label}>{badge.text}</b>
+        const folded = collapsed.has(column.id);
+        return <button key={column.id} id={`task-tab-${column.id}`} className={`${index === shownColumn ? "active" : ""}${folded ? " collapsed" : ""}`} aria-current={index === shownColumn ? "true" : undefined} onClick={() => showColumn(index)}>
+          <span>{column.name}</span><b className={badge.wip ? `task-wip ${badge.wip}` : undefined} aria-label={folded ? `${badge.label}, collapsed` : badge.label}>{badge.text}</b>
         </button>;
       })}
       {canManage && columns.length < MAX_COLUMNS && <button className="task-tab-add" onClick={(event) => openDialog({ kind: "addColumn" }, event.currentTarget)} aria-haspopup="dialog" aria-label="Add column"><Plus /></button>}
@@ -630,6 +677,9 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
         emptyText={filtered ? "No matching cards" : sprintScoped && !lane.length ? (sprints.selection?.kind === "backlog" ? "Nothing from the backlog here" : "Nothing from this sprint here") : hidden.hint ?? "No matching cards"}
         nesting={hierarchy.nesting}
         readOnly={readOnly}
+        collapsed={collapsed.has(column.id)}
+        onToggleCollapsed={() => { void toggleCollapsed(column.id); }}
+        phone={phone}
         tags={detail.tags}
         owner={owner}
         isFirst={index === 0}
@@ -674,7 +724,11 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
       notify={notify}
       onMove={(card) => openDialog({ kind: "moveCard", cardId: card.id })}
       onDelete={removeCard}
-      onChanged={(card) => setDetail((current) => current ? applyCardDetail(current, card) : current)}
+      onChanged={(card) => {
+        // A card restored from the archive while archived cards are hidden is not on the board yet: fetch it.
+        if (!card.archived_at && !detailRef.current?.cards.some((item) => item.id === card.id)) void load();
+        setDetail((current) => current ? applyCardDetail(current, card) : current);
+      }}
       tags={detail.tags ?? []}
       onTagsChange={(change) => setDetail((current) => current ? applyTagChange(current, change) : current)}
       onOpenRelated={(target) => onOpenCardRoute?.(target.board_id, target.id)}
@@ -702,6 +756,8 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
       initialSprintId={sprints.composerSprintId}
     />}
     {(dialog?.kind === "settings" || overSettings) && board && <BoardSettingsSheet board={board} owner={canManage} isOwner={owner} showAllLevels={hierarchy.showAll} onShowAllLevels={hierarchy.setShowAll}
+      showArchived={showArchived} onShowArchived={(value) => { void setShowArchived(value); }}
+      onBoardSaved={(saved) => setDetail((current) => current ? { ...current, board: saved } : current)}
       onClose={closeDialog} notify={notify} suspended={overSettings}
       onRename={() => openOverSettings("rename")} onShare={() => openOverSettings("share")} onDelete={() => openOverSettings("deleteBoard")} onAddColumn={() => openOverSettings("addColumn")}
       onStructureSaved={(saved) => setDetail((current) => current ? { ...current, board: saved } : current)}
@@ -741,6 +797,10 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
     {dialog?.kind === "columnMenu" && dialogColumn && <ModalDialog title={dialogColumn.name} eyebrow="Column" onClose={closeDialog}>
       <div className="move-list task-menu">
         <button className="move-option" autoFocus onClick={() => setDialog({ kind: "renameColumn", columnId: dialogColumn.id })}><Pencil aria-hidden="true" /><span>Rename</span></button>
+        <button className="move-option" onClick={() => { closeDialog(); void toggleCollapsed(dialogColumn.id); }}>
+          {collapsed.has(dialogColumn.id) ? <ChevronsLeftRight aria-hidden="true" /> : <ChevronsRightLeft aria-hidden="true" />}
+          <span>{collapsed.has(dialogColumn.id) ? "Expand" : "Collapse"}<small>{collapsed.has(dialogColumn.id) ? "Show its cards again" : "Narrow it and hide its cards, only for you"}</small></span>
+        </button>
         <ColumnStateField column={dialogColumn} onError={notify} onChanged={(saved, changed) => {
           setDetail((current) => current ? { ...current, columns: saved } : current);
           notify.success(`${changed.name} is now ${STATE_LABELS[columnState(changed)].toLowerCase()}${changed.is_done === 1 ? ": its cards count as done" : ""}`);

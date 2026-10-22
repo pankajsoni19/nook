@@ -13,7 +13,8 @@ export const CARD_SEARCH_LIMIT_MAX = 20;
 export const CARD_SEARCH_RATE_LIMIT = 20;
 export const CARD_SEARCH_RATE_WINDOW_MS = 10_000;
 
-export type CardSearchHit = { id: string; board_id: string; board_name: string; title: string; column_name: string; is_done: 0 | 1 };
+/** `is_archived` (D607): 1 for a card the auto-archive sweep archived; search still finds it. */
+export type CardSearchHit = { id: string; board_id: string; board_name: string; title: string; column_name: string; is_done: 0 | 1; is_archived: 0 | 1 };
 
 /**
  * Order: cards on `boardId` first (a hint only; it never widens or narrows the readable set), then
@@ -24,7 +25,8 @@ export function searchCards(userId: string, q: string, options: { boardId?: stri
   const keyScope = options.keyScope ?? NO_FILTER;
   const limit = options.limit ?? CARD_SEARCH_LIMIT_MAX;
   const rows = db.query(`
-    SELECT k.id, k.board_id, b.name AS board_name, k.title, c.name AS column_name, c.is_done
+    SELECT k.id, k.board_id, b.name AS board_name, k.title, c.name AS column_name, c.is_done,
+           CASE WHEN k.archived_at IS NULL THEN 0 ELSE 1 END AS is_archived
     FROM cards k JOIN boards b ON b.id = k.board_id JOIN board_columns c ON c.id = k.column_id
     WHERE k.deleted_at IS NULL AND ${readableBoardPredicate}
       AND instr(lower(k.title), lower($q)) > 0

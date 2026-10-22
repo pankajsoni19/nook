@@ -7,7 +7,7 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 
 **Current state (2026-10-22).**
 - **v0.44.0** is released (2026-10-22): Claude/Voyage/Local embeddings, keyword-only knowledge, chat agents on data sources, report Lists, Duplicate report, filters later slices, API key Edit adds permissions.
-- Migrations: **001–073** are released and immutable (045, 054, 067, 070, 071, 072 unused; 054 reserved for Messages). Next free: **074** (lane TASKS).
+- Migrations: **001–073** are released and immutable (045, 054, 067, 070, 071, 072 unused; 054 reserved for Messages). Next free: **075**; **074** is lane TASKS (built, unreleased).
 - Development happens directly on `main`, pushed as each change passes its gates.
 
 ## In flight
@@ -17,11 +17,6 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 
 
 - [ ] **Provider code per kind** (operator, 2026-10-22; lane LOCALEMB, step 0): one adapter file per provider kind (OpenAI-compatible default, Anthropic, Voyage, local); golden tests pin OpenAI's requests to v0.43.0 so other kinds can't change them.
-
-- [ ] **Tasks boards** (operator, 2026-10-22; lane TASKS, migration 074 if needed):
-  - [ ] Collapse and expand a column: collapsed, it is narrow, hides its cards, and shows its name and card count; the state is kept.
-  - [ ] Filter bar order: the "+ Filter" selector (and the search box) stay on the left; applied filter chips come after them, so the selector never moves.
-  - [ ] Board settings: auto-archive cards in a done/completed column after N days (default 30); auto-archived cards are hidden from the board, with a board-settings checkbox to show them.
 
 - [ ] **Backups: online, to S3, continuous, and tested** (operator, 2026-10-22; lane BACKUP):
   - [ ] Online backups without stopping the app (SQLite `VACUUM INTO`/backup API), on a schedule set in `.env` (frequency, how many to keep), written to the existing S3 storage under a new backup prefix (and/or local).
@@ -53,6 +48,13 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 - [ ] Save as report default (D566) is a manual edit, so the design rules run on every block that reads a changed default and can refuse it (e.g. a KPI without a unit); the sheet shows the refusal, but the owner has to fix the block first.
 - [ ] The new filter types (D567–D569) and linked lists (D560) are proven against the fake ClickHouse and by hand on the QA ClickHouse 26.6; add a `CLICKHOUSE_TEST_URL` variant (`-inf`/`inf` Float64 ends, the `_not` flag, `positionCaseInsensitive` on LowCardinality).
 - [ ] Saved views are app-only (D565). A read-only MCP `list_report_views` would be safe (the key owner's own views) if an agent needs them.
+
+## Leftovers (lane TASKS)
+
+- [ ] Auto-archived cards still count toward the 1,000-card board cap (D605), so a long-lived board fills up with them; decide whether archived cards leave the cap (and the board payload with "Show auto-archived cards" on stays bounded some other way) or get purged after a further period.
+- [ ] Tasks home (My work, views) and the relation picker list archived cards without the Archived mark (the API flags them: `archived_at`, `is_archived`); show the chip there too.
+- [ ] Only the sweep archives (D605): no manual "Archive" in a card's ⋯ menu. Add one if the operator wants it.
+- [ ] "Show all levels on the board" is still per device (localStorage), while collapsed columns and "Show auto-archived cards" are per person on the server (`board_view_prefs`); move it there for one model.
 
 ## Leftovers (lane LOCALEMB)
 

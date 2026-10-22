@@ -631,6 +631,20 @@ curl http://localhost:2026/api/health
 
 Every image carries immutable numbered migrations under `server/migrations`. They run transactionally and are recorded in SQLite's `schema_migrations` table before the HTTP server accepts requests. New schema changes are always added as a new migration; released migrations are never edited.
 
+### Upgrading to 0.45.0
+
+0.45.0 lets each person collapse a task board's columns, keeps the filter bar's **+ Filter** and search box first, and auto-archives cards that sit in a done column (lane TASKS, D602–D609). Its migration runs once on the first boot, before the HTTP server answers; it is recorded in `schema_migrations` and cannot be undone except by restoring a backup. **Back up first:** `./scripts/backup.sh --force`.
+
+| Migration | What it does | Cost |
+| --- | --- | --- |
+| **074** `task_archive` | Lane TASKS: adds `boards.auto_archive_days` (**30 for every existing board**: auto-archive is on), `cards.done_at` (when a card came into a done column; backfilled from `updated_at` for live cards already in one, which is never earlier than the move that put them there), `cards.archived_at` (NULL for every card), the partial index `idx_cards_done_at`, and the empty table `board_view_prefs` (each person's collapsed columns and "Show auto-archived cards" per board; it goes with the board or the person). | One update over the cards in done columns and one index: quick at any size. |
+
+If it fails, the server logs `Migration failed` with id 74 and does not start; it is transactional, so nothing is half applied. No new environment settings.
+
+Check: `sqlite3 <data>/mynotes.sqlite "SELECT id, name FROM schema_migrations WHERE id >= 74;"` lists 74 `task_archive`.
+
+**Auto-archive is on for every board, existing ones included, at 30 days.** On the first sweep after the upgrade (at boot, then hourly), cards that have sat in a done column for 30 days or more by their last change are archived: hidden from the board, never deleted, still listed by MCP and search with `archived: true`, and back on the board with **Restore to board** in the card or by moving them out. A board's owner or a manager turns it off with **Board settings → Done cards → Auto-archive cards in done columns** (or `PATCH /api/tasks/boards/:id {"autoArchiveDays": null}`); cards it already archived stay archived until restored. To turn it off on every board and bring back what the first sweep archived, run `sqlite3 <data>/mynotes.sqlite "UPDATE boards SET auto_archive_days = NULL; UPDATE cards SET archived_at = NULL WHERE archived_at IS NOT NULL;"` (safe while Nook runs). Each sweep that archives cards writes one `task.cards_auto_archived` audit row per board (actor: the system) with the count and the days. Each person can show archived cards on a board (**Board settings → Display**) and collapse columns; both are kept per person on the server. The board's and Tasks home's filter bars now keep **+ Filter** and the search box first, with the applied filters after them.
+
 ### Upgrading to 0.44.0
 
 0.44.0 adds report lists (lane LISTS, D550–D559: a person groups reports from any folder into named, ordered lists, shares a list with people and groups at view or edit, and finds it under Lists in the Reports nav; a list never gives access to a report) and linked filters and saved filter views (lane FILT2). Its migrations run once on the first boot, in order, before the HTTP server answers; they are recorded in `schema_migrations` and cannot be undone except by restoring a backup. **Back up first:** `./scripts/backup.sh --force`.

@@ -251,7 +251,7 @@ describe("card search (D106, T95)", () => {
     expect(ids).toContain(s.m.id);
     expect(ids).not.toContain(s.p.id);
     expect(hits.body.truncated).toBe(false);
-    expect(hits.body.results.find((hit: { id: string }) => hit.id === s.a.id)).toEqual({ id: s.a.id, board_id: s.shared.id, board_name: "Srch shared", title: "Srch alpha", column_name: "To do", is_done: 0 });
+    expect(hits.body.results.find((hit: { id: string }) => hit.id === s.a.id)).toEqual({ id: s.a.id, board_id: s.shared.id, board_name: "Srch shared", title: "Srch alpha", column_name: "To do", is_done: 0, is_archived: 0 });
     // Parity with GET /boards/:b: every hit is a card the viewer can load.
     for (const hit of hits.body.results as Array<{ id: string; board_id: string }>) {
       const cards = ((await tasks(s.member, "GET", `/boards/${hit.board_id}`)).body.cards as Array<{ id: string }>).map((item) => item.id);

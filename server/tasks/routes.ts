@@ -13,6 +13,7 @@ import { registerTaskQueryRoutes } from "./queryRoutes";
 import { cardHierarchy } from "./hierarchy";
 import { COMMENT_MAX_BYTES, COMMENT_PAGE_SIZE, createComment, deleteComment, listComments, updateComment } from "./comments";
 import { avatarUrlsFor, integrationIdsAmong } from "../avatars";
+import { AUTO_ARCHIVE_MAX_DAYS, unarchiveCard, writeViewPrefs } from "./archive";
 
 /** Web payloads only (MCP output unchanged): each comment author's picture, beside the name (QA U4). */
 function withAuthorAvatars<T extends { author_id: string | null }>(comments: T[]) {
@@ -59,9 +60,22 @@ export const boardCreateSchema = z.object({
   name: label(120), template: z.enum(BOARD_TEMPLATES).optional(),
   tz: z.string().max(64).refine((value) => validTimeZone(value) !== null, "Unknown time zone").optional()
 }).strict();
-/** `PATCH /boards/:b`: a new name and/or a new structure (checked by `validateStructure`, D122). */
-export const boardPatchSchema = z.object({ name: label(120).optional(), structure: z.unknown().optional() }).strict()
-  .refine((value) => value.name !== undefined || value.structure !== undefined, "Provide a name or a structure");
+/**
+ * `PATCH /boards/:b`: a new name, a new structure (checked by `validateStructure`, D122), and/or
+ * `autoArchiveDays` (1–365, or null for off; D604).
+ */
+export const boardPatchSchema = z.object({
+  name: label(120).optional(),
+  structure: z.unknown().optional(),
+  autoArchiveDays: z.number().int().min(1).max(AUTO_ARCHIVE_MAX_DAYS).nullable().optional()
+}).strict()
+  .refine((value) => value.name !== undefined || value.structure !== undefined || value.autoArchiveDays !== undefined, "Provide a name, a structure, or autoArchiveDays");
+/** `PUT /boards/:b/view` (D602, D606): the caller's own collapsed columns and archived-card choice. */
+export const boardViewSchema = z.object({
+  collapsedColumnIds: z.array(uuid).max(40).optional(),
+  showArchived: z.boolean().optional()
+}).strict()
+  .refine((value) => value.collapsedColumnIds !== undefined || value.showArchived !== undefined, "Provide collapsedColumnIds or showArchived");
 export const boardSharingSchema = z.object({
   visibility: z.enum(["private", "selected", "all_users"]),
   userIds: z.array(uuid).max(100).default([])
@@ -247,7 +261,17 @@ export function registerTaskRoutes(app: Hono<AppEnv>) {
     // One lock and one transaction for both (review L5): never a renamed board with a refused structure.
     // Sprint defaults are kept unless the structure names them (`null` clears them).
     const keepSprintDefaults = Boolean(body.structure && typeof body.structure === "object" && !("sprintDefaults" in body.structure));
-    return respond(c, () => updateBoard(userId, boardId, { ...(body.name !== undefined ? { name: body.name } : {}), ...(structure?.ok ? { structure: structure.structure, keepSprintDefaults } : {}) }));
+    return respond(c, () => updateBoard(userId, boardId, {
+      ...(body.name !== undefined ? { name: body.name } : {}),
+      ...(structure?.ok ? { structure: structure.structure, keepSprintDefaults } : {}),
+      ...(body.autoArchiveDays !== undefined ? { autoArchiveDays: body.autoArchiveDays } : {})
+    }));
+  });
+
+  app.put("/api/tasks/boards/:boardId/view", async (c) => {
+    const boardId = id(c, "boardId");
+    const body = await parseJson(c.req.raw, boardViewSchema);
+    return respond(c, () => writeViewPrefs(c.get("user").id, boardId, body));
   });
 
   app.delete("/api/tasks/boards/:boardId", (c) => {
@@ -407,6 +431,11 @@ export function registerTaskRoutes(app: Hono<AppEnv>) {
     const cardId = id(c, "cardId");
     const body = await parseJson(c.req.raw, cardPatchSchema);
     return respond(c, async () => withAssigneeAvatars(await patchCard(c.get("user").id, cardId, body)));
+  });
+
+  app.post("/api/tasks/cards/:cardId/unarchive", (c) => {
+    const cardId = id(c, "cardId");
+    return respond(c, async () => withAssigneeAvatars(await unarchiveCard(c.get("user").id, cardId)));
   });
 
   app.post("/api/tasks/cards/:cardId/move", async (c) => {

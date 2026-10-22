@@ -68,6 +68,10 @@ export type BoardSummary = {
   /** The caller's level on the board (§D.3): owner, manage, edit, comment, or view. */
   level: ItemLevel;
   card_count: number;
+  /** Live cards the auto-archive sweep archived (D605); they are part of `card_count`. */
+  archived_count: number;
+  /** Cards in a done column this many days are archived (D604); null when it is off. */
+  auto_archive_days: number | null;
   /** Level names, work level, and sprints (migration 019, D122). */
   structure: BoardStructure;
   created_at: string;
@@ -81,7 +85,8 @@ const boardSummarySelect = `
          CASE WHEN b.owner_id = $userId THEN 1 ELSE 0 END AS is_owner,
          b.visibility, b.share_role,
          (SELECT COUNT(*) FROM cards k WHERE k.board_id = b.id AND k.deleted_at IS NULL) AS card_count,
-         b.structure_json, b.created_at, b.updated_at
+         (SELECT COUNT(*) FROM cards k WHERE k.board_id = b.id AND k.deleted_at IS NULL AND k.archived_at IS NOT NULL) AS archived_count,
+         b.auto_archive_days, b.structure_json, b.created_at, b.updated_at
   FROM boards b JOIN users u ON u.id = b.owner_id
 `;
 
@@ -160,6 +165,10 @@ export type CardSummary = {
    * work level, null above it and in the backlog.
    */
   sprint_id: string | null;
+  /** When the card last came into a done column, or null outside one (D603). */
+  done_at: string | null;
+  /** When the auto-archive sweep archived it, or null (D605). Archived cards are live, not binned. */
+  archived_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -172,7 +181,7 @@ const cardSelect = (extraColumns = "") => `
          (SELECT COUNT(*) FROM card_comments cc WHERE cc.card_id = k.id) AS comment_count,
          (SELECT COUNT(*) FROM card_attachments ca WHERE ca.card_id = k.id) AS attachment_count,
          k.parent_card_id, k.level, ${EFFECTIVE_SPRINT_SQL} AS sprint_id,
-         k.created_at, k.updated_at${extraColumns}
+         k.done_at, k.archived_at, k.created_at, k.updated_at${extraColumns}
   FROM cards k LEFT JOIN users cu ON cu.id = k.created_by
 `;
 const cardSummarySelect = cardSelect();
@@ -196,8 +205,10 @@ function requireDue(current: Parameters<typeof resolveDue>[0], input: DueInput) 
   return resolved;
 }
 
-export function listCards(boardId: string): CardSummary[] {
-  const cards = db.query(`${cardSummarySelect} WHERE k.board_id = ? AND k.deleted_at IS NULL ORDER BY k.position, k.id`).all(boardId) as SelectedCard[];
+/** The board's live cards in order; `includeArchived: false` leaves out auto-archived ones (D605). */
+export function listCards(boardId: string, options: { includeArchived?: boolean } = {}): CardSummary[] {
+  const archived = options.includeArchived === false ? " AND k.archived_at IS NULL" : "";
+  const cards = db.query(`${cardSummarySelect} WHERE k.board_id = ? AND k.deleted_at IS NULL${archived} ORDER BY k.position, k.id`).all(boardId) as SelectedCard[];
   // One grouped query per concern over the board's live cards, never a per-card subquery (§3.1).
   const assignees = assigneesForBoard(boardId);
   const tags = tagIdsForBoard(boardId);
@@ -214,10 +225,14 @@ export function listCards(boardId: string): CardSummary[] {
   return cards.map((card) => withCardFields(card, { assignees: assignees.get(card.id) ?? [], tagIds: tags.get(card.id) ?? [], flags: flags.get(card.id) ?? [], rollup: rollups.get(card.id) ?? NO_CHILDREN }, instant));
 }
 
-export function getBoard(userId: string, boardId: string) {
+/**
+ * The board, its columns, cards, tags, and sprints. Cards include auto-archived ones unless
+ * `includeArchived` is false (the app's board passes the viewer's choice, D606; MCP lists them all).
+ */
+export function getBoard(userId: string, boardId: string, options: { includeArchived?: boolean } = {}) {
   requireReadableBoard(boardId, userId);
   // Open sprints and the latest completed ones (17B, §6.1); empty on a board that never had sprints.
-  return { board: boardSummary(boardId, userId)!, columns: listColumns(boardId), cards: listCards(boardId), tags: listBoardTags(boardId), sprints: boardSprints(boardId) };
+  return { board: boardSummary(boardId, userId)!, columns: listColumns(boardId), cards: listCards(boardId, options), tags: listBoardTags(boardId), sprints: boardSprints(boardId) };
 }
 
 /** The board if the caller can read it, else 404. */
@@ -333,7 +348,7 @@ function checkStructureChange(boardId: string, structure: BoardStructure) {
  * then written in one transaction under the board lock, so a refused structure never leaves the
  * name changed and a failed write leaves neither.
  */
-export function updateBoard(userId: string, boardId: string, input: { name?: string; structure?: BoardStructure; keepSprintDefaults?: boolean }) {
+export function updateBoard(userId: string, boardId: string, input: { name?: string; structure?: BoardStructure; keepSprintDefaults?: boolean; autoArchiveDays?: number | null }) {
   return withBoardLock(boardId, () => {
     requireBoardAt(boardId, userId, "manage");
     const { name } = input;
@@ -350,6 +365,11 @@ export function updateBoard(userId: string, boardId: string, input: { name?: str
       if (name !== undefined) {
         db.query("UPDATE boards SET name = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL").run(name, timestamp, boardId);
         audit(userId, null, "task.board_rename", { boardId });
+      }
+      if (input.autoArchiveDays !== undefined) {
+        // Only later sweeps read it: cards already archived stay archived (D604).
+        db.query("UPDATE boards SET auto_archive_days = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL").run(input.autoArchiveDays, timestamp, boardId);
+        audit(userId, null, "task.board_auto_archive", { boardId, days: input.autoArchiveDays });
       }
     })();
     return { board: boardSummary(boardId, userId)! };
@@ -485,6 +505,13 @@ export async function patchColumn(userId: string, columnId: string, input: { nam
       if (state !== null) {
         // One statement writes both, so `is_done = (state = 'done')` always holds (T121).
         db.query("UPDATE board_columns SET state = ?, is_done = ?, updated_at = ? WHERE id = ?").run(state, state === "done" ? 1 : 0, timestamp, columnId);
+        // Its cards' done clocks (D603): they start now in a column that became done, and stop (with
+        // any archive undone) in one that no longer is.
+        if (state === "done" && column.state !== "done") {
+          db.query("UPDATE cards SET done_at = ? WHERE column_id = ? AND deleted_at IS NULL AND done_at IS NULL").run(timestamp, columnId);
+        } else if (state !== "done" && column.state === "done") {
+          db.query("UPDATE cards SET done_at = NULL, archived_at = NULL WHERE column_id = ? AND deleted_at IS NULL").run(columnId);
+        }
         if (input.isDone !== undefined) audit(userId, null, "task.column_done", { boardId: board.id, columnId, isDone: state === "done" });
         if (input.state !== undefined) audit(userId, null, "task.column_state", { boardId: board.id, columnId, state });
       }
@@ -513,8 +540,14 @@ export async function deleteColumn(userId: string, columnId: string) {
   const { board } = requireOwnedColumn(columnId, userId);
   return withBoardLock(board.id, () => {
     requireOwnedColumn(columnId, userId);
-    const liveCards = (db.query("SELECT COUNT(*) AS count FROM cards WHERE column_id = ? AND deleted_at IS NULL").get(columnId) as { count: number }).count;
-    if (liveCards > 0) throw new TaskError(409, "Move or delete the cards in this column first", "COLUMN_NOT_EMPTY", { cardCount: liveCards });
+    const { count: liveCards, archived } = db.query("SELECT COUNT(*) AS count, COUNT(archived_at) AS archived FROM cards WHERE column_id = ? AND deleted_at IS NULL").get(columnId) as { count: number; archived: number };
+    if (liveCards > 0) {
+      // Archived cards are hidden from the board but still live (D605): say where they are.
+      const message = archived === liveCards
+        ? `This column has ${archived === 1 ? "1 archived card" : `${archived} archived cards`}. Show archived cards in Board settings to move or delete them.`
+        : "Move or delete the cards in this column first";
+      throw new TaskError(409, message, "COLUMN_NOT_EMPTY", { cardCount: liveCards, archivedCount: archived });
+    }
     const columnCount = (db.query("SELECT COUNT(*) AS count FROM board_columns WHERE board_id = ?").get(board.id) as { count: number }).count;
     if (columnCount <= 1) throw new TaskError(409, "A board needs at least one column", "LAST_COLUMN");
     db.transaction(() => {
@@ -552,7 +585,7 @@ function stalePosition(columnId: string) {
 
 /** A column of this board (path and body ids are joined to their board, T39). */
 function requireBoardColumn(boardId: string, columnId: string) {
-  const column = db.query("SELECT id, wip_limit FROM board_columns WHERE id = ? AND board_id = ?").get(columnId, boardId) as { id: string; wip_limit: number | null } | null;
+  const column = db.query("SELECT id, wip_limit, state FROM board_columns WHERE id = ? AND board_id = ?").get(columnId, boardId) as { id: string; wip_limit: number | null; state: ColumnState } | null;
   if (!column) throw columnNotFound();
   return column;
 }
@@ -561,11 +594,12 @@ function requireBoardColumn(boardId: string, columnId: string) {
  * 409 COLUMN_FULL when a card would come into a column at or over its WIP
  * limit (D108, T96). Called under the board lock for creates and for moves
  * from another column only: moving within a column, moving out, and Bin
- * restore are always allowed. Every live card in the column counts.
+ * restore are always allowed. Every live card in the column counts, except archived ones (hidden
+ * from the board, D605).
  */
 function requireColumnRoom(column: { id: string; wip_limit: number | null }) {
   if (column.wip_limit === null) return;
-  const cardCount = liveCardsIn(column.id).length;
+  const cardCount = (db.query("SELECT COUNT(*) AS count FROM cards WHERE column_id = ? AND deleted_at IS NULL AND archived_at IS NULL").get(column.id) as { count: number }).count;
   if (cardCount >= column.wip_limit) {
     throw new TaskError(409, `This column is full (limit ${column.wip_limit})`, "COLUMN_FULL", { columnId: column.id, wipLimit: column.wip_limit, cardCount });
   }
@@ -696,10 +730,10 @@ export function createCard(userId: string, boardId: string, input: CardCreateInp
       applyRenumber("cards", plan.renumbered);
       const timestamp = now();
       const description = input.description ?? "";
-      db.query(`INSERT INTO cards (id, board_id, column_id, position, title, description, description_excerpt, due_on, due_time, due_tz, parent_card_id, level, sprint_id, created_by, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      db.query(`INSERT INTO cards (id, board_id, column_id, position, title, description, description_excerpt, due_on, due_time, due_tz, parent_card_id, level, sprint_id, done_at, created_by, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(id, boardId, input.columnId, plan.position, input.title, description, descriptionExcerpt(description), due.due_on, due.due_time, due.due_tz,
-          placement.parentId, placement.level, sprintId, userId, timestamp, timestamp);
+          placement.parentId, placement.level, sprintId, column.state === "done" ? timestamp : null, userId, timestamp, timestamp);
       if (assignees?.length) replaceAssignees(id, assignees, userId, timestamp);
       if (tagIds?.length) replaceCardTags(id, tagIds, timestamp);
       if (input.flags?.length) replaceCardFlags(id, input.flags, timestamp);
@@ -951,7 +985,16 @@ export async function moveCard(userId: string, cardId: string, input: { columnId
     db.transaction(() => {
       applyRenumber("cards", plan.renumbered);
       const timestamp = now();
-      db.query("UPDATE cards SET column_id = ?, position = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL").run(input.columnId, plan.position, timestamp, cardId);
+      if (card.column_id === input.columnId) {
+        db.query("UPDATE cards SET position = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL").run(plan.position, timestamp, cardId);
+      } else {
+        // Another column (D603, D605): the done clock keeps running between two done columns, starts
+        // on coming into one, and stops on leaving; any archive is undone (the card is back in view).
+        const fromDone = (db.query("SELECT state FROM board_columns WHERE id = ?").get(card.column_id) as { state: ColumnState } | null)?.state === "done";
+        db.query(`UPDATE cards SET column_id = $columnId, position = $position, updated_at = $timestamp, archived_at = NULL,
+            done_at = CASE WHEN NOT $toDone THEN NULL WHEN $fromDone AND done_at IS NOT NULL THEN done_at ELSE $timestamp END
+          WHERE id = $cardId AND deleted_at IS NULL`).run({ columnId: input.columnId, position: plan.position, timestamp, cardId, toDone: column.state === "done" ? 1 : 0, fromDone: fromDone ? 1 : 0 });
+      }
       db.query("UPDATE boards SET updated_at = ? WHERE id = ?").run(timestamp, board.id);
       audit(userId, null, "task.card_move", { boardId: board.id, cardId, columnId: input.columnId });
     })();

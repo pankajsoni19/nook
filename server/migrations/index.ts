@@ -65,6 +65,7 @@ import { reportFiltersMigration } from "./066_report_filters";
 import { reportListsMigration } from "./068_report_lists";
 import { reportFilterViewsMigration } from "./069_report_filter_views";
 import { agentDatasourcesMigration } from "./073_agent_datasources";
+import { taskArchiveMigration } from "./074_task_archive";
 
 const migrations = [initialMigration, folderSharingMigration, totpMigration, totpRecoveryCodesMigration, mcpApiKeysMigration, documentsMigration, binMigration, noteSearchMigration, taskBoardsMigration, mcpKeyScopesMigration, taskDatesMigration, collectionsMigration, calendarMigration, eventNextOccurrenceMigration, taskCardUxMigration, userPreferencesMigration, teamRolesMigration,
   // 018 (Team invites) may reach existing installs after 019 (task hierarchy) and 020 (task views); none depends on another.
@@ -180,7 +181,9 @@ const migrations = [initialMigration, folderSharingMigration, totpMigration, tot
   // values; report_param_views, a reader's saved views) needs 050 and 063.
   reportFilterViewsMigration,
   // 073 (lane AGENTSQL, D590–D599: report_datasources.agent_use, agent_datasources, chat_sql_results) needs 039 and 050.
-  agentDatasourcesMigration
+  agentDatasourcesMigration,
+  // 074 (lane TASKS, D602–D609: boards.auto_archive_days, cards.done_at and archived_at, board_view_prefs) needs 009, 011, and 020.
+  taskArchiveMigration
 ];
 
 /** Every registered migration in order (read-only), for tests that build an older database shape. */

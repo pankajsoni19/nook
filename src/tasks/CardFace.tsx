@@ -1,4 +1,4 @@
-import { AlignLeft, CalendarDays, Link2, ListChecks, MessageSquare, OctagonAlert, Paperclip } from "lucide-react";
+import { AlignLeft, Archive, CalendarDays, Link2, ListChecks, MessageSquare, OctagonAlert, Paperclip } from "lucide-react";
 import { cardTags, FLAG_LABELS, visibleItems } from "./cardTags";
 import { FlagIcon } from "./TagPicker";
 import { Avatar } from "../ui/Avatar";
@@ -93,6 +93,7 @@ export function avatarTone(id: string) {
  */
 export function cardFaceLabel({ card, tags, done, today, parentTitle, rollup, childLabel = "subtasks" }: FaceInput) {
   const parts = [card.title];
+  if (card.archived_at) parts.push("archived");
   if (parentTitle) parts.push(`in ${parentTitle}`);
   if (rollup?.total) parts.push(`${rollup.done} of ${rollup.total} ${childLabel} done`);
   for (const flag of card.flags ?? []) parts.push(FLAG_LABELS[flag].toLowerCase());
@@ -126,7 +127,10 @@ export function CardFace({ card, tags, done, today, excerptId, rollup, childLabe
   const allTags = cardTags(card.tag_ids, tags);
   const people = cardAssignees(card);
   const children = rollup && rollup.total > 0 ? rollup : null;
+  const archived = Boolean(card.archived_at);
   const countTexts = [
+    // The Archived chip (D605) takes footer room like a count.
+    ...(archived ? ["Archived"] : []),
     ...(card.has_description === 1 && !excerpt ? [""] : []),
     ...(card.comment_count > 0 ? [String(card.comment_count)] : []),
     ...(card.attachment_count > 0 ? [String(card.attachment_count)] : []),
@@ -138,9 +142,9 @@ export function CardFace({ card, tags, done, today, excerptId, rollup, childLabe
   const shownPeople = visibleItems(people, FACE_PEOPLE);
   const assigned = people.length ? `Assigned to ${assigneeSentence(people.map((person) => person.display_name))}` : "";
   const counts = (card.has_description === 1 && !excerpt) || card.comment_count > 0 || card.attachment_count > 0 || Boolean(card.relation_count) || Boolean(card.open_blockers);
-  const meta = due || allTags.length > 0 || counts || people.length > 0 || children;
+  const meta = archived || due || allTags.length > 0 || counts || people.length > 0 || children;
   const subtasks = children && <span className={`task-subtask-chip${children.done === children.total ? " complete" : ""}`} title={`${children.done} of ${children.total} ${childLabel} done`}><ListChecks />{children.done}/{children.total}</span>;
-  const main = due || allTags.length > 0 || counts || children;
+  const main = archived || due || allTags.length > 0 || counts || children;
 
   return <div className="task-card-face" aria-hidden="true">
     <span className="task-card-title">
@@ -152,6 +156,7 @@ export function CardFace({ card, tags, done, today, excerptId, rollup, childLabe
     {excerpt && <span id={excerptId} className="task-card-excerpt">{excerpt}</span>}
     {meta && <span className="task-card-meta">
       {main && <span className="task-card-meta-main">
+        {archived && <ArchivedChip at={card.archived_at!} />}
         {due && <span className={`task-due-chip ${due.tone}`} title={due.description}><CalendarDays />{due.label}</span>}
         {allTags.length > 0 && <span className="task-card-tags">
           {tagList.shown.map((tag) => <span key={tag.id} className={`task-tag color-${tag.color}`} title={tag.name}>{tag.name}</span>)}
@@ -170,4 +175,11 @@ export function CardFace({ card, tags, done, today, excerptId, rollup, childLabe
       </span>}
     </span>}
   </div>;
+}
+
+/** "Archived" on a card the auto-archive sweep archived (D605), shown only when the viewer shows them. */
+export function ArchivedChip({ at }: { at: string }) {
+  const date = new Date(at);
+  const when = Number.isNaN(date.getTime()) ? "" : ` on ${date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`;
+  return <span className="task-archived-chip" title={`Auto-archived${when}`}><Archive aria-hidden="true" />Archived</span>;
 }

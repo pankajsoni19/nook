@@ -201,7 +201,10 @@ const cardFields = (card: CardSummary, tags: Map<string, string>, structure?: Bo
   done_child_count: card.done_child_count,
   // Sprints (17B, D139): the card's sprint (inherited below the work level) and its name.
   sprint_id: card.sprint_id,
-  ...(sprints ? { sprint_name: card.sprint_id ? sprints.get(card.sprint_id) ?? null : null } : {})
+  ...(sprints ? { sprint_name: card.sprint_id ? sprints.get(card.sprint_id) ?? null : null } : {}),
+  // Auto-archive (D607): an archived card is still a live card, hidden only on the app's board.
+  archived: card.archived_at !== null,
+  archived_at: card.archived_at
 });
 
 /**
@@ -274,7 +277,9 @@ const listFilters = {
   dueNone: z.boolean().optional().describe("true: also (or, alone, only) cards without a due date"),
   text: z.string().min(1).max(QUERY_LIMITS.textMax).optional().describe("Only cards whose title or description excerpt contains this text, ignoring case and accents"),
   sprint: z.union([z.enum(["current", "next", "none"]), uuid]).optional()
-    .describe("Only cards in this sprint (see list_sprints): current (the active sprint), next (the first planned one), none (the backlog), or a sprint id. Subtasks count in their task's sprint")
+    .describe("Only cards in this sprint (see list_sprints): current (the active sprint), next (the first planned one), none (the backlog), or a sprint id. Subtasks count in their task's sprint"),
+  archived: z.boolean().optional()
+    .describe("true: only auto-archived cards; false: leave them out. Omitted, archived cards are listed too, each with archived: true")
 };
 
 export const taskTools: McpToolSpec[] = [
@@ -292,12 +297,12 @@ export const taskTools: McpToolSpec[] = [
   defineTool({
     name: "list_cards",
     title: "List cards on a board",
-    description: "List a board's columns, its tags, and its cards in order. Optional filters narrow the cards: columnId, assigneeIds, tags, flags, dueBefore/dueAfter/dueNone, text, and sprint; values inside one filter are alternatives, and different filters must all match. Descriptions are shortened plain text; attachments are file names only. Use get_card for a full card.",
+    description: "List a board's columns, its tags, and its cards in order. Optional filters narrow the cards: columnId, assigneeIds, tags, flags, dueBefore/dueAfter/dueNone, text, sprint, and archived; values inside one filter are alternatives, and different filters must all match. Cards the board auto-archived (after auto_archive_days in a done column) are listed with archived: true unless archived is false. Descriptions are shortened plain text; attachments are file names only. Use get_card for a full card.",
     scopes: ["tasks:read"],
     access: { mode: "items", items: [{ arg: "boardId", kind: "board" }], related: ["columnId", "assigneeIds", "sprint"] },
     write: false,
     inputSchema: z.object({ boardId: uuid, columnId: uuid.optional().describe("Only cards in this column"), ...listFilters }),
-    handler: async ({ boardId, columnId, assigneeIds, tags, flags, dueBefore, dueAfter, dueNone, text, sprint }, key) => service(key, () => {
+    handler: async ({ boardId, columnId, assigneeIds, tags, flags, dueBefore, dueAfter, dueNone, text, sprint, archived }, key) => service(key, () => {
       const { board, columns, cards, tags: boardTags } = getBoardWithRelationCounts(key.userId, boardId);
       if (columnId && !columns.some((column) => column.id === columnId)) throw new McpToolError("NOT_FOUND", "Column not found");
       const filter: CardFilter = {
@@ -318,17 +323,19 @@ export const taskTools: McpToolSpec[] = [
       const open = sprint === "current" || sprint === "next" ? openSprintRows(board.id) : [];
       const wanted = sprint === "current" ? open.find((row) => row.state === "active")?.id ?? "" : sprint === "next" ? open.find((row) => row.state === "planned")?.id ?? "" : sprint;
       const inSprint = (card: CardSummary) => wanted === undefined || (wanted === "none" ? card.sprint_id === null : card.sprint_id === wanted.toLowerCase());
+      const archiveMatch = (card: CardSummary) => archived === undefined || archived === (card.archived_at !== null);
       return {
         board: {
           id: board.id, name: board.name, owner_name: board.owner_name, is_owner: board.is_owner, levels: structure.levels.map((level) => level.name), work_level: structure.workLevel,
           sprints_enabled: structure.sprints,
+          auto_archive_days: board.auto_archive_days,
           // Read-only here; the owner sets them in Board settings (PATCH /boards/:b {structure}).
           ...(structure.sprintDefaults ? { sprint_defaults: { days: structure.sprintDefaults.days, start: structure.sprintDefaults.start, name_pattern: structure.sprintDefaults.name ?? null } } : {})
         },
         columns: columns.map((column) => ({ id: column.id, name: column.name, position: column.position, wip_limit: column.wip_limit })),
         tags: boardTags.map((tag) => ({ id: tag.id, name: tag.name, color: tag.color })),
         // Cards come from the board just authorized above.
-        cards: cards.filter((card) => matching.has(card.id) && inSprint(card)).map((card) => listedCard(cardDetail(card.id) ?? card, names.get(card.column_id), tagName, card, structure, sprints))
+        cards: cards.filter((card) => matching.has(card.id) && inSprint(card) && archiveMatch(card)).map((card) => listedCard(cardDetail(card.id) ?? card, names.get(card.column_id), tagName, card, structure, sprints))
       };
     })
   }),
@@ -412,7 +419,7 @@ export const taskTools: McpToolSpec[] = [
   defineTool({
     name: "search_cards",
     title: "Search cards by title",
-    description: "Find cards by title across every board the user can open (case-insensitive substring match on titles only, not descriptions), for example to pick a card for link_cards. Cards on boardId come first. At most 20 results.",
+    description: "Find cards by title across every board the user can open (case-insensitive substring match on titles only, not descriptions), for example to pick a card for link_cards. Cards on boardId come first; auto-archived cards are found too, with is_archived 1. At most 20 results.",
     scopes: ["tasks:read"],
     access: { mode: "list", lists: ["board"], items: [{ arg: "boardId", kind: "board", ifAbsent: "allow" }] },
     write: false,

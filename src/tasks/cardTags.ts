@@ -81,6 +81,9 @@ export function mergeCardDetail(item: CardSummary, card: CardDetail): CardSummar
     level: card.level ?? item.level,
     // Sprints (17B): the dialog's Sprint field, and a level change that clears it.
     sprint_id: card.sprint_id !== undefined ? card.sprint_id : item.sprint_id,
+    // Auto-archive (D605): restoring from the dialog clears it.
+    archived_at: card.archived_at !== undefined ? card.archived_at : item.archived_at,
+    done_at: card.done_at !== undefined ? card.done_at : item.done_at,
     updated_at: card.updated_at
   };
 }

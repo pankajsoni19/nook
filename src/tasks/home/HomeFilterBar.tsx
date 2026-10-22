@@ -155,6 +155,17 @@ export function HomeFilterBar({ filter, onChange, names, options, lockedKeys = [
   }
 
   return <div className="task-filter-bar task-home-filter" role="group" aria-label="Filters">
+    {/* The order never changes (operator, 2026-10-22, D608): "+ Filter" and the text box first, so
+        they stay put; the applied filters after them, then the one being edited, Clear, and the count. */}
+    {!readOnly && <Select<string> variant="chip" className="task-filter-add" label="Add filter" placeholder="+ Filter" value={null} searchable={false}
+      options={FIELD_ORDER.filter((key) => !lockedKeys.includes(key) && !hiddenKeys.includes(key)).map((key) => ({ value: key, label: FIELD_LABELS[key], icon: <ListFilter /> }))}
+      onChange={(key) => setEditing(key as HomeField)} />}
+    {!readOnly && searchEnabled && <label className="task-filter-text">
+      <Search aria-hidden="true" />
+      <input type="search" value={text} maxLength={100} placeholder="Find cards" aria-label="Find cards by text"
+        onChange={(event) => { typedRef.current = true; setText(event.target.value); }}
+        onKeyDown={(event) => { if (event.key === "Escape" && text) { event.preventDefault(); event.stopPropagation(); typedRef.current = true; setText(""); } }} />
+    </label>}
     {chips.map(({ term, index }) => {
       const label = homeChipLabel(term, names);
       const editable = removable(term) && !term.negate && (FIELD_ORDER as string[]).includes(term.key);
@@ -168,9 +179,6 @@ export function HomeFilterBar({ filter, onChange, names, options, lockedKeys = [
         }} aria-label={`Remove filter: ${label}`}><X /></button>}
       </span>;
     })}
-    {!readOnly && !editing && <Select<string> variant="chip" className="task-filter-add" label="Add filter" placeholder="+ Filter" value={null} searchable={false}
-      options={FIELD_ORDER.filter((key) => !lockedKeys.includes(key) && !hiddenKeys.includes(key)).map((key) => ({ value: key, label: FIELD_LABELS[key], icon: <ListFilter /> }))}
-      onChange={(key) => setEditing(key as HomeField)} />}
     {!readOnly && editing && <span className="task-filter-editor" role="group" aria-label={`${FIELD_LABELS[editing]} filter`}>
       <span className="task-filter-editor-label">{FIELD_LABELS[editing]} is</span>
       <Combobox<string> multiple defaultOpen label={`${FIELD_LABELS[editing]} filter values`} placeholder={`Choose ${FIELD_LABELS[editing].toLowerCase()}…`} value={values}
@@ -184,12 +192,6 @@ export function HomeFilterBar({ filter, onChange, names, options, lockedKeys = [
       </span>}
       <button type="button" className="icon-button task-filter-done" onClick={() => setEditing(null)} aria-label="Done editing the filter" title="Done"><Check /></button>
     </span>}
-    {!readOnly && searchEnabled && <label className="task-filter-text">
-      <Search aria-hidden="true" />
-      <input type="search" value={text} maxLength={100} placeholder="Find cards" aria-label="Find cards by text"
-        onChange={(event) => { typedRef.current = true; setText(event.target.value); }}
-        onKeyDown={(event) => { if (event.key === "Escape" && text) { event.preventDefault(); event.stopPropagation(); typedRef.current = true; setText(""); } }} />
-    </label>}
     {hasClearable && <button type="button" className="task-filter-clear" onClick={() => {
       typedRef.current = false;
       setText("");

@@ -20,6 +20,10 @@ export type BoardSummary = {
   /** The caller's level on the board (Wave 32, §D.3); older servers omit it (every member edits, D38). */
   level?: ItemLevel;
   card_count: number;
+  /** Live cards auto-archived (D605), part of `card_count`; older servers omit it. */
+  archived_count?: number;
+  /** Cards in a done column this many days are archived (D604); null when off; older servers omit it. */
+  auto_archive_days?: number | null;
   /** Level names, work level, and sprints (migration 019); older servers omit it (Flat). */
   structure?: BoardStructure;
   created_at: string;
@@ -85,13 +89,19 @@ export type CardSummary = {
   done_child_count?: number;
   /** The sprint (17B): stored on work-level cards, the parent's below them, null in the backlog. */
   sprint_id?: string | null;
+  /** When the card came into a done column (D603), or null. */
+  done_at?: string | null;
+  /** When the auto-archive sweep archived it (D605), or null. The board lists archived cards only when the viewer shows them. */
+  archived_at?: string | null;
   created_at: string;
   updated_at: string;
 };
 
 /** `tags` (Wave 13) are by name. */
 /** `sprints` (17B): open sprints plus the latest completed ones; older servers omit it. */
-export type BoardDetail = { board: BoardSummary; columns: BoardColumn[]; cards: CardSummary[]; tags?: BoardTag[]; sprints?: SprintSummary[] };
+/** `view` (D602, D606): the viewer's own collapsed columns and whether they show archived cards; older servers omit it. */
+export type BoardView = { collapsedColumnIds: string[]; showArchived: boolean };
+export type BoardDetail = { board: BoardSummary; columns: BoardColumn[]; cards: CardSummary[]; tags?: BoardTag[]; sprints?: SprintSummary[]; view?: BoardView };
 
 /** A sprint (17B, D124). Counts are live work-level cards planned in it, and those in a done column. */
 export type SprintSummary = {
@@ -131,6 +141,12 @@ export function hydrateBoard(payload: BoardPayload): BoardDetail {
 
 export const getBoard = (boardId: string) => api<BoardPayload>(`/tasks/boards/${boardId}`).then(hydrateBoard);
 export const renameBoard = (boardId: string, name: string) => api<{ board: BoardSummary }>(`/tasks/boards/${boardId}`, json("PATCH", { name }));
+/** Owner or manager (D604): 1–365 days, or null to turn auto-archive off. */
+export const setAutoArchiveDays = (boardId: string, autoArchiveDays: number | null) => api<{ board: BoardSummary }>(`/tasks/boards/${boardId}`, json("PATCH", { autoArchiveDays }));
+/** Any reader (D602, D606): replaces the fields sent of the caller's own view of the board. */
+export const saveBoardView = (boardId: string, change: Partial<BoardView>) => api<{ view: BoardView }>(`/tasks/boards/${boardId}/view`, json("PUT", change));
+/** Puts an auto-archived card back on the board (D605); its done clock starts again. */
+export const unarchiveCard = (cardId: string) => api<{ card: CardDetail }>(`/tasks/cards/${cardId}/unarchive`, json("POST", {}));
 export type BoardReader = { id: string; displayName: string; /** Q7: the same-origin picture (web payload). */ avatarUrl?: string | null; /** Wave 36: an integration (web payload). */ isIntegration?: boolean };
 /**
  * Everyone who can open the board, for the assignee picker: up to 200 without `q`, or a

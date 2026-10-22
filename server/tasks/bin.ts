@@ -166,9 +166,13 @@ export async function restoreTaskItem(type: TaskBinType, id: string, userId: str
     return db.transaction((): TaskRestoreOutcome => {
       applyRenumber("cards", plan.renumbered);
       const timestamp = now();
+      // Back on the board in view (D605): never archived, and in a done column its done clock starts now (D603).
+      const doneAt = "CASE WHEN (SELECT state FROM board_columns WHERE id = cards.column_id) = 'done' THEN updated_at ELSE NULL END";
       const restored = db.query(`UPDATE cards SET deleted_at = NULL, deleted_by = NULL, purge_after = NULL, column_id = ?, position = ?, updated_at = ?,
           parent_card_id = CASE WHEN ? THEN NULL ELSE parent_card_id END
         WHERE id = ? AND deleted_at IS NOT NULL AND purge_started_at IS NULL`).run(column.id, plan.position, timestamp, detached ? 1 : 0, id);
+      const resetClock = db.query(`UPDATE cards SET archived_at = NULL, done_at = ${doneAt} WHERE id = ?`);
+      if (restored.changes === 1) resetClock.run(id);
       if (restored.changes !== 1) return { status: "purging" };
       // The group comes back in its old columns (or the first one), at the bottom, in its old order.
       const firstColumn = db.query("SELECT id FROM board_columns WHERE board_id = ? ORDER BY position, id LIMIT 1").get(card.board_id) as { id: string };
@@ -179,6 +183,7 @@ export async function restoreTaskItem(type: TaskBinType, id: string, userId: str
         const place = planInsert(liveCardsIn(target), undefined)!;
         applyRenumber("cards", place.renumbered);
         restoreMember.run(target, place.position, timestamp, member.id);
+        resetClock.run(member.id);
       }
       audit(userId, null, "task.card_restore", { boardId: card.board_id, cardId: id, columnId: column.id, ...(members.length ? { descendantCount: members.length } : {}), ...(detached ? { detached: true } : {}) });
       return {

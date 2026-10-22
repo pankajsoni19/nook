@@ -329,10 +329,11 @@ export function columnBadge(shown: number, total: number, limit: number | null |
  * limit; otherwise only while the column holds fewer cards than its limit. The server decides (409
  * COLUMN_FULL); this only refuses a drop or a key move early.
  */
-export function canEnterColumn(cards: readonly { id: string; column_id: string }[], column: { id: string; wip_limit?: number | null }, cardId: string | null) {
+export function canEnterColumn(cards: readonly { id: string; column_id: string; archived_at?: string | null }[], column: { id: string; wip_limit?: number | null }, cardId: string | null) {
   if (!column.wip_limit) return true;
   if (cardId && cards.some((card) => card.id === cardId && card.column_id === column.id)) return true;
-  return cards.filter((card) => card.column_id === column.id).length < column.wip_limit;
+  // Archived cards (shown or not) never count toward the limit, as on the server (D605).
+  return cards.filter((card) => card.column_id === column.id && !card.archived_at).length < column.wip_limit;
 }
 
 /** The message for a card refused by a full column. */
@@ -343,7 +344,7 @@ export const columnFullMessage = (name: string, limit: number | null | undefined
  * "Add a card to <column>" on a full column: the same refusal a drag gets, instead of a composer
  * that quietly starts in another column. Null when the column has room.
  */
-export function addCardRefusal(cards: readonly { id: string; column_id: string }[], column: { id: string; name: string; wip_limit?: number | null }) {
+export function addCardRefusal(cards: readonly { id: string; column_id: string; archived_at?: string | null }[], column: { id: string; name: string; wip_limit?: number | null }) {
   return canEnterColumn(cards, column, null) ? null : columnFullMessage(column.name, column.wip_limit);
 }
 

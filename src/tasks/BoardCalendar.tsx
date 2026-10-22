@@ -11,6 +11,7 @@ import { cardsDueInMonth, displayedDay, displayedTime, dropDueOn, emptyMonthNote
 import type { BoardCard, BoardData } from "./boardQuery";
 import type { CalendarLayout } from "./boardUrl";
 import { FlagIcons, KeyboardMoveHint } from "./boardViewParts";
+import { ArchivedChip } from "./CardFace";
 import { useModuleEnabled } from "../modules";
 import { committableDueDate } from "./taskActions";
 import { useHistoryDialogGuard } from "./useHistoryDialogGuard";
@@ -118,7 +119,7 @@ export function BoardCalendar({ board, cards, layout, month: routeMonth, today, 
       onDragStart={(event: ReactDragEvent<HTMLButtonElement>) => { event.dataTransfer.setData(CARD_DRAG_TYPE, card.id); event.dataTransfer.effectAllowed = "move"; }}
       onKeyDown={(event) => chipKeyDown(event, card)} aria-keyshortcuts={readOnly ? undefined : "Alt+ArrowLeft Alt+ArrowRight Alt+ArrowUp Alt+ArrowDown"}>
       <span className="task-cal-row-time">{displayedTime(card, viewerZone) ?? (card.due_on ? "All day" : "")}</span>
-      <span className="task-cal-row-title"><FlagIcons flags={card.flags} /><span>{card.title}</span></span>
+      <span className="task-cal-row-title"><FlagIcons flags={card.flags} /><span>{card.title}</span>{card.archived_at && <ArchivedChip at={card.archived_at} />}</span>
       <small>{board.columns.find((column) => column.id === card.column_id)?.name}</small>
     </button>
     {!readOnly && <button type="button" className="icon-button task-cal-row-due" onClick={() => openDueDialog(card)} aria-haspopup="dialog" aria-label={`Set due date for “${card.title}”`} title="Set due date…"><CalendarClock /></button>}

@@ -369,7 +369,7 @@ describe("MCP card relations and search (WAVE_13 §5.5, T90, T91, T95, T99)", ()
     const key = makeKey(s.member, ["tasks:read"]);
     const found = await callTool(key, "search_cards", { query: "owner CARD" });
     expect(found.isError).toBe(false);
-    expect(found.value.results).toContainEqual({ id: s.cardId, board_id: s.boardId, board_name: "MCP find board", title: "Owner card", column_name: "To do", is_done: 0 });
+    expect(found.value.results).toContainEqual({ id: s.cardId, board_id: s.boardId, board_name: "MCP find board", title: "Owner card", column_name: "To do", is_done: 0, is_archived: 0 });
     expect(found.value.truncated).toBe(false);
     // Private cards never appear; the owner's own key finds them.
     expect(((await callTool(key, "search_cards", { query: "Secret" })).value.results as Array<{ id: string }>).map((hit) => hit.id)).not.toContain(s.privateCardId);

@@ -46,6 +46,28 @@
 .task-column-controls .icon-button svg { width: 15px; }
 .task-column-controls .icon-button:disabled { opacity: .3; cursor: not-allowed; }
 .task-column-controls .desktop-only { opacity: 0; transition: opacity .12s ease; }
+/* Collapse (D602): shown with the move arrows, on hover or focus; always on touch screens. */
+.task-column-controls .task-column-collapse { opacity: 0; transition: opacity .12s ease; }
+.task-column:hover .task-column-controls .task-column-collapse, .task-column:focus-within .task-column-controls .task-column-collapse { opacity: 1; }
+@media (hover: none) { .task-column-controls .task-column-collapse { opacity: 1; } }
+/* A collapsed column on desktop: a 44 px strip with Expand, the count, and the name read top to bottom. */
+.task-column.collapsed { flex: 0 0 44px; width: 44px; }
+.task-column-strip { flex: 1; min-height: 168px; display: flex; flex-direction: column; align-items: center; gap: 10px; border: 0; border-radius: 13px; padding: 10px 0 14px; background: transparent; color: #e4e4e6; font: inherit; cursor: pointer; }
+.task-column-strip:hover { background: #17171a; }
+.task-column-strip:focus-visible { outline: 2px solid var(--yellow); outline-offset: -2px; }
+.task-column-strip > svg { flex: none; width: 15px; height: 15px; color: #a8a8ae; }
+.task-column-strip b { min-width: 22px; border-radius: 999px; padding: 1px 7px; background: rgb(255 255 255 / 7%); color: #a8a8ae; font-size: .7rem; text-align: center; }
+.task-column-strip-name { max-height: 260px; overflow: hidden; color: #e4e4e6; font-size: .86rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; writing-mode: vertical-rl; }
+.task-column-collapsed-note { margin-top: 2px; }
+/* Auto-archived cards, shown only when the viewer asks (D605, D606). */
+.task-card.archived { border-style: dashed; background: #161618; }
+.task-card.archived .task-card-title { color: #b9b9bf; }
+.task-archived-chip { display: inline-flex; align-items: center; gap: 4px; border-radius: 999px; padding: 2px 8px; background: #1d1d21; color: #a9a9b0; font-size: .72rem; font-weight: 600; white-space: nowrap; }
+.task-archived-chip svg { width: 12px; height: 12px; }
+.task-archive-days .task-settings-input { width: 120px; }
+.task-card-archived { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 0; border: 1px dashed #3a3a40; border-radius: 10px; padding: 8px 10px; color: #b9b9bf; font-size: .8rem; line-height: 1.4; }
+.task-card-archived > svg { flex: none; width: 15px; height: 15px; color: #85858c; }
+.task-card-archived > span { flex: 1 1 200px; min-width: 0; }
 .task-column:hover .task-column-controls .desktop-only, .task-column:focus-within .task-column-controls .desktop-only { opacity: 1; }
 .task-card-item { display: grid; gap: 6px; }
 .task-card { position: relative; display: grid; gap: 6px; border: 1px solid #2a2a2f; border-radius: 10px; padding: 10px 40px 10px 12px; background: #1a1a1d; color: #e8e8ea; font-size: .86rem; line-height: 1.4; outline: 0; cursor: grab; user-select: none; }
@@ -93,6 +115,8 @@
   .task-column-tabs button { flex: none; min-height: 44px; max-width: 70vw; display: inline-flex; align-items: center; gap: 8px; border: 1px solid #303035; border-radius: 999px; padding: 0 14px; background: #151517; color: #b7b7bd; font-size: .84rem; font-weight: 600; cursor: pointer; }
   .task-column-tabs button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .task-column-tabs button.active { border-color: #6f5928; background: #2b271d; color: #f5cf79; }
+  .task-column-tabs button.collapsed span { color: #85858c; }
+  .task-column-tabs button.collapsed.active span { color: #c9b27a; }
   .task-column-tabs button b { min-width: 20px; border-radius: 999px; padding: 1px 6px; background: rgb(255 255 255 / 7%); font-size: .72rem; text-align: center; }
   .task-column-tabs .task-tab-add { width: 44px; justify-content: center; padding: 0; }
   .task-column-tabs .task-tab-add svg { width: 17px; }
@@ -102,6 +126,7 @@
   .task-add-column { display: none; }
   .task-column-header { min-height: 52px; }
   .task-column-controls .icon-button { width: 44px; height: 44px; }
+  .task-column-controls .task-column-collapse { opacity: 1; }
   .task-card { min-height: 52px; padding: 12px 48px 12px 12px; font-size: .92rem; }
   .task-card-more { top: 4px; right: 2px; width: 44px; height: 44px; opacity: 1; }
   .task-add-card { min-height: 44px; }

@@ -22,6 +22,7 @@ import { resyncStaleServers, sweepSessions } from "./agents/toolServers";
 import { sweepKnowledge } from "./knowledge/index";
 import { sweepSchemaSync } from "./reports/schemaCatalog";
 import { scheduleDocumentIndex } from "./documentSearch";
+import { sweepAutoArchive } from "./tasks/archive";
 import { logger } from "./log";
 
 const slog = logger("sweeper");
@@ -127,6 +128,13 @@ export function runSweep(options: { boot?: boolean; nowMs?: number } = {}) {
         if (removed.notifications || removed.reminders) slog.info(`Notification sweep: ${removed.notifications} notifications and ${removed.reminders} fired reminders removed`);
       } catch (error) {
         slog.error("Notification sweep failed", error);
+      }
+      try {
+        // Task boards (D604): cards in a done column past the board's auto-archive days are archived, never deleted.
+        const archived = sweepAutoArchive(options.nowMs);
+        if (archived) slog.info(`Auto-archive sweep: ${archived} done cards archived`);
+      } catch (error) {
+        slog.error("Auto-archive sweep failed", error);
       }
       try {
         // Team invites dead (used, revoked, or expired) for 90 days are deleted (D169).

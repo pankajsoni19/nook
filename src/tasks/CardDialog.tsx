@@ -2,7 +2,7 @@ import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent as 
 import { Avatar } from "../ui/Avatar";
 import { IntegrationBadge } from "../ui/IntegrationBadge";
 import { initials } from "./CardFace";
-import { ArrowRightLeft, Copy, Maximize2, MessageSquare, Minimize2, Paperclip, Pencil, RotateCcw, Trash2, X } from "lucide-react";
+import { Archive, ArrowRightLeft, ArchiveRestore, Copy, Maximize2, MessageSquare, Minimize2, Paperclip, Pencil, RotateCcw, Trash2, X } from "lucide-react";
 import { imageAltText, imageContentUrl, IMAGE_REJECTED_MESSAGE, isInsertableImageType } from "../editor/imageUpload";
 import { deleteFile } from "../files/filesApi";
 import { ApiError } from "../api";
@@ -34,6 +34,7 @@ import {
   listComments,
   taskErrorCode,
   taskErrorMessage,
+  unarchiveCard,
   updateCard,
   updateComment,
   type BoardColumn,
@@ -218,6 +219,22 @@ export function CardDialog({ userId, cardId, columns, columnId, boardOwner, boar
   function applyCard(next: CardDetail) {
     setCard(next);
     onChanged(next);
+  }
+
+  // Auto-archived (D605): Restore puts the card back on the board where it is, its done clock restarted.
+  const [restoring, setRestoring] = useState(false);
+  async function restoreArchived() {
+    if (!card) return;
+    setRestoring(true);
+    try {
+      const { card: next } = await unarchiveCard(card.id);
+      applyCard({ ...card, ...next });
+      notify.success("Restored to the board");
+    } catch (reason) {
+      notify.error(taskErrorMessage(reason, "Could not restore the card"));
+    } finally {
+      setRestoring(false);
+    }
   }
 
   // The title saves on blur. On CARD_CHANGED, retry at the new revision only when the title on the
@@ -665,6 +682,11 @@ export function CardDialog({ userId, cardId, columns, columnId, boardOwner, boar
           <div className="task-card-side">
           <p className="task-card-byline">{card.creator_name ? <>Added by {card.creator_name}{card.creator_is_integration === 1 && <IntegrationBadge />}</> : "Added"} · <time dateTime={card.created_at}>{relativeTime(card.created_at)}</time>{card.updated_at !== card.created_at && <> · Updated <time dateTime={card.updated_at}>{relativeTime(card.updated_at)}</time></>}</p>
 
+          {card.archived_at && <p className="task-card-archived" role="status">
+            <Archive aria-hidden="true" />
+            <span>Auto-archived {relativeTime(card.archived_at)}. It is hidden from the board unless you show archived cards.</span>
+            {!readOnly && <button type="button" className="secondary-button task-small-button" disabled={restoring} onClick={() => { void restoreArchived(); }}><ArchiveRestore />{restoring ? "Restoring…" : "Restore to board"}</button>}
+          </p>}
           <CardFields card={card} userId={userId} idPrefix={titleId} done={column?.is_done === 1} saving={savingDetails} onSave={saveDetails} tags={tags} owner={boardOwner} onTagsChange={onTagsChange} readOnly={readOnly} />
           {hierarchy && <div className="task-card-details"><CardParentFields card={card} context={hierarchy} idPrefix={titleId} saving={savingDetails} onSave={saveDetails} readOnly={readOnly} />
             {sprints && <CardSprintField card={card} structure={hierarchy.structure} cards={hierarchy.cards} sprints={sprints} idPrefix={titleId} saving={savingDetails} onSave={saveDetails} readOnly={readOnly} />}</div>}
