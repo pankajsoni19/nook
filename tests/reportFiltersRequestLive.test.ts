@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, setDefaultTimeout, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { createUser, db, request, type Session } from "./support/harness";
 import { retireUsersAfterFile } from "./support/retireUsers";
 import { qaEditScript, startScriptedProvider, withCondition } from "../scripts/fakeReportProvider";
@@ -61,9 +61,13 @@ function spec(): ReportSpec {
 }
 
 describe.skipIf(!url)("Add filter's identity check on a real ClickHouse (CLICKHOUSE_TEST_URL)", () => {
-  const provider = startScriptedProvider(0, qaEditScript);
+  // In hooks, not the describe body: a skipped describe still runs its body, and must change nothing.
+  let provider: ReturnType<typeof startScriptedProvider>;
   const originalConnection = editDeps.connection;
-  editDeps.connection = () => ({ id: "scripted", baseUrl: provider.baseUrl, apiKey: null, model: "scripted-report-model", compat: DEFAULT_COMPAT });
+  beforeAll(() => {
+    provider = startScriptedProvider(0, qaEditScript);
+    editDeps.connection = () => ({ id: "scripted", baseUrl: provider.baseUrl, apiKey: null, model: "scripted-report-model", compat: DEFAULT_COMPAT });
+  });
   afterAll(async () => {
     const until = Date.now() + 15_000;
     while (liveEdits().length && Date.now() < until) await Bun.sleep(20);
