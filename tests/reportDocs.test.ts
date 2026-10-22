@@ -374,6 +374,31 @@ describe("docs attached to a change (D517)", () => {
     expect((await send(owner, "GET", `/reports/${reportId}/doc`)).body.doc.docs.map((doc: Json) => [doc.title, doc.changed, doc.addedVia])).toEqual([["Refund rules", false, "change"]]);
   });
 
+  test("D577: a change that attached a doc already on the report clears its New; a doc the report was generated from stays Changed", async () => {
+    const reportId = await seededReport("Stamped docs");
+    const base = await note(owner, "# Base rules\n\nOrders from analytics.orders.");
+    const later = await note(owner, "# Later rules\n\nCount paid orders only.");
+    expect((await send(owner, "POST", `/reports/${reportId}/docs`, nookDoc(base))).status).toBe(200);
+    // As if the report had been generated from the base doc.
+    const baseHash = (db.query("SELECT sha256 FROM report_doc_snapshots WHERE report_id = ? ORDER BY fetched_at DESC LIMIT 1").get(reportId) as { sha256: string }).sha256;
+    db.query("UPDATE report_docs SET hash = ? WHERE report_id = ?").run(baseHash, reportId);
+    db.query("UPDATE reports SET doc_hash = ? WHERE id = ?").run(baseHash, reportId);
+    const added = await send(owner, "POST", `/reports/${reportId}/docs`, nookDoc(later));
+    expect(added.body.doc.docs.map((doc: Json) => [doc.title, doc.added, doc.changed])).toEqual([["Base rules", false, false], ["Later rules", true, true]]);
+    await republish(owner, base, "# Base rules\n\nOrders from analytics.orders, refunds excluded.");
+
+    const sent = await send(owner, "POST", `/reports/${reportId}/instructions`, { text: "make it a stacked bar", blockId: "country-bar", docs: [nookDoc(later), nookDoc(base)] });
+    expect(sent.status).toBe(201);
+    await waitStatus(sent.body.instruction.id, ["proposed"]);
+    expect((await send(owner, "POST", `/reports/${reportId}/instructions/${sent.body.instruction.id}/apply`)).status).toBe(200);
+    // Check doc reads both again: "Base rules" has a newer text than the report was generated from.
+    const state = (await send(owner, "POST", `/reports/${reportId}/doc/check`)).body.doc;
+    // "Later rules" was New: the applied change read it, so it is the report's now. "Base rules" changed since the
+    // report was generated: a change does not regenerate the report, so it still says Changed.
+    expect(state.docs.map((doc: Json) => [doc.title, doc.added, doc.changed])).toEqual([["Base rules", false, true], ["Later rules", false, false]]);
+    expect((await send(owner, "GET", `/reports/${reportId}/instructions`)).body.instructions[0].docs.map((doc: Json) => doc.joined)).toEqual([true, true]);
+  });
+
   test("Reject: the docs do not join, and their text is not kept", async () => {
     const reportId = await seededReport("Rejected docs");
     const sent = await send(owner, "POST", `/reports/${reportId}/instructions`, { text: "make it a stacked bar", blockId: "country-bar", docs: [nookDoc(notes.countries!)] });

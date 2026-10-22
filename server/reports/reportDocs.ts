@@ -445,7 +445,18 @@ export function joinInstructionDocs(reportId: string, instructionId: string, aut
     const docs = ensureDocRows(reportId);
     const note = (text: string) => { skipped += 1; db.query("UPDATE report_instruction_docs SET join_note = ? WHERE id = ?").run(text, row.id); };
     const same = docs.find((doc) => sameDoc(doc, row));
-    if (same) { db.query("UPDATE report_instruction_docs SET joined_doc_id = ? WHERE id = ?").run(same.id, row.id); continue; }
+    if (same) {
+      // D577: a doc already on the report that no generation has read yet (`hash` NULL, "New", e.g. added in
+      // Doc settings) takes the hash of the text this change read, as a doc the change adds does: the
+      // applied change is the report's use of it. A doc the report was generated from keeps its hash, so a
+      // newer text still reads "Changed" (a change touched part of the report; Regenerate follows the doc).
+      if (same.hash === null) {
+        if (row.markdown) recordSnapshot(reportId, { title: row.title, markdown: row.markdown, sha256: row.sha256 }, same.id);
+        db.query("UPDATE report_docs SET hash = ? WHERE id = ? AND hash IS NULL").run(row.sha256, same.id);
+      }
+      db.query("UPDATE report_instruction_docs SET joined_doc_id = ? WHERE id = ?").run(same.id, row.id);
+      continue;
+    }
     if (docs.length >= REPORT_DOC_LIMITS.docs) { note(`Not added: the report already has ${REPORT_DOC_LIMITS.docs} docs`); continue; }
     if (!ownerMayRead(owner, row)) { note("Not added: the report's owner cannot read it"); continue; }
     if (!row.markdown) { note("Not added: its text is no longer kept"); continue; }

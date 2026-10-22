@@ -31,7 +31,6 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 ## Small fixes (lane SMALL)
 
 - [ ] Add filter is only proven against the scripted agent and the QA ClickHouse by hand: add a `CLICKHOUSE_TEST_URL` variant of tests/reportFiltersRequest.test.ts that seeds `eval_top_routes` and runs the identity check on a real server (ORDER BY ties, Decimal and Float rows).
-- [ ] Several docs (lane DOCS): a doc added in Doc settings stays "New" after a change that attached the same doc is applied (the edit read it, but only Regenerate stamps a doc's hash); decide whether an applied change should stamp it.
 - [ ] "Add a new section" after a block outside any section puts the section first among the sections, which render after every loose block (D516), so it can land below later loose blocks; placing it truly in between would need the loose blocks after the anchor to move into a section.
 - [ ] Inspect → "From the doc" (D518) needs the plan todo's `docRef` (`d2`); the scripted QA provider never sets it, so only a real model's runs show it. Check after the real-model eval.
 - [ ] Button lint on New report (found by lane DOCS, already on main before it): the "From a doc" / "Blank" mode buttons have under 12 px side padding. (The 390 px Reports row wrap is fixed, D559.)
