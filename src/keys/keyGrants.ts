@@ -192,7 +192,33 @@ export function rowModuleChoices(role: string | undefined, policy: Pick<PolicySu
   });
 }
 
-export type GrantPayload = { module: GrantModule; permission: KeyPermission; resources?: Array<{ kind: ResourceKind; id: string }> };
+/**
+ * Why a row's permission cannot change (D587), or null when it can: a module with one level (Today,
+ * Team, Bin). Such a row shows its level as plain text with this reason, never a dropdown that
+ * cannot open.
+ */
+export function fixedLevelReason(module: GrantModule): string | null {
+  const levels = permissionsFor(module);
+  return levels.length === 1 ? `${MODULE_LABELS[module]} has one level: ${permissionLabel(module, levels[0]!).toLowerCase()}` : null;
+}
+
+/** Whether `held` implies `needed` (mirrors server/keyGrants.ts permissionImplies): any writing level reads too. */
+const implies = (held: KeyPermission, needed: KeyPermission) => held === needed || (needed === "read" && ["write", "comment", "draft", "publish", "create"].includes(held));
+
+/**
+ * The rows that add access to a key holding `held` (mirrors server/keyGrants.ts isNarrowing, D585): a
+ * row no held row covers by module, an implied permission, and "all" or a superset of its items.
+ * Empty when the edit only narrows, so no password is asked.
+ */
+export function rowsAddingAccess(held: readonly GrantRow[], rows: readonly GrantRow[]): GrantRow[] {
+  return rows.filter((row) => {
+    const items = row.applies === "chosen" && selectorFor(row.module, row.permission) ? row.resourceIds : null;
+    return !held.some((have) => have.module === row.module && implies(have.permission, row.permission)
+      && (have.applies === "all" || !selectorFor(have.module, have.permission) || (items !== null && items.every((item) => have.resourceIds.includes(item)))));
+  });
+}
+
+export type GrantPayload ={ module: GrantModule; permission: KeyPermission; resources?: Array<{ kind: ResourceKind; id: string }> };
 
 /** The request body's grants, or an error to show next to Create. */
 export function rowsToGrants(rows: readonly GrantRow[]): { grants: GrantPayload[]; error: string | null } {
@@ -341,6 +367,7 @@ export function keyEventLine(event: { action: string; meta: Record<string, unkno
   switch (event.action) {
     case "key.created": return meta.rotatedFrom ? "Created by rotating an older key" : "Created";
     case "key.narrowed": return "Narrowed";
+    case "key.updated": return "Access added";
     case "key.rotated": return "Rotated";
     case "key.revoked": return meta.by === "admin" ? "Revoked by an admin" : "Revoked";
     case "key.grace_ended": return "Rotation grace ended";

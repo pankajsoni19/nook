@@ -154,15 +154,15 @@ describe("/api/keys", () => {
     expect(removed.status).toBe(200);
     expect(removed.body.changed).toEqual(["grants", "name"]);
     expect((await mcp(key.token)).tools).not.toContain("list_boards");
-    // Adding tasks back widens.
-    expect((await narrow({ grants: grants(["notes", "read"], ["tasks", "read"]) })).body.code).toBe("WIDENING_NOT_ALLOWED");
+    // Adding tasks back widens: it needs the password (D585, tests/keyEditAddAccess.test.ts).
+    expect((await narrow({ grants: grants(["notes", "read"], ["tasks", "read"]) })).body.code).toBe("REAUTH_FAILED");
     // A second key: tasks:write on all boards narrows to one board, and to read.
     const wide = (await createKey(owner, { name: "Wide" })).body.key;
     const toBoard = await api(owner, "PATCH", `/keys/${wide.id}`, { grants: grants(["notes", "read"], ["tasks", "read", [mine]]) });
     expect(toBoard.status).toBe(200);
     expect(toBoard.body.key.grants.map((grant: { permission: string; resource: { id: string } | null }) => [grant.permission, grant.resource?.id ?? null])).toEqual([["read", null], ["read", mine]]);
-    // Back to all boards widens.
-    expect((await api(owner, "PATCH", `/keys/${wide.id}`, { grants: grants(["tasks", "read"]) })).body.code).toBe("WIDENING_NOT_ALLOWED");
+    // Back to all boards widens: without the password it is refused.
+    expect((await api(owner, "PATCH", `/keys/${wide.id}`, { grants: grants(["tasks", "read"]) })).status).toBe(401);
     // Surfaces only shrink; expiry only comes closer; limits only go down.
     expect((await narrow({ surfaces: "both" })).body.code).toBe("WIDENING_NOT_ALLOWED");
     expect((await narrow({ expiresInDays: 200 })).body.code).toBe("WIDENING_NOT_ALLOWED");

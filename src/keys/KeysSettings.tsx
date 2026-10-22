@@ -8,7 +8,7 @@ import { GrantBuilder, newRowKey } from "./GrantBuilder";
 import { KeysDialog } from "./KeysDialog";
 import { asksForCode, asksForPassword, googleConfirmed, GoogleReauthNotice, isGoogleReauthRequired, passwordAlternative, reauthPassword, ReauthRouteToggle, useAccountAuth, useReauthRoute } from "../auth/accountAuth";
 import {
-  blockedSurfaceLine, checkAllowlist, deniedLine, expiryChoices, keyEventLine, expiryDays, GRACE_OPTIONS, lastUsedLine, resourceToken, rotationExpiryDefault, grantChips, keyStateLabel, rowsToGrants, SELECTOR_KINDS, SURFACE_LABELS, usageLabel,
+  blockedSurfaceLine, checkAllowlist, deniedLine, expiryChoices, keyEventLine, expiryDays, GRACE_OPTIONS, lastUsedLine, resourceToken, rotationExpiryDefault, grantChips, keyStateLabel, rowsAddingAccess, rowsToGrants, SURFACE_LABELS, usageLabel,
   type GrantRow, type KeySurfaces, type PolicySummary
 } from "./keyGrants";
 import { keyDetailEvents, useKeysApi, type ApiKey, type KeyEvent, type KeyList, type NarrowBody, type KeysApi, type VaultKeyEvent } from "./keysApi";
@@ -213,7 +213,7 @@ export function KeysSettings({ onPendingChange, onNestedDialogChange, totpEnable
     {/* Back off the phone sentinel closes a key dialog; Forward shows the same one again (Friction 12). */}
     <HistoryDialogReopen.Provider value={dialog && reopenOnForward ? () => setDialog(dialog) : null}>
     {dialog?.kind === "create" && data && <CreateKeyDialog policy={data.policy} role={role} totpEnabled={totpEnabled} allowVault={!integration && vaultAvailable} preset={tabbed ? shownTab : "general"} onKind={setCreatingKind} onClose={closeDialog} onCreated={(key) => { closeDialog(); setNewToken({ token: key.token, name: key.name, rotated: false, tab: tabOf(key) }); load(); }} />}
-    {dialog?.kind === "edit" && data && <EditKeyDialog apiKey={dialog.key} policy={data.policy} role={role} onClose={closeDialog} onSaved={(message) => { closeDialog(); setStatus(message); load(); }} />}
+    {dialog?.kind === "edit" && data && <EditKeyDialog apiKey={dialog.key} policy={data.policy} role={role} totpEnabled={totpEnabled} onClose={closeDialog} onSaved={(message) => { closeDialog(); setStatus(message); load(); }} />}
     {dialog?.kind === "rotate" && data && <RotateKeyDialog apiKey={dialog.key} policy={data.policy} role={role} totpEnabled={totpEnabled} onClose={closeDialog} onRotated={(key) => { closeDialog(); setNewToken({ token: key.token, name: key.name, rotated: true, tab: tabOf(dialog.key) }); load(); }} />}
     {dialog?.kind === "revoke" && <RevokeKeyDialog apiKey={dialog.key} onClose={closeDialog} onRevoked={() => { closeDialogAfterReload(revokedFocusKey(dialog.key.id)); setStatus(`${dialog.key.name} was revoked.`); }} />}
     {dialog?.kind === "review" && <McpBinnedReview keyId={dialog.key.id} keyName={dialog.key.name} onClose={() => closeDialogAfterReload(dialog.key.id)} onRevoke={() => setDialog({ kind: "revoke", key: dialog.key })} />}
@@ -564,10 +564,16 @@ export function keyToRows(key: ApiKey): GrantRow[] {
   return [...rows.values()];
 }
 
-function EditKeyDialog({ apiKey, policy, role, onClose, onSaved }: { apiKey: ApiKey; policy: PolicySummary; role: string | undefined; onClose: () => void; onSaved: (message: string) => void }) {
+/**
+ * Edit (D585): rename, change access, bring the expiry closer, or tighten addresses. Rows may be
+ * added, changed, or removed with the same builder as New key; an edit that adds access asks for the
+ * password (or Google) like New key, and the key keeps its secret. Vault access, surfaces, and
+ * addresses still only narrow here (D278); Rotate widens those.
+ */
+function EditKeyDialog({ apiKey, policy, role, totpEnabled, onClose, onSaved }: { apiKey: ApiKey; policy: PolicySummary; role: string | undefined; totpEnabled: boolean; onClose: () => void; onSaved: (message: string) => void }) {
   const keysApi = useKeysApi();
-  const ceiling = useMemo(() => keyToRows(apiKey), [apiKey]);
-  const [rows, setRows] = useState<GrantRow[]>(ceiling);
+  const held = useMemo(() => keyToRows(apiKey), [apiKey]);
+  const [rows, setRows] = useState<GrantRow[]>(held);
   // Wave 27: a vault key narrows its vault rows and turns its settings off (D278).
   const isVault = apiKey.kind === "vault";
   const vaultCeiling = useMemo(() => vaultGrantsToRows(apiKey.grants.filter((grant) => grant.module === "vault") as VaultGrantView[]), [apiKey]);
@@ -582,6 +588,8 @@ function EditKeyDialog({ apiKey, policy, role, onClose, onSaved }: { apiKey: Api
   const [allowlist, setAllowlist] = useState((apiKey.ipAllowlist ?? []).join("\n"));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const reauth = useKeyReauth(totpEnabled);
+  const adding = isVault ? [] : rowsAddingAccess(held, rows);
   const daysLeft = apiKey.expiresAt ? Math.max(1, Math.ceil((Date.parse(apiKey.expiresAt) - Date.now()) / 86_400_000)) : null;
   const expiryChoices = [
     { value: "keep", label: daysLeft === null ? "Keep: no expiry" : `Keep: ${daysLeft} ${daysLeft === 1 ? "day" : "days"} left` },
@@ -606,7 +614,7 @@ function EditKeyDialog({ apiKey, policy, role, onClose, onSaved }: { apiKey: Api
     if ((description.trim() || null) !== apiKey.description) body.description = description.trim() || null;
     if (expires !== "keep") body.expiresInDays = Number(expires);
     if (surfaces !== apiKey.surfaces) body.surfaces = surfaces;
-    const same = JSON.stringify(isVault ? vaultRowsToGrants(vaultCeiling).grants : rowsToGrants(ceiling).grants) === JSON.stringify(grants);
+    const same = JSON.stringify(isVault ? vaultRowsToGrants(vaultCeiling).grants : rowsToGrants(held).grants) === JSON.stringify(grants);
     if (!same) body.grants = grants;
     // Adding or tightening an address limit narrows the key (D278); the server refuses widening.
     const checkedList = checkAllowlist(allowlist);
@@ -615,29 +623,41 @@ function EditKeyDialog({ apiKey, policy, role, onClose, onSaved }: { apiKey: Api
     if (nextAllowlist.length && nextAllowlist.join("\n") !== (apiKey.ipAllowlist ?? []).join("\n")) body.ipAllowlist = nextAllowlist;
     if (!nextAllowlist.length && apiKey.ipAllowlist?.length) return setError("Removing the address limit widens the key. Rotate the key to change this.");
     if (!Object.keys(body).length) return onClose();
+    // D585: adding access confirms it's you, as New key does; narrowing never asks.
+    const widening = Boolean(body.grants) && adding.length > 0;
+    if (widening) {
+      const notReady = reauth.blocked();
+      if (notReady) return setError(notReady);
+    }
     setBusy(true);
     setError("");
     try {
-      await keysApi.narrow(apiKey.id, body);
+      await keysApi.narrow(apiKey.id, widening ? { ...body, ...reauth.body() } : body);
       onSaved(`${body.name ?? apiKey.name} was updated.`);
     } catch (reason) {
+      reauth.failed(reason);
       setError(messageOf(reason, "Could not save the key"));
       setBusy(false);
     }
   }
 
-  const hasSelectors = ceiling.some((row) => SELECTOR_KINDS[row.module]);
-  return <KeysDialog title={`Edit ${apiKey.name}`} description={`Editing can only remove access, bring the expiry closer, or rename. Rotate the key to add access, surfaces, or addresses.${hasSelectors ? " You can narrow “all” to chosen items." : ""}`} onClose={onClose} busy={busy} wide>
+  return <KeysDialog title={`Edit ${apiKey.name}`} description={isVault
+    ? "Editing can only remove access, bring the expiry closer, or rename. Rotate the key to add access, surfaces, or addresses."
+    : "Add, change, or remove permissions, bring the expiry closer, or rename. Adding access asks for your password; the key keeps its secret. Rotate the key to add surfaces or addresses."} onClose={onClose} busy={busy} wide>
     <form className="keys-form" onSubmit={submit} noValidate>
       <label className="keys-input">Name<input value={name} onChange={(event) => setName(event.target.value)} maxLength={80} required disabled={busy} autoComplete="off" /></label>
       <label className="keys-input">Description (optional)<input value={description} onChange={(event) => setDescription(event.target.value)} maxLength={200} disabled={busy} autoComplete="off" /></label>
       {apiKey.surfaces === "both" && <div className="keys-select-field"><span id="keys-edit-surface">Where it is used</span><Select<KeySurfaces> labelledBy="keys-edit-surface" label="Where it is used" value={surfaces} options={surfaceChoices} onChange={setSurfaces} disabled={busy} /></div>}
-      {!isVault && <fieldset className="keys-fieldset"><legend>Access</legend><GrantBuilder rows={rows} onChange={setRows} role={role} policy={policy} disabled={busy} ceiling={ceiling} /></fieldset>}
+      {!isVault && <fieldset className="keys-fieldset"><legend>Access</legend><GrantBuilder rows={rows} onChange={setRows} role={role} policy={policy} disabled={busy} /></fieldset>}
       {isVault && <fieldset className="keys-fieldset"><legend>Vault access</legend><VaultGrantBuilder rows={vaultRows} onChange={setVaultRows} vaults={vaults} role={role} protectedAccess={Boolean(apiKey.vault?.protectedAccess)} disabled={busy} ceiling={vaultCeiling} /></fieldset>}
       {isVault && <VaultFlags mcpValues={mcpValues} protectedAccess={protectedAccess} onMcpValues={setMcpValues} onProtectedAccess={setProtectedAccess} disabled={busy}
         narrowing={{ mcpValues: Boolean(apiKey.vault?.allowMcpValueReads), protectedAccess: Boolean(apiKey.vault?.protectedAccess) }} />}
       <div className="keys-select-field"><span id="keys-edit-expiry">Expiry</span><Select labelledBy="keys-edit-expiry" label="Expiry" value={expires} options={expiryChoices} onChange={setExpires} disabled={busy} /></div>
       <AllowlistField available={Boolean(policy.ipAllowlistAvailable)} pinned={policy.ipProxyPinned} value={allowlist} onChange={setAllowlist} disabled={busy} mode={apiKey.ipAllowlist?.length ? "narrow" : "create"} />
+      {adding.length > 0 && <>
+        <p className="grant-note keys-adding-note" role="note">{adding.length === 1 ? "Permission" : "Permissions"} {adding.map((row) => rows.indexOf(row) + 1).join(", ")} {adding.length === 1 ? "adds" : "add"} access, so confirm it's you to save.</p>
+        {reauth.fields(busy)}
+      </>}
       <FormError message={error} />
       <div className="keys-dialog-actions inline">
         <button type="button" className="secondary-button" onClick={onClose} disabled={busy}>Cancel</button>

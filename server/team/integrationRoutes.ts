@@ -196,11 +196,27 @@ export function registerIntegrationRoutes(app: Hono<AppEnv>, gates: { read: Gate
     if (refused) return refused;
     const id = idOf(c, "integrationId");
     const keyId = idOf(c, "keyId");
-    if (!id || !keyId || !integrationAccount(id)) return notFound(c);
+    const integration = id && keyId ? integrationAccount(id) : null;
+    if (!id || !keyId || !integration) return notFound(c);
     const body = await parseJson(c.req.raw, narrowKeySchema);
     const admin = c.get("user");
-    return run(c, () => {
-      const { changed } = narrowApiKey(id, keyId, body, admin.id);
+    return run(c, async () => {
+      // D585: narrowing needs no password; adding access is checked against the integration (its
+      // role, policy, and shares) first, then the admin re-authenticates, as for a new key.
+      const plan = narrowApiKey(id, keyId, body, admin.id, { dryRun: true });
+      if (plan.added.length) {
+        refuseRetired(integration);
+        if (integration.disabled_at !== null) throw new KeyError(409, "INTEGRATION_BLOCKED", "Unblock this integration before adding access to its keys");
+        refuseExcludedModules(plan.added.map((grant) => grant.module));
+        if (createLimited(admin.id)) throw new KeyError(429, "RATE_LIMITED", "Too many key changes. Try again later.");
+        const reauth = await checkReauth(admin.id, body, "integration_key_update", c.get("sessionId"));
+        if (!reauth.ok) {
+          audit(admin.id, null, "keys.update_failed", { keyId, ownerId: id });
+          throw new KeyError(401, reauth.code, reauth.error);
+        }
+        if (reauth.recoveryCodeUsed) mailTwoFactor(admin.id, "recovery_used");
+      }
+      const { changed } = narrowApiKey(id, keyId, body, admin.id, { widen: plan.added.length > 0 });
       return { changed, key: ownApiKey(id, keyId) };
     });
   });

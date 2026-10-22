@@ -301,9 +301,9 @@ describe("Wave 34 review: what people are told on the client", () => {
     expect(inventorySummary({ live: 7, noExpiry: 2, matching: 7 }, false)).toBe("7 live keys on this Nook · 2 without an expiry");
   });
 
-  test("Q9, Q13: editing only removes chosen items; the picker is bounded and Backspace never removes a chip", async () => {
+  test("Q13: the picker is bounded and Backspace never removes a chip (D585: Edit uses the full picker)", async () => {
     const builder = await Bun.file(new URL("../src/keys/GrantBuilder.tsx", import.meta.url)).text();
-    expect(builder).toContain("Items can only be removed here; rotate the key to add.");
+    expect(builder).not.toContain("Items can only be removed here");
     expect(builder).toContain("<Combobox multiple backspaceRemoves={false}");
     const css = await Bun.file(new URL("../src/keys/keys.css", import.meta.url)).text();
     expect(css).toContain(".grant-resources .ui-popup-body { max-height: 352px; overflow: hidden; display: flex; flex-direction: column; }");

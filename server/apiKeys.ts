@@ -124,7 +124,10 @@ export const createKeySchema = z.object({
   ...reauthFields
 }).strict().refine((value) => !(value.totpCode && value.recoveryCode), "Use either an authentication code or a recovery code");
 
-/** PATCH: narrowing only (D278). Every field is optional; the grants, when given, replace the current set. */
+/**
+ * PATCH: narrowing (D278) and, for general keys, adding access after re-authentication (D585). Every
+ * field is optional; the grants, when given, replace the current set.
+ */
 export const narrowKeySchema = z.object({
   name: z.string().trim().min(1).max(KEY_NAME_MAX).optional(),
   description: z.string().trim().max(KEY_DESCRIPTION_MAX).nullable().optional(),
@@ -137,8 +140,10 @@ export const narrowKeySchema = z.object({
   protectedAccess: z.boolean().optional(),
   limits: z.object({ callsPerMinute: z.number().int().min(1).nullable().optional(), writesPerMinute: z.number().int().min(1).nullable().optional() }).strict().optional(),
   /** Adding a list, or a list inside the current one, narrows; null (removing it) widens and is refused (D278). */
-  ipAllowlist: z.array(z.string().trim().min(1).max(64)).min(1).max(IP_ALLOWLIST_MAX).nullable().optional()
-}).strict();
+  ipAllowlist: z.array(z.string().trim().min(1).max(64)).min(1).max(IP_ALLOWLIST_MAX).nullable().optional(),
+  /** D585: only when `grants` add access (a module, a higher permission, "all", or more items); narrowing needs none. */
+  ...reauthFields
+}).strict().refine((value) => !(value.totpCode && value.recoveryCode), "Use either an authentication code or a recovery code");
 
 export const rotateKeySchema = z.object({
   graceHours: z.union([z.literal(0), z.literal(1), z.literal(24), z.literal(168)]).default(24),
@@ -732,12 +737,44 @@ const liveOwnKey = (userId: string, keyId: string) => {
   return row;
 };
 
-/** PATCH /api/keys/:id (D278): rename, describe, and narrow; anything that widens is refused. */
-export function narrowApiKey(userId: string, keyId: string, patch: z.infer<typeof narrowKeySchema>, actorId: string = userId) {
+/**
+ * What a key update may do besides narrowing (D585). `widen`: the caller re-authenticated, so the
+ * grants may add access (validated like a new key's). `dryRun`: run every check and report what
+ * would change, writing nothing (the route asks this before the password, so no code is consumed on
+ * a refusal).
+ */
+export type KeyUpdateOptions = { widen?: boolean; dryRun?: boolean };
+
+/** "All or chosen items, never both" for one module and permission (the builder offers one or the other). */
+function assertAllOrChosen(grants: readonly Grant[]) {
+  const seen = new Map<string, { all: boolean; chosen: boolean }>();
+  for (const grant of grants) {
+    const id = `${grant.module}:${grant.permission}`;
+    const entry = seen.get(id) ?? { all: false, chosen: false };
+    if (grant.resourceKind === null) entry.all = true;
+    else entry.chosen = true;
+    seen.set(id, entry);
+    if (entry.all && entry.chosen) throw new KeyError(400, "INVALID_GRANT", "A permission covers either every item or chosen items, not both");
+  }
+}
+
+/** A grant as a request input, so an added grant is validated by validateGrants exactly like a new key's. */
+const grantAsInput = (grant: Grant): GrantInput => ({
+  module: grant.module as GrantInput["module"], permission: grant.permission as GrantInput["permission"],
+  ...(grant.resourceKind && grant.resourceId ? { resources: [{ kind: grant.resourceKind, id: grant.resourceId }] } : {})
+});
+
+/**
+ * PATCH /api/keys/:id: rename, describe, and narrow without a password (D278); a general key's grants
+ * may also add access when the caller re-authenticated (`widen`, D585). Surfaces, expiry, limits,
+ * addresses, and vault keys still only narrow. Returns what changed and the grants it added.
+ */
+export function narrowApiKey(userId: string, keyId: string, patch: z.infer<typeof narrowKeySchema>, actorId: string = userId, options: KeyUpdateOptions = {}) {
   const row = liveOwnKey(userId, keyId);
   const changed: string[] = [];
   const current = loadGrants(row.id);
   let nextGrants: Grant[] | null = null;
+  let added: Grant[] = [];
   const protectedAccess = row.vault_protected_access === 1;
   if (patch.grants && row.kind === "vault") {
     // Vault keys (D278): drop grants, write → read, or one environment for every one (see isVaultNarrowing).
@@ -776,7 +813,18 @@ export function narrowApiKey(userId: string, keyId: string, patch: z.infer<typeo
     }
     const unique = dedupeGrants(candidate);
     if (unique.some((grant) => foreignViewGrant(grant, userId))) throw new KeyError(400, "INVALID_GRANT", "A key can only hold your own saved views. Remove the views that are no longer available.");
-    if (!isNarrowing(current, unique)) throw new KeyError(400, "WIDENING_NOT_ALLOWED", "Editing a key can only remove access. Create a new key to add access.");
+    // D585: a grant no current one covers adds access. It needs the re-authentication (the route's)
+    // and the checks a new key's grants get: the holder's role may create keys and use the key's
+    // surfaces, the role and team policy allow the permission, and each chosen item is reachable.
+    added = unique.filter((grant) => !isNarrowing(current, [grant]));
+    if (added.length && !options.widen && !options.dryRun) throw new KeyError(400, "WIDENING_NOT_ALLOWED", "Adding access to a key needs your password. Confirm it and save again.");
+    if (added.length) {
+      const policies = readPolicies();
+      checkCreatePolicy(userId, row.role, { surfaces: patch.surfaces ?? row.surfaces }, policies);
+      validateGrants(userId, row.role, added.map(grantAsInput), policies);
+      assertAllOrChosen(unique);
+      if (unique.filter((grant) => grant.resourceId).length > MAX_RESOURCE_IDS) throw new KeyError(400, "INVALID_GRANT", `A key can name at most ${MAX_RESOURCE_IDS} items`);
+    }
     // Narrowing an "all" grant to chosen items: each item must be one the holder can reach (T205).
     for (const grant of unique) {
       if (grant.resourceId && !current.some((held) => grantKey(held) === grantKey(grant)) && !resourceReachable(userId, grant.resourceKind!, grant.resourceId, grant.permission)) {
@@ -863,9 +911,10 @@ export function narrowApiKey(userId: string, keyId: string, patch: z.infer<typeo
   if (patch.name !== undefined && patch.name !== row.name) changed.push("name");
   const description = patch.description === undefined ? row.description : (patch.description?.trim() || null);
   if (patch.description !== undefined && description !== row.description) changed.push("description");
-  if (!changed.length) return { changed };
+  if (!changed.length) return { changed, added: [] as Grant[] };
   // A linked key still holding "Run agents" (one linked before the rule) must drop it or be unlinked (review M1).
   assertRunGrantUnlinked(row.id, nextGrants ?? current);
+  if (options.dryRun) return { changed, added };
   db.transaction(() => {
     const timestamp = now();
     const scopes = nextGrants ? grantsToScopes(nextGrants) : null;
@@ -876,11 +925,18 @@ export function narrowApiKey(userId: string, keyId: string, patch: z.infer<typeo
       insertGrantRows(row.id, nextGrants, timestamp);
     }
     if (flags) db.query("UPDATE mcp_api_keys SET allow_mcp_value_reads = ?, vault_protected_access = ? WHERE id = ?").run(flags.allowMcpValueReads ? 1 : 0, flags.protectedAccess ? 1 : 0, row.id);
-    recordAccessEvent({ actorId, via: "web", action: "key.narrowed", targetUserId: userId, keyId: row.id,
-      meta: { fields: changed, ...(nextGrants ? { grantsBefore: current.length, grantsAfter: nextGrants.length } : {}) } }, timestamp);
-    audit(actorId, null, "key.narrowed", { keyId: row.id, fields: changed });
+    if (added.length && nextGrants) {
+      // D586: adding access is its own event, with the scopes before and after; the secret stays.
+      recordAccessEvent({ actorId, via: "web", action: "key.updated", targetUserId: userId, keyId: row.id,
+        meta: { fields: changed, grantsBefore: current.length, grantsAfter: nextGrants.length, added: grantSummary(added) } }, timestamp);
+      audit(actorId, null, "keys.update", { keyId: row.id, fields: changed, scopesBefore: grantsToScopes(current), scopesAfter: grantsToScopes(nextGrants), added: grantSummary(added) });
+    } else {
+      recordAccessEvent({ actorId, via: "web", action: "key.narrowed", targetUserId: userId, keyId: row.id,
+        meta: { fields: changed, ...(nextGrants ? { grantsBefore: current.length, grantsAfter: nextGrants.length } : {}) } }, timestamp);
+      audit(actorId, null, "key.narrowed", { keyId: row.id, fields: changed });
+    }
   })();
-  return { changed };
+  return { changed, added };
 }
 
 /** Withdraws the pending proposals a key made (review M1), when it stops working. */

@@ -220,6 +220,8 @@ const ACTION_LABELS: Record<string, (event: ActivityEvent) => string> = {
   // Q-L5: a key made for someone else (an integration's, by an admin) names its owner, like a revoke does.
   "key.created": (event) => `${who(event)} created ${ownerOf(event)}key ${keyName(event)}`,
   "key.narrowed": (event) => `${who(event)} narrowed ${ownerOf(event)}key ${keyName(event)}`,
+  // D586: an edit that added access (after re-authentication).
+  "key.updated": (event) => `${who(event)} added access to ${ownerOf(event)}key ${keyName(event)}`,
   "key.rotated": (event) => `${who(event)} rotated ${ownerOf(event)}key ${keyName(event)}`,
   "key.revoked": (event) => event.meta?.by === "admin" ? `${who(event)} revoked ${target(event)}'s key ${keyName(event)}`
     : event.meta?.by === "google_relink" ? `${target(event)}'s key ${keyName(event)} was revoked when a new Google account was linked`

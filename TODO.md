@@ -15,9 +15,10 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 - [ ] **Report filters, later slices** (lane FILT2, migration 069) (slice 1 shipped, D532–D537): linked filters, client-side table sort and contains, saved personal views, more filter types (number range, exclude, text contains, Add filter on dates), and concurrent parameter runs, ranked in [REPORT_FILTERS.md](docs/plan/REPORT_FILTERS.md) "Later". Started 2026-10-22.
 - [ ] **Local embedding model** (operator: "complete todo.md", 2026-10-22; lane LOCALEMB; lane CLAUDE landed: add it as another provider kind beside `compat.embeddings`, keyword-only bases (D541) move to it with Change embedding model, migration 071 if needed) (transformers.js + a small model, CPU) for meaning-based search with no outside provider.
 
-- [ ] **API keys: editing a key's permissions** (operator, 2026-10-22; lane KEYS), at `/settings/keys/general`:
-  - [ ] Editing a created key can only remove permission rows; it must also be able to **add** rows.
-  - [ ] On some rows the permission dropdown is disabled and can't be clicked; find why and fix it.
+- [ ] **API keys, after lane KEYS (D585–D589)** (general keys' Edit now adds rows with the password, and no row has a dead dropdown):
+  - [ ] Vault keys' Edit (`/settings/keys/vault`, `VaultGrantBuilder` `ceiling`) is still narrowing only, with the same pattern: the Vault dropdown is always disabled and Permission collapses to the held level plus Read. Decide whether vault keys may add access on Edit with re-authentication (vault grants have their own checks, `validateVaultGrants`, and protected environments), then apply D585/D587 there.
+  - [ ] Button lint on the Edit key dialog (already on main before lane KEYS, unchanged by it): at 1280 the three-column row ellipsizes long Select values ("Chosen folders and notes", "Read agents, chats, and knowledge"), and "Save" is under 64 px wide.
+  - [ ] A security mail when a key gains access through Edit (today only creating and rotating send `mailApiKeyCreated`); `keys.update` is in the audit log and Access activity.
 
 - [ ] **Chat agents can use report data sources (ClickHouse)** (operator, 2026-10-22; lane AGENTSQL): today chat agents can't reach ClickHouse. Give agents guarded schema search, describe, and SELECT tools over data sources an admin allows for agents, with results shown in chat; the reports guard, allowlist and limits apply; no ad-hoc SQL over MCP keys (T361 stands).
 

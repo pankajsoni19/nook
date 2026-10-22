@@ -14,6 +14,8 @@ export type AccessVia = "web" | "cli" | "mcp" | "rest" | "sweeper" | "migration"
 export type AccessAction =
   | "key.created"
   | "key.narrowed"
+  // D586: an edit that added access (after re-authentication); the secret is unchanged.
+  | "key.updated"
   | "key.rotated"
   | "key.revoked"
   | "key.grace_ended"

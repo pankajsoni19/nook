@@ -24,8 +24,8 @@ import { parseJson, uuid } from "./validation";
  * `/api/keys` (docs/plan/research/2026-09-28-access-management-api-keys.md §C.7, D276–D278): the
  * caller's own Nook keys. Session auth, CSRF, Origin, TOTP setup, and the role write gate come from
  * the global `/api/*` middleware; viewers keep read-only keys (the allowlist in writeGate.ts, the
- * scopes by role here). Create and rotate re-authenticate (password plus a fresh code); narrowing
- * and revoking do not (D278). Every change is audited and lands in `access_events`. Keys never
+ * scopes by role here). Create, rotate, and an edit that adds access (D585) re-authenticate
+ * (password plus a fresh code); narrowing and revoking do not (D278). Every change is audited and lands in `access_events`. Keys never
  * reach these routes: they need a session (D265).
  */
 
@@ -188,11 +188,26 @@ export function registerKeyRoutes(app: Hono<AppEnv>) {
     const id = keyId(c);
     if (!id) return notFound(c);
     const body = await parseJson(c.req.raw, narrowKeySchema);
-    const userId = c.get("user").id;
-    return run(c, () => {
-      const { changed } = narrowApiKey(userId, id, body);
-      return { changed, key: ownApiKey(userId, id) };
-    });
+    const user = c.get("user");
+    try {
+      // Every refusal that needs no password first (D585): narrowing goes straight through; an edit
+      // that adds access is checked like a new key's grants, then rate-limited and re-authenticated.
+      const plan = narrowApiKey(user.id, id, body, user.id, { dryRun: true });
+      if (plan.added.length) {
+        if (createLimited(user.id)) return c.json({ error: "Too many key changes. Try again later.", code: "RATE_LIMITED" }, 429);
+        const reauth = await checkReauth(user.id, body, "api_key_update", c.get("sessionId"));
+        if (!reauth.ok) {
+          audit(user.id, null, "keys.update_failed", { keyId: id });
+          return c.json({ error: reauth.error, code: reauth.code }, 401);
+        }
+        if (reauth.recoveryCodeUsed) mailTwoFactor(user.id, "recovery_used");
+      }
+      const { changed } = narrowApiKey(user.id, id, body, user.id, { widen: plan.added.length > 0 });
+      return c.json({ changed, key: ownApiKey(user.id, id) });
+    } catch (error) {
+      if (error instanceof KeyError) return keyError(c, error);
+      throw error;
+    }
   });
 
   app.post("/api/keys/:id/rotate", async (c) => {

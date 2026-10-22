@@ -46,7 +46,7 @@ export type VaultKeyFields = { kind?: "general" | "vault"; allowMcpValueReads?: 
 export const createKey = (body: { name: string; description?: string | null; surfaces: KeySurfaces; expiresInDays: number | null; grants: Array<GrantPayload | VaultGrantPayload>; ipAllowlist?: string[] } & VaultKeyFields & Reauth) =>
   api<{ key: ApiKey & { token: string } }>("/keys", { method: "POST", body: JSON.stringify(body) });
 
-export type NarrowBody = { name?: string; description?: string | null; surfaces?: KeySurfaces; expiresInDays?: number | null; grants?: Array<GrantPayload | VaultGrantPayload>; limits?: { callsPerMinute?: number | null; writesPerMinute?: number | null }; ipAllowlist?: string[]; allowMcpValueReads?: boolean; protectedAccess?: boolean };
+export type NarrowBody = { name?: string; description?: string | null; surfaces?: KeySurfaces; expiresInDays?: number | null; grants?: Array<GrantPayload | VaultGrantPayload>; limits?: { callsPerMinute?: number | null; writesPerMinute?: number | null }; ipAllowlist?: string[]; allowMcpValueReads?: boolean; protectedAccess?: boolean } & Reauth;
 
 export const narrowKey = (id: string, body: NarrowBody) =>
   api<{ changed: string[]; key: ApiKey }>(`/keys/${id}`, { method: "PATCH", body: JSON.stringify(body) });

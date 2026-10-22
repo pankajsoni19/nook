@@ -36,21 +36,22 @@ describe("N1: Edit narrows all → chosen, and chosen only to a subset", () => {
     expect(toTwo.status).toBe(200);
     expect(toTwo.body.changed).toEqual(["grants"]);
     expect((await api(owner, "PATCH", `/keys/${id}`, chosen([a]))).status).toBe(200);
-    expect((await api(owner, "PATCH", `/keys/${id}`, chosen([c]))).body.code).toBe("WIDENING_NOT_ALLOWED");
-    expect((await api(owner, "PATCH", `/keys/${id}`, chosen([a, b]))).body.code).toBe("WIDENING_NOT_ALLOWED");
-    expect((await api(owner, "PATCH", `/keys/${id}`, { grants: [{ module: "tasks", permission: "read" }] })).body.code).toBe("WIDENING_NOT_ALLOWED");
+    // Another item, more items, or "all" again add access: refused without the password (D585)…
+    expect((await api(owner, "PATCH", `/keys/${id}`, chosen([c]))).status).toBe(401);
+    expect((await api(owner, "PATCH", `/keys/${id}`, chosen([a, b]))).status).toBe(401);
+    expect((await api(owner, "PATCH", `/keys/${id}`, { grants: [{ module: "tasks", permission: "read" }] })).status).toBe(401);
+    // …and allowed with it, keeping the key.
+    const grown = await api(owner, "PATCH", `/keys/${id}`, { ...chosen([a, c]), password: owner.password });
+    expect(grown.status).toBe(200);
+    expect(grown.body.key.id).toBe(id);
   });
 
-  test("the builder offers the picker to narrow an 'all' grant, and only removable chips for a chosen one", () => {
+  test("Edit uses the full picker for chosen items, with no remove-only chips (D585)", () => {
     const policy = { keyMaxDays: 365, keyDefaultDays: 90, keyRequireExpiry: false, keysPerUser: 10, modules: ["tasks" as const], mcpAllowed: true, restAllowed: true };
     const row = (patch: Partial<GrantRow>): GrantRow => ({ key: "r1", module: "tasks", permission: "read", applies: "all", resourceIds: [], ...patch });
-    const fromAll = renderToStaticMarkup(<GrantBuilder rows={[row({ applies: "chosen" })]} onChange={() => undefined} role="member" policy={policy} ceiling={[row({})]} />);
-    expect(fromAll).toContain("Choose boards and views…");
-    expect(fromAll).not.toContain("Items can only be removed here");
-    const fromChosen = renderToStaticMarkup(<GrantBuilder rows={[row({ applies: "chosen", resourceIds: ["board:b1", "board:b2"] })]} onChange={() => undefined} role="member" policy={policy} ceiling={[row({ applies: "chosen", resourceIds: ["board:b1", "board:b2"] })]} />);
-    expect(fromChosen).toContain("Items can only be removed here; rotate the key to add.");
-    expect(fromChosen).not.toContain("ui-combobox-input");
-    expect(fromAll).toContain("ui-combobox-input");
+    const chosen = renderToStaticMarkup(<GrantBuilder rows={[row({ applies: "chosen", resourceIds: ["board:b1", "board:b2"] })]} onChange={() => undefined} role="member" policy={policy} />);
+    expect(chosen).toContain("ui-combobox-input");
+    expect(chosen).not.toContain("Items can only be removed here");
   });
 });
 
