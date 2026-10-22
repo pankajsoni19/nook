@@ -1,16 +1,14 @@
-import { catalogRow, changedMetrics, pageMetricsChanged, type LinkedPage } from "./metricCatalog";
 import { logger, shortId } from "../log";
 import { createHash } from "node:crypto";
 import { audit, db, now } from "../db";
 import { REPORT_LIMITS } from "../../shared/reports";
-import type { CatalogMetric } from "../../shared/reportsMetrics";
 import { isReadLikeTool, type DocServerChoice, type DocState, type DocToolChoice } from "../../shared/reportsGenerate";
 import { describeMcpError, McpClientError, type McpSession } from "../agents/mcpClient";
 import { AgentError } from "../agents/status";
 import { serverAvailableTo, serverRowOrNull, sessionFor, toolsWithPolicies, type StoredTool, type ToolServerRow } from "../agents/toolServers";
 import { ownedReport } from "./access";
 import { ReportError } from "./errors";
-import { checkBrowseTools, currentSpecRunIds, pageInfos, recheckPages, serverBrowseSource, storedBrowseTools, type BrowseSource } from "./docBrowse";
+import { checkBrowseTools, serverBrowseSource, type BrowseSource } from "./docBrowse";
 import { fetchNookDoc, NOOK_SOURCE_ID, nookBrowseSource, nookCatalog, nookChoice, nookSourceName, nookToolOf } from "./nookSource";
 
 /**
@@ -219,18 +217,22 @@ async function fetchDocText(row: ToolServerRow, choice: DocToolChoice, ref: stri
 }
 
 /**
- * Stores the doc as the report's newest snapshot unless the newest already has its hash; prunes old
- * snapshots no run names (keeping 20). Returns the snapshot id and whether a row was written.
+ * Stores the doc as its newest snapshot unless the newest already has its hash; prunes old snapshots no
+ * run names (keeping 20). D515: each of a report's docs keeps its own snapshots (`docId`); without one
+ * the report's first doc is meant (its row is made from the one-doc columns when there is none yet).
+ * Returns the snapshot id and whether a row was written.
  */
-export function recordSnapshot(reportId: string, doc: FetchedDoc): { id: string; sha256: string; changed: boolean } {
+export function recordSnapshot(reportId: string, doc: Pick<FetchedDoc, "title" | "markdown" | "sha256">, docId?: string | null): { id: string; sha256: string; changed: boolean } {
   return db.transaction(() => {
-    const latest = db.query("SELECT id, sha256 FROM report_doc_snapshots WHERE report_id = ? ORDER BY fetched_at DESC, rowid DESC LIMIT 1").get(reportId) as { id: string; sha256: string } | null;
+    const owner = docId !== undefined ? docId : (db.query("SELECT id FROM report_docs WHERE report_id = ? ORDER BY position, created_at, rowid LIMIT 1").get(reportId) as { id: string } | null)?.id ?? null;
+    const latest = db.query("SELECT id, sha256 FROM report_doc_snapshots WHERE report_id = ? AND doc_id IS ? ORDER BY fetched_at DESC, rowid DESC LIMIT 1").get(reportId, owner) as { id: string; sha256: string } | null;
     if (latest?.sha256 === doc.sha256) return { id: latest.id, sha256: doc.sha256, changed: false };
     const id = crypto.randomUUID();
-    db.query("INSERT INTO report_doc_snapshots (id, report_id, sha256, title, markdown, fetched_at) VALUES (?, ?, ?, ?, ?, ?)").run(id, reportId, doc.sha256, doc.title, doc.markdown, now());
-    db.query(`DELETE FROM report_doc_snapshots WHERE report_id = $reportId
-      AND id NOT IN (SELECT id FROM report_doc_snapshots WHERE report_id = $reportId ORDER BY fetched_at DESC, rowid DESC LIMIT ${SNAPSHOTS_KEPT})
-      AND id NOT IN (SELECT doc_snapshot_id FROM report_runs WHERE report_id = $reportId AND doc_snapshot_id IS NOT NULL)`).run({ reportId });
+    db.query("INSERT INTO report_doc_snapshots (id, report_id, sha256, title, markdown, fetched_at, doc_id) VALUES (?, ?, ?, ?, ?, ?, ?)").run(id, reportId, doc.sha256, doc.title, doc.markdown, now(), owner);
+    db.query(`DELETE FROM report_doc_snapshots WHERE report_id = $reportId AND doc_id IS $docId
+      AND id NOT IN (SELECT id FROM report_doc_snapshots WHERE report_id = $reportId AND doc_id IS $docId ORDER BY fetched_at DESC, rowid DESC LIMIT ${SNAPSHOTS_KEPT})
+      AND id NOT IN (SELECT doc_snapshot_id FROM report_runs WHERE report_id = $reportId AND doc_snapshot_id IS NOT NULL)
+      AND id NOT IN (SELECT json_extract(j.value, '$.snapshotId') FROM report_runs r, json_each(r.docs_json) j WHERE r.report_id = $reportId AND r.docs_json IS NOT NULL AND json_extract(j.value, '$.snapshotId') IS NOT NULL)`).run({ reportId, docId: owner });
     return { id, sha256: doc.sha256, changed: true };
   })();
 }
@@ -257,88 +259,9 @@ export function browseSourceOf(row: { doc_source?: string | null; doc_server_id:
   return row.doc_server_id ? serverBrowseSource(row.doc_server_id, owner.role) : null;
 }
 
-/** The report's doc, its newest snapshot, and whether the doc changed since the report was generated. */
-export function docState(reportId: string, userId: string): DocState {
-  // The doc (its link, server, and snapshots) is the owner's; readers of a shared report never see it (wave 48, D456).
-  ownedReport(reportId, userId);
-  const row = db.query(`SELECT ${DOC_COLUMNS} FROM reports WHERE id = ?`).get(reportId) as DocRow;
-  const latest = db.query("SELECT id, sha256, title, length(CAST(markdown AS BLOB)) AS bytes, fetched_at FROM report_doc_snapshots WHERE report_id = ? ORDER BY fetched_at DESC, rowid DESC LIMIT 1")
-    .get(reportId) as { id: string; sha256: string; title: string | null; bytes: number; fetched_at: string } | null;
-  const nook = row.doc_source === NOOK_SOURCE_ID;
-  const serverName = nook ? nookSourceName() : row.doc_server_id ? (db.query("SELECT name FROM agent_tool_servers WHERE id = ?").get(row.doc_server_id) as { name: string } | null)?.name ?? null : null;
-  const mainChanged = Boolean(latest && row.doc_hash && latest.sha256 !== row.doc_hash);
-  // B3: the linked pages of the current spec's runs; one that changed since its run read it is "Doc changed" too.
-  const pages = pageInfos(reportId);
-  // E4: which catalog metrics' definitions the new snapshot changed (their doc text, compared).
-  let metricsChanged: string[] = [];
-  if (mainChanged && latest) {
-    const catalog = catalogRow(reportId, row.doc_hash);
-    const markdown = catalog?.metrics.length ? (db.query("SELECT markdown FROM report_doc_snapshots WHERE id = ?").get(latest.id) as { markdown: string } | null)?.markdown : null;
-    if (catalog && markdown) metricsChanged = changedMetrics(catalog.metrics, markdown);
-  }
-  // L2: the metrics Check doc re-read from a changed linked page (the catalog the report was generated
-  // with against the newest one for its doc), named like the main doc's.
-  const changedTitles = pages.filter((page) => page.changed && page.kind !== "search" && page.title).map((page) => page.title!);
-  if (changedTitles.length && row.doc_hash) {
-    for (const name of linkedMetricsChanged(reportId, row.doc_hash, changedTitles)) if (!metricsChanged.includes(name)) metricsChanged.push(name);
-  }
-  return {
-    doc: row.doc_ref || row.doc_server_id || nook ? { serverId: nook ? NOOK_SOURCE_ID : row.doc_server_id, serverName, tool: row.doc_tool, arg: row.doc_arg, ref: row.doc_ref, hash: row.doc_hash, browseTools: storedBrowseTools(row.doc_browse_tools) } : null,
-    latest: latest ? { id: latest.id, sha256: latest.sha256, title: latest.title, bytes: latest.bytes, fetchedAt: latest.fetched_at } : null,
-    changed: mainChanged || pages.some((page) => page.changed),
-    mainChanged,
-    pages,
-    ...(metricsChanged.length ? { metricsChanged } : {})
-  };
-}
-
-/**
- * L2: the catalog metrics on these changed linked pages whose definition differs between the catalog the
- * current spec was generated with (its generation run's own version, else the newest saved before that
- * run finished) and the newest catalog for the doc's hash. None when the two are the same version.
- */
-function linkedMetricsChanged(reportId: string, docHash: string, titles: readonly string[]): string[] {
-  const newest = catalogRow(reportId, docHash);
-  if (!newest) return [];
-  const runs = currentSpecRunIds(reportId);
-  const generation = runs.length ? db.query(`SELECT id, COALESCE(finished_at, started_at) AS at FROM report_runs WHERE kind = 'generate' AND id IN (${runs.map(() => "?").join(", ")}) ORDER BY started_at DESC LIMIT 1`).get(...runs) as { id: string; at: string } | null : null;
-  if (!generation) return [];
-  const base = (db.query("SELECT version, metrics_json FROM report_metric_catalogs WHERE report_id = ? AND run_id = ? ORDER BY version DESC LIMIT 1").get(reportId, generation.id)
-    ?? db.query("SELECT version, metrics_json FROM report_metric_catalogs WHERE report_id = ? AND doc_sha256 = ? AND created_at <= ? ORDER BY version DESC LIMIT 1").get(reportId, docHash, generation.at)) as { version: number; metrics_json: string } | null;
-  if (!base || base.version === newest.version) return [];
-  let before: CatalogMetric[] = [];
-  try { before = JSON.parse(base.metrics_json) as CatalogMetric[]; } catch { return []; }
-  return pageMetricsChanged(before.map((metric) => ({ ...metric, filters: metric.filters ?? [], excerpt: metric.excerpt ?? null })), newest.metrics, titles);
-}
-
-/**
- * "Check doc": fetches the report's doc again and stores a snapshot when it changed; then reads its
- * linked pages again (B3) and hands the changed ones to `onPagesChanged` (L2: the catalog re-reads the
- * metrics defined on them) before it answers the state.
- */
-export async function checkDoc(actor: { userId: string; role: string }, reportId: string, signal?: AbortSignal, onPagesChanged?: (pages: LinkedPage[]) => Promise<unknown>): Promise<DocState> {
-  // Review M3: Check doc writes a snapshot, so it is the owner's (wave 48's viewers only read the state).
-  ownedReport(reportId, actor.userId);
-  const row = db.query(`SELECT ${DOC_COLUMNS} FROM reports WHERE id = ?`).get(reportId) as DocRow;
-  if (row.doc_source === NOOK_SOURCE_ID && row.doc_ref) {
-    // B4: the doc in Nook, read again with the owner's live access.
-    const doc = await fetchNookFetched(actor.userId, row.doc_ref);
-    const snapshot = recordSnapshot(reportId, doc);
-    const pages = await recheckPages(reportId, { id: actor.userId, role: actor.role }, signal);
-    audit(actor.userId, null, "reports.doc.check", { reportId, serverId: NOOK_SOURCE_ID, tool: doc.tool, sha256: doc.sha256, bytes: doc.bytes, changed: snapshot.changed, pages: pages.checked, pagesFailed: pages.failed, pagesChanged: pages.changed });
-    if (pages.changedPages.length && onPagesChanged) await onPagesChanged(pages.changedPages);
-    return docState(reportId, actor.userId);
-  }
-  if (!row.doc_server_id || !row.doc_ref) throw new ReportError(400, "INVALID", "This report has no doc to check");
-  const server = docServerFor(row.doc_server_id, actor.role);
-  const choice = docToolOf(server, { tool: row.doc_tool, arg: row.doc_arg });
-  const doc = await fetchDoc(server, choice, row.doc_ref, { signal });
-  const snapshot = recordSnapshot(reportId, doc);
-  const pages = await recheckPages(reportId, { id: actor.userId, role: actor.role }, signal);
-  audit(actor.userId, null, "reports.doc.check", { reportId, serverId: server.id, tool: choice.tool, sha256: doc.sha256, bytes: doc.bytes, changed: snapshot.changed, pages: pages.checked, pagesFailed: pages.failed, pagesChanged: pages.changed });
-  if (pages.changedPages.length && onPagesChanged) await onPagesChanged(pages.changedPages);
-  return docState(reportId, actor.userId);
-}
+// D515: the doc state and Check doc cover every doc of the report (reportDocs.ts).
+import { checkDoc, docState } from "./reportDocs";
+export { checkDoc, docState };
 
 /**
  * "Doc settings" (B3): the tools the AI may use to read more docs, for the report's doc server. Each

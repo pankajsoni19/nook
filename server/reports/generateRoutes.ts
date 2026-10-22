@@ -8,7 +8,8 @@ import { TOOL_NAME } from "../agents/toolServers";
 import { db } from "../db";
 import { isReportOwner, readableReport } from "./access";
 import { checkDoc, docServerChoices, docState, setBrowseTools } from "./docSource";
-import { DOC_BROWSE_LIMITS } from "../../shared/reportsGenerate";
+import { DOC_BROWSE_LIMITS, REPORT_DOC_LIMITS } from "../../shared/reportsGenerate";
+import { addReportDoc, removeReportDoc, reorderReportDocs } from "./reportDocs";
 import { cancelGenerate, refreshPageMetrics, regenerate, startGenerate } from "./generate";
 import { reportModelView, setReportModel } from "./model";
 import { handle, id } from "./routes";
@@ -29,8 +30,14 @@ const argName = z.string().trim().regex(/^[A-Za-z_][A-Za-z0-9_.-]{0,63}$/, "must
 const browseTools = z.array(z.string().trim().regex(TOOL_NAME, "must be a tool name")).max(DOC_BROWSE_LIMITS.ticked);
 // B4: the doc source is a tool server, or `nook` (Nook itself).
 const sourceId = z.union([uuid, z.literal("nook")]);
-const generateCreate = z.object({ docRef, serverId: sourceId, tool: toolName, arg: argName, datasourceId: uuid, title: oneLine(REPORT_LIMITS.title).nullish(), browseTools: browseTools.nullish(), folderId: uuid.nullish() }).strict();
-const generateAgain = z.object({ docRef: docRef.optional(), serverId: sourceId.optional(), tool: toolName, arg: argName, datasourceId: uuid.optional(), browseTools: browseTools.nullish() }).strict();
+// D515: 1–8 docs in order (each a link and its source), or the one doc of docRef and serverId.
+const docInput = z.object({ docRef, serverId: sourceId, tool: toolName, arg: argName }).strict();
+const docList = z.array(docInput).min(1).max(REPORT_DOC_LIMITS.docs);
+const generateCreate = z.object({ docRef: docRef.optional(), serverId: sourceId.optional(), docs: docList.optional(), tool: toolName, arg: argName, datasourceId: uuid, title: oneLine(REPORT_LIMITS.title).nullish(), browseTools: browseTools.nullish(), folderId: uuid.nullish() }).strict()
+  .refine((body) => Boolean(body.docs?.length) !== Boolean(body.docRef && body.serverId), "Give docs, or docRef and serverId");
+const generateAgain = z.object({ docRef: docRef.optional(), serverId: sourceId.optional(), docs: docList.optional(), tool: toolName, arg: argName, datasourceId: uuid.optional(), browseTools: browseTools.nullish() }).strict()
+  .refine((body) => !(body.docs?.length && (body.docRef || body.serverId)), "Give docs, or docRef and serverId, not both");
+const docOrder = z.object({ ids: z.array(uuid).min(1).max(REPORT_DOC_LIMITS.docs) }).strict();
 const browseInput = z.object({ tools: browseTools }).strict();
 const emptySchema = z.object({}).strict();
 const modelInput = z.object({ override: z.object({ providerId: uuid.nullable(), model: oneLine(200).nullable() }).strict().nullable() }).strict();
@@ -86,6 +93,19 @@ export function registerGenerateRoutes(app: Hono<AppEnv>) {
     const body = await parseJson(c.req.raw, browseInput);
     return { doc: setBrowseTools({ userId: user.id, role: user.role }, reportId, body.tools) };
   }));
+  // D515: Doc settings lists, adds, removes, and reorders the report's docs (the owner; removal is app-only, D180).
+  app.post("/api/reports/:reportId/docs", handle(async (c) => {
+    const user = c.get("user");
+    const reportId = id(c, "reportId");
+    const body = await parseJson(c.req.raw, docInput);
+    return { doc: await addReportDoc({ userId: user.id, role: user.role }, reportId, body, c.req.raw.signal) };
+  }));
+  app.put("/api/reports/:reportId/docs/order", handle(async (c) => {
+    const reportId = id(c, "reportId");
+    const { ids } = await parseJson(c.req.raw, docOrder);
+    return { doc: reorderReportDocs({ userId: c.get("user").id }, reportId, ids) };
+  }));
+  app.delete("/api/reports/:reportId/docs/:docId", handle((c) => ({ doc: removeReportDoc({ userId: c.get("user").id }, id(c, "reportId"), id(c, "docId")) })));
   app.post("/api/reports/:reportId/doc/check", handle(async (c) => {
     const user = c.get("user");
     const reportId = id(c, "reportId");

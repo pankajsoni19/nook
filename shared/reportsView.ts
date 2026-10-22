@@ -19,7 +19,7 @@ export type ReportResultsView = { results: QueryResultView[]; running: ReportRun
 export type DocSnapshotInfo = { id: string; title: string | null; sha256: string; fetchedAt: string };
 
 /** GET /api/reports/:id/provenance. */
-export type ProvenanceView = { run: ReportRun | null; snapshot: DocSnapshotInfo | null; /** The plan todo that produced the block (2c), the owner's only. */ todo?: { id: string; title: string; status: string; note: string | null } | null; /** B3: the linked pages the run read, the owner's only. */ pages?: DocPageInfo[] };
+export type ProvenanceView = { run: ReportRun | null; snapshot: DocSnapshotInfo | null; /** D518: every doc the run read (several-doc reports), the owner's only. */ docs?: Array<DocSnapshotInfo & { label: string }>; /** D518: the doc the block came from, where the plan says (its todo's docRef names it). */ blockDoc?: (DocSnapshotInfo & { label: string }) | null; /** The plan todo that produced the block (2c), the owner's only. */ todo?: { id: string; title: string; status: string; note: string | null } | null; /** B3: the linked pages the run read, the owner's only. */ pages?: DocPageInfo[] };
 
 /** A report's schedule as the Schedule sheet edits it; `autoDisabled` once five scheduled refreshes failed in a row. */
 export type ScheduleView = ReportSchedule & { autoDisabled: boolean; lastRunId: string | null };

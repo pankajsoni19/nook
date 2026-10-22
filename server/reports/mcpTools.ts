@@ -5,7 +5,9 @@ import { keyContainerIds } from "../keyResources";
 import { defineTool, McpToolError, type McpErrorCode, type McpKeyContext, type McpToolSpec } from "../mcpToolKit";
 import { CADENCES } from "../../shared/routineSchedule";
 import { BLOCK_ID, QUERY_KEY, REPORT_LIMITS, type ReportBlock } from "../../shared/reports";
-import { INSTRUCTION_LIMITS } from "../../shared/reportsEdit";
+import { INSTRUCTION_KINDS, INSTRUCTION_LIMITS } from "../../shared/reportsEdit";
+import { REPORT_DOC_LIMITS } from "../../shared/reportsGenerate";
+import { docViews } from "./reportDocs";
 import { versionSourceLabel, versionWhoLabel } from "../../shared/reportVersions";
 import { isReportOwner, ownedReport, readableReport, reportLevel } from "./access";
 import { listVersions, previousVersion, versionDiff } from "./versions";
@@ -102,6 +104,13 @@ const withoutProvenance = (block: ReportBlock) => {
 };
 
 const reportItem = [{ arg: "reportId", kind: "report" as const }];
+/** D515, D517: a doc as a tool names it: its link or id, and where it is read from (a tool server id, or "nook" for a note or file in this Nook). */
+const mcpDoc = z.object({
+  docRef: z.string().min(1).max(2048).describe("The doc's link or id"),
+  serverId: z.union([z.string().uuid(), z.literal("nook")]).describe("The tool server to read it through, or \"nook\" for a note or file in this Nook"),
+  tool: z.string().min(1).max(128).optional().describe("The server's tool that returns the doc (default: its fetch, get_document, or read_document)"),
+  arg: z.string().min(1).max(64).optional().describe("That tool's input for the link (default id or url)")
+});
 
 export const reportTools: McpToolSpec[] = [
   defineTool({
@@ -191,7 +200,7 @@ export const reportTools: McpToolSpec[] = [
   defineTool({
     name: "get_report",
     title: "Get a report",
-    description: `One report: title, status, the caller's level (owner, comment, view), auto-apply, spec v2's sections and blocks (markdown, KPI, chart, table: intent, width, section, and their mapping), and the saved queries with their SQL. Results are read per block with get_report_block. ${UNTRUSTED}`,
+    description: `One report: title, status, the caller's level (owner, comment, view), auto-apply, the docs it is built from (the owner's reports: title, source, link, whether it changed since), spec v2's sections and blocks (markdown, KPI, chart, table: intent, width, section, and their mapping), and the saved queries with their SQL. Results are read per block with get_report_block. ${UNTRUSTED}`,
     scopes: ["reports:read"],
     access: { mode: "items", items: reportItem },
     write: false,
@@ -201,8 +210,11 @@ export const reportTools: McpToolSpec[] = [
       const spec = parseSpec(report.spec_json);
       // Spec v3: the parameter set these values make (the defaults when none are given), checked and bound.
       const set = paramResults(id, key.userId, parameters ?? null).set;
+      const level = reportLevel(report, key.userId);
       return {
-        id: report.id, title: report.title, status: report.status, level: reportLevel(report, key.userId), autoApply: report.auto_apply === 1,
+        id: report.id, title: report.title, status: report.status, level, autoApply: report.auto_apply === 1,
+        // D515: the docs it is built from, the owner's only (D456: readers never see a doc's link or server).
+        docs: level === "owner" ? docViews(report.id).map((doc) => ({ id: doc.id, position: doc.position, title: doc.title, source: doc.serverId === "nook" ? "nook" : "server", serverId: doc.serverId, serverName: doc.serverName, ref: doc.ref, changed: doc.changed, addedVia: doc.addedVia })) : null,
         lastRunAt: report.last_run_at, lastError: report.last_error, revision: report.revision, url: reportUrl(report.id),
         // Spec v2 (wave 48b): a stored v1 spec reads upgraded (intents, widths, no sections).
         specVersion: spec.specVersion, sections: spec.sections,
@@ -339,19 +351,21 @@ export const reportTools: McpToolSpec[] = [
   defineTool({
     name: "create_report",
     title: "Create a report from a doc",
-    description: "Starts generating a new report from a document: Nook reads the doc through a tool server (its id from the person's Settings → AI → Tool servers), then its AI writes ClickHouse SQL against the data source (list_report_datasources) and builds the report. Answers at once with the report and the run; follow it with get_report_run. Uses the key owner's AI budget.",
+    description: "Starts generating a new report from one document (docRef and serverId) or up to 8 (docs, in order): Nook reads each doc through a tool server (its id from the person's Settings → AI → Tool servers) or, with serverId \"nook\", a note or file in this Nook the key's owner can read, then its AI writes ClickHouse SQL against the data source (list_report_datasources) and builds the report. Answers at once with the report and the run; follow it with get_report_run. Uses the key owner's AI budget.",
     scopes: ["reports:write"],
-    access: { mode: "global", related: ["serverId", "datasourceId"] },
+    access: { mode: "global", related: ["serverId", "datasourceId", "docs"] },
     write: true,
     buckets: ["report_write"],
     inputSchema: z.object({
-      docRef: z.string().min(1).max(2048).describe("The doc's link or id"),
-      serverId: z.string().uuid().describe("The tool server to read the doc through"),
+      docRef: z.string().min(1).max(2048).optional().describe("The doc's link or id (one doc; or use docs)"),
+      serverId: z.union([z.string().uuid(), z.literal("nook")]).optional().describe("The tool server to read the doc through, or \"nook\" (one doc; or use docs)"),
+      docs: z.array(mcpDoc).min(1).max(REPORT_DOC_LIMITS.docs).optional().describe("Several docs, in order (at most 8): the first is the main one"),
       datasourceId: z.string().uuid().describe("The data source (from list_report_datasources)"),
       title: z.string().min(1).max(REPORT_LIMITS.title).optional().describe("The report's title; default the doc's title")
     }),
     handler: (args, key) => asOwner(key, async (role) => {
-      const started = await startGenerate({ userId: key.userId, role }, { docRef: args.docRef, serverId: args.serverId, datasourceId: args.datasourceId, title: args.title ?? null });
+      if (args.docs?.length ? Boolean(args.docRef || args.serverId) : !(args.docRef && args.serverId)) throw new McpToolError("INVALID", "Give docs, or docRef and serverId");
+      const started = await startGenerate({ userId: key.userId, role }, { docRef: args.docRef ?? null, serverId: args.serverId ?? null, docs: args.docs ?? null, datasourceId: args.datasourceId, title: args.title ?? null });
       audit(key.userId, null, "reports.mcp.create", { via: "mcp", keyId: key.keyId, reportId: started.report.id, runId: started.run.id });
       return { report: { id: started.report.id, title: started.report.title, url: reportUrl(started.report.id) }, run: { id: started.run.id, status: "running" } };
     })
@@ -401,13 +415,19 @@ export const reportTools: McpToolSpec[] = [
   defineTool({
     name: "add_report_instruction",
     title: "Ask for a change to a report",
-    description: "Queues an instruction for the report's edit agent (\"split this chart by country\"), about the whole report or one block. Instructions run one at a time in order; each ends as a proposal to apply or reject (apply_report_proposal), or is applied at once when the owner turned on auto-apply for their own instructions. Returns the instruction id; follow it with get_report_instruction. Uses the key owner's AI budget.",
+    description: "Queues an instruction for the report's edit agent (\"split this chart by country\"), about the whole report or one block, or (kind \"add\") asking for a new section after a block (afterBlockId) or at the end. It may carry up to 4 docs (notes or files in this Nook, or docs behind a tool server the key's owner may use) that the agent reads; they join the report's docs when the change is applied. Instructions run one at a time in order; each ends as a proposal to apply or reject (apply_report_proposal), or is applied at once when the owner turned on auto-apply for their own instructions. Returns the instruction id; follow it with get_report_instruction. Uses the key owner's AI budget.",
     scopes: ["reports:write"],
-    access: { mode: "items", items: reportItem, related: ["blockId"] },
+    access: { mode: "items", items: reportItem, related: ["blockId", "afterBlockId", "docs"] },
     write: true,
     buckets: ["report_write"],
-    inputSchema: z.object({ reportId, text: z.string().min(1).max(INSTRUCTION_LIMITS.text).describe("What to change"), blockId: z.string().regex(BLOCK_ID).optional().describe("The block it is about (from get_report)") }),
-    handler: ({ reportId: id, text, blockId }, key) => asOwner(key, (role) => ({ instruction: addInstruction({ userId: key.userId, role, keyId: key.keyId }, id, { text, blockId: blockId ?? null }) }))
+    inputSchema: z.object({
+      reportId, text: z.string().min(1).max(INSTRUCTION_LIMITS.text).describe("What to change (or, for kind add, what the new section shows)"),
+      blockId: z.string().regex(BLOCK_ID).optional().describe("The block it is about (from get_report); not with kind add"),
+      kind: z.enum(INSTRUCTION_KINDS).optional().describe("change (default) or add: a new section"),
+      afterBlockId: z.string().regex(BLOCK_ID).optional().describe("kind add: the block the new section follows; omitted: at the end"),
+      docs: z.array(mcpDoc).max(REPORT_DOC_LIMITS.instructionDocs).optional().describe("Docs the agent reads for this change (at most 4)")
+    }),
+    handler: ({ reportId: id, text, blockId, kind, afterBlockId, docs }, key) => asOwner(key, async (role) => ({ instruction: await addInstruction({ userId: key.userId, role, keyId: key.keyId }, id, { text, blockId: blockId ?? null, kind, afterBlockId: afterBlockId ?? null, docs: docs ?? [] }) }))
   }),
   defineTool({
     name: "apply_report_proposal",

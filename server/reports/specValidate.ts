@@ -774,7 +774,7 @@ export function nextSpecVersion(currentSpecJson: string): number {
  * Saves an accepted spec in one transaction: the report's queries (replaced), the run's results, the
  * spec with each block's provenance, the doc hash it came from, status `ready`, and the run `succeeded`.
  */
-export function persistGenerated(input: { reportId: string; runId: string; docSnapshotId: string | null; docHash: string | null; spec: ReportSpec; results: ReadonlyMap<string, QueryOutcome>; /** E5: the model that wrote it. */ model?: string | null }): ReportSpec {
+export function persistGenerated(input: { reportId: string; runId: string; docSnapshotId: string | null; docHash: string | null; /** D515: each doc's hash the spec was generated from. */ docHashes?: ReadonlyArray<{ docId: string; sha256: string }>; spec: ReportSpec; results: ReadonlyMap<string, QueryOutcome>; /** E5: the model that wrote it. */ model?: string | null }): ReportSpec {
   return db.transaction(() => {
     // Review L1: a binned or purged report, or a run that is no longer running (abandoned, reclaimed by
     // wave 47's lease sweep), saves nothing: the transaction rolls back.
@@ -810,6 +810,7 @@ export function persistGenerated(input: { reportId: string; runId: string; docSn
     const saved = db.query(`UPDATE reports SET spec_json = ?, status = 'ready', doc_hash = COALESCE(?, doc_hash), last_run_at = ?, last_error = NULL, revision = revision + 1, updated_at = ? WHERE id = ? AND deleted_at IS NULL`)
       .run(specJson, input.docHash, at, at, input.reportId);
     if (saved.changes !== 1) throw new PersistRefused("REPORT_GONE");
+    for (const doc of input.docHashes ?? []) db.query("UPDATE report_docs SET hash = ? WHERE id = ? AND report_id = ?").run(doc.sha256, doc.docId, input.reportId);
     return spec;
   })();
 }

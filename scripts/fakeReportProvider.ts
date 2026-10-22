@@ -249,6 +249,21 @@ export const qaEditScript: Script = (context) => {
   const instruction = (text(turn?.content).match(/<instruction>\n([\s\S]*?)\n<\/instruction>/)?.[1] ?? "").toLowerCase();
   const target = /The instruction is about block `([^`]+)`/.exec(context.system)?.[1] ?? null;
   const patch = () => {
+    // D516: "Add a new section": a section with net revenue by country, placed where the prompt says.
+    if (context.system.includes("The instruction asks for a NEW SECTION")) {
+      const sectionAfter = /add_section \{after: (?:null|"([^"]+)")\}/.exec(context.system)?.[1] ?? null;
+      const blockAfter = /add_block \{after: "([^"]+)"\}/.exec(context.system)?.[1] ?? null;
+      let n = 1;
+      while (context.system.includes(`"new_section_${n}"`)) n += 1;
+      return {
+        summary: "Add a section: net revenue by country",
+        ops: [
+          { op: "add_section", section: { id: `new_section_${n}`, title: instruction.includes("refund") ? "Refunds" : "Revenue by country" }, after: sectionAfter },
+          { op: "add_query", query: { key: `section_revenue_${n}`, sql: QA_EDIT_SQL, purpose: "Net revenue per country for the new section" } },
+          { op: "add_block", after: blockAfter, block: { id: `section_chart_${n}`, type: "chart", title: "Net revenue by country", queryKey: `section_revenue_${n}`, kind: "bar", x: "country", y: ["net_revenue"], format: "currency:USD", section: `new_section_${n}` } }
+        ]
+      };
+    }
     if (instruction.includes("stacked")) return { summary: "Show it as a stacked bar", ops: [{ op: "update_block", id: target ?? "country_revenue", set: { kind: "stacked_bar" } }] };
     if (instruction.includes("revenue by country")) {
       return {

@@ -331,13 +331,14 @@ describe("final review L3 and M3", () => {
     expect(registeredMigrationIds.filter((id) => id === 63)).toEqual([63]);
   });
 
-  test("docs/OPERATIONS.md has the 0.43.0 upgrade section: 065 (lane EDIT), its column, backup, and the failure path", async () => {
+  test("docs/OPERATIONS.md has the 0.43.0 upgrade section: 064 (lane DOCS) and 065 (lane EDIT), their tables and columns, backup, and the failure path", async () => {
     const text = await Bun.file(new URL("../docs/OPERATIONS.md", import.meta.url)).text();
     const start = text.indexOf("### Upgrading to 0.43.0");
     expect(start).toBeGreaterThan(0);
     const section = text.slice(start, text.indexOf("### Upgrading to 0.42.1", start));
-    for (const word of ["**065**", "report_query_suggestions", "report_instructions.suggested_query", "APP_VERSION=0.43.0", "Back up first", "./scripts/backup.sh --force", "Migration failed"]) expect(section).toContain(word);
+    for (const word of ["**064**", "report_docs", "report_instruction_docs", "report_doc_snapshots.doc_id", "report_runs.docs_json", "report_instructions.kind", "after_block_id", "added_via = 'create'", "**065**", "report_query_suggestions", "report_instructions.suggested_query", "APP_VERSION=0.43.0", "Back up first", "./scripts/backup.sh --force", "Migration failed"]) expect(section).toContain(word);
     const { registeredMigrationIds } = await import("../server/migrations");
     expect(registeredMigrationIds).toContain(65);
+    expect(registeredMigrationIds).toContain(64);
   });
 });

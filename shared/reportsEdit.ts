@@ -69,11 +69,28 @@ export type ReportPatch = { ops: PatchOp[]; summary?: string };
 
 // ------------------------------------------------------------------------------- instructions
 
+/** D516: `change` (the page or a block, as before) or `add` ("Add a new section", after a block or at the end). */
+export const INSTRUCTION_KINDS = ["change", "add"] as const;
+export type InstructionKind = typeof INSTRUCTION_KINDS[number];
+
+/**
+ * D517: a doc attached to an instruction (read with its author's access when it was sent). `ref` is
+ * shown to the owner and the author only; `joined` once an Apply added it to the report's docs, or
+ * `joinNote` says why it was not (the owner cannot read it, the report has 8 docs, it was already one).
+ */
+export type InstructionDocView = { id: string; title: string | null; source: "nook" | "server"; serverName: string | null; ref: string | null; bytes: number; joined: boolean; joinNote: string | null };
+
 export type ReportInstruction = {
   id: string;
   reportId: string;
-  /** The block it is about; null is the whole page. */
+  /** The block it is about; null is the whole page (or, for `add`, nothing). */
   blockId: string | null;
+  /** D516: `add` asks for a new section after `afterBlockId` (null: at the end). */
+  kind: InstructionKind;
+  afterBlockId: string | null;
+  /** D517: the attached docs (the owner and the author see them; other readers get an empty list and the count). */
+  docs: InstructionDocView[];
+  docCount: number;
   text: string;
   status: InstructionStatus;
   /** Queue order (only meaningful while queued). */

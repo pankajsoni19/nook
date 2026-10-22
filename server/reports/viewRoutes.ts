@@ -56,6 +56,24 @@ function snapshotInfo(reportId: string, snapshotId: string | null | undefined): 
   return row ? { id: row.id, title: row.title, sha256: row.sha256, fetchedAt: row.fetched_at } : null;
 }
 
+/**
+ * D518: the docs a run read (several-doc runs: `report_runs.docs_json`), each as its snapshot (a doc an
+ * instruction carried: its stored title and hash), labelled as the prompt labelled it.
+ */
+function runDocInfos(reportId: string, runId: string): Array<DocSnapshotInfo & { label: string }> {
+  const raw = (db.query("SELECT docs_json FROM report_runs WHERE id = ? AND report_id = ?").get(runId, reportId) as { docs_json: string | null } | null)?.docs_json;
+  if (!raw) return [];
+  let items: Array<{ label?: string; title?: string | null; snapshotId?: string; instructionDocId?: string }> = [];
+  try { items = JSON.parse(raw) as typeof items; } catch { return []; }
+  return items.flatMap((item) => {
+    const label = typeof item.label === "string" ? item.label : "";
+    const snapshot = item.snapshotId ? snapshotInfo(reportId, item.snapshotId) : null;
+    if (snapshot) return [{ ...snapshot, label }];
+    const attached = item.instructionDocId ? db.query("SELECT id, title, sha256, created_at FROM report_instruction_docs WHERE id = ?").get(item.instructionDocId) as { id: string; title: string | null; sha256: string; created_at: string } | null : null;
+    return attached ? [{ id: attached.id, title: attached.title, sha256: attached.sha256, fetchedAt: attached.created_at, label }] : [];
+  });
+}
+
 /** A block's provenance: the run that made or last changed it and the doc snapshot it worked from (never the doc's text). */
 export function provenance(reportId: string, userId: string, input: { runId?: string | null; snapshotId?: string | null; blockId?: string | null; queryKey?: string | null }): ProvenanceView {
   const report = readableReport(reportId, userId);
@@ -66,8 +84,12 @@ export function provenance(reportId: string, userId: string, input: { runId?: st
   // 2c: the plan todo that produced the block (by its block id, else its query key).
   const plan = ownRun ? storedPlan((db.query("SELECT plan_json FROM report_runs WHERE id = ?").get(ownRun.id) as { plan_json: string | null } | null)?.plan_json) : null;
   const todo = plan?.todos.find((item) => input.blockId && item.blockId === input.blockId) ?? plan?.todos.find((item) => input.queryKey && item.queryKey === input.queryKey) ?? null;
+  // D518: a several-doc run lists its docs, and names the block's own where its todo's docRef says (d2, "d2: Revenue").
+  const docs = ownRun ? runDocInfos(reportId, ownRun.id) : [];
+  const label = todo?.docRef ? /^\s*(d\d{1,2})\b/i.exec(todo.docRef)?.[1]?.toLowerCase() : undefined;
+  const several = docs.length > 1 ? { docs, blockDoc: label ? docs.find((doc) => doc.label === label) ?? null : null } : {};
   // B3: the linked pages the run's agent read (titles and hashes, never their text), the owner's only.
-  return { run: ownRun ? runView(ownRun) : null, snapshot: snapshotInfo(reportId, input.snapshotId ?? ownRun?.doc_snapshot_id), todo: todo ? { id: todo.id, title: todo.title, status: todo.status, note: todo.note } : null, ...(ownRun ? { pages: pageInfos(reportId, ownRun.id) } : {}) };
+  return { run: ownRun ? runView(ownRun) : null, snapshot: snapshotInfo(reportId, input.snapshotId ?? ownRun?.doc_snapshot_id), todo: todo ? { id: todo.id, title: todo.title, status: todo.status, note: todo.note } : null, ...(ownRun ? { pages: pageInfos(reportId, ownRun.id) } : {}), ...several };
 }
 
 /** A run as a reader of a shared report sees it: no doc snapshot, no agent run (wave 48 review L2). */

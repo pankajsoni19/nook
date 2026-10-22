@@ -3,7 +3,9 @@ import { z } from "zod";
 import type { AppEnv } from "../auth";
 import { parseJson, uuid } from "../validation";
 import { BLOCK_ID } from "../../shared/reports";
-import { INSTRUCTION_LIMITS, SHARE_LEVELS, type ReportPatch } from "../../shared/reportsEdit";
+import { INSTRUCTION_KINDS, INSTRUCTION_LIMITS, SHARE_LEVELS, type ReportPatch } from "../../shared/reportsEdit";
+import { REPORT_DOC_LIMITS } from "../../shared/reportsGenerate";
+import { TOOL_NAME } from "../agents/toolServers";
 import { ReportError } from "./errors";
 import { addInstruction, applyProposal, cancelInstruction, listInstructions, proposalView, rejectProposal, reorderInstructions, setAutoApply } from "./instructions";
 import { manualEdit } from "./manualEdit";
@@ -21,7 +23,19 @@ import { ownedReport } from "./access";
  * person cannot read; owner-only actions answer 404 to readers.
  */
 
-const instructionCreate = z.object({ text: z.string().min(1).max(INSTRUCTION_LIMITS.text), blockId: z.string().regex(BLOCK_ID).nullish() }).strict();
+/** D517: a doc attached to an instruction: its link or id and where it is read from (`nook` or a tool server). */
+export const docInputSchema = z.object({
+  docRef: z.string().trim().min(1).max(2048).refine((value) => !/[\u0000-\u001f\u007f]/.test(value), "must be one line of text"),
+  serverId: z.union([uuid, z.literal("nook")]),
+  tool: z.string().trim().regex(TOOL_NAME, "must be a tool name").nullish(),
+  arg: z.string().trim().regex(/^[A-Za-z_][A-Za-z0-9_.-]{0,63}$/, "must be an argument name").nullish()
+}).strict();
+const instructionCreate = z.object({
+  text: z.string().min(1).max(INSTRUCTION_LIMITS.text), blockId: z.string().regex(BLOCK_ID).nullish(),
+  // D516: "Add a new section", after a block (null or absent: at the end).
+  kind: z.enum(INSTRUCTION_KINDS).optional(), afterBlockId: z.string().regex(BLOCK_ID).nullish(),
+  docs: z.array(docInputSchema).max(REPORT_DOC_LIMITS.instructionDocs).optional()
+}).strict();
 const reorderSchema = z.object({ ids: z.array(uuid).max(INSTRUCTION_LIMITS.queued * 2) }).strict();
 const autoApplySchema = z.object({ autoApply: z.boolean() }).strict();
 const emptySchema = z.object({}).strict();
@@ -44,7 +58,7 @@ export function registerReportEditRoutes(app: Hono<AppEnv>) {
     const user = c.get("user");
     const reportId = id(c, "reportId");
     const body = await parseJson(c.req.raw, instructionCreate);
-    return c.json({ instruction: addInstruction({ userId: user.id, role: user.role }, reportId, { text: body.text, blockId: body.blockId ?? null }) }, 201);
+    return c.json({ instruction: await addInstruction({ userId: user.id, role: user.role }, reportId, { text: body.text, blockId: body.blockId ?? null, kind: body.kind, afterBlockId: body.afterBlockId ?? null, docs: body.docs ?? [] }, c.req.raw.signal) }, 201);
   }));
   app.post("/api/reports/:reportId/instructions/reorder", handle(async (c) => {
     const reportId = id(c, "reportId");

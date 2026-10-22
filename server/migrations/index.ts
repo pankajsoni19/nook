@@ -59,6 +59,7 @@ import { documentFtsMigration } from "./060_document_fts";
 import { reportFavoritesMigration } from "./061_report_favorites";
 import { reportOwnersMigration } from "./062_report_owners";
 import { reportParametersMigration } from "./063_report_parameters";
+import { reportDocsMigration } from "./064_report_docs";
 import { reportQuerySuggestionsMigration } from "./065_report_query_suggestions";
 
 const migrations = [initialMigration, folderSharingMigration, totpMigration, totpRecoveryCodesMigration, mcpApiKeysMigration, documentsMigration, binMigration, noteSearchMigration, taskBoardsMigration, mcpKeyScopesMigration, taskDatesMigration, collectionsMigration, calendarMigration, eventNextOccurrenceMigration, taskCardUxMigration, userPreferencesMigration, teamRolesMigration,
@@ -161,6 +162,9 @@ const migrations = [initialMigration, folderSharingMigration, totpMigration, tot
   // 063 (report parameters, spec v3: report_results.params_json, report_param_sets, report_param_results,
   // report_param_options) needs only 050.
   reportParametersMigration,
+  // 064 (lane DOCS: report_docs, several docs per report; report_instruction_docs; snapshots, runs, and
+  // instructions learn their docs and "Add a new section") needs 050, 052, and 056.
+  reportDocsMigration,
   // 065 (lane EDIT, D527: report_instructions.suggested_query, a person's suggested query edit) needs only 052.
   reportQuerySuggestionsMigration
 ];

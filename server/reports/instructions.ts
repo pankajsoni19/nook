@@ -1,6 +1,9 @@
 import { audit, db, now } from "../db";
 import { upgradeSpec } from "../../shared/reports";
-import { INSTRUCTION_LIMITS, type InstructionsView, type ProposalView, type ReportInstruction } from "../../shared/reportsEdit";
+import { INSTRUCTION_LIMITS, type InstructionDocView, type InstructionKind, type InstructionsView, type ProposalView, type ReportInstruction } from "../../shared/reportsEdit";
+import { REPORT_DOC_LIMITS, type DocInput } from "../../shared/reportsGenerate";
+import { joinInstructionDocs, readAllDocs, releaseInstructionDocs, resolveDocInputs } from "./reportDocs";
+import { NOOK_SOURCE_ID, nookSourceName } from "./nookSource";
 import type { QueryResultView } from "../../shared/reportsView";
 import { commentableReport, isReportOwner, ownedReport, readableReport, reportLevel } from "./access";
 import { cancelLiveEdit, instructionRow, liveEdits, startEdit, type InstructionRow, type StoredProposal } from "./edit";
@@ -30,12 +33,31 @@ const slog = logger("reports");
 
 type Actor = { userId: string; role: string; keyId?: string | null };
 type Row = InstructionRow & { author_name: string | null; /** 065 (D527): a person's suggested query edit. */ suggested_query?: string | null };
+type DocRow = { id: string; instruction_id: string; source: "nook" | "server"; server_id: string | null; ref: string; title: string | null; bytes: number; joined_doc_id: string | null; join_note: string | null; server_name: string | null };
+
+const DOC_SELECT = `SELECT d.id, d.instruction_id, d.source, d.server_id, d.ref, d.title, d.bytes, d.joined_doc_id, d.join_note, s.name AS server_name
+  FROM report_instruction_docs d LEFT JOIN agent_tool_servers s ON s.id = d.server_id`;
+
+/** D517: the attached docs of these instructions, by instruction (never their text). */
+function docsOf(where: string, ...params: string[]): Map<string, DocRow[]> {
+  const out = new Map<string, DocRow[]>();
+  for (const row of db.query(`${DOC_SELECT} WHERE ${where} ORDER BY d.instruction_id, d.position`).all(...params) as DocRow[]) out.set(row.instruction_id, [...(out.get(row.instruction_id) ?? []), row]);
+  return out;
+}
+
+const docView = (row: DocRow): InstructionDocView => ({
+  id: row.id, title: row.title, source: row.source, serverName: row.source === "nook" ? nookSourceName() : row.server_name, ref: row.ref, bytes: row.bytes, joined: row.joined_doc_id !== null, joinNote: row.join_note
+});
 
 const SELECT = "SELECT i.*, u.display_name AS author_name FROM report_instructions i LEFT JOIN users u ON u.id = i.author_id";
 
-function view(row: Row, userId: string, owner: boolean): ReportInstruction {
+function view(row: Row, userId: string, owner: boolean, docs: readonly DocRow[] = []): ReportInstruction {
+  // D517: the attached docs are the owner's and the author's to see (titles and links, never text).
+  const seesDocs = owner || row.author_id === userId;
   return {
     id: row.id, reportId: row.report_id, blockId: row.block_id, text: row.text, status: row.status as ReportInstruction["status"], position: row.position,
+    kind: (row.kind === "add" ? "add" : "change") as InstructionKind, afterBlockId: row.after_block_id ?? null,
+    docs: seesDocs ? docs.map(docView) : [], docCount: docs.length,
     authorName: row.author_name, isMine: row.author_id === userId, via: row.via, runId: row.run_id,
     // The run, its live events, and its steps are the owner's (review M1a: the prompt carries the doc);
     // the agent's own summary too, which may quote it. Others see the status and the outcome.
@@ -54,8 +76,9 @@ export function listInstructions(reportId: string, userId: string, role: string)
   const report = readableReport(reportId, userId);
   const level = reportLevel(report, userId);
   const rows = db.query(`${SELECT} WHERE i.report_id = ? ${ORDER} LIMIT 200`).all(reportId) as Row[];
+  const docs = docsOf("d.instruction_id IN (SELECT id FROM report_instructions WHERE report_id = ?)", reportId);
   return {
-    instructions: rows.map((row) => view(row, userId, level === "owner")),
+    instructions: rows.map((row) => view(row, userId, level === "owner", docs.get(row.id))),
     level,
     canComment: (level === "owner" || level === "comment") && role !== "viewer" && role !== "guest",
     canApply: level === "owner",
@@ -67,26 +90,62 @@ export function getInstruction(reportId: string, instructionId: string, userId: 
   const report = readableReport(reportId, userId);
   const row = db.query(`${SELECT} WHERE i.id = ? AND i.report_id = ?`).get(instructionId, reportId) as Row | null;
   if (!row) throw new ReportError(404, "NOT_FOUND", "Instruction not found");
-  return view(row, userId, isReportOwner(report.id, userId));
+  return view(row, userId, isReportOwner(report.id, userId), docsOf("d.instruction_id = ?", row.id).get(row.id));
 }
 
-/** Adds an instruction at the end of the queue and kicks the queue. */
-export function addInstruction(actor: Actor, reportId: string, input: { text: string; blockId?: string | null }): ReportInstruction {
+export type InstructionInput = {
+  text: string; blockId?: string | null;
+  /** D516: `add` asks for a new section after `afterBlockId` (null: at the end). */
+  kind?: InstructionKind; afterBlockId?: string | null;
+  /** D517: docs the edit agent reads with the report's docs (at most 4), read now with the author's access. */
+  docs?: DocInput[] | null;
+};
+
+/**
+ * Adds an instruction at the end of the queue and kicks the queue. Attached docs are read first, as the
+ * author (a Nook doc they can read, a tool server their role may use; 404 otherwise), so the author
+ * can only attach what they can read; their text is kept on the instruction for the edit agent.
+ */
+export async function addInstruction(actor: Actor, reportId: string, input: InstructionInput, signal?: AbortSignal): Promise<ReportInstruction> {
   const { row: report } = commentableReport(reportId, actor.userId);
   if (actor.role === "viewer" || actor.role === "guest") throw new ReportError(403, "ROLE_READ_ONLY", "Your role cannot ask for changes");
   const text = input.text.replace(/\r\n?/g, "\n").replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "").trim().slice(0, INSTRUCTION_LIMITS.text);
   if (!text) throw new ReportError(400, "INVALID", "Write what to change");
-  const blockId = input.blockId ?? null;
-  if (blockId && !parseSpec(report.spec_json).blocks.some((block) => block.id === blockId)) throw new ReportError(404, "NOT_FOUND", "That block is not in the report");
-  const queued = (db.query("SELECT COUNT(*) AS count FROM report_instructions WHERE report_id = ? AND status = 'queued'").get(reportId) as { count: number }).count;
-  if (queued >= INSTRUCTION_LIMITS.queued) throw new ReportError(429, "LIMIT_REACHED", `At most ${INSTRUCTION_LIMITS.queued} instructions can wait at once`);
+  const kind: InstructionKind = input.kind === "add" ? "add" : "change";
+  const blockId = kind === "add" ? null : input.blockId ?? null;
+  if (kind === "add" && input.blockId) throw new ReportError(400, "INVALID", "A new section is placed with afterBlockId, not blockId");
+  if (kind === "change" && input.afterBlockId) throw new ReportError(400, "INVALID", "afterBlockId is for a new section (kind add)");
+  const afterBlockId = kind === "add" ? input.afterBlockId ?? null : null;
+  const blocks = parseSpec(report.spec_json).blocks;
+  if (blockId && !blocks.some((block) => block.id === blockId)) throw new ReportError(404, "NOT_FOUND", "That block is not in the report");
+  if (afterBlockId && !blocks.some((block) => block.id === afterBlockId)) throw new ReportError(404, "NOT_FOUND", "That block is not in the report");
+  const queuedNow = () => (db.query("SELECT COUNT(*) AS count FROM report_instructions WHERE report_id = ? AND status = 'queued'").get(reportId) as { count: number }).count;
+  if (queuedNow() >= INSTRUCTION_LIMITS.queued) throw new ReportError(429, "LIMIT_REACHED", `At most ${INSTRUCTION_LIMITS.queued} instructions can wait at once`);
+  // D517: checked (source, server, tool) before anything is read, then read as the author, three at a time.
+  const docInputs = input.docs ?? [];
+  if (docInputs.length > REPORT_DOC_LIMITS.instructionDocs) throw new ReportError(400, "INVALID", `Attach at most ${REPORT_DOC_LIMITS.instructionDocs} docs to one instruction`);
+  const resolved = docInputs.length ? resolveDocInputs(actor.role, docInputs, REPORT_DOC_LIMITS.instructionDocs) : [];
+  const read = resolved.length ? await readAllDocs(actor.userId, resolved, signal) : [];
   const id = crypto.randomUUID();
   const at = now();
-  const position = ((db.query("SELECT max(position) AS position FROM report_instructions WHERE report_id = ?").get(reportId) as { position: number | null }).position ?? 0) + 1;
-  db.query(`INSERT INTO report_instructions (id, report_id, block_id, text, author_id, via, key_id, status, position, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?)`).run(id, reportId, blockId, text, actor.userId, actor.keyId ? "mcp" : "web", actor.keyId ?? null, position, at, at);
-  // Never the text (T380: it is the person's words, and it may quote warehouse data).
-  audit(actor.userId, null, "reports.instruction.add", { reportId, instructionId: id, blockId, chars: text.length, ...(actor.keyId ? { via: "mcp", keyId: actor.keyId } : {}) });
+  db.transaction(() => {
+    if (queuedNow() >= INSTRUCTION_LIMITS.queued) throw new ReportError(429, "LIMIT_REACHED", `At most ${INSTRUCTION_LIMITS.queued} instructions can wait at once`);
+    const position = ((db.query("SELECT max(position) AS position FROM report_instructions WHERE report_id = ?").get(reportId) as { position: number | null }).position ?? 0) + 1;
+    db.query(`INSERT INTO report_instructions (id, report_id, block_id, text, author_id, via, key_id, status, position, kind, after_block_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?)`).run(id, reportId, blockId, text, actor.userId, actor.keyId ? "mcp" : "web", actor.keyId ?? null, position, kind, afterBlockId, at, at);
+    resolved.forEach((doc, index) => {
+      const fetched = read[index]!;
+      db.query(`INSERT INTO report_instruction_docs (id, instruction_id, position, source, server_id, tool, arg, ref, title, sha256, bytes, markdown, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(crypto.randomUUID(), id, index, doc.nook ? "nook" : "server", doc.server?.id ?? null, doc.nook ? fetched.tool : doc.tool, doc.arg,
+        doc.ref.slice(0, 2048), fetched.title?.slice(0, 500) ?? null, fetched.sha256, fetched.bytes, fetched.markdown, at);
+    });
+  })();
+  // Never the text (T380: it is the person's words, and it may quote warehouse data), nor the docs' (ids, hashes, and sizes only).
+  audit(actor.userId, null, "reports.instruction.add", {
+    reportId, instructionId: id, blockId, chars: text.length, ...(kind === "add" ? { kind, afterBlockId } : {}),
+    ...(read.length ? { docs: read.map((doc, index) => ({ serverId: resolved[index]!.sourceId, tool: doc.tool, sha256: doc.sha256, bytes: doc.bytes })) } : {}),
+    ...(actor.keyId ? { via: "mcp", keyId: actor.keyId } : {})
+  });
   kick(reportId);
   return getInstruction(reportId, id, actor.userId);
 }
@@ -122,6 +181,7 @@ export function cancelInstruction(userId: string, reportId: string, instructionI
       if (row.run_id) db.query("UPDATE report_runs SET status = 'failed', error = 'Cancelled', finished_at = ?, lease_until = NULL WHERE id = ? AND status = 'running'").run(at, row.run_id);
     }
   } else throw new ReportError(409, "INVALID", row.status === "proposed" ? "Reject the proposal instead" : "This instruction has already finished");
+  releaseInstructionDocs(instructionId);
   audit(userId, null, "reports.instruction.cancel", { reportId, instructionId, ...(via.keyId ? { via: "mcp", keyId: via.keyId } : {}) });
   kick(reportId);
   return getInstruction(reportId, instructionId, userId);
@@ -275,13 +335,16 @@ export function applyProposal(userId: string, reportId: string, instructionId: s
       reportId, userId, spec: proposal.spec, source: (row as Row).suggested_query ? "manual" : "edit", instructionId, stamp, runId,
       docSnapshotId: proposal.docSnapshotId, results, note: row.summary
     });
+    // D517: the docs the instruction carried join the report's docs (before it is marked applied, which clears their text).
+    const docs = joinInstructionDocs(reportId, instructionId, row.author_id);
     const at = now();
     const marked = db.query("UPDATE report_instructions SET status = 'applied', applied_version = ?, auto_applied = ?, decided_by = ?, decided_at = ?, updated_at = ? WHERE id = ? AND status = 'proposed'")
       .run(committed.version, options.auto ? 1 : 0, userId, at, at, instructionId);
     if (marked.changes !== 1) throw new ReportError(409, "INVALID", "This proposal was already decided");
-    return committed;
+    return { ...committed, docs };
   })();
-  audit(userId, null, "reports.instruction.apply", { reportId, instructionId, version: saved.version, auto: Boolean(options.auto), blocks: stamp.size, queries: results.size, ...(options.keyId ? { via: "mcp", keyId: options.keyId } : {}) });
+  releaseInstructionDocs(instructionId);
+  audit(userId, null, "reports.instruction.apply", { reportId, instructionId, version: saved.version, auto: Boolean(options.auto), blocks: stamp.size, queries: results.size, ...(saved.docs.joined || saved.docs.skipped ? { docsJoined: saved.docs.joined, docsSkipped: saved.docs.skipped } : {}), ...(options.keyId ? { via: "mcp", keyId: options.keyId } : {}) });
   kick(reportId);
   return getInstruction(reportId, instructionId, userId);
 }
@@ -295,6 +358,7 @@ export function rejectProposal(userId: string, reportId: string, instructionId: 
   const at = now();
   const marked = db.query("UPDATE report_instructions SET status = 'rejected', decided_by = ?, decided_at = ?, updated_at = ? WHERE id = ? AND status = 'proposed'").run(userId, at, at, instructionId);
   if (marked.changes !== 1) throw new ReportError(409, "INVALID", "This proposal was already decided");
+  releaseInstructionDocs(instructionId);
   audit(userId, null, "reports.instruction.reject", { reportId, instructionId, ...(via.keyId ? { via: "mcp", keyId: via.keyId } : {}) });
   kick(reportId);
   return getInstruction(reportId, instructionId, userId);
@@ -379,6 +443,7 @@ export function sweepInstructions(): number {
   for (const { report_id } of waiting) {
     try { kick(report_id); } catch (error) { slog.error("Reports: an instruction queue could not move", error); }
   }
+  try { releaseInstructionDocs(); } catch (error) { slog.error("Reports: instruction docs could not be released", error); }
   return waiting.length;
 }
 

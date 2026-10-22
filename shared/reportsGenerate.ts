@@ -27,9 +27,35 @@ export type DocServerChoice = {
 export type DocPageInfo = { id: string; /** A page's title; for a search (K3), what it searched for (null for a list). */ title: string | null; tool: string; /** K3: a page read, or a search or list kept as its result set (absent: a page). */ kind?: "page" | "search"; serverName: string; bytes: number; sha256: string; fetchedAt: string; checkedAt: string | null; changed: boolean };
 
 /**
+ * Lane DOCS (D515): a report has 1–8 docs (Nook notes and files mixed with tool-server docs), read
+ * together before the model starts (at most 3 at a time); an instruction carries at most 4 more.
+ */
+export const REPORT_DOC_LIMITS = { docs: 8, fetchConcurrency: 3, instructionDocs: 4 } as const;
+
+/** One doc as a request names it: its link or id and where it is read from (`nook` or a tool server id), with the tool and argument a person named. */
+export type DocInput = { docRef: string; serverId: string; tool?: string | null; arg?: string | null };
+
+/** How a doc joined its report: New report or Regenerate, an applied change, or Doc settings. */
+export type ReportDocVia = "create" | "change" | "settings";
+
+/**
+ * One of a report's docs as its owner sees it (D515): where it is read from, its newest snapshot,
+ * whether it changed since the report was generated from it (`changed`), or was added since and never
+ * generated from (`added`, which counts as changed).
+ */
+export type ReportDocView = {
+  id: string; position: number; serverId: string | null; serverName: string | null; tool: string | null; arg: string | null; ref: string;
+  title: string | null; hash: string | null;
+  latest: { id: string; sha256: string; title: string | null; bytes: number; fetchedAt: string } | null;
+  changed: boolean; added: boolean; addedVia: ReportDocVia; addedByName: string | null; createdAt: string;
+};
+
+/**
  * A report's doc, its newest snapshot, and whether the doc changed since the report was generated ("Doc
  * changed — regenerate?"): the main doc, or (B3) a linked page of the current spec's runs (`pages`,
  * each with its own `changed`). `browseTools` are the ticked tools the AI may use to read more docs.
+ * D515: `doc` and `latest` are the first doc's; `docs` lists every doc, and `mainChanged` is true when
+ * any of them changed or was added since.
  */
 export type DocState = {
   doc: { serverId: string | null; serverName: string | null; tool: string | null; arg: string | null; ref: string | null; hash: string | null; browseTools: string[] } | null;
@@ -40,6 +66,8 @@ export type DocState = {
   pages: DocPageInfo[];
   /** E4: catalog metrics whose definition text changed (or is gone) in the newest snapshot. */
   metricsChanged?: string[];
+  /** D515: every doc of the report, in order (empty for a report without one). */
+  docs: ReportDocView[];
 };
 
 /** B3: the AI's doc tools per run: calls, bytes of results, one result shown to the model, ticks per report, pages Check doc reads. */
@@ -68,7 +96,7 @@ export type NookFileHit = { id: string; name: string; ownerName: string; isOwner
 export type NookFileSearch = { results: NookFileHit[]; /** Ask again with this to search older files; null when every file was searched. */ next: string | null };
 
 /** `POST /api/reports/generate` and `POST /api/reports/:id/generate` (202): the report and the run to follow on `/api/runs/:agentRunId/events`. */
-export type GenerateStarted = { report: ReportDetail; run: { id: string; agentRunId: string; docSnapshotId: string; docChanged: boolean } };
+export type GenerateStarted = { report: ReportDetail; run: { id: string; agentRunId: string; docSnapshotId: string; docChanged: boolean; /** D515: each doc the run read, in order. */ docs?: Array<{ id: string; title: string | null; snapshotId: string; changed: boolean }> } };
 
 /** `GET /api/reports/:id/generation`: the latest generation run. */
 export type GenerationRun = { id: string; agentRunId: string | null; status: RunStatus; error: string | null; docSnapshotId: string | null; startedAt: string; finishedAt: string | null; /** The run's plan (2c), the owner's only. */ plan?: RunPlan | null };
