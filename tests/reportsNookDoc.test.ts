@@ -303,7 +303,8 @@ describe("K4: Pick from Nook searches Files text", () => {
   }
 
   // D512: PDFs are offered too. The index offers a PDF by its text, never one with no text layer; the
-  // bounded scan before the backfill never runs the PDF worker, so it matches a PDF by name only.
+  // bounded scan before the backfill never runs the PDF worker, so it matches a PDF by name only, and
+  // only one the index has already read with a text layer (D581).
   for (const indexed of [true, false]) test(`offers PDFs with a text layer, labelled pdf (${indexed ? "index" : "scan before the backfill"})`, async () => {
     const word = `pd${crypto.randomUUID().slice(0, 8)}`;
     const byText = await upload(owner, "Quarterly.pdf", makePdf([`The ${word} metric`, "net of refunds"]), "application/pdf");
@@ -324,7 +325,14 @@ describe("K4: Pick from Nook searches Files text", () => {
         // Every PDF the index offers reads as a doc.
         for (const id of hits.keys()) expect((await fetchNookFetched(owner.userId, id)).tool).toBe("read_document_text");
       } else {
-        expect([...hits.keys()].sort()).toEqual([byName, scan].sort());
+        // D581: the scan offers a PDF only once the index has read it with a text layer: never the scan.
+        expect([...hits.keys()]).toEqual([byName]);
+        expect(found.body.pdfsPending).toBeUndefined();
+        // A PDF the index has not read yet (its text layer unknown) is not offered either; the answer counts it.
+        db.query("DELETE FROM document_search WHERE document_id IN (?, ?)").run(byName, scan);
+        const pending = await search(owner, word);
+        expect(pending.body.results).toEqual([]);
+        expect(pending.body.pdfsPending).toBe(2);
       }
     } finally {
       resetDocumentIndexForTests({ ready: wasReady });

@@ -20,7 +20,9 @@ const slog = logger("reports");
  *   integrity and UTF-8 checks, and PDFs (D512) of at most the PDF cap (16 MiB). Whiteboards are left out.
  * - **PDFs**: the indexed search offers a PDF only when its indexed text layer is not empty (a scan, a
  *   password, or a damaged PDF could only fail to read). The bounded scan never runs the PDF worker:
- *   it matches a PDF by its name alone. Each hit says `pdf` so the picker can label it.
+ *   it matches a PDF by its name alone, and only a PDF the index has already read with a text layer
+ *   (D581); `pdfsPending` counts name matches it left out because the index has not read them yet.
+ *   Each hit says `pdf` so the picker can label it.
  * - **Match**: every word of the query (case-insensitive) in the name or the text. A name match needs
  *   no read. The answer has the id, name, owner, and a short plain snippet around the first word.
  * - **Caps, per request**: the newest 100 candidates after the cursor, 8 MiB read, 20 hits. `next` is
@@ -58,10 +60,25 @@ function rateLimited(userId: string, time = Date.now()): boolean {
 /** Test hook: forget the rate-limit history. */
 export const resetNookFileSearchRate = () => requests.clear();
 
+/**
+ * D581: a PDF the scan may offer: the Files index has already read this version of it (its row's
+ * `source_sha256` is the document's) and found a text layer. A PDF the indexer has not reached yet, a
+ * scan, or one that could not be read is never offered before the backfill: picking it could only fail.
+ */
+const PDF_TEXT_KNOWN = `EXISTS (SELECT 1 FROM document_search ps JOIN document_fts pf ON pf.rowid = ps.id
+      WHERE ps.document_id = d.id AND ps.source_sha256 = d.sha256 AND ps.body_state = 'text' AND pf.body <> '')`;
+/** D581: PDFs whose name matches that the scan left out because their text layer is not known yet. */
+const pendingPdfsSql = `
+  SELECT COUNT(*) AS n FROM documents d
+  WHERE ${readableDocumentPredicate} AND d.purpose = 'file' AND d.preview_kind = 'pdf' AND d.size_bytes <= $maxPdfBytes
+    AND NOT EXISTS (SELECT 1 FROM whiteboards wk WHERE wk.document_id = d.id)
+    AND NOT EXISTS (SELECT 1 FROM document_search ps WHERE ps.document_id = d.id AND ps.source_sha256 = d.sha256)
+    AND NOT EXISTS (SELECT 1 FROM json_each($words) w WHERE instr(lower(d.name), w.value) = 0)`;
+
 const candidatesSql = `
   SELECT d.*, u.display_name AS owner_name FROM documents d JOIN users u ON u.id = d.owner_id
   WHERE ${readableDocumentPredicate} AND d.purpose = 'file'
-    AND ((d.preview_kind = 'text' AND d.size_bytes <= $maxBytes) OR (d.preview_kind = 'pdf' AND d.size_bytes <= $maxPdfBytes))
+    AND ((d.preview_kind = 'text' AND d.size_bytes <= $maxBytes) OR (d.preview_kind = 'pdf' AND d.size_bytes <= $maxPdfBytes AND ${PDF_TEXT_KNOWN}))
     AND NOT EXISTS (SELECT 1 FROM whiteboards wk WHERE wk.document_id = d.id)
     AND ($at IS NULL OR d.updated_at < $at OR (d.updated_at = $at AND d.id < $id))
   ORDER BY d.updated_at DESC, d.id DESC LIMIT $limit`;
@@ -115,8 +132,10 @@ export async function searchNookFiles(userId: string, query: string, cursorValue
     results.push(hit("text", snippetAt(text, first, words[0]!.length)));
   }
   const more = scanned < rows.length;
-  slog.info("Nook file search", { user: shortId(userId), scanned, bytes: read, hits: results.length, more, ms: Math.round(performance.now() - started) });
-  return { results, next: more && last ? encodeCursor(last) : null };
+  // D581: say so when a PDF named like the query is still waiting for the index (it is offered once read).
+  const pdfsPending = cursor ? 0 : (db.query(pendingPdfsSql).get({ userId, maxPdfBytes: PDF_TEXT_LIMITS.maxBytes, words: JSON.stringify(words) }) as { n: number }).n;
+  slog.info("Nook file search", { user: shortId(userId), scanned, bytes: read, hits: results.length, more, pdfsPending, ms: Math.round(performance.now() - started) });
+  return { results, next: more && last ? encodeCursor(last) : null, ...(pdfsPending ? { pdfsPending } : {}) };
 }
 
 /** The indexed answer: one ranked query, text files and PDFs `read_document_text` can read, `hits` per page. */

@@ -93,7 +93,8 @@ export const defaultBrowseTools = (names: readonly string[]): string[] => names.
 
 /** K4: `GET /api/reports/nook-files?q=&cursor=`: Files text documents and PDFs (D512) whose name or text has every word, one page at a time. */
 export type NookFileHit = { id: string; name: string; ownerName: string; isOwner: boolean; updatedAt: string; /** Where every word was found: the name alone, or the text. */ matched: "name" | "text"; /** Plain text around the first word (text matches). */ snippet: string | null; /** A PDF (its text layer is the doc, D512). */ pdf: boolean };
-export type NookFileSearch = { results: NookFileHit[]; /** Ask again with this to search older files; null when every file was searched. */ next: string | null };
+export type NookFileSearch = { results: NookFileHit[]; /** Ask again with this to search older files; null when every file was searched. */ next: string | null;
+  /** D581: before the Files index's first backfill, PDFs named like the query that are not offered yet (their text layer is not known). */ pdfsPending?: number };
 
 /** `POST /api/reports/generate` and `POST /api/reports/:id/generate` (202): the report and the run to follow on `/api/runs/:agentRunId/events`. */
 export type GenerateStarted = { report: ReportDetail; run: { id: string; agentRunId: string; docSnapshotId: string; docChanged: boolean; /** D515: each doc the run read, in order. */ docs?: Array<{ id: string; title: string | null; snapshotId: string; changed: boolean }> } };

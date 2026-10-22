@@ -24,7 +24,7 @@ export const searchNookFiles = (query: string, cursor: string | null, signal?: A
 export function NookDocPicker({ onPick, onClose }: { onPick: (pick: NookPick) => void; onClose: () => void }) {
   const [query, setQuery] = useState("");
   const [notes, setNotes] = useState<NookPick[]>([]);
-  const [files, setFiles] = useState<{ query: string; picks: NookPick[]; next: string | null } | null>(null);
+  const [files, setFiles] = useState<{ query: string; picks: NookPick[]; next: string | null; pdfsPending?: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
@@ -40,7 +40,7 @@ export function NookDocPicker({ onPick, onClose }: { onPick: (pick: NookPick) =>
     const timer = window.setTimeout(() => {
       setSearchingFiles(true);
       searchNookFiles(trimmed, null, controller.signal).then((page) => {
-        setFiles({ query: trimmed, picks: page.results.map(filePick), next: page.next });
+        setFiles({ query: trimmed, picks: page.results.map(filePick), next: page.next, pdfsPending: page.pdfsPending ?? 0 });
         setFileError(null);
       }).catch((reason: unknown) => { if (!controller.signal.aborted) setFileError(searchErrorMessage(reason)); })
         .finally(() => { if (!controller.signal.aborted) setSearchingFiles(false); });
@@ -53,7 +53,7 @@ export function NookDocPicker({ onPick, onClose }: { onPick: (pick: NookPick) =>
     const current = files;
     setSearchingFiles(true);
     searchNookFiles(current.query, current.next, undefined).then((page) => {
-      setFiles((now) => now && now.query === current.query ? { query: now.query, picks: [...now.picks, ...page.results.map(filePick).filter((pick) => !now.picks.some((item) => item.id === pick.id))], next: page.next } : now);
+      setFiles((now) => now && now.query === current.query ? { ...now, picks: [...now.picks, ...page.results.map(filePick).filter((pick) => !now.picks.some((item) => item.id === pick.id))], next: page.next } : now);
       setFileError(null);
     }).catch((reason: unknown) => setFileError(searchErrorMessage(reason))).finally(() => setSearchingFiles(false));
   }
@@ -82,7 +82,9 @@ export function NookDocPicker({ onPick, onClose }: { onPick: (pick: NookPick) =>
         onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onClose(); } }} />
     </div>
     {(error ?? fileError) && <p className="file-dialog-hint" role="alert">{error ?? fileError}</p>}
-    {query.trim() && !busy && !error && !fileError && picks.length === 0 && !files?.next && <p className="file-dialog-hint" role="status">Nothing found. Notes need a published version; files must be text (.md, .txt, .csv, .json) or PDFs with a text layer.</p>}
+    {query.trim() && !busy && !error && !fileError && picks.length === 0 && !files?.next && !files?.pdfsPending && <p className="file-dialog-hint" role="status">Nothing found. Notes need a published version; files must be text (.md, .txt, .csv, .json) or PDFs with a text layer.</p>}
+    {/* D581: before the Files index has read every file once, a PDF it has not read yet is not offered (it may be a scan). */}
+    {files?.pdfsPending ? files.query === query.trim() && <p className="file-dialog-hint" role="status">{files.pdfsPending === 1 ? "1 PDF with this name is" : `${files.pdfsPending} PDFs with this name are`} not offered yet: {appName()} is still reading {files.pdfsPending === 1 ? "its" : "their"} text. Search again in a minute.</p> : null}
     <ul id={listId} className="nook-doc-picker-list">
       {picks.map((pick) => <li key={`${pick.kind}-${pick.id}`}>
         <button type="button" onClick={() => onPick(pick)}>
