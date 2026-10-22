@@ -168,6 +168,16 @@
 .keys-tabpanel:not([hidden]) { gap: 16px; }
 .keys-tabpanel:focus-visible { outline: 2px solid var(--yellow); outline-offset: 4px; border-radius: 6px; }
 .keys-tab-intro { margin: 0; color: #a9a9ae; font-size: .84rem; }
+/*
+ * D601: a general key's grant rows (New key, Edit, Rotate) fit their longest values at desktop widths
+ * ("Read agents, chats, and knowledge", "Chosen folders and notes"): a wider dialog, and Module (short
+ * names) gives room to Permission. Vault rows and every other key dialog keep their size.
+ */
+@media (min-width: 761px) {
+  .keys-dialog.wide:has(.grant-builder:not(.vault-grant-builder)) { width: min(880px, calc(100vw - 32px)); }
+  .grant-builder:not(.vault-grant-builder) .grant-row-fields { grid-template-columns: minmax(0, .8fr) minmax(0, 1.3fr) minmax(0, 1fr); }
+}
+.keys-dialog-actions .keys-save { min-width: 96px; }
 /* D587: a module with one level shows it as text, the reason on hover and to screen readers. */
 .grant-fixed { display: flex; align-items: center; min-height: 44px; padding-inline: 12px; border: 1px dashed var(--field-border); border-radius: var(--field-radius); color: #c9c9ce; font-size: var(--field-font-size); cursor: default; min-width: 0; }
 .grant-fixed > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

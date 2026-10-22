@@ -3,7 +3,7 @@ import { assignedTemplate, commentTemplate, proposalsTemplate, sharedTemplate } 
 import { eventChangedTemplate, reminderTemplate } from "./templates/calendar";
 import { binExpiringTemplate, sprintTemplate } from "./templates/later";
 import { digestTemplate } from "./templates/digest";
-import { accountEventTemplate, apiKeyCreatedTemplate, newSignInTemplate, passwordChangedTemplate, roleChangedTemplate, twoFactorTemplate } from "./templates/security";
+import { accountEventTemplate, apiKeyAccessAddedTemplate, apiKeyCreatedTemplate, newSignInTemplate, passwordChangedTemplate, roleChangedTemplate, twoFactorTemplate } from "./templates/security";
 import type { TemplateDef } from "./templates/types";
 
 /**
@@ -20,6 +20,8 @@ export const TEMPLATES = {
   "sharing.shared": sharedTemplate,
   "inbox.proposals": proposalsTemplate,
   "security.api_key_created": apiKeyCreatedTemplate,
+  // D600: an edit added access to a key.
+  "security.api_key_access_added": apiKeyAccessAddedTemplate,
   "security.role_changed": roleChangedTemplate,
   "security.two_factor": twoFactorTemplate,
   "security.account": accountEventTemplate,

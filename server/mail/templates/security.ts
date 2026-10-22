@@ -38,6 +38,31 @@ export const apiKeyCreatedTemplate = defineTemplate<{ keyName: string; scopes: s
   fixture: () => ({ keyName: "laptop", scopes: "Notes: read, write drafts · Tasks: read", at: "2026-09-28T09:00:00.000Z" })
 });
 
+/** D600: an edit added access to an existing key (the secret is unchanged). */
+export const apiKeyAccessAddedTemplate = defineTemplate<{ keyName: string; added: string; at: string; delayed?: boolean }>({
+  name: "security.api_key_access_added",
+  class: "security",
+  render(data, ctx) {
+    const name = cleanLine(data.keyName, 60, "unnamed");
+    return layout({
+      instanceName: ctx.instanceName,
+      tone: "security",
+      subject: delayed(`Access added to API key “${name}” on your ${appName()} account`, data.delayed),
+      preheader: "An API key gained permissions. If this wasn't you, revoke it.",
+      eyebrow: "Security · API key",
+      title: "Access was added to an API key",
+      lead: "Anyone holding this key can now use the permissions below. The key itself did not change.",
+      blocks: [
+        context([{ title: `“${name}”`, meta: `Changed ${formatInstant(data.at, ctx.tz)}` }, { title: "Permissions added", meta: cleanLine(data.added, 300, "None") }], { tone: "security" }),
+        paragraph("If this wasn't you, sign in and revoke the key, then change your password, or ask your admin.")
+      ],
+      action: { label: "Review in Settings", href: appLink(paths.settings("keys")) },
+      footer: securityFooter()
+    });
+  },
+  fixture: () => ({ keyName: "laptop", added: "Tasks: write (2 chosen items) · Files: read", at: "2026-10-22T09:00:00.000Z" })
+});
+
 const ROLE_LABELS: Record<string, string> = { admin: "Admin", member: "Member", viewer: "Viewer", guest: "Guest" };
 const ROLE_LINES: Record<string, string> = {
   admin: "Admins manage the team and have every member permission.",

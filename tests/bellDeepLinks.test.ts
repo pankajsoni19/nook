@@ -93,6 +93,7 @@ describe("bell deep links (id-only hrefs, T68)", () => {
       ["group_added", null, "/settings/access"],
       ["group_removed", null, "/settings/access"],
       ["key_revoked", null, "/settings/keys"],
+      ["key_access_added", null, "/settings/keys"],
       ["key_vault_limited", null, "/settings/keys"],
       ["key_vault_volume", null, "/settings/keys"],
       ["google_allowed", null, "/settings/security"],

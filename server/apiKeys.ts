@@ -6,7 +6,7 @@ import { addressBucket } from "./clientAddress";
 import { recordAccessEvent, type AccessVia } from "./access/events";
 import { notifyAccess } from "./access/notices";
 import {
-  ALL_ONLY, CREATE_ONLY, dedupeGrants, GENERAL_KEY_MODULES, grantKey, grantsToScopes, isNarrowing, permissionsForModule, READ_ONLY_KINDS, RESOURCE_KINDS, SCOPE_GRANTS, scopeFor, SELECTOR_KINDS, selectorKindsFor,
+  addedGrantEntries, ALL_ONLY, CREATE_ONLY, dedupeGrants, GENERAL_KEY_MODULES, grantKey, grantsToScopes, isNarrowing, permissionsForModule, READ_ONLY_KINDS, RESOURCE_KINDS, SCOPE_GRANTS, scopeFor, SELECTOR_KINDS, selectorKindsFor,
   type Grant, type GrantModule, type KeyKind, type KeyPermission, type KeySurfaces, type ResourceKind
 } from "./keyGrants";
 import type { McpScope } from "./mcpScopes";
@@ -928,8 +928,11 @@ export function narrowApiKey(userId: string, keyId: string, patch: z.infer<typeo
     if (added.length && nextGrants) {
       // D586: adding access is its own event, with the scopes before and after; the secret stays.
       recordAccessEvent({ actorId, via: "web", action: "key.updated", targetUserId: userId, keyId: row.id,
-        meta: { fields: changed, grantsBefore: current.length, grantsAfter: nextGrants.length, added: grantSummary(added) } }, timestamp);
-      audit(actorId, null, "keys.update", { keyId: row.id, fields: changed, scopesBefore: grantsToScopes(current), scopesAfter: grantsToScopes(nextGrants), added: grantSummary(added) });
+        meta: { fields: changed, grantsBefore: current.length, grantsAfter: nextGrants.length, added: addedGrantEntries(added) } }, timestamp);
+      audit(actorId, null, "keys.update", { keyId: row.id, fields: changed, scopesBefore: grantsToScopes(current), scopesAfter: grantsToScopes(nextGrants), added: addedGrantEntries(added) });
+      // D600: the owner's bell says the key gained access, whoever made the change (no actor, so
+      // their own edit is not dropped); integrations have no bell. The mail is the route's.
+      notifyAccess({ userId, kind: "key_access_added", actorId: null, keyId: row.id, count: added.length }, timestamp);
     } else {
       recordAccessEvent({ actorId, via: "web", action: "key.narrowed", targetUserId: userId, keyId: row.id,
         meta: { fields: changed, ...(nextGrants ? { grantsBefore: current.length, grantsAfter: nextGrants.length } : {}) } }, timestamp);

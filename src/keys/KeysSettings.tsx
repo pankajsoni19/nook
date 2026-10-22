@@ -661,7 +661,7 @@ function EditKeyDialog({ apiKey, policy, role, totpEnabled, onClose, onSaved }: 
       <FormError message={error} />
       <div className="keys-dialog-actions inline">
         <button type="button" className="secondary-button" onClick={onClose} disabled={busy}>Cancel</button>
-        <button type="submit" className="primary-button" disabled={busy || (isVault ? !vaultRows.length : !rows.length)}>{busy ? "Saving…" : "Save"}</button>
+        <button type="submit" className="primary-button keys-save" disabled={busy || (isVault ? !vaultRows.length : !rows.length)}>{busy ? "Saving…" : "Save"}</button>
       </div>
     </form>
   </KeysDialog>;

@@ -225,3 +225,36 @@ export function dedupeGrants(grants: readonly Grant[]): Grant[] {
   for (const grant of grants) unique.set(grantKey(grant), grant);
   return [...unique.values()];
 }
+
+const ADDED_MODULE_WORDS: Record<string, string> = {
+  notes: "Notes", files: "Files", tasks: "Tasks", today: "Today", calendar: "Calendar", collections: "Collections", team: "Team", inbox: "Inbox",
+  bin: "Bin", whiteboards: "Whiteboards", agents: "Chat", reports: "Reports", vault: "Vault"
+};
+const ADDED_PERMISSION_WORDS: Record<string, string> = { read: "read", comment: "comment", write: "write", draft: "write drafts", publish: "publish", create: "create", run: "run agents" };
+
+/**
+ * Grants an edit added, compact (D600): one `module:permission` per permission on every item, or
+ * `module:permission@N` for N chosen items. Bounded (at most 50 entries) whatever the item count,
+ * so it fits `access_events.meta_json`; ids and titles never appear.
+ */
+export function addedGrantEntries(grants: readonly Pick<Grant, "module" | "permission" | "resourceId">[]) {
+  const groups = new Map<string, { all: boolean; items: number }>();
+  for (const grant of grants) {
+    const id = `${grant.module}:${grant.permission}`;
+    const group = groups.get(id) ?? { all: false, items: 0 };
+    if (grant.resourceId) group.items += 1;
+    else group.all = true;
+    groups.set(id, group);
+  }
+  return [...groups].map(([id, group]) => group.all || !group.items ? id : `${id}@${group.items}`);
+}
+
+/** The added grants in words for the security mail and the bell: "Tasks: write (2 chosen items) · Files: read". */
+export function describeAddedGrants(entries: readonly string[]) {
+  return entries.map((entry) => /^([a-z_]+):([a-z]+)(?:@(\d+))?$/.exec(entry))
+    .filter((match): match is RegExpExecArray => match !== null && match[1]! in ADDED_MODULE_WORDS && match[2]! in ADDED_PERMISSION_WORDS)
+    .map((match) => {
+      const items = match[3] ? Number(match[3]) : 0;
+      return `${ADDED_MODULE_WORDS[match[1]!]}: ${ADDED_PERMISSION_WORDS[match[2]!]}${items ? ` (${items} chosen ${items === 1 ? "item" : "items"})` : ""}`;
+    }).join(" · ");
+}

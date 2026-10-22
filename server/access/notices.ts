@@ -7,6 +7,7 @@ import { deviceLabelFromCode } from "../deviceLabels";
 import { paths } from "../mail/links";
 import { mayChatNow } from "../agents/status";
 import { userRole } from "../team/userRole";
+import { describeAddedGrants } from "../keyGrants";
 
 const LEVEL_WORDS: Record<Level, string> = { view: "Can view", comment: "Can comment", edit: "Can edit", manage: "Manager" };
 
@@ -49,7 +50,10 @@ export type AccessNoticeKind = "share_removed" | "share_lowered" | "access_reset
   // routine; its name is yours). From Settings → Team → a member's access page (D268).
   | "feed_revoked" | "routine_paused"
   // T353: an admin removed your profile picture (Team → a member). Opens Settings → Security, where the picture card is.
-  | "avatar_removed";
+  | "avatar_removed"
+  // D600: an edit added access to one of your API keys (the line names the permissions from the
+  // `key.updated` event written in the same transaction). Opens Settings → API keys.
+  | "key_access_added";
 
 export type AccessNotice = {
   userId: string;
@@ -80,7 +84,7 @@ export function notifyAccess(notice: AccessNotice, timestamp = now()) {
 
 type NoticeRow = {
   id: string; kind: string; actor_name: string | null; target_name: string | null; resource_kind: string | null; resource_id: string | null;
-  group_name: string | null; key_name: string | null; count: number | null; level: string | null; created_at: string; read_at: string | null;
+  group_name: string | null; key_id: string | null; key_name: string | null; count: number | null; level: string | null; created_at: string; read_at: string | null;
 };
 
 /**
@@ -148,6 +152,7 @@ export function accessNoticeHref(row: { kind: string; resource_kind: string | nu
     case "feed_revoked":
       return paths.settings("access");
     case "key_revoked":
+    case "key_access_added":
     case "key_vault_limited":
     case "key_vault_volume":
       return paths.settings("keys");
@@ -185,6 +190,18 @@ export function accessNoticeHref(row: { kind: string; resource_kind: string | nu
     case "access_reset":
     default:
       return ACCESS_NOTICE_HREF;
+  }
+}
+
+/** What the `key.updated` event written with a `key_access_added` notice added, in words (D600), or null. */
+function addedOnKey(keyId: string | null, at: string) {
+  if (!keyId) return null;
+  const event = db.query("SELECT meta_json FROM access_events WHERE key_id = ? AND action = 'key.updated' AND created_at = ? ORDER BY rowid DESC LIMIT 1").get(keyId, at) as { meta_json: string | null } | null;
+  try {
+    const added = (JSON.parse(event?.meta_json ?? "null") as { added?: unknown } | null)?.added;
+    return Array.isArray(added) ? describeAddedGrants(added.filter((entry): entry is string => typeof entry === "string")) || null : null;
+  } catch {
+    return null;
   }
 }
 
@@ -236,6 +253,10 @@ function line(row: NoticeRow, recipientId: string) {
     case "group_added": return `${actor} added you to ${group}`;
     case "group_removed": return `${actor} removed you from ${group}`;
     case "key_revoked": return `${actor} revoked your API key${row.key_name ? ` “${row.key_name}”` : ""}`;
+    case "key_access_added": {
+      const added = addedOnKey(row.key_id, row.created_at);
+      return `Access was added to your API key${row.key_name ? ` “${row.key_name}”` : ""}${added ? `: ${added}` : ""}. If this wasn't you, revoke it in Settings → API keys.`;
+    }
     case "feed_revoked": return `${actor} revoked your calendar feed link for ${item ? (item.titleHidden ? "a calendar" : `“${item.title}”`) : "a calendar that is gone"}`;
     case "routine_paused": {
       const name = row.resource_id ? routineName(recipientId, row.resource_id) : null;
@@ -323,7 +344,7 @@ export type AccessNoticeItem = { id: string; kind: "access"; title: string; href
 /** The newest `limit` notices for the bell, shaped like calendar notifications. */
 export function listAccessNotices(userId: string, options: { unread: boolean; limit: number }): AccessNoticeItem[] {
   const rows = db.query(`SELECT n.id, n.kind, a.display_name AS actor_name, t.display_name AS target_name, n.resource_kind, n.resource_id,
-      g.name AS group_name, k.name AS key_name, n.count, n.level, n.created_at, n.read_at
+      g.name AS group_name, n.key_id, k.name AS key_name, n.count, n.level, n.created_at, n.read_at
     FROM access_notices n LEFT JOIN users a ON a.id = n.actor_id LEFT JOIN users t ON t.id = n.target_user_id
       LEFT JOIN user_groups g ON g.id = n.group_id LEFT JOIN mcp_api_keys k ON k.id = n.key_id AND k.user_id = n.user_id
     WHERE n.user_id = $userId AND ($unread = 0 OR n.read_at IS NULL) ORDER BY n.created_at DESC, n.rowid DESC LIMIT $limit`)

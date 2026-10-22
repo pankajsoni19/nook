@@ -141,6 +141,11 @@ export function mailApiKeyCreated(userId: string, keyId: string) {
   safely("security.api_key_created", () => enqueueMail({ userId, template: "security.api_key_created", payload: { keyId } }));
 }
 
+/** D600: an edit added access to one of your keys; `added` is addedGrantEntries (kinds and counts, never ids or titles). */
+export function mailApiKeyAccessAdded(userId: string, keyId: string, added: readonly string[]) {
+  safely("security.api_key_access_added", () => enqueueMail({ userId, template: "security.api_key_access_added", payload: { keyId, added: [...added], at: new Date().toISOString() } }));
+}
+
 /** #2: a role change, coalesced 10 min; the first old role is kept, so a toggle back sends nothing. */
 export function mailRoleChanged(targetId: string, fromRole: string, actorId: string | null) {
   safely("security.role_changed", () => enqueueMail({

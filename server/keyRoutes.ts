@@ -10,11 +10,11 @@ import { keyEvents } from "./access/events";
 import { keyValueReadsToday } from "./vault/limits";
 import { recordKeyGrantEvents, validateVaultGrants, vaultKeyEvents, type VaultGrantInput } from "./vault/keys";
 import { vaultStatus } from "./vault/status";
-import { grantsForScopes } from "./keyGrants";
+import { addedGrantEntries, grantsForScopes } from "./keyGrants";
 import type { McpScope } from "./mcpScopes";
 import { BINNED_WINDOWS, binnedCountsByKey, isBinnedWindow, listKeyBinned, restoreKeyBinned } from "./mcpBinned";
 import { pendingProposalsByKey } from "./inbox/service";
-import { mailApiKeyCreated, mailTwoFactor } from "./mail/triggers";
+import { mailApiKeyAccessAdded, mailApiKeyCreated, mailTwoFactor } from "./mail/triggers";
 import { checkReauth } from "./reauth";
 import { readPolicies } from "./team/policies";
 import type { Role } from "./team/roles";
@@ -202,7 +202,10 @@ export function registerKeyRoutes(app: Hono<AppEnv>) {
         }
         if (reauth.recoveryCodeUsed) mailTwoFactor(user.id, "recovery_used");
       }
-      const { changed } = narrowApiKey(user.id, id, body, user.id, { widen: plan.added.length > 0 });
+      const { changed, added } = narrowApiKey(user.id, id, body, user.id, { widen: plan.added.length > 0 });
+      // D600: the same kind of security mail as a new key, naming the key and what was added; a
+      // narrowing edit sends nothing.
+      if (added.length) mailApiKeyAccessAdded(user.id, id, addedGrantEntries(added));
       return c.json({ changed, key: ownApiKey(user.id, id) });
     } catch (error) {
       if (error instanceof KeyError) return keyError(c, error);

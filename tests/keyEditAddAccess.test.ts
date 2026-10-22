@@ -117,6 +117,41 @@ describe("PATCH /api/keys/:id adds access after re-authentication (D585)", () =>
     expect((await api(owner, "PATCH", `/keys/${key.id}`, { surfaces: "both", password: owner.password })).body.code).toBe("WIDENING_NOT_ALLOWED");
   });
 
+  test("adding access queues a security mail and a bell line naming the key and what was added; narrowing sends nothing (D600)", async () => {
+    const owner = await createUser("Add mail owner");
+    const mail = await import("../server/mail");
+    const { resolvePayload } = await import("../server/mail/resolve");
+    const { renderTemplate } = await import("../server/mail/registry");
+    const { listAccessNotices } = await import("../server/access/notices");
+    const boards = [(await api(owner, "POST", "/tasks/boards", { name: "Mail A" })).body.board.id as string, (await api(owner, "POST", "/tasks/boards", { name: "Mail B" })).body.board.id as string];
+    const key = await createKey(owner, [{ module: "notes", permission: "read" }, { module: "files", permission: "read" }]);
+    const outbox = () => db.query("SELECT payload FROM mail_outbox WHERE user_id = ? AND template = 'security.api_key_access_added'").all(owner.userId) as Array<{ payload: string }>;
+    const bell = () => listAccessNotices(owner.userId, { unread: false, limit: 20 }).map((notice) => notice.title).filter((title) => title.includes("API key"));
+    mail.setMailTransportForTests(async () => ({ id: "msg_1" }));
+    try {
+      // A narrowing edit: no mail, no bell.
+      expect((await api(owner, "PATCH", `/keys/${key.id}`, { grants: [{ module: "notes", permission: "read" }] })).status).toBe(200);
+      expect(outbox()).toEqual([]);
+      expect(bell()).toEqual([]);
+      // Adding Tasks on two chosen boards and Files on everything.
+      const added = await api(owner, "PATCH", `/keys/${key.id}`, { password: owner.password, grants: [{ module: "notes", permission: "read" }, { module: "tasks", permission: "write", resourceIds: boards }, { module: "files", permission: "read" }] });
+      expect(added.status).toBe(200);
+    } finally {
+      mail.setMailTransportForTests(null);
+    }
+    const [queued] = outbox();
+    const payload = JSON.parse(queued!.payload) as { keyId: string; added: string[] };
+    expect(payload).toMatchObject({ keyId: key.id, added: ["tasks:write@2", "files:read"] });
+    // Kinds and counts only: no board id or title in the payload.
+    expect(queued!.payload).not.toContain(boards[0]!);
+    const resolved = resolvePayload("security.api_key_access_added", payload, { id: owner.userId, email: "x@example.test", displayName: "Owner", role: "member", tz: "UTC" }, Date.now()) as { data: { keyName: string; added: string } };
+    expect(resolved.data).toMatchObject({ keyName: "Edit me", added: "Tasks: write (2 chosen items) · Files: read" });
+    const rendered = renderTemplate("security.api_key_access_added", resolved.data, { instanceName: "Nook", tz: "UTC" } as never);
+    expect(rendered.subject).toContain("Access added to API key “Edit me”");
+    expect(rendered.html).toContain("Tasks: write (2 chosen items) · Files: read");
+    expect(bell()).toEqual(["Access was added to your API key “Edit me”: Tasks: write (2 chosen items) · Files: read. If this wasn't you, revoke it in Settings → API keys."]);
+  });
+
   test("an integration's key: the admin adds a module with their password; Inbox and Team stay refused", async () => {
     const admin = await createUser("Add integration admin");
     db.query("UPDATE users SET role = 'admin' WHERE id = ?").run(admin.userId);

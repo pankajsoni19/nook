@@ -10,6 +10,7 @@ import { atLeast } from "../access/levels";
 import { vaultBestLevel, vaultTitleFor } from "../vault/access";
 import { shareLevelById, sharedTitleFor } from "../agents/sharing";
 import { parseStoredScopes } from "../mcpScopes";
+import { describeAddedGrants } from "../keyGrants";
 import { stripMarkdown } from "./html";
 import { isMuted } from "./mutes";
 import { resolveEventChanged, resolveReminder } from "./calendarMail";
@@ -165,6 +166,15 @@ function resolveKeyCreated(payload: Payload, recipient: Recipient): Resolution {
   return { data: { keyName: key.name, scopes: scopesSummary(key.scopes), at: key.created_at } };
 }
 
+/** D600: a key that gained access through Edit; the permissions added, in words (kinds and counts only). */
+function resolveKeyAccessAdded(payload: Payload, recipient: Recipient): Resolution {
+  const key = db.query("SELECT name FROM mcp_api_keys WHERE id = ? AND user_id = ?").get(String(payload.keyId ?? ""), recipient.id) as { name: string } | null;
+  const entries = Array.isArray(payload.added) ? payload.added.filter((entry): entry is string => typeof entry === "string") : [];
+  const added = describeAddedGrants(entries);
+  if (!key || !added) return { skip: "empty" };
+  return { data: { keyName: key.name, added, at: String(payload.at ?? new Date().toISOString()) } };
+}
+
 /** A vault key's permissions for the security mail (Wave 27): counts and flags, never a vault's name (D223). */
 function vaultKeySummary(key: { id: string; allow_mcp_value_reads: number; vault_protected_access: number }) {
   const rows = db.query("SELECT permission, COUNT(DISTINCT resource_id) AS vaults FROM api_key_grants WHERE key_id = ? AND module = 'vault' GROUP BY permission").all(key.id) as Array<{ permission: string; vaults: number }>;
@@ -229,6 +239,7 @@ export function resolvePayload(template: TemplateName, payload: Payload, recipie
     case "sharing.shared": return resolveShared(payload, recipient);
     case "inbox.proposals": return resolveProposals(payload, recipient);
     case "security.api_key_created": return resolveKeyCreated(payload, recipient);
+    case "security.api_key_access_added": return resolveKeyAccessAdded(payload, recipient);
     case "security.role_changed": return resolveRoleChanged(payload, recipient);
     case "security.two_factor": return resolveTwoFactor(payload);
     case "security.account": return resolveAccount(payload);
