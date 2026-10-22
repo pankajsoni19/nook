@@ -14,6 +14,13 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 
 - None right now.
 
+## In flight
+
+- [ ] **Claude (Anthropic) as a model provider** (operator, 2026-10-22; lane CLAUDE):
+  - [ ] Test says "anthropic-version header required": send `anthropic-version` (and `x-api-key`) automatically when the endpoint is Anthropic's.
+  - [ ] Test tool calling reports "tool_choice type tool and any are not supported for this model" as a failure: record it as "forced choice unsupported, Nook uses auto" and confirm tools work with auto.
+  - [ ] Knowledge bases: Anthropic has no embeddings API. Mark such providers as chat-only, default new bases to a provider that embeds (e.g. the OpenAI one), and say so clearly; evaluate Voyage AI (Anthropic's recommended embeddings) as an embeddings-only provider.
+
 ## Waiting on the operator
 
 - [ ] **Report filters, later slices** (slice 1 shipped, D532–D537): linked filters, client-side table sort and contains, saved personal views, more filter types (number range, exclude, text contains, Add filter on dates), and concurrent parameter runs, ranked in [REPORT_FILTERS.md](docs/plan/REPORT_FILTERS.md) "Later". Start a slice when the operator asks.
