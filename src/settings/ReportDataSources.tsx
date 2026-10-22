@@ -5,7 +5,8 @@ import { relativeTime } from "../files/format";
 import { notify } from "../ui/notify";
 import { useConfirm } from "../ui/useConfirm";
 import { useHistoryDialogGuard } from "../ui/useHistoryDialogGuard";
-import { REPORT_LIMITS, type ConnectionTest, type DatasourceSummary } from "../../shared/reports";
+import { REPORT_LIMITS, type ConnectionTest, type DatasourceAgentUse, type DatasourceSummary } from "../../shared/reports";
+import { Select } from "../ui/Select";
 import { codeOf, createDatasource, deleteDatasource, listDatasources, messageOf, parseAllowlistText, previewAllowlist, syncDatasource, testDatasource, updateDatasource } from "../reports/reportsApi";
 import { useLayerOpener } from "../historyDialogs";
 import { HUB_TITLE_ID } from "./hubModel";
@@ -99,6 +100,7 @@ export function ReportDataSources() {
             <div><dt>Allowlist</dt><dd>{source.allowlist.length ? source.allowlist.join(", ") : "Nothing yet"}</dd></div>
             <div><dt>Schema</dt><dd>{source.schema.error ? <span className="form-error">{source.schema.error}</span> : source.schema.syncedAt ? `${source.schema.tables} tables, synced ${relativeTime(source.schema.syncedAt)}${source.schema.truncated ? " (more left out)" : ""}` : "Not synced yet"}</dd></div>
             <div><dt>Limits</dt><dd>{source.maxRows.toLocaleString()} rows, {source.timeoutS} s</dd></div>
+            <div><dt>Chat agents</dt><dd>{AGENT_USE_FACT[source.agentUse ?? "off"]}</dd></div>
           </dl>
           {result && <div className={`report-test ${result.ok ? "ok" : "failed"}`} role="status">
             {result.ok ? <p><CircleCheck aria-hidden="true" />Connected as {result.user} to ClickHouse {result.version} in {result.ms} ms.</p> : <p><TriangleAlert aria-hidden="true" />{result.error}</p>}
@@ -124,6 +126,10 @@ export function ReportDataSources() {
   </section>;
 }
 
+/** D590: the list's line for chat agents' use. */
+const AGENT_USE_FACT: Record<DatasourceAgentUse, string> = { off: "Off", admins: "Admins", members: "Members and admins" };
+const AGENT_ROLE_OPTIONS: Array<{ value: Exclude<DatasourceAgentUse, "off">; label: string }> = [{ value: "members", label: "Members and admins" }, { value: "admins", label: "Admins only" }];
+
 const whole = (text: string, min: number, max: number) => /^\s*\d+\s*$/.test(text) && Number(text) >= min && Number(text) <= max ? Number(text) : null;
 
 function DatasourceSheet({ source, onCancel, onSaved }: { source: DatasourceSummary | null; onCancel: () => void; onSaved: (source: DatasourceSummary) => void }) {
@@ -137,10 +143,13 @@ function DatasourceSheet({ source, onCancel, onSaved }: { source: DatasourceSumm
   const [maxRows, setMaxRows] = useState(String(source?.maxRows ?? REPORT_LIMITS.maxRowsDefault));
   const [timeoutS, setTimeoutS] = useState(String(source?.timeoutS ?? REPORT_LIMITS.timeoutDefaultS));
   const [enabled, setEnabled] = useState(source?.enabled ?? true);
+  // D590: chat agents may use it (off by default), and for which roles (never viewers or guests).
+  const [agents, setAgents] = useState((source?.agentUse ?? "off") !== "off");
+  const [agentRoles, setAgentRoles] = useState<Exclude<DatasourceAgentUse, "off">>(source?.agentUse === "admins" ? "admins" : "members");
   const [preview, setPreview] = useState<{ text: string; error: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const ids = { name: useId(), url: useId(), user: useId(), password: useId(), database: useId(), allowlist: useId(), rows: useId(), timeout: useId() };
+  const ids = { name: useId(), url: useId(), user: useId(), password: useId(), database: useId(), allowlist: useId(), rows: useId(), timeout: useId(), agentRoles: useId() };
   useHistoryDialogGuard(true, onCancel, { blocked: busy, layerKey: `${DATASOURCE_LAYER}:${source?.id ?? "new"}` });
 
   // The live match count: once saved, the patterns are counted against ClickHouse's table list (cached a minute).
@@ -168,7 +177,7 @@ function DatasourceSheet({ source, onCancel, onSaved }: { source: DatasourceSumm
     if (timeout === null) return setError(`Enter a timeout of 1 to ${REPORT_LIMITS.timeoutCeilingS} whole seconds.`);
     setBusy(true);
     setError(null);
-    const common = { name: name.trim(), url: url.trim(), username: username.trim(), database: database.trim() || "default", allowlist: parseAllowlistText(allowlist), maxRows: rows, timeoutS: timeout, enabled };
+    const common = { name: name.trim(), url: url.trim(), username: username.trim(), database: database.trim() || "default", allowlist: parseAllowlistText(allowlist), maxRows: rows, timeoutS: timeout, enabled, agentUse: agents ? agentRoles : "off" as DatasourceAgentUse };
     try {
       const { datasource } = source
         ? await updateDatasource(source.id, { ...common, ...(password ? { password } : {}), removePassword, expectedRevision: source.revision })
@@ -205,6 +214,12 @@ function DatasourceSheet({ source, onCancel, onSaved }: { source: DatasourceSumm
         <span><label htmlFor={ids.timeout}>Timeout (seconds)</label><input id={ids.timeout} value={timeoutS} inputMode="numeric" onChange={(event) => setTimeoutS(event.target.value)} /></span>
       </div>
       <label className="reports-check"><input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />On: reports may use it</label>
+      <label className="reports-check"><input type="checkbox" checked={agents} onChange={(event) => setAgents(event.target.checked)} />Chat agents may use this data source</label>
+      {agents && <div className="report-source-agents">
+        <span id={ids.agentRoles}>Who</span>
+        <Select<Exclude<DatasourceAgentUse, "off">> labelledBy={ids.agentRoles} value={agentRoles} onChange={setAgentRoles} options={AGENT_ROLE_OPTIONS} />
+      </div>}
+      <p className="file-dialog-hint">{agents ? "An agent's owner can then give it this data source: it searches the schema and runs read-only SELECTs on the allowed tables, as the person chatting, within these limits. Never over API keys or MCP." : "Off: no chat agent can read this data source."}</p>
       {error && <p className="form-error" role="alert">{error}</p>}
       <footer className="file-dialog-actions">
         <button type="button" className="secondary-button" onClick={onCancel} disabled={busy}>Cancel</button>

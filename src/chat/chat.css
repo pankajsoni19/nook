@@ -299,6 +299,27 @@
 .chat-tool-failed .chat-tool-outcome { color: #fda4af; }
 .chat-tool-detail { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; padding: 0 12px 10px; min-width: 0; }
 .chat-tool-detail pre, .chat-confirm-args { margin: 0; max-height: 240px; overflow: auto; border: 1px solid #2c2c31; border-radius: 8px; padding: 8px 10px; background: #0b0b0d; color: #ededee; font-size: .8rem; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* AGENTSQL (D594): a run_sql result under the reply: a compact table that scrolls both ways. */
+.chat-sql-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; max-width: min(100%, 760px); }
+.chat-sql { min-width: 0; border: 1px solid #26262a; border-radius: 12px; background: #0f0f11; }
+.chat-sql-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 2px 8px; padding: 4px 6px 4px 12px; border-bottom: 1px solid #26262a; }
+.chat-sql-title { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; min-width: 0; color: #e1e1e3; font-size: .82rem; font-weight: 600; overflow-wrap: anywhere; }
+.chat-sql-title svg { width: 14px; flex: none; color: #8d8d94; }
+.chat-sql-title small { color: #8d8d94; font-weight: 400; }
+.chat-sql-actions { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px; }
+.chat-sql-text { margin: 8px 10px 0; max-height: 200px; overflow: auto; border: 1px solid #2c2c31; border-radius: 8px; padding: 8px 10px; background: #0b0b0d; color: #ededee; font-size: .78rem; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.chat-sql-scroll { max-height: 320px; overflow: auto; margin: 8px 0 0; border-top: 0; }
+.chat-sql-scroll:focus-visible { outline: 2px solid #c9a85c; outline-offset: -2px; }
+.chat-sql-table { border-collapse: collapse; min-width: 100%; font-size: .78rem; color: #e1e1e3; }
+.chat-sql-table th, .chat-sql-table td { padding: 5px 10px; border-bottom: 1px solid #1f1f23; text-align: left; white-space: nowrap; max-width: 320px; overflow: hidden; text-overflow: ellipsis; vertical-align: top; }
+.chat-sql-table th { position: sticky; top: 0; background: #151518; font-weight: 600; }
+.chat-sql-table th span, .chat-sql-table th small { display: block; }
+.chat-sql-table th small { color: #7c7c83; font-weight: 400; font-size: .7rem; }
+.chat-sql-num { text-align: right; font-variant-numeric: tabular-nums; }
+.chat-sql-null { color: #6b6b72; font-style: italic; }
+.chat-sql-note { margin: 0; padding: 8px 12px; font-size: .78rem; }
+.chat-sql-actions .chat-sql-action { min-height: 32px; min-width: 64px; justify-content: center; padding: 0 12px; white-space: nowrap; }
+@media (max-width: 760px) { .chat-sql-actions .chat-sql-action { min-height: 44px; } }
 .chat-confirm { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; min-width: 0; max-width: min(100%, 760px); scroll-margin-bottom: 140px; border: 1px solid #6b582f; border-radius: 14px; padding: 14px 16px; background: #1f1d16; outline: 0; }
 .chat-confirm:focus-visible { box-shadow: 0 0 0 2px #c9a85c; }
 .chat-confirm > strong { display: flex; align-items: flex-start; gap: 8px; color: #f3ce79; font-size: .92rem; }

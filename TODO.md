@@ -20,11 +20,12 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
   - [ ] Button lint on the Edit key dialog (already on main before lane KEYS, unchanged by it): at 1280 the three-column row ellipsizes long Select values ("Chosen folders and notes", "Read agents, chats, and knowledge"), and "Save" is under 64 px wide.
   - [ ] A security mail when a key gains access through Edit (today only creating and rotating send `mailApiKeyCreated`); `keys.update` is in the audit log and Access activity.
 
-- [ ] **Chat agents can use report data sources (ClickHouse)** (operator, 2026-10-22; lane AGENTSQL): today chat agents can't reach ClickHouse. Give agents guarded schema search, describe, and SELECT tools over data sources an admin allows for agents, with results shown in chat; the reports guard, allowlist and limits apply; no ad-hoc SQL over MCP keys (T361 stands).
 
 - [ ] **Provider code per kind** (operator, 2026-10-22; lane LOCALEMB, step 0): one adapter file per provider kind (OpenAI-compatible default, Anthropic, Voyage, local); golden tests pin OpenAI's requests to v0.43.0 so other kinds can't change them.
 
 ## Waiting on the operator
+
+- [ ] **Real-model check of chat agents on data sources** (lane AGENTSQL, D592): only the scripted provider has called the data tools. On a host with a working model, give an agent a data source (Settings → Report data sources → Chat agents may use this data source) and check that it searches before it queries, aggregates in SQL rather than paging raw rows, and summarizes instead of repeating the table.
 
 - [ ] **Real-model eval of report generation** (D488 chart kinds, D489 parameters): only the scripted provider has run. Run `bun --no-env-file scripts/reportEval.ts --clickhouse <test ClickHouse>` on a host whose Nook has a working model provider (it falls back to Settings → AI; the local instance's OpenAI key is a placeholder), or set `REPORT_EVAL_*`, or regenerate reports on the VM (docs/OPERATIONS.md "Report generation eval"). Check: the five kind cases (`onboarding_funnel`, `cohort_retention`, `quota_attainment`, `latency_spread`, `plan_flow`) get fitting chart kinds, and a doc that names a window or a dimension gets a date range or filter. Tune the prompts from the scores.
 
@@ -39,6 +40,11 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 - [ ] Agents on Claude 4.7+: a `temperature` below 1 is a 400 there; the agent editor could say so (or leave temperature out) when the agent's provider is Anthropic.
 - [ ] Voyage AI behind a proxy: `compat.flavor: "voyage"` and `dimensionsParam` are API-only (the editor offers only Anthropic's headers); and a provider's embedding model and size have no field in the editor (API `embeddingModel`, `embeddingDims`).
 - [ ] Button lint (found by lane CLAUDE, not new): at 390 px a Knowledge list row with a long status ("1 source · 0 chunks · 1 source has an error") wraps; at 1280 px a provider card's `max_completion_tokens` breaks mid-word (`overflow-wrap: anywhere` in a 160 px column).
+
+- [ ] Chat data tools (lane AGENTSQL leftovers): a failed `run_sql` is not kept with the chat, so its SQL is not shown anywhere (the model's argument excerpt hides SQL, D595); keep failed queries too (SQL and the guard's message, no rows) so the owner can see what was refused.
+- [ ] Button lint on an open chat (found by lane AGENTSQL; the lint's `chat` screen has no chat open, so it never saw them): a reply's Edit / Copy / Regenerate (`.chat-action`, under 12 px side padding, under 44 px at 390), the chat row, the Agents / Audit log / Settings links, the "Used N tools" toggle, the agent chip, Back and More at 390; and the agent editor's emoji trigger, Save width, and the Agents back link.
+- [ ] Chat SQL result tables (up to 512 KiB each, `chat_sql_results`) do not count against the chat owner's storage quota as tool images do; count them, or cap results per chat.
+- [ ] "Turn into a report": Forward after Back does not reopen New report (the hand-off is used once), the same as New report opened from the list; and a report made this way has no blocks until its owner adds a table from the console.
 
 ## Watch (no work unless it shows up)
 

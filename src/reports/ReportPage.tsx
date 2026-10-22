@@ -14,6 +14,7 @@ import { cancelConsole, cellText, codeOf, countLabel, datasourceChoices, deleteR
 import { NewReportSheet } from "./NewReportSheet";
 import { copyReportLink, LinkSheet, reportLink } from "./reportLink";
 import { ReportConsoleContext } from "./reportConsole";
+import { dropConsoleSeed, peekConsoleSeed } from "./chatSeed";
 import { ReportEditContext, type ReportEditing } from "./reportBlockEdit";
 import { STATUS_LABELS } from "./ReportsHome";
 import { StarButton } from "./StarButton";
@@ -69,7 +70,9 @@ export function ReportPage({ reportId, displayName, flash, onBack, onSettings, o
   const { canWrite } = useRole();
   const [report, setReport] = useState<ReportDetail | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [sql, setSql] = useState(() => readDraft(reportId));
+  const [sql, setSql] = useState(() => peekConsoleSeed(reportId) ?? readDraft(reportId));
+  // AGENTSQL (D598): a chat's query seeds the console once; the draft keeps it from here.
+  useEffect(() => { dropConsoleSeed(reportId); }, [reportId]);
   // D490: the values of the statement's {name:Type} placeholders, by name, as typed.
   const [paramValues, setParamValues] = useState<Record<string, string>>({});
   const placeholders = useMemo(() => consolePlaceholders(sql), [sql]);

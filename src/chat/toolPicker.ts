@@ -6,10 +6,10 @@ import type { AgentToolPolicy, AgentToolRef, NookCatalogTool, ToolCatalog, ToolP
  * (one per server; Nook's tools by module), and counts for the section headings.
  */
 
-export const refKey = (ref: AgentToolRef) => ref.source === "server" ? `server:${ref.serverId}:${ref.toolName}` : ref.source === "nook" ? `nook:${ref.toolName}` : `knowledge:${ref.kbId}`;
+export const refKey = (ref: AgentToolRef) => ref.source === "server" ? `server:${ref.serverId}:${ref.toolName}` : ref.source === "nook" ? `nook:${ref.toolName}` : ref.source === "datasource" ? `datasource:${ref.datasourceId}` : `knowledge:${ref.kbId}`;
 
 /** What a pick is called in the picker's "No longer available" group. */
-export const refName = (ref: AgentToolRef) => ref.source === "knowledge" ? "A knowledge base" : ref.toolName;
+export const refName = (ref: AgentToolRef) => ref.source === "knowledge" ? "A knowledge base" : ref.source === "datasource" ? "A data source" : ref.toolName;
 
 export const hasRef = (refs: readonly AgentToolRef[], ref: AgentToolRef) => refs.some((item) => refKey(item) === refKey(ref));
 
@@ -50,7 +50,9 @@ export function pickCounts(refs: readonly AgentToolRef[], catalog: ToolCatalog) 
   const nook = refs.filter((ref) => ref.source === "nook").length;
   // AC-E: attached knowledge bases (one search_knowledge tool between them).
   const knowledge = refs.filter((ref) => ref.source === "knowledge").length;
-  return { perServer, nook, knowledge, total: refs.length };
+  // AGENTSQL (D591): picked data sources (five data tools between them).
+  const datasources = refs.filter((ref) => ref.source === "datasource").length;
+  return { perServer, nook, knowledge, datasources, total: refs.length };
 }
 
 /** Picks that no longer exist in the catalog (a removed server or tool): shown so the person can clear them. */
@@ -59,9 +61,10 @@ export function orphanRefs(refs: readonly AgentToolRef[], catalog: ToolCatalog):
   for (const server of catalog.servers) for (const tool of server.tools) known.add(`server:${server.id}:${tool.name}`);
   for (const tool of catalog.nook.tools) known.add(`nook:${tool.name}`);
   for (const kb of catalog.knowledge ?? []) known.add(`knowledge:${kb.id}`);
+  for (const source of catalog.datasources ?? []) known.add(`datasource:${source.id}`);
   // Without a live key the catalog lists no Nook tools (QA Q4): those picks are inactive, not orphans.
   // An older server sends no knowledge list: its picks are left alone.
-  return refs.filter((ref) => !known.has(refKey(ref)) && (ref.source !== "nook" || catalog.nook.linked) && (ref.source !== "knowledge" || catalog.knowledge !== undefined));
+  return refs.filter((ref) => !known.has(refKey(ref)) && (ref.source !== "nook" || catalog.nook.linked) && (ref.source !== "knowledge" || catalog.knowledge !== undefined) && (ref.source !== "datasource" || catalog.datasources !== undefined));
 }
 
 /** What a Nook write tool does in a chat, from the catalog's flags and the agent's direct-writes setting. */

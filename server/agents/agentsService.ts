@@ -6,6 +6,7 @@ import { shareLevel, shareReadableSql, type ShareLevel } from "./sharing";
 import { AgentError } from "./status";
 import { agentToolRefs, linkStateOf, nookAutoOn, refKeyOf, setAgentTools, trifectaOf } from "./tools";
 import { manageableKbIds } from "../knowledge/service";
+import { roleMayUseDatasource } from "./dataSources";
 import { serversAvailableTo } from "./toolServers";
 import { agentChangeMask, notifyAccess } from "../access/notices";
 import { effectiveModelOf, providerNameOf, visionFor } from "./providers";
@@ -51,7 +52,8 @@ export function toolsVisibleTo(tools: AgentToolRef[], role: string, userId?: str
   const kbs = userId ? manageableKbIds(userId, tools.flatMap((tool) => tool.source === "knowledge" ? [tool.kbId] : [])) : null;
   const shown: AgentToolRef[] = [];
   const hidden: AgentToolRef[] = [];
-  for (const tool of tools) ((tool.source === "server" && !usable.has(tool.serverId)) || (tool.source === "knowledge" && kbs !== null && !kbs.has(tool.kbId)) ? hidden : shown).push(tool);
+  // AGENTSQL (D591): nor a data source not open to agents for their role (it stays on save too).
+  for (const tool of tools) ((tool.source === "server" && !usable.has(tool.serverId)) || (tool.source === "knowledge" && kbs !== null && !kbs.has(tool.kbId)) || (tool.source === "datasource" && !roleMayUseDatasource(tool.datasourceId, role)) ? hidden : shown).push(tool);
   return { shown, hidden };
 }
 

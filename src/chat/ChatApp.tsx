@@ -24,6 +24,7 @@ import { leafForSibling, shownBranch, type Shown } from "./chatTree";
 import { LinkNookKeySheet } from "./LinkNookKeySheet";
 import { Markdown, type RenderContext } from "./markdown/render";
 import { ConfirmationCard, ToolCallsDisclosure, TrifectaBadge } from "./ToolDisclosure";
+import { SqlResults, writeReportFromChat, type ReportFromChat } from "./SqlResultCard";
 import { AuditLog } from "./AuditLog";
 import { ACCESS_REVOKED_TEXT, accessLost, ChatOffNotice } from "./accessNotice";
 import "./chat.css";
@@ -209,7 +210,7 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
       else if (event.type === "tool_call") {
         if (!next.toolCalls.some((call) => call.id === event.data.callId)) next.toolCalls = [...next.toolCalls, { id: event.data.callId, tool: event.data.tool, server: event.data.server, serverId: event.data.serverId, argsPreview: event.data.argsPreview, resultPreview: null, ok: null, truncated: false, durationMs: null, decision: null, proposalId: null }];
       } else if (event.type === "tool_result") {
-        next.toolCalls = next.toolCalls.map((call) => call.id === event.data.callId ? { ...call, ok: event.data.ok, resultPreview: event.data.resultPreview, truncated: event.data.truncated, durationMs: event.data.durationMs, decision: event.data.decision, proposalId: event.data.proposalId, ...(event.data.images ? { images: event.data.images } : {}) } : call);
+        next.toolCalls = next.toolCalls.map((call) => call.id === event.data.callId ? { ...call, ok: event.data.ok, resultPreview: event.data.resultPreview, truncated: event.data.truncated, durationMs: event.data.durationMs, decision: event.data.decision, proposalId: event.data.proposalId, ...(event.data.images ? { images: event.data.images } : {}), ...(event.data.sqlResult ? { sqlResult: event.data.sqlResult } : {}) } : call);
       } else if (event.type === "confirmation_required") {
         const { messageId: _message, ...pending } = event.data;
         next.pending = pending;
@@ -595,6 +596,11 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
   // Images (D370 as amended): Nook's own and data: images show; an outside image loads on a click, and
   // "always from this host" lasts for this chat (or the Audit log) in this tab.
   const imageChatId = route.audit ? undefined : route.chatId ?? undefined;
+  // AGENTSQL (D594): New report → Blank on the result's data source, its query opened in the console.
+  const turnIntoReport = useCallback((seed: ReportFromChat) => {
+    if (!writeReportFromChat({ ...seed, title: detail?.chat.title ?? "" })) return flash("Could not hand the query to Reports in this browser");
+    onOpenPath("/reports");
+  }, [detail?.chat.title, flash, onOpenPath]);
   const renderContext = useMemo<RenderContext>(() => ({ onExternalLink: (href) => setExternalLink(href), onNookLink: (path) => onOpenPath(path), images: { mode: "app", scope: imageChatId ?? "audit", chatId: imageChatId } }), [onOpenPath, imageChatId]);
   const detailOpen = Boolean(route.chatId || route.newChat || (route.audit && route.runId));
   const agentOptions = useMemo(() => (agents ?? []).map((agent) => ({ value: agent.id, label: `${agent.icon ? `${agent.icon} ` : ""}${agent.name}`, description: agent.description || (agent.model ?? agent.effectiveModel ?? status?.defaultModel ?? "") })), [agents, status?.defaultModel]);
@@ -733,6 +739,7 @@ export function ChatApp({ displayName, role, navigate, flash, onHome, onSettings
         <ol className="chat-messages" aria-live="polite" aria-relevant="additions text">
           {branch.map((shown) => <MessageView key={shown.message.id} shown={shown} context={renderContext} streaming={live?.messageId === shown.message.id && running} live={live?.messageId === shown.message.id ? live : null} busy={busy || running} deciding={deciding} onDecide={(decision, card) => { void decide(decision, card); }}
             readOnly={readOnly} onContinue={() => { void continueFrom(shown.message.id); }}
+            canMakeReport={role === "admin" || role === "member"} onTurnIntoReport={turnIntoReport}
             editing={editing?.id === shown.message.id ? editing.text : null}
             onEdit={(text) => setEditing({ id: shown.message.id, text })}
             onCancelEdit={() => setEditing(null)}
@@ -801,10 +808,12 @@ type MessageViewProps = {
   readOnly?: boolean; onContinue?: () => void;
   /** U5: opens one of a user message's images in the viewer. */
   onOpenImage?: (item: Extract<ChatAttachment, { removed: false }>) => void;
+  /** AGENTSQL (D594): run_sql result tables, and "Turn into a report" for a role that writes reports. */
+  canMakeReport?: boolean; onTurnIntoReport?: (seed: ReportFromChat) => void;
   onEdit: (text: string) => void; onCancelEdit: () => void; onSubmitEdit: (text: string) => void; onRegenerate: () => void; onSwitch: (direction: 1 | -1) => void; onCopied: () => void; onDecide: (decision: "once" | "deny", card: PendingConfirmation) => void;
 };
 
-function MessageView({ shown, context, streaming, live, busy, editing, deciding, readOnly = false, onContinue, onOpenImage, onEdit, onCancelEdit, onSubmitEdit, onRegenerate, onSwitch, onCopied, onDecide }: MessageViewProps) {
+function MessageView({ shown, context, streaming, live, busy, editing, deciding, readOnly = false, onContinue, onOpenImage, canMakeReport = false, onTurnIntoReport, onEdit, onCancelEdit, onSubmitEdit, onRegenerate, onSwitch, onCopied, onDecide }: MessageViewProps) {
   const { message, index, count } = shown;
   const user = message.role === "user";
   const continueAction = readOnly && onContinue && !streaming && <button type="button" className="chat-action" onClick={onContinue} disabled={busy}><CopyPlus />Continue from here</button>;
@@ -842,6 +851,7 @@ function MessageView({ shown, context, streaming, live, busy, editing, deciding,
       {message.content ? <Markdown text={message.content} context={context} streaming={streaming} /> : streaming ? <span className="chat-thinking" aria-label={live?.pending ? "Waiting for your answer" : "Answering"}>…</span> : null}
       {footer && <p className={`chat-footer${failed ? " chat-footer-error" : ""}`} role={failed ? "alert" : undefined}>{footer}</p>}
     </div>
+    <SqlResults calls={message.toolCalls} chatId={context.images?.mode === "app" ? context.images.chatId : undefined} canMakeReport={canMakeReport} onTurnIntoReport={onTurnIntoReport} />
     {!streaming && <div className="chat-message-actions">
       {switcher}
       {message.content && <button type="button" className="chat-action" onClick={() => { void copy(); }}><Copy />Copy</button>}

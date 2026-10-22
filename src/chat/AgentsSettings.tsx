@@ -7,7 +7,7 @@ import { EmojiPicker } from "../ui/EmojiPicker";
 import { Combobox } from "../ui/Combobox";
 import { Select, type Option } from "../ui/Select";
 import { useConfirm } from "../ui/useConfirm";
-import { AGENT_BOUNDS, type AgentApiUsage, type AgentDetail, type AgentProviderChoice, type AgentSummary, type AgentToolRef, type KnowledgeCatalogBase, type LinkState, type NookLink, type ToolCatalog } from "../../shared/agents";
+import { AGENT_BOUNDS, type AgentApiUsage, type AgentDetail, type AgentProviderChoice, type AgentSummary, type AgentToolRef, type DatasourceCatalogItem, type KnowledgeCatalogBase, type LinkState, type NookLink, type ToolCatalog } from "../../shared/agents";
 import { agentApiUsage, agentProviders, agentsStatus, createAgent, deleteAgent, errorCode, getAgent, listAgents, messageOf, restoreNookKey, toolCatalog, updateAgent, type AgentsStatus } from "./chatApi";
 import { appName } from "../appName";
 import { LinkNookKeySheet } from "./LinkNookKeySheet";
@@ -420,6 +420,7 @@ function ToolPicker({ catalog, tools, directWrites, linked, linkState, creating,
       </section>;
     })}
     {catalog.knowledge && <KnowledgeToolGroup bases={catalog.knowledge} tools={tools} onChange={onChange} />}
+    {catalog.datasources && <DataSourcesToolGroup sources={catalog.datasources} tools={tools} onChange={onChange} />}
     <section className="agents-tools-group" aria-label="Nook">
       <div className="agents-tools-head">
         <strong>Nook{linked && <span className="ai-badge ai-badge-ok">Key linked</span>}{auto && <span className="ai-badge ai-badge-ok">Automatic</span>}{dead && <span className="ai-badge ai-badge-warn">{LINK_DEAD[linkState]} — link another</span>}</strong>
@@ -450,9 +451,37 @@ function ToolPicker({ catalog, tools, directWrites, linked, linkState, creating,
     </section>
     {orphans.length > 0 && <div className="agents-tools-group">
       <div className="agents-tools-head"><strong>No longer available</strong><small>{orphans.length}</small></div>
-      {orphans.map((ref) => <div key={refKey(ref)} className="agents-tool"><label><input type="checkbox" checked onChange={() => onChange(toggleRef(tools, ref))} /><span className="agents-tool-text"><code>{refName(ref)}</code><small>{ref.source === "server" ? "Its server or tool is gone; untick to clear it." : ref.source === "knowledge" ? "It is in the Bin, or no longer shared with you; untick to clear it." : "Not offered any more; untick to clear it."}</small></span></label></div>)}
+      {orphans.map((ref) => <div key={refKey(ref)} className="agents-tool"><label><input type="checkbox" checked onChange={() => onChange(toggleRef(tools, ref))} /><span className="agents-tool-text"><code>{refName(ref)}</code><small>{ref.source === "server" ? "Its server or tool is gone; untick to clear it." : ref.source === "knowledge" ? "It is in the Bin, or no longer shared with you; untick to clear it." : ref.source === "datasource" ? "An admin closed it to chat agents or turned it off; untick to clear it." : "Not offered any more; untick to clear it."}</small></span></label></div>)}
     </div>}
   </div>;
+}
+
+/**
+ * The picker's Data sources group (lane AGENTSQL, D591): the report data sources an admin opened to chat
+ * agents for the editor's role, one checkbox each. Picked sources give the agent five read-only data
+ * tools (search the schema, describe tables, sample rows, run a SELECT, estimate) that run on their own,
+ * with the access of whoever chats: someone the policy does not cover gets none of them.
+ */
+export function DataSourcesToolGroup({ sources, tools, onChange }: { sources: DatasourceCatalogItem[]; tools: AgentToolRef[]; onChange: (tools: AgentToolRef[]) => void }) {
+  const picked = tools.filter((ref) => ref.source === "datasource").length;
+  return <section className="agents-tools-group" aria-label="Data sources">
+    <div className="agents-tools-head">
+      <strong>Data sources</strong>
+      <small>{picked} picked</small>
+    </div>
+    {sources.length === 0 ? <p className="chat-muted">No report data sources are open to chat agents for you. An admin opens one in Settings → Report data sources.</p>
+      : <>
+        <p className="chat-muted">The agent can search the schema and run read-only SELECTs on the allowed tables; results show as a table in the chat. It runs with the access of whoever chats, and only for people the data source is open to.</p>
+        {sources.map((source) => {
+          const ref: AgentToolRef = { source: "datasource", datasourceId: source.id };
+          return <div key={source.id} className="agents-tool">
+            <label><input type="checkbox" checked={hasRef(tools, ref)} onChange={() => onChange(toggleRef(tools, ref))} />
+              <span className="agents-tool-text"><span><strong>{source.name}</strong><span className="agents-tool-badges"><span className="ai-badge ai-badge-ok">Read-only</span></span></span><small>ClickHouse · {source.database} · {source.tables.toLocaleString()} {source.tables === 1 ? "table" : "tables"} allowed</small></span>
+            </label>
+          </div>;
+        })}
+      </>}
+  </section>;
 }
 
 /**

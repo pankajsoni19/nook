@@ -1,6 +1,6 @@
 import type { ToolCallingProbe } from "../../shared/reportsModel";
 import { api, ApiError, getCsrfToken, noteRequestOutcome } from "../api";
-import type { ChatAttachmentInput, ProviderVisionPolicy, AgentApiUsage, AgentProviderChoice, AuditFacets, AuditRunDetail, AuditRunSummary, AgentDetail, AgentSettings, AgentSummary, AgentToolRef, ChatDetail, ChatMessage, ChatUpdateEvent, ChatSummary, DailyUsage, DeclaredStdioServer, LinkableKey, NookLink, ProviderCompat, ProviderKnowledgePolicy, ProviderSummary, PublicLinkState, RunEvent, ServerAuthKind, ServerAvailability, ToolCatalog, ToolPolicy, ToolServerSummary } from "../../shared/agents";
+import type { SqlResultDetail, ChatAttachmentInput, ProviderVisionPolicy, AgentApiUsage, AgentProviderChoice, AuditFacets, AuditRunDetail, AuditRunSummary, AgentDetail, AgentSettings, AgentSummary, AgentToolRef, ChatDetail, ChatMessage, ChatUpdateEvent, ChatSummary, DailyUsage, DeclaredStdioServer, LinkableKey, NookLink, ProviderCompat, ProviderKnowledgePolicy, ProviderSummary, PublicLinkState, RunEvent, ServerAuthKind, ServerAvailability, ToolCatalog, ToolPolicy, ToolServerSummary } from "../../shared/agents";
 
 /** The agent chat API (docs/plan/API_CONTRACTS.md § Agent chat), plus the SSE reader for runs. */
 
@@ -30,6 +30,8 @@ export const updateAgent = (id: string, input: Partial<AgentInput> & { expectedR
 export const deleteAgent = (id: string) => api<{ ok: true }>(`/agents/${id}`, { method: "DELETE", body: "{}" });
 export const myUsage = () => api<{ usage: DailyUsage }>("/agents/usage");
 
+/** AGENTSQL (D595): a run_sql result table (403 DATASOURCE_UNAVAILABLE when the reader may not use its data source). */
+export const getSqlResult = (chatId: string, resultId: string) => api<{ result: SqlResultDetail }>(`/chats/${chatId}/sql-results/${resultId}`);
 export const listChats = (q?: string) => api<{ chats: ChatSummary[] }>(`/chats${q ? `?q=${encodeURIComponent(q)}` : ""}`);
 /** Wave 43 (AC-D): the owner also gets the public link's state (null without one, or with the policy off). */
 export const getChat = (id: string) => api<ChatDetail & { publicLink?: PublicLinkState | null }>(`/chats/${id}`);

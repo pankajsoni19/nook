@@ -6,6 +6,7 @@ import { shareLevel, shareReadableSql } from "./sharing";
 import { publishChatUpdate } from "./chatUpdates";
 import { AgentError } from "./status";
 import { copyToolImages } from "./images";
+import { copySqlResults } from "./dataSources";
 import { chatAttachmentsFor, copyChatAttachments } from "./chatImages";
 
 /**
@@ -348,6 +349,8 @@ export function forkChat(userId: string, chatId: string, messageId: string): Cha
     db.query("UPDATE chats SET active_leaf_id = ? WHERE id = ?").run(parent, id);
     // The copy's messages keep their tool-call lists, so they keep the pictures those calls returned (same ids).
     copyToolImages(chatId, id, new Map([...copies].filter(([source]) => path.some((row) => row.id === source && row.role === "assistant"))));
+    // AGENTSQL (D594): and its result tables (each reader is still checked against the data source, D595).
+    copySqlResults(chatId, id, new Map([...copies].filter(([source]) => path.some((row) => row.id === source && row.role === "assistant"))));
     // U5: the user turns' images follow the copy when the copier owns them (the owner's own copy); never someone else's file.
     const images = copyChatAttachments(userId, new Map([...copies].filter(([source]) => path.some((row) => row.id === source && row.role === "user"))));
     audit(userId, null, "agents.chat.fork", { chatId: id, messages: path.length, ...(source.owner_id !== userId ? { shared: true } : {}), ...(images.linked || images.skipped ? { images: images.linked, imagesLeftBehind: images.skipped } : {}) });

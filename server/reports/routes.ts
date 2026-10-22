@@ -2,7 +2,7 @@ import type { Context, Hono } from "hono";
 import { z, ZodError } from "zod";
 import type { AppEnv } from "../auth";
 import { parseJson, uuid } from "../validation";
-import { REPORT_LIMITS, REPORT_PAGE_SIZE, REPORT_STATUSES } from "../../shared/reports";
+import { DATASOURCE_AGENT_USES, REPORT_LIMITS, REPORT_PAGE_SIZE, REPORT_STATUSES } from "../../shared/reports";
 import { CONSOLE_PARAM_LIMITS } from "../../shared/reportParams";
 import { roleHasReports } from "./access";
 import { createDatasource, datasourceChoices, datasourceRow, datasourceSummary, deleteDatasource, listDatasources, previewAllowlist, SCHEMA_FIELDS, testConnection, updateDatasource } from "./datasources";
@@ -39,7 +39,9 @@ const datasourceCreate = z.object({
   allowlist: allowlist.optional(),
   maxRows: z.number().int().min(1).max(REPORT_LIMITS.maxRowsCeiling).optional(),
   timeoutS: z.number().int().min(1).max(REPORT_LIMITS.timeoutCeilingS).optional(),
-  enabled: z.boolean().optional()
+  enabled: z.boolean().optional(),
+  // D590: chat agents may use it (off by default).
+  agentUse: z.enum(DATASOURCE_AGENT_USES).optional()
 }).strict();
 const datasourcePatch = datasourceCreate.partial().extend({ expectedRevision: z.number().int().min(1), removePassword: z.boolean().optional() }).strict();
 const previewSchema = z.object({ allowlist }).strict();

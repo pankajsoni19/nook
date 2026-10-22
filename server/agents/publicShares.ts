@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { config } from "../config";
 import { audit, db, now } from "../db";
-import type { PublicChatSnapshot, PublicLinkState } from "../../shared/agents";
+import { DATA_TOOL_SERVER, type PublicChatSnapshot, type PublicLinkState } from "../../shared/agents";
 import { ownedChat, parseToolCalls, pathTo, type ChatRow } from "./chats";
 import { readAgentSettings } from "./settings";
 import { AgentError, agentsStatus } from "./status";
@@ -69,7 +69,8 @@ export function snapshotOf(chat: ChatRow, includeToolResults: boolean): PublicCh
       createdAt: row.created_at,
       toolCalls: parseToolCalls(row.tool_calls_json).map((call) => ({
         tool: call.tool, server: call.server, ok: call.ok,
-        ...(includeToolResults ? { args: clip(call.argsPreview, 1024), result: call.resultPreview === null ? null : clip(call.resultPreview, 1024) } : {})
+        // AGENTSQL (D597): a data-source tool appears by name only, never its arguments, summary, or result table.
+        ...(includeToolResults && call.server !== DATA_TOOL_SERVER ? { args: clip(call.argsPreview, 1024), result: call.resultPreview === null ? null : clip(call.resultPreview, 1024) } : {})
       }))
     }))
     .filter((message) => message.content.length > 0 || message.toolCalls.length > 0);

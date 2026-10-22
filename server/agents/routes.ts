@@ -24,6 +24,7 @@ import { createServerAndSync, deleteServer, ensureServersSynced, listServers, se
 import { ProviderError } from "./loop";
 import { agentApiUsage, auditFacets, auditRunDetail, auditVisibleTo, exportAuditRuns, listAuditRuns } from "./audit";
 import { proxyImage, toolImageResponse } from "./images";
+import { readSqlResult } from "./dataSources";
 import "./bin";
 
 /**
@@ -123,7 +124,9 @@ const toolRefSchema = z.discriminatedUnion("source", [
   z.object({ source: z.literal("server"), serverId: uuid, toolName, policy: z.enum(["confirm", "off"]).nullable() }).strict(),
   z.object({ source: z.literal("nook"), toolName }).strict(),
   // AC-E: a knowledge base (all of an agent's bases become one search_knowledge tool).
-  z.object({ source: z.literal("knowledge"), kbId: uuid }).strict()
+  z.object({ source: z.literal("knowledge"), kbId: uuid }).strict(),
+  // AGENTSQL (D591): a report data source an admin opened to agents.
+  z.object({ source: z.literal("datasource"), datasourceId: uuid }).strict()
 ]);
 const linkSchema = z.object({ nookKeyId: uuid.nullable() }).strict();
 // Review M1: the card is named by the server's nonce and the arguments' hash, never the model's call id.
@@ -269,6 +272,15 @@ export function registerAgentRoutes(app: Hono<AppEnv>) {
   app.get("/api/agents/image-proxy", handle((c) => proxyImage(c)));
   // A picture an MCP tool returned, to whoever can read the chat: the owner, and the people it is shared
   // with for the messages of the active branch only, as they see the chat (security review L3).
+  // AGENTSQL (D595): a run_sql result table, to whoever can read the chat (shared: the active branch only)
+  // and may use its data source through agents now; 403 DATASOURCE_UNAVAILABLE otherwise.
+  app.get("/api/chats/:chatId/sql-results/:resultId", handle((c) => {
+    const chatId = id(c, "chatId");
+    const resultId = id(c, "resultId");
+    const chat = readableChat(chatId, c.get("user").id);
+    const visible = chat.owner_id === c.get("user").id ? null : new Set(pathTo(chatId, chat.active_leaf_id).map((row) => row.id));
+    return { result: readSqlResult(chatId, resultId, c.get("user").id, visible) };
+  }));
   app.get("/api/chats/:chatId/tool-images/:imageId", handle((c) => {
     const chatId = id(c, "chatId");
     const imageId = id(c, "imageId");

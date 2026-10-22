@@ -3,7 +3,7 @@ import { config } from "../config";
 import { audit, db, now } from "../db";
 import { checkSavedEndpoint, EgressError } from "../agents/egress";
 import { openSecret, sealSecret } from "../agents/secrets";
-import { REPORT_LIMITS, type ConnectionTest, type DatasourceChoice, type DatasourceSummary } from "../../shared/reports";
+import { REPORT_LIMITS, type ConnectionTest, type DatasourceAgentUse, type DatasourceChoice, type DatasourceSummary } from "../../shared/reports";
 import { normalizeAllowlist, tableAllowed } from "./allowlist";
 import { chQuery, ChError, queryIdFor, type ChTarget } from "./clickhouse";
 import { datasourceNotFound, ReportError } from "./errors";
@@ -21,10 +21,14 @@ export type DatasourceRow = {
   id: string; name: string; kind: "clickhouse"; url: string; username: string; password_ct: string | null; database: string; allowlist_json: string;
   max_rows: number; timeout_s: number; enabled: number; schema_synced_at: string | null; schema_table_count: number; schema_truncated: number;
   schema_error: string | null; revision: number; created_by: string | null; created_at: string; updated_at: string;
+  /** Lane AGENTSQL (073, D590): chat agents' use; absent on a database before 073. */
+  agent_use?: DatasourceAgentUse;
 };
 
 export type DatasourceInput = {
   name: string; url: string; username: string; password?: string | null; database?: string; allowlist?: string[]; maxRows?: number; timeoutS?: number; enabled?: boolean;
+  /** D590: chat agents may use it (off by default). */
+  agentUse?: DatasourceAgentUse;
 };
 export type DatasourcePatch = Partial<DatasourceInput> & { expectedRevision: number; removePassword?: boolean };
 
@@ -48,7 +52,7 @@ export function allowlistOf(row: Pick<DatasourceRow, "allowlist_json">): string[
 export function datasourceSummary(row: DatasourceRow): DatasourceSummary {
   return {
     id: row.id, name: row.name, kind: row.kind, url: row.url, username: row.username, database: row.database, allowlist: allowlistOf(row),
-    maxRows: row.max_rows, timeoutS: row.timeout_s, enabled: row.enabled === 1, hasPassword: row.password_ct !== null,
+    maxRows: row.max_rows, timeoutS: row.timeout_s, enabled: row.enabled === 1, agentUse: row.agent_use ?? "off", hasPassword: row.password_ct !== null,
     schema: { syncedAt: row.schema_synced_at, tables: row.schema_table_count, error: row.schema_error, truncated: row.schema_truncated === 1 },
     revision: row.revision, createdAt: row.created_at, updatedAt: row.updated_at
   };
@@ -91,14 +95,14 @@ export function createDatasource(actorId: string, input: DatasourceInput): Datas
   const allowlist = normalizeAllowlist(input.allowlist ?? []);
   if (allowlist.length > REPORT_LIMITS.allowlistPatterns) throw new ReportError(400, "INVALID_ALLOWLIST", `At most ${REPORT_LIMITS.allowlistPatterns} patterns`);
   if (db.query("SELECT 1 FROM report_datasources WHERE name = ? COLLATE NOCASE").get(input.name)) throw new ReportError(409, "NAME_TAKEN", "Another data source has this name");
-  db.query(`INSERT INTO report_datasources (id, name, kind, url, username, password_ct, database, allowlist_json, max_rows, timeout_s, enabled, created_by, created_at, updated_at)
-    VALUES (?, ?, 'clickhouse', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+  db.query(`INSERT INTO report_datasources (id, name, kind, url, username, password_ct, database, allowlist_json, max_rows, timeout_s, enabled, agent_use, created_by, created_at, updated_at)
+    VALUES (?, ?, 'clickhouse', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
     id, input.name, url, input.username, input.password ? sealSecret("datasource", id, input.password) : null, database, JSON.stringify(allowlist),
     clamp(input.maxRows ?? REPORT_LIMITS.maxRowsDefault, 1, REPORT_LIMITS.maxRowsCeiling), clamp(input.timeoutS ?? REPORT_LIMITS.timeoutDefaultS, 1, REPORT_LIMITS.timeoutCeilingS),
-    input.enabled === false ? 0 : 1, actorId, at, at
+    input.enabled === false ? 0 : 1, input.agentUse ?? "off", actorId, at, at
   );
   // Never the password, the URL, or the allowlist: the name and id only.
-  audit(actorId, null, "reports.datasource.create", { id, name: input.name });
+  audit(actorId, null, "reports.datasource.create", { id, name: input.name, ...(input.agentUse && input.agentUse !== "off" ? { agentUse: input.agentUse } : {}) });
   return datasourceSummary(datasourceRow(id));
 }
 
@@ -119,15 +123,15 @@ export function updateDatasource(actorId: string, id: string, patch: DatasourceP
   const nextUrl = patch.url === undefined ? row.url : checkUrl(patch.url);
   const hostChanged = new URL(nextUrl).host !== new URL(row.url).host;
   const password = patch.removePassword ? null : patch.password ? sealSecret("datasource", id, patch.password) : hostChanged ? null : row.password_ct;
-  db.query(`UPDATE report_datasources SET name = ?, url = ?, username = ?, password_ct = ?, database = ?, allowlist_json = ?, max_rows = ?, timeout_s = ?, enabled = ?,
+  db.query(`UPDATE report_datasources SET name = ?, url = ?, username = ?, password_ct = ?, database = ?, allowlist_json = ?, max_rows = ?, timeout_s = ?, enabled = ?, agent_use = ?,
     revision = revision + 1, updated_at = ? WHERE id = ? AND revision = ?`).run(
     patch.name ?? row.name, nextUrl, patch.username ?? row.username, password,
     patch.database === undefined ? row.database : checkDatabase(patch.database), allowlist ? JSON.stringify(allowlist) : row.allowlist_json,
     patch.maxRows === undefined ? row.max_rows : clamp(patch.maxRows, 1, REPORT_LIMITS.maxRowsCeiling),
     patch.timeoutS === undefined ? row.timeout_s : clamp(patch.timeoutS, 1, REPORT_LIMITS.timeoutCeilingS),
-    patch.enabled === undefined ? row.enabled : patch.enabled ? 1 : 0, now(), id, row.revision
+    patch.enabled === undefined ? row.enabled : patch.enabled ? 1 : 0, patch.agentUse ?? row.agent_use ?? "off", now(), id, row.revision
   );
-  audit(actorId, null, "reports.datasource.update", { id, fields: Object.keys(patch).filter((field) => field !== "expectedRevision" && field !== "password").concat(patch.password ? ["password"] : []) });
+  audit(actorId, null, "reports.datasource.update", { id, fields: Object.keys(patch).filter((field) => field !== "expectedRevision" && field !== "password").concat(patch.password ? ["password"] : []), ...(patch.agentUse !== undefined && patch.agentUse !== (row.agent_use ?? "off") ? { agentUse: patch.agentUse } : {}) });
   return datasourceSummary(datasourceRow(id));
 }
 

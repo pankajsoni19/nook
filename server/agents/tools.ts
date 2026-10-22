@@ -12,6 +12,8 @@ import { defaultPolicy, parseTools, serverAvailableTo, serverPolicies, serverRow
 import { KNOWLEDGE_TOOL } from "../../shared/knowledge";
 import { knowledgeToolDescription, knowledgeToolParameters, liveAttachedBases, type KnowledgeToolSpec } from "../knowledge/tool";
 import { listKnowledge, manageableKbIds, viewableKbIds } from "../knowledge/service";
+import { DATA_TOOL_NAMES, DATA_TOOL_SERVER } from "../../shared/agents";
+import { agentDatasourceIds, dataToolDefinition, datasourceCatalogFor, liveAgentSources, roleMayUseDatasource, writeAgentDatasources, type DataToolSpec } from "./dataSources";
 
 /**
  * An agent's tools (plan §5.2, §5.3, D358, D359; Wave 41 AC-B): the picks in `agent_tools`, the
@@ -25,8 +27,8 @@ import { listKnowledge, manageableKbIds, viewableKbIds } from "../knowledge/serv
 
 export type ResolvedTool = {
   modelName: string;
-  /** AC-E: `knowledge` is the one `search_knowledge` tool over the agent's attached bases. */
-  kind: "server" | "nook" | "knowledge";
+  /** AC-E: `knowledge` is the one `search_knowledge` tool over the agent's attached bases; AGENTSQL: `datasource` a data tool (D592). */
+  kind: "server" | "nook" | "knowledge" | "datasource";
   serverId: string | null;
   /** The slug (servers) or "nook". */
   server: string;
@@ -41,6 +43,8 @@ export type ResolvedTool = {
   serverRow: ToolServerRow | null;
   nook: NookResolved | null;
   knowledge: KnowledgeToolSpec | null;
+  /** D592: a data tool over the agent's data sources the runner may use now (chats only). */
+  datasource?: DataToolSpec | null;
 };
 
 type ToolRow = { agent_id: string; source: "server" | "nook" | "knowledge"; server_id: string | null; tool_name: string | null; kb_id: string | null; policy: AgentToolPolicy };
@@ -53,10 +57,12 @@ export function agentToolRefs(agentId: string): AgentToolRef[] {
     else if (row.source === "nook" && row.tool_name) refs.push({ source: "nook", toolName: row.tool_name });
     else if (row.source === "knowledge" && row.kb_id) refs.push({ source: "knowledge", kbId: row.kb_id });
   }
+  // AGENTSQL (D591): the picked data sources live in their own table.
+  for (const datasourceId of agentDatasourceIds(agentId)) refs.push({ source: "datasource", datasourceId });
   return refs;
 }
 
-export const refKeyOf = (ref: AgentToolRef) => ref.source === "server" ? `server:${ref.serverId}:${ref.toolName}` : ref.source === "nook" ? `nook:${ref.toolName}` : `knowledge:${ref.kbId}`;
+export const refKeyOf = (ref: AgentToolRef) => ref.source === "server" ? `server:${ref.serverId}:${ref.toolName}` : ref.source === "nook" ? `nook:${ref.toolName}` : ref.source === "datasource" ? `datasource:${ref.datasourceId}` : `knowledge:${ref.kbId}`;
 
 /**
  * Replaces the agent's picks (PATCH `tools`): every server tool must exist in a catalog the editor may
@@ -72,18 +78,22 @@ export function setAgentTools(agentId: string, role: string, submitted: AgentToo
   const all = agentToolRefs(agentId);
   const current = all.filter((ref): ref is Extract<AgentToolRef, { source: "server" }> => ref.source === "server");
   const currentKbs = all.filter((ref): ref is Extract<AgentToolRef, { source: "knowledge" }> => ref.source === "knowledge");
-  const kept = new Set([...current, ...currentKbs].map(refKeyOf));
+  // AGENTSQL (D591): data sources already picked stay valid; a manager's view hides those their role cannot use.
+  const currentSources = all.filter((ref): ref is Extract<AgentToolRef, { source: "datasource" }> => ref.source === "datasource");
+  const kept = new Set([...current, ...currentKbs, ...currentSources].map(refKeyOf));
   // AC-E: the bases named; new picks need the editor and the owner to own or manage them (M4); a manager's hidden ones stay.
   const ownerId = (db.query("SELECT owner_id FROM agents WHERE id = ?").get(agentId) as { owner_id: string } | null)?.owner_id ?? null;
   const named = [...new Set([...submitted, ...currentKbs].flatMap((ref) => ref.source === "knowledge" ? [ref.kbId] : []))];
   const editorViews = options.userId ? viewableKbIds(options.userId, named) : new Set(named);
   const editorKbs = options.userId ? manageableKbIds(options.userId, named) : new Set(named);
   const ownerKbs = ownerId ? manageableKbIds(ownerId, named) : new Set<string>();
+  const ownerRole = ownerId ? roleOf(ownerId) : null;
   // Review L2: a manager's view withholds picks from servers they cannot use, so their save re-merges them (AC-E: and bases they cannot open).
   const submittedKeys = new Set(submitted.map(refKeyOf));
   const hidden = options.keepHidden ? [
     ...current.filter((ref) => !visible.has(ref.serverId) && !submittedKeys.has(refKeyOf(ref))),
-    ...currentKbs.filter((ref) => !editorKbs.has(ref.kbId) && !submittedKeys.has(refKeyOf(ref)))
+    ...currentKbs.filter((ref) => !editorKbs.has(ref.kbId) && !submittedKeys.has(refKeyOf(ref))),
+    ...currentSources.filter((ref) => !roleMayUseDatasource(ref.datasourceId, role) && !submittedKeys.has(refKeyOf(ref)))
   ] : [];
   const refs = [...submitted, ...hidden];
   const seen = new Set<string>();
@@ -98,14 +108,20 @@ export function setAgentTools(agentId: string, role: string, submitted: AgentToo
       if (!editorKbs.has(ref.kbId)) throw new AgentError(403, "KB_MANAGE_REQUIRED", "You can search this knowledge base, but attaching it to an agent needs Manage", { field: "tools" });
       if (!ownerKbs.has(ref.kbId)) throw new AgentError(403, "KB_MANAGE_REQUIRED", "The agent's owner must own or manage a knowledge base to attach it; ask its owner to make them a manager", { field: "tools" });
     }
+    // D591: a new data source pick must be open to agents for the editor's role and the owner's.
+    if (ref.source === "datasource" && !kept.has(key)) {
+      if (!roleMayUseDatasource(ref.datasourceId, role)) throw new AgentError(400, "INVALID", "A picked data source is not open to you for chat agents", { field: "tools" });
+      if (!roleMayUseDatasource(ref.datasourceId, ownerRole)) throw new AgentError(403, "DATASOURCE_UNAVAILABLE", "The agent's owner cannot use this data source with chat agents", { field: "tools" });
+    }
   }
   db.query("DELETE FROM agent_tools WHERE agent_id = ?").run(agentId);
   const insert = db.query("INSERT INTO agent_tools (agent_id, source, server_id, tool_name, kb_id, policy) VALUES (?, ?, ?, ?, ?, ?)");
   for (const ref of refs) {
     if (ref.source === "server") insert.run(agentId, "server", ref.serverId, ref.toolName, null, ref.policy);
     else if (ref.source === "nook") insert.run(agentId, "nook", null, ref.toolName, null, null);
-    else insert.run(agentId, "knowledge", null, null, ref.kbId, null);
+    else if (ref.source === "knowledge") insert.run(agentId, "knowledge", null, null, ref.kbId, null);
   }
+  writeAgentDatasources(agentId, refs.flatMap((ref) => ref.source === "datasource" ? [ref.datasourceId] : []));
 }
 
 // --- Links (plan §5.3, D359): a pointer to one of the runner's own keys, never a token ---------------
@@ -248,7 +264,8 @@ export function catalogFor(role: string, agentId: string | null, userId: string)
   // AC-E: the knowledge bases the editor can open; only those they own or manage can be attached (M4: `manageable`).
   const knowledge = listKnowledge(userId).map((kb) => ({ id: kb.id, name: kb.name, description: kb.description, ownerName: kb.ownerName, yours: kb.yourLevel === "owner", manageable: kb.yourLevel !== "view", status: kb.status, chunkCount: kb.chunkCount }));
   // Without a live key the picker lists none of Nook's tools (QA Q4): what runs is bounded by the key.
-  return { servers, nook: { linked: key !== null && !nookKey?.internal, linkState: agentId ? linkStateOf(agentId, userId).state : "none", tools: key ? nookCatalogFor(key) : [], auto: nookAutoState(agent, userId) }, knowledge };
+  // AGENTSQL (D591): the data sources an admin opened to agents for the editor's role.
+  return { servers, nook: { linked: key !== null && !nookKey?.internal, linkState: agentId ? linkStateOf(agentId, userId).state : "none", tools: key ? nookCatalogFor(key) : [], auto: nookAutoState(agent, userId) }, knowledge, datasources: datasourceCatalogFor(role) };
 }
 
 // --- Per-step resolution (plan §2.1 `toolCatalog`, D358) ---------------------------------------------
@@ -278,13 +295,16 @@ export type ExternalToolOptions = { nookKey: McpKeyContext | null; surface: "mcp
 export type ToolIdentity =
   | { kind: "server"; serverId: string; toolName: string; revision: number }
   | { kind: "nook"; toolName: string; mode: NookResolved["mode"]; keyId: string }
-  | { kind: "knowledge"; kbIds: string };
+  | { kind: "knowledge"; kbIds: string }
+  | { kind: "datasource"; toolName: string; ids: string };
 
 const kbIdsOf = (spec: KnowledgeToolSpec) => spec.kbs.map((kb) => kb.id).sort().join(",");
+const sourceIdsOf = (spec: DataToolSpec) => spec.sources.map((source) => source.id).sort().join(",");
 
 export const identityOf = (tool: ResolvedTool): ToolIdentity => tool.kind === "server"
   ? { kind: "server", serverId: tool.serverId!, toolName: tool.toolName, revision: tool.serverRow!.revision }
   : tool.kind === "knowledge" ? { kind: "knowledge", kbIds: kbIdsOf(tool.knowledge!) }
+  : tool.kind === "datasource" ? { kind: "datasource", toolName: tool.toolName, ids: sourceIdsOf(tool.datasource!) }
   : { kind: "nook", toolName: tool.toolName, mode: tool.nook!.mode, keyId: tool.nook!.keyId };
 
 /** The agent row and the runner's role as they stand now (the agent not in the Bin, the account active, the role allowed to chat). */
@@ -312,6 +332,7 @@ export function liveToolFor(agentId: string, userId: string, identity: ToolIdent
   const match = resolveTools(live.agent, { userId, role: live.role }, external, identity).find((tool) => identity.kind === "server"
     ? tool.kind === "server" && tool.serverId === identity.serverId && tool.toolName === identity.toolName && tool.serverRow!.revision === identity.revision
     : identity.kind === "knowledge" ? tool.kind === "knowledge" && kbIdsOf(tool.knowledge!) === identity.kbIds
+    : identity.kind === "datasource" ? tool.kind === "datasource" && tool.toolName === identity.toolName && sourceIdsOf(tool.datasource!) === identity.ids
     : tool.kind === "nook" && tool.toolName === identity.toolName && tool.nook!.mode === identity.mode && tool.nook!.keyId === identity.keyId);
   return match ?? null;
 }
@@ -341,14 +362,15 @@ export function liveToolFailure(agentId: string, userId: string, identity: ToolI
 export function resolveTools(agent: AgentRow, runner: { userId: string; role: string }, external: ExternalToolOptions | null = null, only?: ToolIdentity): ResolvedTool[] {
   const all = agentToolRefs(agent.id);
   const refs = all.filter((ref) => !only || (only.kind === "server" ? ref.source === "server" && ref.serverId === only.serverId && ref.toolName === only.toolName
-    : only.kind === "knowledge" ? ref.source === "knowledge" : ref.source === "nook" && ref.toolName === only.toolName));
+    : only.kind === "knowledge" ? ref.source === "knowledge" : only.kind === "datasource" ? ref.source === "datasource" : ref.source === "nook" && ref.toolName === only.toolName));
   // C2: in a chat, an agent with no Nook picks gets every offered Nook tool while its automatic tools are on.
   const nookPicks = all.flatMap((ref) => ref.source === "nook" ? [ref.toolName] : []);
   const autoNook = !external && nookPicks.length === 0 && nookAutoOn(agent);
   const nookNames = (autoNook ? offeredSpecs().map((spec) => spec.name) : nookPicks).filter((name) => !only || (only.kind === "nook" && only.toolName === name));
   // The trifecta (plan §5.2 [14], review L10): with Nook tools (AC-E: or knowledge bases; C2: or the automatic ones) an open-world remote tool asks first.
   const chatKey = !external && (nookPicks.length > 0 || autoNook) ? chatNookKey(agent, runner.userId) : null;
-  const hasNook = all.some((ref) => ref.source === "nook" || ref.source === "knowledge") || (autoNook && chatKey !== null);
+  // AGENTSQL (D596): a data source is private data too.
+  const hasNook = all.some((ref) => ref.source === "nook" || ref.source === "knowledge" || ref.source === "datasource") || (autoNook && chatKey !== null);
   const taken = new Set<string>();
   const resolved: ResolvedTool[] = [];
   const servers = new Map<string, { row: ToolServerRow; tools: Map<string, ReturnType<typeof parseTools>[number]>; policies: Map<string, ToolPolicy> } | null>();
@@ -404,13 +426,29 @@ export function resolveTools(agent: AgentRow, runner: { userId: string; role: st
       });
     }
   }
+  // AGENTSQL (D592, D597): the data tools, in chats only (never an API, MCP, or REST-key run, T361), over
+  // the picks the runner may use now; they only read, so they run on their own.
+  if (!external && refs.some((ref) => ref.source === "datasource")) {
+    const sources = liveAgentSources(agent.id, runner.role).map((row) => ({ id: row.id, name: row.name, database: row.database }));
+    if (sources.length > 0) {
+      for (const name of DATA_TOOL_NAMES) {
+        if (only && (only.kind !== "datasource" || only.toolName !== name)) continue;
+        const spec: DataToolSpec = { tool: name, sources };
+        const definition = dataToolDefinition(spec);
+        resolved.push({
+          modelName: uniqueName(`${DATA_TOOL_SERVER}__${name}`, taken), kind: "datasource", serverId: null, server: DATA_TOOL_SERVER, serverName: "Data sources", toolName: name,
+          description: definition.description, parameters: definition.parameters, policy: "auto", openWorld: false, resultCapBytes: 16_384, timeoutMs: 150_000, serverRow: null, nook: null, knowledge: null, datasource: spec
+        });
+      }
+    }
+  }
   return resolved;
 }
 
 /** The trifecta (plan §5.2 [14]): private data (Nook tools) plus an open-world remote tool. */
 export function trifectaOf(refs: AgentToolRef[], autoNook = false): boolean {
   // AC-E: an attached knowledge base is private data too; C2: so are the automatic Nook tools.
-  const hasNook = autoNook || refs.some((ref) => ref.source === "nook" || ref.source === "knowledge");
+  const hasNook = autoNook || refs.some((ref) => ref.source === "nook" || ref.source === "knowledge" || ref.source === "datasource");
   if (!hasNook) return false;
   const servers = new Map<string, Map<string, boolean>>();
   for (const ref of refs) {

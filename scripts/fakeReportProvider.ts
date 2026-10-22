@@ -342,8 +342,39 @@ export function filterRequestPatch(system: string) {
   };
 }
 
+/**
+ * Lane AGENTSQL (D592): a chat agent with data-source tools (`data__*` offered). It searches the schema,
+ * runs one SELECT on eval_top_routes.requests (or analytics.orders when the message names orders), and
+ * answers from the result. A run offered `data__` tools under the QA script takes this path.
+ */
+export const CHAT_SQL = {
+  routes: "SELECT route, count() AS requests, round(avg(duration_ms)) AS avg_ms, countIf(status >= 500) AS errors\nFROM eval_top_routes.requests\nGROUP BY route\nORDER BY requests DESC",
+  orders: "SELECT country, count() AS orders, sum(amount) AS revenue\nFROM analytics.orders\nWHERE amount > 0\nGROUP BY country\nORDER BY revenue DESC"
+};
+export const chatSqlScript: Script = (context) => {
+  const asked = text([...(context.body.messages ?? [])].reverse().find((turn) => turn.role === "user")?.content);
+  if (!context.tools.includes("data__run_sql")) return { content: `This agent has no data sources I can use for you. You asked: ${asked.slice(0, 200)}` };
+  const turns = context.body.messages ?? [];
+  const lastUser = turns.map((turn) => turn.role).lastIndexOf("user");
+  const done = turns.slice(lastUser + 1).filter((turn) => turn.role === "tool").length;
+  const orders = /order|revenue|countr/i.test(asked);
+  if (done === 0) return { content: "Looking for the right table.\n\n", toolCalls: [{ name: "data__search_schema", arguments: { query: orders ? "orders revenue" : "requests route" } }] };
+  if (done === 1) return { toolCalls: [{ name: "data__run_sql", arguments: { sql: orders ? CHAT_SQL.orders : CHAT_SQL.routes, purpose: orders ? "Revenue by country" : "Requests per route" } }] };
+  let summary = "";
+  try {
+    const payload = JSON.parse(context.lastTool?.content.split("\n").slice(1, -1).join("\n") ?? "{}") as { rowCount?: number; rows?: unknown[][]; columns?: Array<{ name: string }> };
+    const top = payload.rows?.[0];
+    summary = top ? `The top ${payload.columns?.[0]?.name ?? "row"} is **${String(top[0])}** with ${String(top[1])} ${payload.columns?.[1]?.name ?? ""}, of ${payload.rowCount ?? 0} rows.` : "The query returned no rows.";
+  } catch {
+    summary = "The query did not return a result I could read.";
+  }
+  return { content: `${summary} The full result is in the table below.` };
+};
+
 /** The QA instance's fixed sequence (see the file comment). */
 export const qaScript: Script = (context) => {
+  // AGENTSQL: a chat run with data-source tools follows the chat-agent script.
+  if (context.tools.some((name) => name.startsWith("data__"))) return chatSqlScript(context);
   if (context.tools.includes(PROBE_TOOL)) return probeReply;
   if (context.tools.includes("submit_patch")) return qaEditScript(context);
   const evil = context.system.includes("SYSTEM OVERRIDE");

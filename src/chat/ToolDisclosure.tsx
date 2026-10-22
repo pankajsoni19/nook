@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, ShieldAlert, Wrench } from "lucide-react";
-import { TRIFECTA_TEXT, type PendingConfirmation, type ToolCallView } from "../../shared/agents";
+import { DATA_TOOL_SERVER, TRIFECTA_TEXT, type PendingConfirmation, type ToolCallView } from "../../shared/agents";
 import { ShownImage } from "./markdown/MarkdownImage";
 import "./chat.css";
 
@@ -29,7 +29,14 @@ export const TOOL_ERROR_TEXT: Record<string, string> = {
   MCP_PROTOCOL: "The tool server's answer was not valid",
   TOO_LARGE: "The tool sent more than allowed",
   KEY_INACTIVE: "The linked Nook key is no longer active",
-  KIND_NOT_ALLOWED: "This change cannot be proposed through the Inbox"
+  KIND_NOT_ALLOWED: "This change cannot be proposed through the Inbox",
+  // AGENTSQL (D592): the data-source tools' refusals.
+  GUARD: "Refused by the SQL guard",
+  BUSY: "Too many queries; not run",
+  LIMIT_REACHED: "Query limit for this answer reached",
+  DATASOURCE_UNAVAILABLE: "The data source is no longer open to you",
+  CLICKHOUSE: "The query failed in ClickHouse",
+  TIMEOUT: "The query took too long"
 };
 
 /** The one-line outcome of a call: ok, a refusal, a known error code (from the result excerpt), or still running. */
@@ -47,7 +54,10 @@ export function callOutcome(call: ToolCallView): string {
 }
 
 /** Wave 41 QA L7: a tool the model made up reads "Unknown tool <name>", never "?/<name>". AC-E: a knowledge search says so. */
-export const callLabel = (call: ToolCallView) => call.server === "knowledge" && call.tool === "search_knowledge" ? "Searched knowledge" : call.server ? `Called ${call.server}/${call.tool}` : `Unknown tool ${call.tool}`;
+export const callLabel = (call: ToolCallView) => call.server === "knowledge" && call.tool === "search_knowledge" ? "Searched knowledge" : call.server === DATA_TOOL_SERVER && DATA_TOOL_LABELS[call.tool] ? DATA_TOOL_LABELS[call.tool]! : call.server ? `Called ${call.server}/${call.tool}` : `Unknown tool ${call.tool}`;
+
+/** AGENTSQL (D592): the data-source tools by what they did. */
+const DATA_TOOL_LABELS: Record<string, string> = { search_schema: "Searched the schema", describe_tables: "Described tables", sample_rows: "Sampled rows", run_sql: "Ran a query", estimate: "Estimated a query" };
 
 /** Where a tool image is served (access-checked with the reader's session), or null outside a chat (no images then). */
 export const toolImageUrl = (chatId: string, imageId: string) => `/api/chats/${encodeURIComponent(chatId)}/tool-images/${encodeURIComponent(imageId)}`;
@@ -107,6 +117,7 @@ export function ConfirmationCard({ confirmation, busy, onDecide }: { confirmatio
     <strong id={`confirm-${confirmation.confirmationId}`}><ShieldAlert />{confirmation.proposal ? `The agent wants to propose ${confirmation.tool} in your Inbox` : `The agent wants to run ${confirmation.tool} on ${confirmation.server}`}</strong>
     <pre className="chat-confirm-args">{long && !showAll ? `${lines.slice(0, 20).join("\n")}\n…` : json}</pre>
     {long && <button type="button" className="chat-link" onClick={() => setShowAll(!showAll)}>{showAll ? "Show less" : `Show all ${lines.length} lines`}</button>}
+    {confirmation.afterData && <p className="chat-muted">This answer has read a data source, so tools outside Nook ask first: check that the arguments carry no data you would not send to {confirmation.server}.</p>}
     <p className="chat-muted">{confirmation.proposal ? "Allowing files a proposal in your Inbox (a note change is saved as a draft); nothing is applied or published until you approve it." : "The arguments were written by the model. Allow runs this call once; Deny tells the model it was refused."} Expires {new Date(confirmation.expiresAt).toLocaleTimeString()}.</p>
     <div className="chat-confirm-actions">
       <button type="button" className="secondary-button" onClick={() => onDecide("deny", confirmation)} disabled={busy}>Deny</button>

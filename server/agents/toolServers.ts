@@ -103,7 +103,9 @@ export type ToolServerInput = {
 };
 
 const SLUG = /^[a-z0-9][a-z0-9_-]{0,23}$/;
-const RESERVED_SLUGS = new Set(["nook", "mynotes", "system", "user", "assistant", "tool", "tools", "function", "functions", "admin", "mcp", "agent", "agents"]);
+const RESERVED_SLUGS = new Set(["nook", "mynotes", "system", "user", "assistant", "tool", "tools", "function", "functions", "admin", "mcp", "agent", "agents",
+  // AGENTSQL (D592): the data-source tools are `data__<tool>`.
+  "data"]);
 /**
  * Custom credential header names are an allowlist (review L6): `X-…` names or `Authorization`.
  * Hop-by-hop, proxy, and identity headers are refused even when they would match.

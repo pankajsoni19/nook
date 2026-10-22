@@ -630,6 +630,15 @@ export const DATASOURCE_KINDS = ["clickhouse"] as const;
 export type DatasourceKind = typeof DATASOURCE_KINDS[number];
 
 /** What an admin sees (the password never leaves the server; only `hasPassword`). */
+/**
+ * Lane AGENTSQL (D590): who may use a data source through a chat agent: nobody (`off`, the default),
+ * admins, or members and admins. Never viewers, guests, or integrations.
+ */
+export const DATASOURCE_AGENT_USES = ["off", "admins", "members"] as const;
+export type DatasourceAgentUse = (typeof DATASOURCE_AGENT_USES)[number];
+/** Whether a role may use a data source with this policy through an agent. */
+export const agentUseAllows = (use: DatasourceAgentUse, role: string | null | undefined) => use === "admins" ? role === "admin" : use === "members" ? role === "admin" || role === "member" : false;
+
 export type DatasourceSummary = {
   id: string;
   name: string;
@@ -641,6 +650,8 @@ export type DatasourceSummary = {
   maxRows: number;
   timeoutS: number;
   enabled: boolean;
+  /** Lane AGENTSQL (D590): whether chat agents may use it, and for whom (off by default). */
+  agentUse: DatasourceAgentUse;
   hasPassword: boolean;
   schema: { syncedAt: string | null; tables: number; error: string | null; truncated: boolean };
   revision: number;

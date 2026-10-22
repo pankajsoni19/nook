@@ -2878,6 +2878,19 @@ No migration. Wire type: `ReportDuplicate` (`shared/reports.ts`).
 
 **Behaviour.** D577: Apply stamps a New doc the change attached with the hash of the text it read. D578: a block outside any section that follows a section's block in the spec renders right after that section; "Add a new section" refuses new blocks that do not follow the chosen block. D580: a change to one block carries only that block's doc when its plan todo names it.
 
+## Chat agents: report data sources (lane AGENTSQL, D590–D599)
+
+Migration **073** (`report_datasources.agent_use`, `agent_datasources`, `chat_sql_results`).
+
+- **Policy.** `GET/POST/PATCH /api/reports/admin/datasources[/:id]` carry `agentUse`: `"off"` (default) | `"members"` | `"admins"`; any other word is 400. `DatasourceSummary.agentUse` is always present.
+- **Catalog and picks.** `GET /api/agents/catalog` adds `datasources: [{ id, name, database, tables }]`: enabled data sources whose policy covers the caller's role. An agent's `tools` may hold `{ "source": "datasource", "datasourceId": "<uuid>" }`; a new pick not open to the editor's role is 400 `INVALID`, not open to the owner's role 403 `DATASOURCE_UNAVAILABLE`. Picks already on the agent are kept; a manager's view leaves out picks their role cannot use (`hiddenTools` counts them) and their save keeps them.
+- **Tools in a chat run.** `data__search_schema {datasource?, query, limit?}`, `data__describe_tables {datasource?, tables[≤10]}`, `data__sample_rows {datasource?, table, n?≤5}`, `data__estimate {datasource?, sql}`, `data__run_sql {datasource?, sql, purpose?}`; `datasource` is required when the agent has more than one usable data source. Refusals come back to the model as `{error, code, guard?, hint?}` (`GUARD`, `BUSY`, `LIMIT_REACHED`, `DATASOURCE_UNAVAILABLE`, `CLICKHOUSE`, `TIMEOUT`, `INVALID`). Never offered to API (`/api/v1/agents/:id/runs`) or MCP (`run_agent`) runs.
+- **Stream and message.** A data tool's `tool_call.argsPreview` replaces `sql` with `"[shown with the result]"`; `tool_result.resultPreview` is a one-line summary. A run_sql `tool_result` (and the stored `ToolCallView`) carries `sqlResult: { id, datasourceId, datasourceName, rowCount, columnCount, truncated }`. When a run has used a data tool, a tool-server call raises `confirmation_required` with `afterData: true`.
+- **`GET /api/chats/:chatId/sql-results/:resultId`** → `{ result: { id, datasource: {id, name}, sql, columns: [{name, type}], rows, rowCount, truncated, ms, createdAt } }` for whoever can read the chat (a reader other than the owner: messages on the active branch only) and may use the data source through agents now; 403 `DATASOURCE_UNAVAILABLE` otherwise, 410 `DATASOURCE_GONE` when the data source was removed, 404 for anything else.
+- **Audit.** `agents.sql.run` `{ runId, agentId, chatId, datasourceId, tool, sha256?, ok, code?, rows?, truncated?, queryId?, ms }`.
+- **Public links.** A data tool appears as `{tool, server: "data", ok}` only, with or without `includeToolResults`.
+- **Tool servers.** The slug `data` is reserved (400 on create).
+
 ## Changes to existing note endpoints (Wave 4)
 
 - `DELETE /api/notes/:id`:

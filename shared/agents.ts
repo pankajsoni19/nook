@@ -310,7 +310,40 @@ export type ToolCallView = {
   proposalId: string | null;
   /** Images the tool returned (MCP image content), stored with the chat; absent when there are none. */
   images?: ToolImageRef[];
+  /** Lane AGENTSQL (D594): a `run_sql` result kept with the chat, shown as a table under the reply. */
+  sqlResult?: SqlResultRef;
 };
+/**
+ * A data-source query's result kept with the chat (lane AGENTSQL, D594, D595): ids and counts only on
+ * the message; the SQL and the rows are read from `GET /api/chats/:chatId/sql-results/:resultId` by
+ * whoever can read the chat and may still use the data source through agents.
+ */
+export type SqlResultRef = { id: string; datasourceId: string; datasourceName: string; rowCount: number; columnCount: number; truncated: boolean };
+/** The stored result as the chat reads it (D594). */
+export type SqlResultDetail = {
+  id: string; datasource: { id: string; name: string }; sql: string; columns: Array<{ name: string; type: string }>; rows: unknown[][];
+  rowCount: number; truncated: boolean; ms: number | null; createdAt: string;
+};
+/**
+ * The data-source tools a chat agent gets (lane AGENTSQL, D592): the generation agent's schema tools
+ * and a guarded SELECT. Rows to the model, rows kept for the person, and the per-person rate.
+ */
+export const DATA_TOOL_BOUNDS = {
+  /** Rows a run_sql result keeps for the person's table (and at most the data source's max rows). */
+  uiRows: 1000,
+  /** Rows the model sees of a run_sql result (and at most `modelBytes` of text). */
+  modelRows: 50,
+  modelBytes: 16_384,
+  /** The stored rows of one result, as JSON. */
+  storedRowsBytes: 524_288,
+  /** Data-source tool calls a minute per person (every agent and chat together). */
+  perMinute: 30,
+  /** run_sql calls in one run. */
+  queriesPerRun: 12
+} as const;
+/** The model-facing server word of the data-source tools (`data__run_sql`). */
+export const DATA_TOOL_SERVER = "data";
+export const DATA_TOOL_NAMES = ["search_schema", "describe_tables", "sample_rows", "run_sql", "estimate"] as const;
 /**
  * An image a tool returned (MCP `image` content): PNG, JPEG, GIF, or WebP by its bytes, never SVG,
  * within `TOOL_IMAGE_BOUNDS`. The bytes live in `chat_tool_images` (migration 043) and are served by
@@ -324,7 +357,9 @@ export const TOOL_IMAGE_BOUNDS = { bytes: 2 * 1024 * 1024, perCall: 4, perRun: 1
  * the model's call id) and `argsHash` the SHA-256 of the arguments shown; the client sends both
  * back, and the server accepts each pair once.
  */
-export type PendingConfirmation = { confirmationId: string; argsHash: string; callId: string; tool: string; server: string; args: unknown; expiresAt: string; proposal: boolean };
+export type PendingConfirmation = { confirmationId: string; argsHash: string; callId: string; tool: string; server: string; args: unknown; expiresAt: string; proposal: boolean;
+  /** Lane AGENTSQL (D596): this run read a data source, so a tool server's call asks first whatever its policy. */
+  afterData?: boolean };
 
 /**
  * Stream events (plan §2.3), each with its `seq` as the SSE id. `snapshot` replaces a replay the
@@ -339,7 +374,7 @@ export type RunEvent =
   | { type: "done"; data: { status: RunStatus; messageId: string } }
   // AC-B (plan §2.3): tool disclosure and confirmations.
   | { type: "tool_call"; data: { messageId: string; callId: string; tool: string; server: string; serverId: string | null; argsPreview: string } }
-  | { type: "tool_result"; data: { messageId: string; callId: string; ok: boolean; resultPreview: string; truncated: boolean; durationMs: number; decision: ToolCallView["decision"]; proposalId: string | null; images?: ToolImageRef[] } }
+  | { type: "tool_result"; data: { messageId: string; callId: string; ok: boolean; resultPreview: string; truncated: boolean; durationMs: number; decision: ToolCallView["decision"]; proposalId: string | null; images?: ToolImageRef[]; sqlResult?: SqlResultRef } }
   | { type: "confirmation_required"; data: { messageId: string } & PendingConfirmation }
   | { type: "confirmation_resolved"; data: { messageId: string; confirmationId: string; callId: string; decision: "allowed" | "denied" | "expired" | "cancelled" } }
   | { type: "snapshot"; data: { status: RunStatus; messageId: string; content: string; messageStatus: MessageStatus; usage: TokenUsage | null; errorCode: string | null; toolCalls: ToolCallView[]; pendingConfirmation: PendingConfirmation | null } };
@@ -379,7 +414,9 @@ export type AgentProviderChoice = { id: string; name: string; isDefault: boolean
 export type AgentToolRef =
   | { source: "server"; serverId: string; toolName: string; policy: AgentToolPolicy }
   | { source: "nook"; toolName: string }
-  | { source: "knowledge"; kbId: string };
+  | { source: "knowledge"; kbId: string }
+  /** Lane AGENTSQL (D591): a report data source the policy lets the owner use. */
+  | { source: "datasource"; datasourceId: string };
 export type AgentSummary = {
   id: string; ownerId: string; name: string; description: string; icon: string | null; color: string | null;
   providerId: string | null; model: string | null; maxSteps: number; temperature: number | null; maxOutputTokens: number | null;
@@ -450,7 +487,11 @@ export type ToolCatalog = {
   };
   /** AC-E: the knowledge bases the editor can attach (older servers omit it). */
   knowledge?: KnowledgeCatalogBase[];
+  /** Lane AGENTSQL (D591): the data sources the editor may give agents (older servers omit it). */
+  datasources?: DatasourceCatalogItem[];
 };
+/** A data source in the agent editor (D591): only those an admin opened to agents for the editor's role. */
+export type DatasourceCatalogItem = { id: string; name: string; database: string; tables: number };
 /** A key the person may link to an agent (plan §5.3): their own live general key with the MCP surface. */
 export type LinkableKey = { id: string; name: string; prefix: string; state: string; expiresAt: string | null; grants: Array<{ module: string; permission: string; resource: { kind: string; name: string | null } | null; active: boolean }> };
 /** The caller's link on an agent (QA Q4): none, a live key, or a key that is no longer live. */

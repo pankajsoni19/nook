@@ -16,6 +16,7 @@ import { REPORT_FOLDER_NAME_MAX, REPORT_LIST_NAME_MAX, type DatasourceChoice, ty
 import { AddToListSheet } from "./AddToListSheet";
 import { ListShareSheet } from "./ListShareSheet";
 import { NewReportSheet } from "./NewReportSheet";
+import { dropReportFromChat, peekReportFromChat, writeConsoleSeed, type ReportFromChat } from "./chatSeed";
 import { ReportFolderNav, type FolderActions, type ListActions } from "./ReportFolderNav";
 import { ReportMoveSheet } from "./ReportMoveSheet";
 import { ReportFolderMoveSheet } from "./ReportFolderMoveSheet";
@@ -113,7 +114,9 @@ export function ReportsHome({ displayName, role, onHome, onSettings, onSignOut, 
   const [query, setQuery] = useState("");
   const [searchAll, setSearchAll] = useState(false);
   // Phase 3: New report from a list the caller curates also adds the new report to that list.
-  const [creating, setCreating] = useState<{ folderId: string | null; list?: { id: string; name: string } } | null>(null);
+  const [creating, setCreating] = useState<{ folderId: string | null; list?: { id: string; name: string }; seed?: ReportFromChat } | null>(null);
+  // AGENTSQL (D598): `seed` is a chat's query result turned into a report (Blank, its data source and SQL).
+  const [chatSeed] = useState<ReportFromChat | null>(() => canWrite ? peekReportFromChat() : null);
   const [naming, setNaming] = useState<NameRequest | null>(null);
   const [moving, setMoving] = useState<ReportSummary | null>(null);
   const [movingFolder, setMovingFolder] = useState<ReportFolder | null>(null);
@@ -166,6 +169,15 @@ export function ReportsHome({ displayName, role, onHome, onSettings, onSignOut, 
     generation.current += 1;
     if (reports !== null) { setReports(null); setNextCursor(null); }
   }
+  // AGENTSQL (D598): the chat's hand-off opens New report → Blank once the data sources are known.
+  const seededOnce = useRef(false);
+  useEffect(() => {
+    if (!chatSeed || seededOnce.current || !sources) return;
+    seededOnce.current = true;
+    dropReportFromChat();
+    if (!sources.some((source) => source.id === chatSeed.datasourceId)) { notify.error("That query's data source is not available for reports"); return; }
+    setCreating({ folderId: null, seed: chatSeed });
+  }, [chatSeed, sources]);
   useEffect(() => {
     const first = !loadedOnce.current;
     loadedOnce.current = true;
@@ -596,7 +608,8 @@ export function ReportsHome({ displayName, role, onHome, onSettings, onSignOut, 
       {nav(true)}
     </ModalDialog>}
     {creating && sources && <NewReportSheet sources={sources} role={role} onOpenToolServers={onOpenToolServers} folders={folderLabels} initialFolderId={creating.folderId}
-      onCancel={() => setCreating(null)} onCreated={(id) => { void created(id, creating.list); }} />}
+      {...(creating.seed ? { initialSource: creating.seed.datasourceId, blankSeed: { title: creating.seed.title } } : {})}
+      onCancel={() => setCreating(null)} onCreated={(id) => { if (creating.seed) writeConsoleSeed(id, creating.seed.sql); void created(id, creating.list); }} />}
     {naming && <NameDialog title={naming.kind === "rename" ? "Rename folder" : naming.parent ? `New folder in ${naming.parent.name}` : "New folder"} eyebrow="Reports" label="Folder name"
       initialValue={naming.kind === "rename" ? naming.folder.name : ""} submitLabel={naming.kind === "rename" ? "Rename" : "Create folder"} hint={`Up to ${REPORT_FOLDER_NAME_MAX} characters.`}
       validate={checkFolderName(naming.kind === "rename" ? naming.folder.name : "")} onSubmit={submitName} onCancel={closeNaming} />}

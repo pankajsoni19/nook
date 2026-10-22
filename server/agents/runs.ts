@@ -19,6 +19,8 @@ import { withinAgentRun } from "./depth";
 import { shareLevel } from "./sharing";
 import { publishChatUpdate } from "./chatUpdates";
 import { runKnowledgeTool } from "../knowledge/tool";
+import { runDataTool } from "./dataSources";
+import type { SqlResultRef } from "../../shared/agents";
 import { logger } from "../log";
 
 const slog = logger("agents");
@@ -41,7 +43,11 @@ type PendingState = { confirmation: PendingConfirmation; resolve: (decision: "al
  * A live run. Chat runs carry their chat and assistant message; API and MCP runs (AC-C,
  * server/agents/external.ts) carry no chat and their key instead. All of them share the slots.
  */
-export type ActiveRun = { runId: string; chatId: string | null; keyId: string | null; userId: string; messageId: string; controller: AbortController; startedAt: number; pending: PendingState | null; toolCalls: ToolCallView[] };
+export type ActiveRun = { runId: string; chatId: string | null; keyId: string | null; userId: string; messageId: string; controller: AbortController; startedAt: number; pending: PendingState | null; toolCalls: ToolCallView[];
+  /** AGENTSQL (D596): the run has read a data source; every tool server call after it asks first. */
+  dataRead?: boolean;
+  /** AGENTSQL (D592): run_sql calls so far. */
+  dataQueries?: { count: number } };
 const active = new Map<string, ActiveRun>();
 
 export const activeRuns = () => [...active.values()];
@@ -216,6 +222,19 @@ const preview = (value: string) => value.length > AGENT_BOUNDS.toolPreviewChars 
 const argsPreviewOf = (raw: string) => {
   try { return preview(JSON.stringify(JSON.parse(raw), null, 2)); } catch { return preview(raw); }
 };
+/**
+ * AGENTSQL (D595): a data tool's SQL is not on the message (people the chat is shared with read it);
+ * it is shown with its result table to those who may use the data source.
+ */
+const dataArgsPreviewOf = (raw: string) => {
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (parsed && typeof parsed === "object" && typeof parsed.sql === "string") return preview(JSON.stringify({ ...parsed, sql: "[shown with the result]" }, null, 2));
+    return argsPreviewOf(raw);
+  } catch {
+    return "{}";
+  }
+};
 
 /** Cuts a result to the server's cap in UTF-8 bytes (D350), on a character boundary. */
 export function capResultText(text: string, capBytes: number): { text: string; truncated: boolean; bytes: number } {
@@ -247,15 +266,17 @@ function toolExecutor(run: ActiveRun, channel: RunChannel, agent: AgentRow, mess
     resolved = resolveTools(live.agent, { userId: run.userId, role: live.role });
     return resolved.map((tool) => ({ name: tool.modelName, description: tool.description, parameters: tool.parameters }));
   };
-  const finish = (view: ToolCallView, outcome: { ok: boolean; text: string; truncated: boolean; durationMs: number; proposalId?: string | null; decision?: ToolCallView["decision"]; images?: ToolImageRef[] }) => {
+  const finish = (view: ToolCallView, outcome: { ok: boolean; text: string; truncated: boolean; durationMs: number; proposalId?: string | null; decision?: ToolCallView["decision"]; images?: ToolImageRef[]; preview?: string; sqlResult?: SqlResultRef }) => {
     view.ok = outcome.ok;
-    view.resultPreview = preview(outcome.text);
+    // AGENTSQL (D595): a data tool's excerpt is a summary, never rows.
+    view.resultPreview = preview(outcome.preview ?? outcome.text);
+    if (outcome.sqlResult) view.sqlResult = outcome.sqlResult;
     view.truncated = outcome.truncated;
     view.durationMs = outcome.durationMs;
     view.proposalId = outcome.proposalId ?? null;
     if (outcome.decision) view.decision = outcome.decision;
     if (outcome.images && outcome.images.length > 0) view.images = outcome.images;
-    channel.emit({ type: "tool_result", data: { messageId, callId: view.id, ok: outcome.ok, resultPreview: view.resultPreview, truncated: outcome.truncated, durationMs: outcome.durationMs, decision: view.decision, proposalId: view.proposalId, ...(view.images ? { images: view.images } : {}) } });
+    channel.emit({ type: "tool_result", data: { messageId, callId: view.id, ok: outcome.ok, resultPreview: view.resultPreview, truncated: outcome.truncated, durationMs: outcome.durationMs, decision: view.decision, proposalId: view.proposalId, ...(view.images ? { images: view.images } : {}), ...(view.sqlResult ? { sqlResult: view.sqlResult } : {}) } });
     persist();
   };
   const execute = async (call: ModelToolCall): Promise<ToolExecution> => {
@@ -263,7 +284,7 @@ function toolExecutor(run: ActiveRun, channel: RunChannel, agent: AgentRow, mess
     const offered = resolved.find((item) => item.modelName === call.name) ?? null;
     // A Nook tool through a link whose key died is named as such (QA Q4), not as an unknown tool.
     const deadLink = !offered && call.name.startsWith("nook__") ? inactiveLinkMessage(agent.id, run.userId) : null;
-    const view: ToolCallView = { id: call.id, tool: offered?.toolName ?? (deadLink ? call.name.slice("nook__".length) : call.name), server: offered?.server ?? (deadLink ? "nook" : ""), serverId: offered?.serverId ?? null, argsPreview: argsPreviewOf(call.arguments), resultPreview: null, ok: null, truncated: false, durationMs: null, decision: null, proposalId: null };
+    const view: ToolCallView = { id: call.id, tool: offered?.toolName ?? (deadLink ? call.name.slice("nook__".length) : call.name), server: offered?.server ?? (deadLink ? "nook" : ""), serverId: offered?.serverId ?? null, argsPreview: offered?.kind === "datasource" ? dataArgsPreviewOf(call.arguments) : argsPreviewOf(call.arguments), resultPreview: null, ok: null, truncated: false, durationMs: null, decision: null, proposalId: null };
     const fail = (code: string, message: string, extra: { decision?: ToolCallView["decision"] } = {}) => {
       const text = toolError(code, message);
       finish(view, { ok: false, text, truncated: false, durationMs: Date.now() - started, ...extra });
@@ -295,10 +316,13 @@ function toolExecutor(run: ActiveRun, channel: RunChannel, agent: AgentRow, mess
     };
     let tool = liveToolFor(agent.id, run.userId, identity);
     if (!tool) return unavailable();
-    if (tool.policy === "confirm") {
+    // AGENTSQL (D596): once this run has read a data source, a tool server's call asks first whatever its
+    // policy, so warehouse rows cannot leave through it without the person seeing the arguments.
+    const afterData = tool.kind === "server" && run.dataRead === true && tool.policy !== "confirm";
+    if (tool.policy === "confirm" || afterData) {
       const decision = await awaitConfirmation(run, channel, messageId, {
         confirmationId: randomBytes(16).toString("hex"), argsHash: argsHashOf(args), callId: call.id, tool: tool.toolName, server: tool.server, args,
-        expiresAt: new Date(Date.now() + confirmationTimeouts.ttlMs).toISOString(), proposal: tool.nook?.mode === "proposal"
+        expiresAt: new Date(Date.now() + confirmationTimeouts.ttlMs).toISOString(), proposal: tool.nook?.mode === "proposal", ...(afterData ? { afterData: true } : {})
       });
       if (decision === "cancelled") {
         // The run is ending (Stop, the wall clock, the chat deleted): the call is recorded cancelled, never as the person's refusal.
@@ -315,8 +339,19 @@ function toolExecutor(run: ActiveRun, channel: RunChannel, agent: AgentRow, mess
     let ok: boolean;
     let proposalId: string | null = null;
     let images: McpImage[] = [];
+    let summary: string | undefined;
+    let sqlResult: SqlResultRef | undefined;
     try {
-      if (tool.nook) {
+      if (tool.datasource) {
+        // AGENTSQL (D592): the guarded data tools, re-checked against the runner's live role inside.
+        run.dataQueries ??= { count: 0 };
+        const outcome = await withTimeout(runDataTool(tool.datasource, args, { userId: run.userId, agentId: agent.id, runId: run.runId, chatId: run.chatId, messageId, callId: call.id, signal: run.controller.signal, queries: run.dataQueries }), tool.timeoutMs, run.controller.signal);
+        text = outcome.text;
+        ok = outcome.ok;
+        summary = outcome.preview;
+        sqlResult = outcome.sqlResult;
+        run.dataRead = true;
+      } else if (tool.nook) {
         // The same per-call timeout as a server's (review L9); the result of a late call is discarded.
         const outcome = await withTimeout(runNookTool(tool.nook, args, { runId: run.runId, agentId: agent.id, agentName: agent.name }), tool.timeoutMs, run.controller.signal);
         text = outcome.text;
@@ -355,7 +390,7 @@ function toolExecutor(run: ActiveRun, channel: RunChannel, agent: AgentRow, mess
     // The fence's nonce is made after the result exists, so the result cannot close the fence (review L7).
     const nonce = randomBytes(6).toString("hex");
     const content = `${toolResultMarker(tool.server, tool.toolName, nonce)}\n${capped.text}${capped.truncated ? `\n[truncated: the result was ${capped.bytes} bytes; the first ${tool.resultCapBytes} are shown]` : ""}\n${toolResultEnd(nonce)}`;
-    finish(view, { ok, text: capped.text, truncated: capped.truncated, durationMs: Date.now() - started, proposalId, images: imageRefs });
+    finish(view, { ok, text: capped.text, truncated: capped.truncated, durationMs: Date.now() - started, proposalId, images: imageRefs, preview: summary, sqlResult });
     audit(run.userId, null, "agents.tool.call", { runId: run.runId, agentId: agent.id, serverId: view.serverId, server: view.server, tool: view.tool, ok, truncated: capped.truncated, durationMs: view.durationMs, proposalId });
     return { content };
   };

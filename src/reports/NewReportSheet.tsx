@@ -111,18 +111,19 @@ export function DocSourceNotice({ state, admin, onRetry, onOpenToolServers, onAl
  * pasted link picks its source. It says why the sources could not load (Retry) or why the chosen
  * server may not work (not synced, no read-only fetch tool), with admins' link to fix it.
  */
-export function NewReportSheet({ sources, role = "member", onCancel, onCreated, onOpenToolServers, reportId = null, initialSource = null, folders, initialFolderId = null }: { sources: DatasourceChoice[]; role?: string; onCancel: () => void; onCreated: (id: string) => void; onOpenToolServers?: () => void; /** Generate into this (empty) report instead of a new one: doc mode only, no title. */ reportId?: string | null; initialSource?: string | null;
-  /** Lane I: the owner's folders (a path label each); with them the sheet shows "In: <folder>" and a change control. */ folders?: ReadonlyArray<{ id: string; label: string }>; initialFolderId?: string | null }) {
+export function NewReportSheet({ sources, role = "member", onCancel, onCreated, onOpenToolServers, reportId = null, initialSource = null, folders, initialFolderId = null, blankSeed = null }: { sources: DatasourceChoice[]; role?: string; onCancel: () => void; onCreated: (id: string) => void; onOpenToolServers?: () => void; /** Generate into this (empty) report instead of a new one: doc mode only, no title. */ reportId?: string | null; initialSource?: string | null;
+  /** Lane I: the owner's folders (a path label each); with them the sheet shows "In: <folder>" and a change control. */ folders?: ReadonlyArray<{ id: string; label: string }>; initialFolderId?: string | null;
+  /** AGENTSQL (D598): a chat's query result: Blank, this title, and a note that the console opens with the query. */ blankSeed?: { title: string } | null }) {
   const [servers, setServers] = useState<DocServerChoice[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [mode, setMode] = useState<Mode>("doc");
+  const [mode, setMode] = useState<Mode>(blankSeed ? "blank" : "doc");
   const [docRef, setDocRef] = useState("");
   const [serverId, setServerId] = useState<string | null>(null);
   const [tool, setTool] = useState<string>(AUTO);
   const [arg, setArg] = useState("");
   // B3: the read-only tools the AI may use to read more docs (fetch, list, and search ones ticked by default).
   const [browse, setBrowse] = useState<string[]>([]);
-  const [title, setTitle] = useState("");
+  const [title, setTitle] = useState(blankSeed?.title ?? "");
   const [source, setSource] = useState<string | null>(initialSource ?? sources[0]?.id ?? null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -322,6 +323,7 @@ export function NewReportSheet({ sources, role = "member", onCancel, onCreated, 
       </>}
       <p className="file-dialog-hint">{mode === "doc"
         ? `The AI reads ${docs.length ? "the docs" : "the doc"} (up to ${REPORT_DOC_LIMITS.docs}: Add puts another in the list), writes read-only SQL against the tables an admin allowed, checks it, and builds the report. It uses your AI budget.`
+        : blankSeed ? "The report starts as a draft with its SQL console holding the chat's query. Queries run on that data source, read-only, on the tables an admin allowed."
         : "The report starts as a draft with a SQL console. Queries run on that data source, read-only, on the tables an admin allowed."}</p>
       {error && <p className="form-error" role="alert">{error}</p>}
       <footer className="file-dialog-actions">

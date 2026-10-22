@@ -1,5 +1,5 @@
 import { api, ApiError } from "../api";
-import type { CatalogTable, ConnectionTest, DatasourceChoice, DatasourceSummary, QueryOutcome, ReportDetail, ReportDuplicate, ReportFolder, ReportFolderTree, ReportListChoice, ReportListFilter, ReportListPage, ReportListSharing, ReportListSummary, ReportListVisibility, ReportSummary, SchemaSearchHit, SchemaSyncResult } from "../../shared/reports";
+import type { CatalogTable, ConnectionTest, DatasourceAgentUse, DatasourceChoice, DatasourceSummary, QueryOutcome, ReportDetail, ReportDuplicate, ReportFolder, ReportFolderTree, ReportListChoice, ReportListFilter, ReportListPage, ReportListSharing, ReportListSummary, ReportListVisibility, ReportSummary, SchemaSearchHit, SchemaSyncResult } from "../../shared/reports";
 import type { DocInput, DocServerChoice, DocState, GenerateStarted, GenerationRun } from "../../shared/reportsGenerate";
 
 /** The Reports API (docs/plan/API_CONTRACTS.md § Analytics reports, Wave 45). */
@@ -68,7 +68,7 @@ export const listSchemaTables = (id: string, options: { db?: string; like?: stri
 export const describeSchemaTables = (id: string, tables: string[]) => api<{ tables: CatalogTable[]; missing: string[] }>(`/reports/${id}/schema/describe?tables=${encodeURIComponent(tables.join(","))}`);
 
 // Admin: Settings → Report data sources.
-export type DatasourceInput = { name: string; url: string; username: string; password?: string | null; database: string; allowlist: string[]; maxRows: number; timeoutS: number; enabled: boolean };
+export type DatasourceInput = { name: string; url: string; username: string; password?: string | null; database: string; allowlist: string[]; maxRows: number; timeoutS: number; enabled: boolean; /** D590: chat agents' use. */ agentUse?: DatasourceAgentUse };
 export const listDatasources = () => api<{ datasources: DatasourceSummary[] }>("/reports/admin/datasources");
 export const createDatasource = (input: DatasourceInput) => api<{ datasource: DatasourceSummary }>("/reports/admin/datasources", json("POST", input));
 export const updateDatasource = (id: string, patch: Partial<DatasourceInput> & { expectedRevision: number; removePassword?: boolean }) => api<{ datasource: DatasourceSummary }>(`/reports/admin/datasources/${id}`, json("PATCH", patch));

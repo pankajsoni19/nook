@@ -17,6 +17,8 @@ import { imagesSample, markdownSample } from "./markdownSamples";
  *   `tool:<name>:<json>` stream a call to `<name>` with those arguments (default `lookup({"q":"x"})`);
  *                      once a `tool` turn has come back, answer "Done: <excerpt of the result>"
  *   `loop:<name>:<json>` stream the call at every step, whatever came back (the step cap)
+ *   `seq:<name>:<json>|<name>:<json>|…` stream the k-th call at the step after k tool results came
+ *                      back (calls in order across steps), then "Done: <excerpt of the last result>"
  *   `toolbig:<kb1>:<kb2>` stream `<kb1>` KiB of "x" and a `lookup` call; once a `tool` turn has come
  *                      back, stream `<kb2>` KiB of "y" (a multi-step reply past the stored bound)
  *   `md:<name>`        stream a Markdown sample (`gfm`, `long`; tests/support/markdownSamples.ts)
@@ -110,11 +112,19 @@ export function startFakeProvider(port: number, options: { models?: string[]; na
         const model = payload?.model ?? "gpt-6-luna";
         const last = turnText([...(payload?.messages ?? [])].reverse().find((turn) => turn.role === "user")?.content ?? "");
         const lastTurn = payload?.messages?.at(-1);
-        let match = /^(echo|slow|status|nousage|stall|redirect|huge|tool|toolbig|loop|md|mdslow|mdimg):(.*)$/s.exec(last);
+        let match = /^(echo|slow|status|nousage|stall|redirect|huge|tool|toolbig|loop|md|mdslow|mdimg|seq):(.*)$/s.exec(last);
+        // AGENTSQL: `seq:` calls its tools one per step, in order (the k-th after k tool results), then answers.
+        if (match?.[1] === "seq") {
+          const turns = payload?.messages ?? [];
+          const lastUser = turns.map((turn) => turn.role).lastIndexOf("user");
+          const done = turns.slice(lastUser + 1).filter((turn) => turn.role === "tool").length;
+          const steps = match[2]!.split("|");
+          match = (done < steps.length ? ["", "tool", steps[done]!] : ["", "echo", `Done: ${(lastTurn?.content ?? "").slice(0, 200)}`]) as unknown as RegExpExecArray;
+        }
         // AC-B: after a tool result came back (`tool:` mode), the model answers with an excerpt of it;
         // `loop:` keeps calling the tool every step (the step cap). The call names a tool offered to it
         // (`tool:<name>:<json args>`; a name not offered is sent as given, to test "unknown tool").
-        if (match?.[1] === "tool" && lastTurn?.role === "tool") match = ["", "echo", `Done: ${(lastTurn.content ?? "").slice(0, 200)}`] as unknown as RegExpExecArray;
+        if (match?.[1] === "tool" && lastTurn?.role === "tool" && !/^seq:/.test(last)) match = ["", "echo", `Done: ${(lastTurn.content ?? "").slice(0, 200)}`] as unknown as RegExpExecArray;
         // `toolbig:<kb1>:<kb2>`: the step after the tool result streams `<kb2>` KiB of "y".
         let fill = "x";
         if (match?.[1] === "toolbig" && lastTurn?.role === "tool") {
