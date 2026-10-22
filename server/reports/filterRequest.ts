@@ -1,7 +1,7 @@
 import { audit } from "../db";
 import type { ReportSpec } from "../../shared/reports";
-import { bindValues, defaultValues, PARAM_ID, PARAM_LIMITS } from "../../shared/reportParams";
-import { FILTER_LIMITS, type AddFilterRequest, type FilterColumn, type FilterColumnsView, type FilterPreview, type ReportInstruction } from "../../shared/reportsEdit";
+import { bindValues, DATE_PRESET_LABELS, DATE_PRESETS, defaultValues, PARAM_ID, PARAM_LIMITS, placeholdersIn, placeholdersOf, type DatePreset } from "../../shared/reportParams";
+import { FILTER_LIMITS, type AddFilterRequest, type FilterColumn, type FilterColumnsView, type FilterKind, type FilterPreview, type ReportInstruction } from "../../shared/reportsEdit";
 import { ownedReport } from "./access";
 import { tableAllowed } from "./allowlist";
 import { queryIdFor } from "./clickhouse";
@@ -47,6 +47,37 @@ export function filterChType(type: string): string | null {
   return null;
 }
 
+/** D570: whether a column is a day or a time (a date range filters it by day). */
+export function isDateType(type: string): boolean {
+  let inner = type.trim();
+  for (let match = /^(LowCardinality|Nullable)\((.*)\)$/.exec(inner); match; match = /^(LowCardinality|Nullable)\((.*)\)$/.exec(inner)) inner = match[2]!.trim();
+  return /^(Date|Date32|DateTime|DateTime64)(\(.*\))?$/.test(inner);
+}
+
+/** D569, D570: what Add filter offers for a column type: text a list or "contains", whole numbers a list, dates a date range. */
+export function filterKinds(type: string): FilterKind[] {
+  if (isDateType(type)) return ["date_range"];
+  const chType = filterChType(type);
+  if (!chType) return [];
+  return chType === "Array(String)" ? ["multi_select", "text"] : ["multi_select"];
+}
+
+/** A column as the agent's condition names it (a plain name as is, anything else quoted). */
+const columnRef = (column: string) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(column) ? column : sqlIdentifier(column);
+
+/**
+ * D568–D570: the exact condition the edit agent puts in each query that reads the table, built from
+ * identifiers: a multi-select `(empty(p) OR col IN p)` (with exclusion `(col IN p) != p_not`), text
+ * contains `positionCaseInsensitive`, and a date range by day.
+ */
+export function filterCondition(kind: FilterKind, id: string, column: string, chType: string, exclude = false): string {
+  const col = columnRef(column);
+  if (kind === "text") return `(empty({${id}:String}) OR positionCaseInsensitive(toString(${col}), {${id}:String}) > 0)`;
+  if (kind === "date_range") return `toDate(${col}) BETWEEN {${id}_from:Date} AND {${id}_to:Date}`;
+  const placeholder = `{${id}:${chType}}`;
+  return exclude ? `(empty(${placeholder}) OR (${col} IN ${placeholder}) != {${id}_not:UInt8})` : `(empty(${placeholder}) OR ${col} IN ${placeholder})`;
+}
+
 /** D562: an existing select or multi-select a new filter's choices may follow ("Narrow by Country"). */
 export type NarrowParent = { paramId: string; label: string; column: string; type: "select" | "multi_select"; chType: string };
 
@@ -59,7 +90,8 @@ export function optionsQueryFor(table: string, column: string, narrow: readonly 
   const [db, name] = table.split(".") as [string, string];
   const where = narrow.map((parent) => {
     const placeholder = `{${parent.paramId}:${parent.chType}}`;
-    return parent.type === "multi_select" ? `(empty(${placeholder}) OR ${sqlIdentifier(parent.column)} IN ${placeholder})` : `${sqlIdentifier(parent.column)} = ${placeholder}`;
+    // D568: a parent that leaves its picks out narrows to the values it keeps.
+    return parent.type === "multi_select" ? `(empty(${placeholder}) OR (${sqlIdentifier(parent.column)} IN ${placeholder}) != {${parent.paramId}_not:UInt8})` : `${sqlIdentifier(parent.column)} = ${placeholder}`;
   });
   return `SELECT toString(${sqlIdentifier(column)}) AS value FROM ${sqlIdentifier(db)}.${sqlIdentifier(name)}${where.length ? ` WHERE ${where.join(" AND ")}` : ""} GROUP BY value ORDER BY count() DESC LIMIT ${PARAM_LIMITS.options}`;
 }
@@ -122,9 +154,11 @@ export async function filterColumns(reportId: string, userId: string): Promise<F
   for (const table of tables) {
     const name = `${table.db}.${table.name}`;
     for (const column of table.columns) {
-      const chType = filterChType(column.type);
-      if (!chType) continue;
-      columns.push({ table: name, column: column.name, type: column.type, chType, comment: column.comment ?? "", readBy: readers.get(name) ?? [], sensitive: SENSITIVE.test(column.name) || SENSITIVE.test(column.comment ?? "") });
+      // D570: dates too (a date range); D569: text also as "contains".
+      const kinds = filterKinds(column.type);
+      if (!kinds.length) continue;
+      const chType = kinds[0] === "date_range" ? "Date" : filterChType(column.type)!;
+      columns.push({ table: name, column: column.name, type: column.type, chType, comment: column.comment ?? "", readBy: readers.get(name) ?? [], sensitive: SENSITIVE.test(column.name) || SENSITIVE.test(column.comment ?? ""), kinds });
     }
   }
   columns.sort((a, b) => b.readBy.length - a.readBy.length || a.table.localeCompare(b.table) || a.column.localeCompare(b.column));
@@ -136,7 +170,7 @@ type Found = { found: FilterColumn; spec: ReportSpec; datasource: DatasourceRow;
 async function findColumn(reportId: string, userId: string, table: string, column: string): Promise<Found> {
   const view = await filterColumns(reportId, userId);
   const found = view.columns.find((item) => item.table === table && item.column === column);
-  if (!found) throw new ReportError(400, "INVALID", "Pick a text or whole-number column of a table this report's queries read");
+  if (!found) throw new ReportError(400, "INVALID", "Pick a text, whole-number, or date column of a table this report's queries read");
   const report = ownedReport(reportId, userId);
   return { found, spec: parseSpec(report.spec_json), datasource: usableDatasource(report.datasource_id), columns: view.columns };
 }
@@ -152,18 +186,30 @@ function pickedParents(context: Found, narrowBy: readonly string[] | undefined):
   });
 }
 
+/** The kind asked for, one the column offers (its first by default). */
+function pickedKind(found: FilterColumn, kind: FilterKind | undefined): FilterKind {
+  if (kind === undefined) return found.kinds[0]!;
+  if (!found.kinds.includes(kind)) throw new ReportError(400, "INVALID", `${found.column} cannot be filtered as ${kind === "date_range" ? "a date range" : kind === "text" ? "text contains" : "a list"}`);
+  return kind;
+}
+
 /**
  * Runs the options query and counts the distinct values (refused past FILTER_LIMITS.distinct or with no
  * rows). D562: a narrowed options query runs with its parents at their defaults (All for a multi-select).
+ * D569: text contains reads the same sample (the owner's preview and the check's values) but readers
+ * never get a list, so the distinct limit does not apply.
  */
-async function readOptions(context: Found, userId: string, reportId: string, narrow: readonly NarrowParent[] = []): Promise<{ optionsQuery: string; options: string[]; truncated: boolean; distinct: number }> {
+async function readOptions(context: Found, userId: string, reportId: string, narrow: readonly NarrowParent[] = [], kind: FilterKind = "multi_select"): Promise<{ optionsQuery: string; options: string[]; truncated: boolean; distinct: number }> {
   const { datasource, found, spec } = context;
   const optionsQuery = optionsQueryFor(found.table, found.column, narrow);
   const short = reportId.replace(/-/g, "").slice(0, 12);
   try {
-    const counted = await runGuarded(datasource, `SELECT uniq(${sqlIdentifier(found.column)}) AS distinct_values FROM ${found.table.split(".").map(sqlIdentifier).join(".")}`, { classes: ["select"], maxRows: 1, queryId: queryIdFor("fltn", short, crypto.randomUUID().slice(0, 8)), userId });
-    const distinct = Number(counted.rows[0]?.[0] ?? 0);
-    if (distinct > FILTER_LIMITS.distinct) throw new ReportError(400, "INVALID", `${found.column} has about ${distinct.toLocaleString("en-US")} different values; a filter takes columns with at most ${FILTER_LIMITS.distinct.toLocaleString("en-US")}`);
+    let distinct = 0;
+    if (kind === "multi_select") {
+      const counted = await runGuarded(datasource, `SELECT uniq(${sqlIdentifier(found.column)}) AS distinct_values FROM ${found.table.split(".").map(sqlIdentifier).join(".")}`, { classes: ["select"], maxRows: 1, queryId: queryIdFor("fltn", short, crypto.randomUUID().slice(0, 8)), userId });
+      distinct = Number(counted.rows[0]?.[0] ?? 0);
+      if (distinct > FILTER_LIMITS.distinct) throw new ReportError(400, "INVALID", `${found.column} has about ${distinct.toLocaleString("en-US")} different values; a filter takes columns with at most ${FILTER_LIMITS.distinct.toLocaleString("en-US")}`);
+    }
     const bound = bindValues(spec.parameters, defaultValues(spec.parameters), reportToday(reportId));
     const read = await runOptionsQuery(datasource, optionsQuery, { userId, queryId: queryIdFor("fltopt", short, crypto.randomUUID().slice(0, 8)), params: bound });
     if (!read.options.length) throw new ReportError(400, "INVALID", `${found.table} has no values in ${found.column} to filter by`);
@@ -173,19 +219,41 @@ async function readOptions(context: Found, userId: string, reportId: string, nar
   }
 }
 
+/** D570: a date column's first and last day (the preview's range). */
+async function readDays(context: Found, userId: string, reportId: string): Promise<{ from: string; to: string } | null> {
+  const { datasource, found } = context;
+  const col = sqlIdentifier(found.column);
+  try {
+    const outcome = await runGuarded(datasource, `SELECT toString(min(toDate(${col}))) AS first_day, toString(max(toDate(${col}))) AS last_day FROM ${found.table.split(".").map(sqlIdentifier).join(".")}`, { classes: ["select"], maxRows: 1, queryId: queryIdFor("fltd", reportId.replace(/-/g, "").slice(0, 12), crypto.randomUUID().slice(0, 8)), userId });
+    const [from, to] = outcome.rows[0] ?? [];
+    return typeof from === "string" && typeof to === "string" ? { from, to } : null;
+  } catch (error) {
+    throw asReportError(error);
+  }
+}
+
+const takenIds = (spec: ReportSpec) => spec.parameters.flatMap((param) => [param.id, ...placeholdersOf(param).map((item) => item.name)]);
+
 /**
  * POST …/filters/preview (the owner): the options the filter would have, a suggested id and label, and
  * (D562) the existing filters on the same table it can follow (`narrowBy`), with `narrowBy` the ones picked.
+ * D569, D570: `kind` picks text contains or a date range where the column offers them (a date range
+ * previews the column's first and last day instead of values).
  */
-export async function previewFilter(reportId: string, userId: string, input: { table: string; column: string; narrowBy?: string[] }): Promise<FilterPreview> {
+export async function previewFilter(reportId: string, userId: string, input: { table: string; column: string; narrowBy?: string[]; kind?: FilterKind }): Promise<FilterPreview> {
   const context = await findColumn(reportId, userId, input.table, input.column);
-  const narrow = pickedParents(context, input.narrowBy);
-  const read = await readOptions(context, userId, reportId, narrow);
+  const kind = pickedKind(context.found, input.kind);
   const { found, spec, datasource, columns } = context;
+  const suggested = suggestedFilter(found.column, takenIds(spec));
+  if (kind === "date_range") {
+    return { column: found, optionsQuery: "", sample: [], optionCount: 0, truncated: false, distinct: 0, suggested, narrowBy: [], kind, range: await readDays(context, userId, reportId) };
+  }
+  const narrow = kind === "multi_select" ? pickedParents(context, input.narrowBy) : [];
+  const read = await readOptions(context, userId, reportId, narrow, kind);
   return {
-    column: found, optionsQuery: read.optionsQuery, sample: read.options.slice(0, FILTER_LIMITS.sample), optionCount: read.options.length, truncated: read.truncated, distinct: read.distinct,
-    suggested: suggestedFilter(found.column, spec.parameters.flatMap((param) => param.type === "date_range" ? [param.id, `${param.id}_from`, `${param.id}_to`] : [param.id])),
-    narrowBy: narrowParents(spec, found.table, columns, datasource.database, found.column).map((parent) => ({ paramId: parent.paramId, label: parent.label, column: parent.column, picked: narrow.some((item) => item.paramId === parent.paramId) }))
+    column: found, optionsQuery: read.optionsQuery, sample: read.options.slice(0, FILTER_LIMITS.sample), optionCount: read.options.length, truncated: read.truncated, distinct: read.distinct, suggested,
+    narrowBy: kind === "multi_select" ? narrowParents(spec, found.table, columns, datasource.database, found.column).map((parent) => ({ paramId: parent.paramId, label: parent.label, column: parent.column, picked: narrow.some((item) => item.paramId === parent.paramId) })) : [],
+    kind
   };
 }
 
@@ -199,29 +267,47 @@ function ownerActor(actor: Actor, reportId: string) {
   return report;
 }
 
+export type AddFilterInput = { table: string; column: string; label?: string; id?: string; narrowBy?: string[]; kind?: FilterKind; exclude?: boolean; preset?: string };
+
 /**
  * POST …/filters (the owner; MCP `add_report_filter`): checks the column and the id, runs the options
  * query (it must return a row), and queues an instruction carrying the structured request. The edit
  * agent's proposal waits in Changes (never auto-applied). D562: `narrowBy` names existing filters on the
  * same table whose picks narrow this one's choices (its options query reads them; the agent adds it after them).
+ * D568: `exclude` lets readers leave values out; D569: `kind: "text"` is a text-contains filter; D570:
+ * `kind: "date_range"` with a default `preset` (the default results change: reviewed by hand).
  */
-export async function requestAddFilter(actor: Actor, reportId: string, input: { table: string; column: string; label?: string; id?: string; narrowBy?: string[] }): Promise<ReportInstruction> {
+export async function requestAddFilter(actor: Actor, reportId: string, input: AddFilterInput): Promise<ReportInstruction> {
   ownerActor(actor, reportId);
   const context = await findColumn(reportId, actor.userId, input.table, input.column);
   const { found, spec } = context;
+  const kind = pickedKind(found, input.kind);
   if (spec.parameters.length >= PARAM_LIMITS.parameters) throw new ReportError(409, "LIMIT_REACHED", `A report has at most ${PARAM_LIMITS.parameters} filters`);
   if (!spec.blocks.length) throw new ReportError(409, "INVALID", "The report has no blocks to filter yet");
-  const taken = spec.parameters.flatMap((param) => param.type === "date_range" ? [param.id, `${param.id}_from`, `${param.id}_to`] : [param.id]);
+  const taken = takenIds(spec);
   const suggested = suggestedFilter(found.column, taken);
   const id = input.id ?? suggested.id;
   if (!PARAM_ID.test(id)) throw new ReportError(400, "INVALID", "The filter id must match [a-z][a-z0-9_]{0,29}");
-  if (taken.includes(id)) throw new ReportError(409, "INVALID", `The report already has a parameter ${id}`);
+  const provides = placeholdersOf({ id, type: kind === "text" ? "text" : kind, chType: kind === "date_range" ? "Date" : kind === "text" ? "String" : found.chType } as never).map((item) => item.name);
+  if ([id, ...provides].some((name) => taken.includes(name))) throw new ReportError(409, "INVALID", `The report already has a parameter ${id}`);
   const label = cleanLabel(input.label ?? suggested.label) || suggested.label;
-  const narrow = pickedParents(context, input.narrowBy);
-  const read = await readOptions(context, actor.userId, reportId, narrow);
-  const request: AddFilterRequest = { kind: "add_filter", id, label, table: found.table, column: found.column, chType: found.chType, optionsQuery: read.optionsQuery };
-  const instruction = await addInstruction(actor, reportId, { text: `Add a filter: ${label} (${found.table}.${found.column})${narrow.length ? `, narrowed by ${narrow.map((parent) => parent.label).join(" and ")}` : ""}`, request });
-  audit(actor.userId, null, "reports.filter.request", { reportId, instructionId: instruction.id, kind: "add_filter", paramId: id, table: found.table, column: found.column, sensitive: found.sensitive || undefined, ...(narrow.length ? { narrowBy: narrow.map((parent) => parent.paramId) } : {}), ...(actor.keyId ? { via: "mcp", keyId: actor.keyId } : {}) });
+  let request: AddFilterRequest;
+  if (kind === "date_range") {
+    const preset = input.preset ?? "30d";
+    if (preset === "custom" || !(DATE_PRESETS as readonly string[]).includes(preset)) throw new ReportError(400, "INVALID", `preset must be one of ${DATE_PRESETS.filter((item) => item !== "custom").join(", ")}`);
+    request = { kind: "add_filter", type: "date_range", id, label, table: found.table, column: found.column, chType: "Date", optionsQuery: "", preset, condition: filterCondition("date_range", id, found.column, "Date") };
+  } else if (kind === "text") {
+    const read = await readOptions(context, actor.userId, reportId, [], "text");
+    request = { kind: "add_filter", type: "text", id, label, table: found.table, column: found.column, chType: "String", optionsQuery: read.optionsQuery, condition: filterCondition("text", id, found.column, "String") };
+  } else {
+    const narrow = pickedParents(context, input.narrowBy);
+    const read = await readOptions(context, actor.userId, reportId, narrow);
+    request = { kind: "add_filter", id, label, table: found.table, column: found.column, chType: found.chType, optionsQuery: read.optionsQuery, ...(input.exclude ? { exclude: true, condition: filterCondition("multi_select", id, found.column, found.chType, true) } : {}) };
+  }
+  const what = kind === "date_range" ? `, a date range starting at ${DATE_PRESET_LABELS[request.preset as DatePreset] ?? request.preset}` : kind === "text" ? ", text contains" : request.exclude ? ", values can be left out" : "";
+  const narrowed = request.optionsQuery && placeholdersIn(request.optionsQuery).length ? `, narrowed by ${pickedParents(context, input.narrowBy).map((parent) => parent.label).join(" and ")}` : "";
+  const instruction = await addInstruction(actor, reportId, { text: `Add a filter: ${label} (${found.table}.${found.column})${what}${narrowed}`, request });
+  audit(actor.userId, null, "reports.filter.request", { reportId, instructionId: instruction.id, kind: "add_filter", type: kind, paramId: id, table: found.table, column: found.column, sensitive: found.sensitive || undefined, ...(request.exclude ? { exclude: true } : {}), ...(input.narrowBy?.length && kind === "multi_select" ? { narrowBy: input.narrowBy } : {}), ...(actor.keyId ? { via: "mcp", keyId: actor.keyId } : {}) });
   return instruction;
 }
 

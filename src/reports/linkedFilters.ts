@@ -1,4 +1,4 @@
-import { canonicalValues, optionParentsOf, valueLabel, type ParamValues, type ReportParameter } from "../../shared/reportParams";
+import { canonicalValues, isExcluded, multiPicks, optionParentsOf, valueLabel, type ParamValues, type ReportParameter } from "../../shared/reportParams";
 import { getParamOptions } from "./reportViewApi";
 
 /**
@@ -20,7 +20,7 @@ export function parentsKey(param: ReportParameter, parameters: readonly ReportPa
   return parents.length ? canonicalValues(parameters.filter((item) => parents.includes(item.id)), values) : "";
 }
 
-const picksOf = (param: ReportParameter, value: unknown): string[] => param.type === "multi_select" ? (value as string[] ?? []) : param.type === "select" && value !== param.default ? [value as string] : [];
+const picksOf = (param: ReportParameter, value: unknown): string[] => param.type === "multi_select" ? multiPicks(value) : param.type === "select" && value !== param.default ? [value as string] : [];
 const changed = (param: ReportParameter, a: ParamValues, b: ParamValues) => canonicalValues([param], { [param.id]: a[param.id] ?? param.default }) !== canonicalValues([param], { [param.id]: b[param.id] ?? param.default });
 
 /**
@@ -51,7 +51,7 @@ export async function dropUnlinked(reportId: string, parameters: readonly Report
     if (kept.length === picks.length) continue;
     const where = moved.map((parent) => valueLabel(parent, values[parent.id] ?? parent.default)).join(" and ");
     if (param.type === "select") values[param.id] = param.default;
-    else values[param.id] = kept;
+    else values[param.id] = isExcluded(values[param.id]) && kept.length ? { not: kept } : kept;
     notes.push(kept.length ? `${param.label}: ${picks.filter((pick) => !kept.includes(pick)).join(", ").slice(0, 80)} dropped, not in ${where}` : `${param.label} reset: not in ${where}`);
   }
   return { values, notes };

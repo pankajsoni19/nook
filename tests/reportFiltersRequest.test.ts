@@ -193,7 +193,9 @@ describe("Add filter: the eval case top_routes, \"add a filter on requests.route
     expect(columns.body.queries).toBe(2);
     expect(columns.body.slotsLeft).toBe(8);
     const byName = Object.fromEntries(columns.body.columns.map((column: Json) => [column.column, column]));
-    expect(Object.keys(byName).sort()).toEqual(["api_token_hash", "route", "status", "user_email"]);
+    expect(Object.keys(byName).sort()).toEqual(["api_token_hash", "route", "status", "ts", "user_email"]);
+    // D569, D570: text also as "contains", whole numbers as a list, a time as a date range.
+    expect([byName.route.kinds, byName.status.kinds, byName.ts.kinds, byName.ts.chType]).toEqual([["multi_select", "text"], ["multi_select"], ["date_range"], "Date"]);
     expect(byName.route).toMatchObject({ table: "eval_top_routes.requests", type: "LowCardinality(String)", chType: "Array(String)", readBy: ["routes", "errors"], sensitive: false });
     expect(byName.user_email.sensitive).toBe(true);
     expect(byName.api_token_hash.sensitive).toBe(true);
@@ -330,6 +332,54 @@ describe("D536: the owner sets what a click filters by (set_click_filter)", () =
   });
 });
 
+describe("D568–D570: Add filter as exclude, text contains, and a date range", () => {
+  test("a list readers may leave values out of: the condition reads the flag, the default results stay, and a run leaves values out", async () => {
+    const reportId = await seededReport();
+    const asked = await send(owner, "POST", `/reports/${reportId}/filters`, { table: "eval_top_routes.requests", column: "route", exclude: true });
+    expect(asked.body.instruction).toMatchObject({ text: "Add a filter: Route (eval_top_routes.requests.route), values can be left out", request: { exclude: true, condition: "(empty({route:Array(String)}) OR (route IN {route:Array(String)}) != {route_not:UInt8})" } });
+    expect(await waitStatus(asked.body.instruction.id, ["proposed", "failed"])).toEqual({ status: "proposed", error: null });
+    await send(owner, "POST", `/reports/${reportId}/instructions/${asked.body.instruction.id}/apply`, {});
+    expect(specOf(reportId).queries.find((query) => query.key === "errors")!.sql).toContain("!= {route_not:UInt8}");
+    fake.requests.length = 0;
+    const run = await send(owner, "POST", `/reports/${reportId}/param-runs`, { values: { route: { not: ["search"] } } });
+    expect(run.status).toBe(200);
+    expect(fake.requests.some((item) => item.params.param_route_not === "1" && item.params.param_route === "['search']")).toBe(true);
+    const tool = reportTools.find((item) => item.name === "get_report")!;
+    expect((await tool.handler({ reportId }, { keyId: "k-x", userId: owner.userId, name: "k", scopes: ["reports:read"] as never }) as Json).excludable).toEqual(["route"]);
+  });
+
+  test("text contains: a text parameter, positionCaseInsensitive, checked at empty text", async () => {
+    const reportId = await seededReport();
+    const preview = await send(owner, "POST", `/reports/${reportId}/filters/preview`, { table: "eval_top_routes.requests", column: "route", kind: "text" });
+    expect(preview.body.preview).toMatchObject({ kind: "text", narrowBy: [] });
+    expect((await send(owner, "POST", `/reports/${reportId}/filters/preview`, { table: "eval_top_routes.requests", column: "status", kind: "text" })).status).toBe(400);
+    const asked = await send(owner, "POST", `/reports/${reportId}/filters`, { table: "eval_top_routes.requests", column: "route", kind: "text", label: "Route contains" });
+    expect(asked.body.instruction.request).toMatchObject({ type: "text", chType: "String", condition: "(empty({route:String}) OR positionCaseInsensitive(toString(route), {route:String}) > 0)" });
+    expect(await waitStatus(asked.body.instruction.id, ["proposed", "failed"])).toEqual({ status: "proposed", error: null });
+    const proposal = (await send(owner, "GET", `/reports/${reportId}/instructions/${asked.body.instruction.id}/proposal`)).body.proposal;
+    expect(proposal.filter.reviewByHand).toBeUndefined();
+    // Text contains narrows the chart too (it is no list a click could set), so both queries take it.
+    expect(proposal.filter.checked.map((item: Json) => [item.key, item.otherValue])).toEqual([["routes", "healthz"], ["errors", "healthz"]]);
+    await send(owner, "POST", `/reports/${reportId}/instructions/${asked.body.instruction.id}/apply`, {});
+    expect(specOf(reportId).parameters).toEqual([{ id: "route", label: "Route contains", type: "text", chType: "String", default: "" }]);
+  });
+
+  test("a date range on a DateTime: no identity check, the proposal says to review it by hand", async () => {
+    const reportId = await seededReport();
+    const preview = await send(owner, "POST", `/reports/${reportId}/filters/preview`, { table: "eval_top_routes.requests", column: "ts" });
+    expect(preview.body.preview).toMatchObject({ kind: "date_range", sample: [], optionsQuery: "" });
+    expect((await send(owner, "POST", `/reports/${reportId}/filters`, { table: "eval_top_routes.requests", column: "ts", preset: "2y" })).status).toBe(400);
+    const asked = await send(owner, "POST", `/reports/${reportId}/filters`, { table: "eval_top_routes.requests", column: "ts", label: "Period", preset: "7d" });
+    expect(asked.body.instruction).toMatchObject({ text: "Add a filter: Period (eval_top_routes.requests.ts), a date range starting at Last 7 days", request: { type: "date_range", preset: "7d", condition: "toDate(ts) BETWEEN {ts_from:Date} AND {ts_to:Date}" } });
+    expect(await waitStatus(asked.body.instruction.id, ["proposed", "failed"])).toEqual({ status: "proposed", error: null });
+    const proposal = (await send(owner, "GET", `/reports/${reportId}/instructions/${asked.body.instruction.id}/proposal`)).body.proposal;
+    expect(proposal.filter.reviewByHand).toBe(true);
+    expect(proposal.filter.checked.map((item: Json) => item.otherValue)).toEqual(proposal.filter.checked.map(() => "30d"));
+    await send(owner, "POST", `/reports/${reportId}/instructions/${asked.body.instruction.id}/apply`, {});
+    expect(specOf(reportId).parameters).toEqual([{ id: "ts", label: "Period", type: "date_range", chType: "Date", default: { preset: "7d" } }]);
+  });
+});
+
 describe("D562: Add filter narrowed by an existing filter on the same table (a linked filter)", () => {
   test("the preview offers Narrow by Status; the request's options query reads it, and the agent adds the filter after it", async () => {
     const STATUS_BY = "(empty({status:Array(UInt32)}) OR status IN {status:Array(UInt32)})";
@@ -343,10 +393,10 @@ describe("D562: Add filter narrowed by an existing filter on the same table (a l
     const plain = await send(owner, "POST", `/reports/${reportId}/filters/preview`, { table: "eval_top_routes.requests", column: "route" });
     expect(plain.body.preview.narrowBy).toEqual([{ paramId: "status", label: "Status", column: "status", picked: false }]);
     const narrowed = await send(owner, "POST", `/reports/${reportId}/filters/preview`, { table: "eval_top_routes.requests", column: "route", narrowBy: ["status"] });
-    const linkedQuery = "SELECT toString(`route`) AS value FROM `eval_top_routes`.`requests` WHERE (empty({status:Array(UInt32)}) OR `status` IN {status:Array(UInt32)}) GROUP BY value ORDER BY count() DESC LIMIT 200";
+    const linkedQuery = "SELECT toString(`route`) AS value FROM `eval_top_routes`.`requests` WHERE (empty({status:Array(UInt32)}) OR (`status` IN {status:Array(UInt32)}) != {status_not:UInt8}) GROUP BY value ORDER BY count() DESC LIMIT 200";
     expect(narrowed.body.preview).toMatchObject({ optionsQuery: linkedQuery, narrowBy: [{ paramId: "status", picked: true }], sample: ["healthz", "digest", "search", "orders"] });
     // The options query ran with the parent bound (All).
-    expect(fake.requests.some((item) => item.sql.includes("`status` IN {status:Array(UInt32)}") && item.params.param_status === "[]")).toBe(true);
+    expect(fake.requests.some((item) => item.sql.includes("`status` IN {status:Array(UInt32)}") && item.params.param_status === "[]" && item.params.param_status_not === "0")).toBe(true);
     // Only an offered filter can narrow.
     expect((await send(owner, "POST", `/reports/${reportId}/filters/preview`, { table: "eval_top_routes.requests", column: "route", narrowBy: ["nope"] })).status).toBe(400);
 

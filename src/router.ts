@@ -57,7 +57,8 @@ export function formatReportsFilter(filter: ReportsFilter | undefined) {
  * under the keys `t.<blockId>` and `tq.<blockId>` (a parameter id never holds a dot).
  */
 export type ReportParamsSearch = Record<string, string[]>;
-const PARAM_KEY = /^p\.([a-z][a-z0-9_]{0,29})$/;
+// D568: `p.<id>.not` carries a multi-select's left-out values.
+const PARAM_KEY = /^p\.([a-z][a-z0-9_]{0,29}(?:\.not)?)$/;
 /** D563: a table block's sort (`t.`) or contains text (`tq.`), by block id. */
 export const TABLE_KEY = /^tq?\.[a-z0-9][a-z0-9_-]{0,39}$/;
 
@@ -80,7 +81,7 @@ export function formatReportParams(params: ReportParamsSearch | undefined) {
   const query = new URLSearchParams();
   for (const id of Object.keys(params).sort()) {
     if (TABLE_KEY.test(id)) { const value = params[id]?.[0]; if (value) query.append(id, value); continue; }
-    if (!/^[a-z][a-z0-9_]{0,29}$/.test(id)) continue;
+    if (!/^[a-z][a-z0-9_]{0,29}(?:\.not)?$/.test(id)) continue;
     for (const value of params[id] ?? []) query.append(`p.${id}`, value);
   }
   const text = query.toString();

@@ -69,7 +69,7 @@ Parameters stay the only mechanism: every filter is a spec v3 parameter bound as
 1. **Linked filters:** an options query may read earlier parameters (array order, no cycles); options cached per (param, parents' values hash), ≤ 50 lists a report; child values not in the new options drop with a note. **Shipped** (lane FILT2, D560–D562, migration 069; Add filter's "Narrow by" builds one).
 2. **Table sort and contains, client side:** over loaded rows, state in the URL (`?t.<block>=col.desc`, replace), "within the first N rows" when truncated; personal. **Shipped** (lane FILT2, D563, D564).
 3. **Saved views:** per-viewer named value sets and "my default view" (`report_param_views`); only the owner's "Save as report default" changes the spec. **Shipped** (lane FILT2, D565, D566, migration 069).
-4. **More types:** `number_range`, multi-select exclude, text contains, Add filter on Date/DateTime as a date_range (reviewed by hand, no identity check).
+4. **More types:** `number_range`, multi-select exclude, text contains, Add filter on Date/DateTime as a date_range (reviewed by hand, no identity check). **Shipped** (lane FILT2, D567–D570).
 5. **Concurrent parameter runs** under the caller's query slots, measured after F1.
 
 ## What not to do

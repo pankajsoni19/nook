@@ -3,7 +3,7 @@ import { audit, db, now } from "../db";
 import { logger } from "../log";
 import { REPORT_LIMITS, type QueryOutcome, type ReportQuery, type ReportResult, type ReportSpec, type ResultColumn, type RunTrigger } from "../../shared/reports";
 import {
-  bindValues, boundRecord, canonicalValues, declaredPlaceholders, defaultValues, escapeParamString, isDefaultSet, LINKED_OPTIONS, optionParentsOf, PARAM_LIMITS, placeholdersIn, placeholdersOf, quotedElement, readsOf, resolveValues, todayUtc, valueLabel,
+  bindValues, boundRecord, canonicalValues, declaredPlaceholders, defaultValues, escapeParamString, excludableIds, isDefaultSet, isExcluded, LINKED_OPTIONS, multiPicks, optionParentsOf, PARAM_LIMITS, placeholdersIn, placeholdersOf, quotedElement, readsOf, resolveValues, todayUtc, valueLabel,
   type BoundParam, type ParamOptions, type ParamSetInfo, type ParamValues, type ReportParameter
 } from "../../shared/reportParams";
 import type { QueryResultView, ReportResultsView } from "../../shared/reportsView";
@@ -135,6 +135,9 @@ export function paramSetsToCheck(params: readonly ReportParameter[], options: Re
     } else if (param.type === "multi_select") {
       const first = options.get(param.id)?.[0];
       other[param.id] = param.default.length ? [] : first !== undefined ? [first] : [];
+    } else if (param.type === "number_range") {
+      // D567: an open range, or a closed one when the default is open.
+      other[param.id] = param.default.min === null && param.default.max === null ? { min: 0, max: 1_000_000 } : { min: null, max: null };
     }
   }
   const differs = !isDefaultSet(params, other);
@@ -395,7 +398,7 @@ async function assertOptionValues(report: ReportRow, spec: ReportSpec, values: P
   for (const param of spec.parameters) {
     if (param.type !== "select" && param.type !== "multi_select") continue;
     const value = values[param.id];
-    const picked = param.type === "select" ? (value === param.default ? [] : [value as string]) : (value as string[]).filter((item) => !param.default.includes(item));
+    const picked = param.type === "select" ? (value === param.default ? [] : [value as string]) : multiPicks(value).filter((item) => !param.default.includes(item));
     if (!picked.length) continue;
     const options = await reportParamOptions(report.id, userId, param.id, report, values);
     if (options.error) continue;
@@ -428,6 +431,10 @@ export type ResolvedSet = { values: ParamValues; bound: BoundParam[]; hash: stri
 export function resolveSet(spec: ReportSpec, given: Record<string, unknown> | null | undefined, today = todayUtc()): ResolvedSet {
   const { values, problems } = resolveValues(spec.parameters, given);
   if (problems.length) throw new ReportError(400, "INVALID", `Parameter values refused: ${problems.slice(0, 3).join("; ")}`, { problems: problems.slice(0, 10) });
+  // D568: leaving values out needs every query that reads the filter to read its `<id>_not` flag too.
+  const excludable = excludableIds(spec.parameters, spec.queries);
+  const notHere = spec.parameters.find((param) => isExcluded(values[param.id]) && !excludable.has(param.id));
+  if (notHere) throw new ReportError(400, "INVALID", `${notHere.label} cannot leave values out in this report`, { paramId: notHere.id });
   const bound = bindValues(spec.parameters, values, today);
   return { values, bound, hash: setHashOf(bound), isDefault: isDefaultSet(spec.parameters, values) };
 }

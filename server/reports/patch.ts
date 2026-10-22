@@ -333,7 +333,7 @@ export function diffSpecs(before: ReportSpec, after: ReportSpec): { blocks: Bloc
     for (const query of after.queries) {
       const old = oldQueries.get(query.key);
       if (!old || old.sql !== query.sql) continue;
-      const reads = placeholdersIn(query.sql).some((item) => params.has(item.name) || params.has(item.name.replace(/_(from|to)$/, "")));
+      const reads = placeholdersIn(query.sql).some((item) => params.has(item.name) || params.has(item.name.replace(/_(from|to|min|max|not)$/, "")));
       if (reads) queries.push({ key: query.key, change: "updated", before: old.sql, after: query.sql });
     }
   }

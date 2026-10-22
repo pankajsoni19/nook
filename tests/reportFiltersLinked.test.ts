@@ -90,7 +90,7 @@ describe("D560: an options query reads only earlier parameters", () => {
 
   test("D562: a narrowed options query reads its parents; the listed column of an options query", () => {
     expect(optionsQueryFor("db.t", "route", [{ paramId: "country", label: "Country", column: "country", type: "multi_select", chType: "Array(String)" }, { paramId: "plan", label: "Plan", column: "plan", type: "select", chType: "String" }]))
-      .toBe("SELECT toString(`route`) AS value FROM `db`.`t` WHERE (empty({country:Array(String)}) OR `country` IN {country:Array(String)}) AND `plan` = {plan:String} GROUP BY value ORDER BY count() DESC LIMIT 200");
+      .toBe("SELECT toString(`route`) AS value FROM `db`.`t` WHERE (empty({country:Array(String)}) OR (`country` IN {country:Array(String)}) != {country_not:UInt8}) AND `plan` = {plan:String} GROUP BY value ORDER BY count() DESC LIMIT 200");
     expect(optionColumnOf(optionsQueryFor("db.t", "we`ird"))).toBe("we`ird");
     expect(optionColumnOf("SELECT DISTINCT country FROM analytics.orders ORDER BY country")).toBe("country");
     expect(optionColumnOf("SELECT toString(status) AS value FROM db.t")).toBe("status");

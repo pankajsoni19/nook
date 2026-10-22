@@ -175,7 +175,7 @@
 .report-add-filter-form { min-height: 0; flex: 1 1 auto; display: flex; flex-direction: column; gap: 0; }
 .report-add-filter-body { min-height: 0; flex: 1 1 auto; overflow: auto; display: grid; align-content: start; gap: 10px; padding-bottom: 4px; }
 .report-add-filter-form > .file-dialog-actions { border-top: 1px solid var(--border); margin-top: 6px; }
-.report-add-filter-columns { display: grid; gap: 4px; max-height: min(320px, 38dvh); overflow: auto; border: 1px solid var(--border); border-radius: 10px; padding: 4px; background: var(--bg); }
+.report-add-filter-columns { display: grid; grid-auto-rows: max-content; gap: 4px; max-height: min(320px, 38dvh); overflow: auto; border: 1px solid var(--border); border-radius: 10px; padding: 4px; background: var(--bg); }
 .report-add-filter-column { display: grid; gap: 2px; min-width: 0; min-height: 44px; width: 100%; border: 1px solid transparent; border-radius: 8px; padding: 6px 12px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .report-add-filter-column:hover { background: var(--panel-hover); }
 .report-add-filter-column:focus-visible { outline: 2px solid var(--yellow); outline-offset: -2px; }
@@ -193,6 +193,18 @@
 .report-add-filter-narrow input { accent-color: var(--yellow); }
 .report-add-filter-narrow .report-add-filter-toggle span { display: grid; gap: 1px; min-width: 0; }
 .report-add-filter-narrow small { color: var(--muted); font-size: .76rem; overflow-wrap: anywhere; }
+/* D568–D570 (lane FILT2): the filter type, "leave values out", and a date range's review note. */
+.report-add-filter-kinds { display: flex; flex-wrap: wrap; gap: 6px; }
+.report-add-filter-kind { min-height: 36px; border: 1px solid var(--border); border-radius: 999px; padding: 0 14px; background: transparent; color: var(--muted); font: inherit; font-size: .84rem; font-weight: 600; cursor: pointer; }
+.report-add-filter-kind:hover { background: var(--panel-hover); color: inherit; }
+.report-add-filter-kind:focus-visible { outline: 2px solid var(--yellow); outline-offset: 2px; }
+.report-add-filter-kind.selected { border-color: var(--yellow-dim); background: color-mix(in srgb, var(--yellow) 10%, var(--panel)); color: inherit; }
+.report-add-filter-exclude input { accent-color: var(--yellow); }
+.report-add-filter-exclude span { display: grid; gap: 1px; min-width: 0; }
+.report-add-filter-exclude small { color: var(--muted); font-size: .76rem; }
+.report-add-filter-review { display: flex; align-items: flex-start; gap: 8px; margin: 0; border: 1px solid color-mix(in srgb, var(--yellow) 40%, var(--border)); border-radius: 8px; padding: 8px 10px; background: color-mix(in srgb, var(--yellow) 8%, transparent); font-size: .84rem; }
+.report-add-filter-review svg { margin-top: 2px; color: var(--yellow); }
+@media (max-width: 760px) { .report-add-filter-kind { min-height: 44px; } }
 .report-add-filter-preview { display: grid; gap: 8px; min-width: 0; border-top: 1px solid var(--border); padding-top: 10px; }
 .report-add-filter-preview .reports-loading, .report-add-filter-preview .form-error { display: flex; align-items: center; gap: 8px; margin: 0; }
 .report-add-filter-preview svg { width: 16px; height: 16px; flex: none; }
@@ -211,5 +223,7 @@
 .report-proposal-filter li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; min-width: 0; font-size: .86rem; }
 .report-proposal-filter-ok { display: inline-flex; align-items: center; gap: 6px; color: var(--report-good, #4ade80); font-weight: 600; }
 .report-proposal-filter-ok svg { color: #4ade80; }
+.report-proposal-filter-review { display: flex; align-items: flex-start; gap: 8px; margin: 0; border: 1px solid color-mix(in srgb, var(--yellow) 40%, var(--border)); border-radius: 8px; padding: 8px 10px; background: color-mix(in srgb, var(--yellow) 8%, transparent); color: var(--text, #ededee); font-size: .84rem; }
+.report-proposal-filter-review svg { width: 16px; height: 16px; flex: none; margin-top: 2px; color: var(--yellow); }
 .report-proposal-filter-note { color: var(--report-muted); }
 .report-proposal-filter-sub { margin: 4px 0 0; color: var(--report-soft); font-size: .8rem; font-weight: 600; }

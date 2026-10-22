@@ -94,7 +94,7 @@ describe("values, binding, and the URL (shared/reportParams.ts)", () => {
     const bound = bindValues(list, { ...defaultValues(list), country: ["it's", "a\\b"], route: "x\ty", q: "o'k\\" }, "2026-10-15");
     expect(bound).toEqual([
       { name: "period_from", type: "Date", value: "2026-09-16" }, { name: "period_to", type: "Date", value: "2026-10-15" },
-      { name: "country", type: "Array(String)", value: "['it\\'s','a\\\\b']" },
+      { name: "country", type: "Array(String)", value: "['it\\'s','a\\\\b']" }, { name: "country_not", type: "UInt8", value: "0" },
       { name: "route", type: "String", value: "x\\ty" },
       { name: "plan", type: "UInt64", value: "7" },
       { name: "min", type: "Float64", value: "1.5" },

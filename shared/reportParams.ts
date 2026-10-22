@@ -9,7 +9,7 @@
  * the cache key), and tests share it.
  */
 
-export const PARAM_TYPES = ["date_range", "select", "multi_select", "number", "text"] as const;
+export const PARAM_TYPES = ["date_range", "select", "multi_select", "number", "text", "number_range"] as const;
 export type ParamType = typeof PARAM_TYPES[number];
 
 /**
@@ -29,10 +29,10 @@ export const SCALAR_SELECT_TYPES = ["String", "Int32", "Int64", "UInt32", "UInt6
 export const MULTI_SELECT_TYPES = ["Array(String)", "Array(Int32)", "Array(Int64)", "Array(UInt32)", "Array(UInt64)"] as const;
 export const NUMBER_TYPES = ["Int32", "Int64", "UInt32", "UInt64", "Float64"] as const;
 export const CH_TYPES_BY_PARAM: Record<ParamType, readonly string[]> = {
-  date_range: ["Date"], select: SCALAR_SELECT_TYPES, multi_select: MULTI_SELECT_TYPES, number: NUMBER_TYPES, text: ["String"]
+  date_range: ["Date"], select: SCALAR_SELECT_TYPES, multi_select: MULTI_SELECT_TYPES, number: NUMBER_TYPES, text: ["String"], number_range: NUMBER_TYPES
 };
-/** Every type a placeholder may carry. */
-export const PLACEHOLDER_TYPES: ReadonlySet<string> = new Set(Object.values(CH_TYPES_BY_PARAM).flat());
+/** Every type a placeholder may carry (D568: a multi-select's `<id>_not` flag is UInt8). */
+export const PLACEHOLDER_TYPES: ReadonlySet<string> = new Set([...Object.values(CH_TYPES_BY_PARAM).flat(), "UInt8"]);
 
 export const PARAM_LIMITS = {
   /** Parameters one spec may declare. */
@@ -63,9 +63,36 @@ export type SelectParameter = ParamBase & { type: "select"; chType: string; defa
 export type MultiSelectParameter = ParamBase & { type: "multi_select"; chType: string; default: string[]; optionsQuery: string };
 export type NumberParameter = ParamBase & { type: "number"; chType: string; default: number; min?: number; max?: number };
 export type TextParameter = ParamBase & { type: "text"; chType: "String"; default: string; maxLength?: number };
-export type ReportParameter = DateRangeParameter | SelectParameter | MultiSelectParameter | NumberParameter | TextParameter;
+/** D567: a number range; a missing end (null) is open (bound as the type's lowest or highest value). */
+export type NumberRangeValue = { min: number | null; max: number | null };
+export type NumberRangeParameter = ParamBase & { type: "number_range"; chType: string; default: NumberRangeValue };
+export type ReportParameter = DateRangeParameter | SelectParameter | MultiSelectParameter | NumberParameter | TextParameter | NumberRangeParameter;
 
-export type ParamValue = DateRangeValue | string | string[] | number;
+/**
+ * D568: a multi-select's picks to leave out (`{ not: [...] }`), where the report's SQL reads the
+ * companion flag `{<id>_not:UInt8}`: `(empty({p:Array(T)}) OR (col IN {p:Array(T)}) != {p_not:UInt8})`.
+ */
+export type ExcludeValue = { not: string[] };
+export type ParamValue = DateRangeValue | string | string[] | number | NumberRangeValue | ExcludeValue;
+
+/** D568: a multi-select's picked values, whether it keeps or leaves them out. */
+export const multiPicks = (value: unknown): string[] => Array.isArray(value) ? value as string[] : value && typeof value === "object" && Array.isArray((value as ExcludeValue).not) ? (value as ExcludeValue).not : [];
+/** D568: whether a multi-select's value leaves its picks out. */
+export const isExcluded = (value: unknown): value is ExcludeValue => Boolean(value && typeof value === "object" && !Array.isArray(value) && Array.isArray((value as ExcludeValue).not) && (value as ExcludeValue).not.length > 0);
+
+/**
+ * D568: the multi-selects readers may exclude with: every query that reads the parameter also reads
+ * its `<id>_not` flag (else excluding would leave some blocks keeping the picks).
+ */
+export function excludableIds(params: ReadonlyArray<Pick<ReportParameter, "id" | "type">>, queries: ReadonlyArray<{ sql: string }>): Set<string> {
+  const out = new Set<string>();
+  for (const param of params) {
+    if (param.type !== "multi_select") continue;
+    const readers = queries.map((query) => new Set(placeholdersIn(query.sql).map((item) => item.name))).filter((names) => names.has(param.id) || names.has(`${param.id}_not`));
+    if (readers.length && readers.every((names) => names.has(param.id) && names.has(`${param.id}_not`))) out.add(param.id);
+  }
+  return out;
+}
 export type ParamValues = Record<string, ParamValue>;
 
 /** One bound ClickHouse parameter: its name in the SQL, its type, and the value as sent (`param_<name>`). */
@@ -74,6 +101,9 @@ export type BoundParam = { name: string; type: string; value: string };
 /** A placeholder `{name:Type}` a parameter provides. */
 export function placeholdersOf(param: Pick<ReportParameter, "id" | "type" | "chType">): Array<{ name: string; type: string }> {
   if (param.type === "date_range") return [{ name: `${param.id}_from`, type: "Date" }, { name: `${param.id}_to`, type: "Date" }];
+  // D567: a number range binds both ends; D568: a multi-select also offers its exclude flag.
+  if (param.type === "number_range") return [{ name: `${param.id}_min`, type: param.chType }, { name: `${param.id}_max`, type: param.chType }];
+  if (param.type === "multi_select") return [{ name: param.id, type: param.chType }, { name: `${param.id}_not`, type: "UInt8" }];
   return [{ name: param.id, type: param.chType }];
 }
 
@@ -233,10 +263,26 @@ export function valueProblem(param: ReportParameter, value: unknown): string | n
     }
     case "select": return scalarProblem(param.chType, value);
     case "multi_select": {
-      if (!Array.isArray(value)) return "must be a list (empty for All)";
-      if (value.length > PARAM_LIMITS.selected) return `may hold at most ${PARAM_LIMITS.selected} values`;
-      for (const item of value) { const problem = scalarProblem(elementType(param.chType), item); if (problem) return problem; }
-      return new Set(value).size === value.length ? null : "lists a value twice";
+      // D568: `{ not: [...] }` leaves the picks out (the server checks the report's SQL reads `<id>_not`).
+      const exclude = value && typeof value === "object" && !Array.isArray(value);
+      if (exclude && (Object.keys(value).length !== 1 || !Array.isArray((value as ExcludeValue).not))) return "must be a list, or { not: [values] } to leave them out";
+      const items = exclude ? (value as ExcludeValue).not : value;
+      if (!Array.isArray(items)) return "must be a list (empty for All)";
+      if (items.length > PARAM_LIMITS.selected) return `may hold at most ${PARAM_LIMITS.selected} values`;
+      for (const item of items) { const problem = scalarProblem(elementType(param.chType), item); if (problem) return problem; }
+      return new Set(items).size === items.length ? null : "lists a value twice";
+    }
+    case "number_range": {
+      if (!value || typeof value !== "object" || Array.isArray(value)) return "must be { min, max } (null for an open end)";
+      const range = value as Record<string, unknown>;
+      if (Object.keys(range).length !== 2 || !("min" in range) || !("max" in range)) return "takes only min and max";
+      for (const end of [range.min, range.max]) {
+        if (end === null) continue;
+        if (typeof end !== "number" || !Number.isFinite(end)) return "min and max must be numbers or null";
+        if (isInteger(param.chType) && !Number.isSafeInteger(end)) return "must be whole numbers";
+        if (param.chType.startsWith("U") && end < 0) return "must not be negative";
+      }
+      return typeof range.min === "number" && typeof range.max === "number" && range.min > range.max ? "min must not be more than max" : null;
     }
     case "number": {
       if (typeof value !== "number" || !Number.isFinite(value)) return "must be a number";
@@ -274,7 +320,15 @@ function canonical(param: ReportParameter, value: ParamValue): unknown {
     const range = value as DateRangeValue;
     return range.preset === "custom" ? { from: range.from, preset: "custom", to: range.to } : { preset: range.preset };
   }
-  if (param.type === "multi_select") return [...(value as string[])].sort();
+  if (param.type === "multi_select") {
+    const picks = [...multiPicks(value)].sort();
+    // An empty exclusion is All, like [].
+    return isExcluded(value) ? { not: picks } : picks;
+  }
+  if (param.type === "number_range") {
+    const range = value as NumberRangeValue;
+    return { max: range.max, min: range.min };
+  }
   return value;
 }
 
@@ -305,7 +359,7 @@ export function resolveValues(params: readonly ReportParameter[], given: Record<
     const problem = valueProblem(param, value);
     if (problem) { problems.push(`${param.id}: ${problem}`); values[param.id] = param.default; }
     // Canonical (a multi-select sorted), so the same choice binds and caches as one set.
-    else values[param.id] = param.type === "date_range" || param.type === "multi_select" ? canonical(param, value as ParamValue) as ParamValue : value as ParamValue;
+    else values[param.id] = param.type === "date_range" || param.type === "multi_select" || param.type === "number_range" ? canonical(param, value as ParamValue) as ParamValue : value as ParamValue;
   }
   return { values, problems };
 }
@@ -316,6 +370,12 @@ export function resolveValues(params: readonly ReportParameter[], given: Record<
 export const escapeParamString = (value: string) => value.replace(/\\/g, "\\\\").replace(/\t/g, "\\t").replace(/\n/g, "\\n").replace(/\r/g, "\\r");
 /** One element of an Array(String) parameter: single-quoted, backslash-escaped. */
 export const quotedElement = (value: string) => `'${value.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/\t/g, "\\t")}'`;
+
+/** D567: what an open end of a number range binds as, per type (the type's lowest and highest; Float64's infinities). */
+export const RANGE_ENDS: Record<string, readonly [string, string]> = {
+  Int32: ["-2147483648", "2147483647"], Int64: ["-9223372036854775808", "9223372036854775807"],
+  UInt32: ["0", "4294967295"], UInt64: ["0", "18446744073709551615"], Float64: ["-inf", "inf"]
+};
 
 /**
  * The bound parameters for a set of values on `today`: a date range binds `<id>_from` and `<id>_to`,
@@ -333,9 +393,16 @@ export function bindValues(params: readonly ReportParameter[], values: ParamValu
         break;
       }
       case "multi_select": {
-        const items = value as string[];
+        const items = multiPicks(value);
         const element = elementType(param.chType);
-        out.push({ name: param.id, type: param.chType, value: `[${items.map((item) => element === "String" ? quotedElement(item) : String(BigInt(item))).join(",")}]` });
+        out.push({ name: param.id, type: param.chType, value: `[${items.map((item) => element === "String" ? quotedElement(item) : String(BigInt(item))).join(",")}]` },
+          { name: `${param.id}_not`, type: "UInt8", value: isExcluded(value) ? "1" : "0" });
+        break;
+      }
+      case "number_range": {
+        const range = value as NumberRangeValue;
+        const [low, high] = RANGE_ENDS[param.chType] ?? ["-inf", "inf"];
+        out.push({ name: `${param.id}_min`, type: param.chType, value: range.min === null ? low : String(range.min) }, { name: `${param.id}_max`, type: param.chType, value: range.max === null ? high : String(range.max) });
         break;
       }
       case "select":
@@ -457,8 +524,14 @@ export function valuesToSearch(params: readonly ReportParameter[], values: Param
     if (param.type === "date_range") {
       const range = value as DateRangeValue;
       out[param.id] = [range.preset === "custom" ? `${range.from}..${range.to}` : range.preset];
-    } else if (param.type === "multi_select") out[param.id] = (value as string[]).length ? [...(value as string[])] : [""];
-    else out[param.id] = [String(value)];
+    } else if (param.type === "multi_select") {
+      // D568: left-out values ride as `p.<id>.not`.
+      if (isExcluded(value)) out[`${param.id}.not`] = [...value.not];
+      else out[param.id] = multiPicks(value).length ? [...multiPicks(value)] : [""];
+    } else if (param.type === "number_range") {
+      const range = value as NumberRangeValue;
+      out[param.id] = [`${range.min ?? ""}..${range.max ?? ""}`];
+    } else out[param.id] = [String(value)];
   }
   return out;
 }
@@ -467,6 +540,8 @@ export function valuesToSearch(params: readonly ReportParameter[], values: Param
 export function valuesFromSearch(params: readonly ReportParameter[], entries: Record<string, string[]> | undefined): ParamValues {
   const given: Record<string, unknown> = {};
   for (const param of params) {
+    const excluded = param.type === "multi_select" ? entries?.[`${param.id}.not`]?.filter((item) => item !== "") : undefined;
+    if (excluded?.length) { given[param.id] = { not: excluded }; continue; }
     const raw = entries?.[param.id];
     if (!raw?.length) continue;
     if (param.type === "date_range") {
@@ -474,17 +549,33 @@ export function valuesFromSearch(params: readonly ReportParameter[], entries: Re
       given[param.id] = range ? { preset: "custom", from: range[1], to: range[2] } : { preset: raw[0] };
     } else if (param.type === "multi_select") given[param.id] = raw.filter((item) => item !== "");
     else if (param.type === "number") given[param.id] = raw[0]!.trim() === "" ? NaN : Number(raw[0]);
-    else given[param.id] = raw[0];
+    else if (param.type === "number_range") {
+      // D567: `10..500`, `10..`, `..500`.
+      const range = /^([^.]*(?:\.\d+)?)\.\.(.*)$/.exec(raw[0]!.trim());
+      const end = (text: string | undefined) => text === undefined || text.trim() === "" ? null : Number(text);
+      given[param.id] = range ? { min: end(range[1]), max: end(range[2]) } : null;
+    } else given[param.id] = raw[0];
   }
   return resolveValues(params, given).values;
 }
+
+/** A number as a range label shows it (grouped). */
+const rangeNumber = (value: number) => value.toLocaleString("en-US", { maximumFractionDigits: 6 });
 
 /** A value as the control bar and Inspect show it. */
 export function valueLabel(param: ReportParameter, value: ParamValue): string {
   if (param.type === "date_range") return dateRangeLabel(value as DateRangeValue);
   if (param.type === "multi_select") {
-    const items = value as string[];
-    return items.length === 0 ? "All" : items.length <= 2 ? items.join(", ") : `${items.length} selected`;
+    const items = multiPicks(value);
+    const list = items.length <= 2 ? items.join(", ") : `${items.length} selected`;
+    return items.length === 0 ? "All" : isExcluded(value) ? `All but ${list}` : list;
+  }
+  if (param.type === "number_range") {
+    const range = value as NumberRangeValue;
+    if (range.min === null && range.max === null) return "Any";
+    if (range.min === null) return `≤ ${rangeNumber(range.max!)}`;
+    if (range.max === null) return `≥ ${rangeNumber(range.min)}`;
+    return range.min === range.max ? rangeNumber(range.min) : `${rangeNumber(range.min)}–${rangeNumber(range.max)}`;
   }
   return String(value);
 }

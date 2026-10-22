@@ -78,7 +78,18 @@ export type ReportPatch = { ops: PatchOp[]; summary?: string; untouched?: PatchU
  * 066): Add filter (a multi-select over one catalog column; its options query built by Nook from catalog
  * identifiers) or Remove filter. The label is data in the agent's prompt, never instructions.
  */
-export type AddFilterRequest = { kind: "add_filter"; id: string; label: string; table: string; column: string; chType: string; optionsQuery: string };
+export type AddFilterRequest = {
+  kind: "add_filter"; id: string; label: string; table: string; column: string; chType: string; optionsQuery: string;
+  /** D569, D570: the filter's type (absent: a multi-select, as slice 1 asked); its exact condition, built by Nook from identifiers. */
+  type?: FilterKind; condition?: string;
+  /** D568: a multi-select readers may leave values out of (`{<id>_not:UInt8}`). */
+  exclude?: boolean;
+  /** D570: a date range's default preset (the default results change: the owner reviews by hand). */
+  preset?: string;
+};
+/** D569, D570: what Add filter can make of a column. */
+export const FILTER_KINDS = ["multi_select", "text", "date_range"] as const;
+export type FilterKind = typeof FILTER_KINDS[number];
 export type RemoveFilterRequest = { kind: "remove_filter"; id: string; label: string };
 export type FilterRequest = AddFilterRequest | RemoveFilterRequest;
 
@@ -92,6 +103,8 @@ export type ProposalFilterView = {
   untouched: PatchUntouched[];
   /** Blocks the filter reaches after the change, of the chart, KPI, and table blocks. */
   reach: { blocks: number; total: number };
+  /** D570: a date range filter changes the default results, so nothing was compared: the owner reviews it by hand. */
+  reviewByHand?: boolean;
 };
 
 // ------------------------------------------------------------------------------- instructions
@@ -242,12 +255,18 @@ export type FilterColumn = {
   readBy: string[];
   /** Named or commented like an email, phone, token, password, or secret (T409): hidden unless asked for. */
   sensitive: boolean;
+  /** D569, D570: what Add filter can make of it (text: a list or "contains"; whole numbers: a list; dates: a date range). */
+  kinds: FilterKind[];
 };
 export type FilterColumnsView = { columns: FilterColumn[]; /** The report's used queries. */ queries: number; /** Parameters left before the limit of 8. */ slotsLeft: number };
 /** D534: the options Nook would give the filter (POST /api/reports/:id/filters/preview). */
 /** D562: an existing filter on the same table whose picks a new filter's choices may follow ("Narrow by Country"). */
 export type FilterNarrowChoice = { paramId: string; label: string; column: string; picked: boolean };
-export type FilterPreview = { column: FilterColumn; optionsQuery: string; sample: string[]; optionCount: number; truncated: boolean; distinct: number; suggested: { id: string; label: string }; narrowBy: FilterNarrowChoice[] };
+export type FilterPreview = {
+  column: FilterColumn; optionsQuery: string; sample: string[]; optionCount: number; truncated: boolean; distinct: number; suggested: { id: string; label: string }; narrowBy: FilterNarrowChoice[];
+  /** D569, D570: the kind previewed, and a date column's first and last day. */
+  kind: FilterKind; range?: { from: string; to: string } | null;
+};
 
 export const FILTER_LIMITS = {
   /** A column with more distinct values than this is refused (T409). */

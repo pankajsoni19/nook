@@ -5,8 +5,8 @@ import type { ReportParamsSearch } from "../router";
 import { Select } from "../ui/Select";
 import { useHistoryDialogGuard } from "../ui/useHistoryDialogGuard";
 import {
-  DATE_PRESET_LABELS, DATE_PRESETS, defaultValues, isDefaultSet, optionParentsOf, PARAM_LIMITS, resolveDateRange, todayIn, validDay, valueLabel, valueProblem, zoneLabel,
-  type DatePreset, type DateRangeValue, type MultiSelectParameter, type ParamOptions, type ParamValue, type ParamValues, type ReportParameter
+  DATE_PRESET_LABELS, DATE_PRESETS, defaultValues, isDefaultSet, isExcluded, multiPicks, optionParentsOf, PARAM_LIMITS, resolveDateRange, todayIn, validDay, valueLabel, valueProblem, zoneLabel,
+  type DatePreset, type DateRangeValue, type MultiSelectParameter, type NumberRangeParameter, type NumberRangeValue, type ParamOptions, type ParamValue, type ParamValues, type ReportParameter
 } from "../../shared/reportParams";
 import { getParamOptions } from "./reportViewApi";
 import { parentsKey, parentValuesOf } from "./linkedFilters";
@@ -108,6 +108,8 @@ const ZoneContext = createContext<string>("UTC");
 /** D533: how many of the report's chart, KPI, and table blocks each parameter reaches. */
 export type ParamReach = Record<string, { blocks: number; total: number }>;
 const ReachContext = createContext<ParamReach>({});
+/** D568: the multi-selects readers may leave values out of (every query reading one reads its `<id>_not`). */
+const ExcludableContext = createContext<ReadonlySet<string>>(new Set());
 /** "Filters 4 of 6 blocks" ("all 6" when it reaches every one); null when unknown. */
 export function reachText(reach: ParamReach[string] | undefined): string | null {
   if (!reach || !reach.total) return null;
@@ -126,7 +128,7 @@ function rangeText(value: DateRangeValue, zone: string) {
   return `${day(value.from)} – ${day(value.to)}`;
 }
 
-type Sheet = { kind: "range"; param: ReportParameter } | { kind: "multi"; param: MultiSelectParameter } | null;
+type Sheet = { kind: "range"; param: ReportParameter } | { kind: "multi"; param: MultiSelectParameter } | { kind: "numbers"; param: NumberRangeParameter } | null;
 
 type FieldProps = {
   param: ReportParameter;
@@ -142,7 +144,7 @@ type FieldProps = {
 function ParamField({ param, value, options, variant, disabled, onChange, onSheet }: FieldProps) {
   const zone = useContext(ZoneContext);
   const reach = reachText(useContext(ReachContext)[param.id]);
-  const isDefault = JSON.stringify(value) === JSON.stringify(param.default);
+  const isDefault = isDefaultSet([param], { [param.id]: value });
   let control: React.ReactNode;
   switch (param.type) {
     case "date_range": {
@@ -158,7 +160,7 @@ function ParamField({ param, value, options, variant, disabled, onChange, onShee
       control = <SelectParamControl param={param} value={value as string} state={options[param.id]} variant={variant} disabled={disabled} onChange={onChange} />;
       break;
     case "multi_select": {
-      const picked = value as string[];
+      const picked = value;
       // The shared Select's trigger look; the choices open as a checkbox sheet (none checked is All).
       control = <button type="button" className={`ui-select ui-select-${variant} report-param-multi`} disabled={disabled} aria-haspopup="dialog" onClick={() => onSheet({ kind: "multi", param })}
         aria-label={`${param.label}: ${valueLabel(param, picked)}`}>
@@ -167,6 +169,14 @@ function ParamField({ param, value, options, variant, disabled, onChange, onShee
       </button>;
       break;
     }
+    case "number_range":
+      // D567: the multi-select's trigger look; the two ends open in a sheet.
+      control = <button type="button" className={`ui-select ui-select-${variant} report-param-multi`} disabled={disabled} aria-haspopup="dialog" onClick={() => onSheet({ kind: "numbers", param })}
+        aria-label={`${param.label}: ${valueLabel(param, value)}`}>
+        <span className="ui-select-value">{variant === "chip" ? `${param.label}: ` : ""}{valueLabel(param, value)}</span>
+        <ChevronDown className="ui-select-chevron" aria-hidden="true" />
+      </button>;
+      break;
     default:
       control = <ParamInput param={param} value={value} disabled={disabled} onChange={onChange} />;
   }
@@ -220,20 +230,22 @@ type BarProps = {
   /** D565: open the reader's saved views, and the one on show (its name on the chip). */
   onViews?: () => void;
   viewName?: string | null;
+  /** D568: the multi-selects readers may leave values out of. */
+  excludable?: ReadonlySet<string>;
 };
 
 /** The control bar: pills from 761 px, the Filters button and sheet on a phone. */
-export function ReportParamsBar({ reportId, parameters, values, busy, onChange, timeZone = "UTC", reach = NO_REACH, onAddFilter, onRemoveFilter, onViews, viewName = null }: BarProps) {
+export function ReportParamsBar({ reportId, parameters, values, busy, onChange, timeZone = "UTC", reach = NO_REACH, onAddFilter, onRemoveFilter, onViews, viewName = null, excludable = NO_EXCLUDE }: BarProps) {
   const options = useParamOptions(reportId, parameters, true, values);
   const [sheet, setSheet] = useState<Sheet>(null);
   const [phoneOpen, setPhoneOpen] = useState(false);
   const isDefault = isDefaultSet(parameters, values);
-  const changed = parameters.filter((param) => JSON.stringify(values[param.id]) !== JSON.stringify(param.default)).length;
+  const changed = parameters.filter((param) => !isDefaultSet([param], { [param.id]: values[param.id] ?? param.default })).length;
   const set = (param: ReportParameter, value: ParamValue) => onChange({ ...values, [param.id]: value });
   const reset = () => onChange(defaultValues(parameters));
   const summary = (param: ReportParameter) => param.type === "date_range" ? rangeText((values[param.id] ?? param.default) as DateRangeValue, timeZone) : valueLabel(param, values[param.id] ?? param.default);
   const addButton = (className: string) => onAddFilter ? <button type="button" className={`report-params-add ${className}`} onClick={onAddFilter} aria-haspopup="dialog"><Plus aria-hidden="true" />Filter</button> : null;
-  return <ReportIdContext.Provider value={reportId}><ZoneContext.Provider value={timeZone}><ReachContext.Provider value={reach}><LinkContext.Provider value={{ parameters, values }}><div className="report-params" role="group" aria-label="Report filters">
+  return <ReportIdContext.Provider value={reportId}><ZoneContext.Provider value={timeZone}><ReachContext.Provider value={reach}><ExcludableContext.Provider value={excludable}><LinkContext.Provider value={{ parameters, values }}><div className="report-params" role="group" aria-label="Report filters">
     <div className="report-params-chips">
       {parameters.map((param) => <ParamField key={param.id} param={param} value={values[param.id] ?? param.default} options={options} variant="chip" disabled={false}
         onChange={(value) => set(param, value)} onSheet={setSheet} />)}
@@ -253,12 +265,13 @@ export function ReportParamsBar({ reportId, parameters, values, busy, onChange, 
     </div>
     {sheet?.kind === "range" && <CustomRangeSheet param={sheet.param} value={values[sheet.param.id] as DateRangeValue} onClose={() => setSheet(null)}
       onApply={(value) => { setSheet(null); set(sheet.param, value); }} />}
-    {sheet?.kind === "multi" && <MultiSelectSheet param={sheet.param} value={values[sheet.param.id] as string[]} options={options[sheet.param.id]} onClose={() => setSheet(null)}
+    {sheet?.kind === "numbers" && <NumberRangeSheet param={sheet.param} value={values[sheet.param.id] as NumberRangeValue} onClose={() => setSheet(null)} onApply={(value) => { setSheet(null); set(sheet.param, value); }} />}
+    {sheet?.kind === "multi" && <MultiSelectSheet param={sheet.param} value={values[sheet.param.id]} options={options[sheet.param.id]} onClose={() => setSheet(null)}
       onApply={(value) => { setSheet(null); set(sheet.param, value); }} onRemove={onRemoveFilter ? () => { const param = sheet.param; setSheet(null); onRemoveFilter(param); } : undefined} />}
     {phoneOpen && <ParamsSheet parameters={parameters} values={values} options={options} onClose={() => setPhoneOpen(false)} reopen={() => setPhoneOpen(true)}
       onApply={(next) => { setPhoneOpen(false); onChange(next); }} onRemove={onRemoveFilter ? (param) => { setPhoneOpen(false); onRemoveFilter(param); } : undefined}
       onViews={onViews ? () => { setPhoneOpen(false); onViews(); } : undefined} viewName={viewName} />}
-  </div></LinkContext.Provider></ReachContext.Provider></ZoneContext.Provider></ReportIdContext.Provider>;
+  </div></LinkContext.Provider></ExcludableContext.Provider></ReachContext.Provider></ZoneContext.Provider></ReportIdContext.Provider>;
 }
 
 /** Custom from–to days (both included); Apply keeps a valid range only. */
@@ -283,10 +296,41 @@ function CustomRangeSheet({ param, value, onApply, onClose }: { param: ReportPar
 }
 
 const NO_REACH: ParamReach = {};
+const NO_EXCLUDE: ReadonlySet<string> = new Set();
 
-/** A multi-select's choices as checkboxes; none checked is All. D534: the owner's Remove filter asks the edit agent (a proposal in Changes). */
-function MultiSelectSheet({ param, value, options, onApply, onClose, onRemove }: { param: MultiSelectParameter; value: string[]; options: OptionsState[string] | undefined; onApply: (value: string[]) => void; onClose: () => void; onRemove?: () => void }) {
-  const [picked, setPicked] = useState<string[]>(value ?? []);
+/** D567: a number range's two ends; an empty end is open. Apply keeps a valid range only. */
+function NumberRangeSheet({ param, value, onApply, onClose }: { param: NumberRangeParameter; value: NumberRangeValue | undefined; onApply: (value: NumberRangeValue) => void; onClose: () => void }) {
+  const start = value ?? param.default;
+  const [min, setMin] = useState(start.min === null ? "" : String(start.min));
+  const [max, setMax] = useState(start.max === null ? "" : String(start.max));
+  useHistoryDialogGuard(true, onClose, { reopen: null });
+  const parse = (text: string) => text.trim() === "" ? null : Number(text);
+  const next: NumberRangeValue = { min: parse(min), max: parse(max) };
+  const problem = valueProblem(param, next);
+  return <ModalDialog title={param.label} eyebrow="Range" onClose={onClose} variant="sheet" className="reports-dialog report-params-sheet">
+    <div className="report-params-fields">
+      <label className="report-param-field"><span className="report-param-label">At least</span><input className="report-param-input" inputMode="decimal" placeholder="Any" value={min} onChange={(event) => setMin(event.target.value)} /></label>
+      <label className="report-param-field"><span className="report-param-label">At most</span><input className="report-param-input" inputMode="decimal" placeholder="Any" value={max} onChange={(event) => setMax(event.target.value)} /></label>
+      {problem && <p className="report-param-problem" role="alert">{problem.slice(0, 1).toUpperCase() + problem.slice(1)}</p>}
+      <ReachNote paramId={param.id} />
+    </div>
+    <footer className="file-dialog-actions">
+      <button type="button" className="secondary-button" onClick={() => { setMin(""); setMax(""); }} disabled={!min && !max}><RotateCcw aria-hidden="true" />Any</button>
+      <button type="button" className="secondary-button" onClick={onClose}>Cancel</button>
+      <button type="button" className="primary-button" disabled={Boolean(problem)} onClick={() => onApply(next)}><Check aria-hidden="true" />Apply</button>
+    </footer>
+  </ModalDialog>;
+}
+
+/**
+ * A multi-select's choices as checkboxes; none checked is All. D534: the owner's Remove filter asks the
+ * edit agent (a proposal in Changes). D568: where the report allows it, "Leave these out" keeps every
+ * value but the checked ones.
+ */
+function MultiSelectSheet({ param, value, options, onApply, onClose, onRemove }: { param: MultiSelectParameter; value: ParamValue | undefined; options: OptionsState[string] | undefined; onApply: (value: ParamValue) => void; onClose: () => void; onRemove?: () => void }) {
+  const [picked, setPicked] = useState<string[]>(multiPicks(value));
+  const canExclude = useContext(ExcludableContext).has(param.id);
+  const [exclude, setExclude] = useState(isExcluded(value));
   const [query, setQuery] = useState("");
   useHistoryDialogGuard(true, onClose, { reopen: null });
   // D491: a list cut at 200 searches ClickHouse too.
@@ -298,10 +342,11 @@ function MultiSelectSheet({ param, value, options, onApply, onClose, onRemove }:
   const shown = query ? withFound(choices, search.found).filter((choice) => choice.toLowerCase().includes(query.trim().toLowerCase())) : choices;
   const note = optionsNote(options) ?? (search.error ? search.error : query.trim() && search.searching ? "Searching…" : cut && !query.trim() ? `Showing the first ${listed.length}; search to find more.` : null);
   const toggle = (choice: string) => setPicked((current) => current.includes(choice) ? current.filter((item) => item !== choice) : current.length >= PARAM_LIMITS.selected ? current : [...current, choice]);
-  return <ModalDialog title={param.label} eyebrow={picked.length ? `${picked.length} selected` : "All"} onClose={onClose} variant="sheet" className="reports-dialog report-params-sheet">
+  return <ModalDialog title={param.label} eyebrow={picked.length ? `${picked.length} ${exclude ? "left out" : "selected"}` : "All"} onClose={onClose} variant="sheet" className="reports-dialog report-params-sheet">
     <div className="report-params-fields">
       {(choices.length > 8 || cut) && <input className="report-param-input" type="search" placeholder={`Search ${param.label.toLowerCase()}`} aria-label={`Search ${param.label}`} value={query} onChange={(event) => setQuery(event.target.value)} />}
       <label className="report-param-check"><input type="checkbox" checked={picked.length === 0} onChange={() => setPicked([])} />All</label>
+      {canExclude && <label className="report-param-check report-param-exclude"><input type="checkbox" checked={exclude} onChange={(event) => { const on = event.target.checked; setExclude(on); }} />Leave the checked values out</label>}
       <div className="report-param-checks" role="group" aria-label={param.label}>
         {shown.map((choice) => <label key={choice} className="report-param-check"><input type="checkbox" checked={picked.includes(choice)} onChange={() => toggle(choice)} />{choice || "(blank)"}</label>)}
       </div>
@@ -311,7 +356,7 @@ function MultiSelectSheet({ param, value, options, onApply, onClose, onRemove }:
     <footer className="file-dialog-actions">
       {onRemove && <button type="button" className="secondary-button report-param-remove" onClick={onRemove}><Trash2 aria-hidden="true" />Remove filter</button>}
       <button type="button" className="secondary-button" onClick={onClose}>Cancel</button>
-      <button type="button" className="primary-button" onClick={() => onApply(picked)}><Check aria-hidden="true" />Apply</button>
+      <button type="button" className="primary-button" onClick={() => onApply(exclude && picked.length ? { not: picked } : picked)}><Check aria-hidden="true" />Apply</button>
     </footer>
   </ModalDialog>;
 }
@@ -338,7 +383,8 @@ function ParamsSheet({ parameters, values, options, onApply, onClose, reopen, on
       <button type="button" className="primary-button" onClick={() => onApply(draft)}><Check aria-hidden="true" />Show results</button>
     </footer>
     {sheet?.kind === "range" && <CustomRangeSheet param={sheet.param} value={draft[sheet.param.id] as DateRangeValue} onClose={() => setSheet(null)} onApply={(value) => { setSheet(null); set(sheet.param, value); }} />}
-    {sheet?.kind === "multi" && <MultiSelectSheet param={sheet.param} value={draft[sheet.param.id] as string[]} options={shown[sheet.param.id]} onClose={() => setSheet(null)} onApply={(value) => { setSheet(null); set(sheet.param, value); }}
+    {sheet?.kind === "numbers" && <NumberRangeSheet param={sheet.param} value={draft[sheet.param.id] as NumberRangeValue} onClose={() => setSheet(null)} onApply={(value) => { setSheet(null); set(sheet.param, value); }} />}
+    {sheet?.kind === "multi" && <MultiSelectSheet param={sheet.param} value={draft[sheet.param.id]} options={shown[sheet.param.id]} onClose={() => setSheet(null)} onApply={(value) => { setSheet(null); set(sheet.param, value); }}
       onRemove={onRemove ? () => { const param = sheet.param; setSheet(null); onRemove(param); } : undefined} />}
   </ModalDialog></LinkContext.Provider>;
 }

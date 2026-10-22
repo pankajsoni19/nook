@@ -19,7 +19,7 @@ import { ResultTable } from "./ResultTable";
 import { PAGE_METRICS_RUN_MARKER } from "../../shared/reportsMetrics";
 import { getParamOptions, previewVersionOf, getParamResults, getResults, getRun, listRuns, refreshReport, runParamSet, RUN_STATUS_TEXT, timeAgo } from "./reportViewApi";
 import { ReportParamsBar, ReportParamsContext, type ParamReach } from "./ReportParamsBar";
-import { canonicalValues, isDefaultSet, optionParentsOf, reachOf, valuesFromSearch, valuesToSearch, type ParamValues, type ReportParameter } from "../../shared/reportParams";
+import { canonicalValues, excludableIds, isDefaultSet, optionParentsOf, reachOf, valuesFromSearch, valuesToSearch, type ParamValues, type ReportParameter } from "../../shared/reportParams";
 import { dropUnlinked, parentsKey, parentValuesOf } from "./linkedFilters";
 import { CONTAINS_CHARS, containsKey, formatSort, parseSort, sortKey } from "./tableView";
 import { TABLE_KEY } from "../router";
@@ -195,7 +195,9 @@ export function ReportView({ report, canWrite, generating = false, initial, read
           setLoadError(null);
           return ran;
         } catch (reason) {
-          if (codeOf(reason).code !== "RUN_IN_PROGRESS" || attempt >= 80) throw reason;
+          // Another run holds the report, or the person's query slots are full for a moment (the filters' lists load too): wait, then run.
+          const code = codeOf(reason).code;
+          if ((code !== "RUN_IN_PROGRESS" && code !== "BUSY") || attempt >= 80) throw reason;
           await new Promise((resolve) => setTimeout(resolve, 1500));
           if (!current()) return null;
         }
@@ -357,6 +359,7 @@ export function ReportView({ report, canWrite, generating = false, initial, read
     const named = Object.keys(paramsContext?.search ?? {}).some((key) => !TABLE_KEY.test(key));
     if (mine && !named) pushValues(viewValues(parameters, mine), { replace: true });
   }, [views.loaded, views.views, withParams, paramsContext?.search, parameters, pushValues]);
+  const excludable = useMemo(() => excludableIds(parameters, report.spec.queries), [parameters, report.spec.queries]);
   const shownView = views.views.length ? activeView(parameters, values, views.views) : null;
   const saveAsDefault = async () => {
     await editSpec(report.id, defaultOps(parameters, values), report.revision);
@@ -395,7 +398,7 @@ export function ReportView({ report, canWrite, generating = false, initial, read
     const current = valuesRef.current[param.id] ?? param.default;
     const next = clickedValue(param, current, value);
     if (next === null) { notify.warning(`At most 50 values can be picked for ${param.label}`); return; }
-    const adding = param.type === "multi_select" ? !(current as string[]).includes(value) : next !== param.default;
+    const adding = param.type === "multi_select" ? !(Array.isArray(current) && current.includes(value)) : next !== param.default;
     if (adding) {
       // D560: a linked filter's choices are those of its parents' current values.
       const cacheKey = `${param.id}\u0000${parentsKey(param, parameters, valuesRef.current)}`;
@@ -425,7 +428,7 @@ export function ReportView({ report, canWrite, generating = false, initial, read
   return <section className={`report-view report-theme-${palette.mode}`} style={cssVars} aria-label="Report">
     {(withParams || (canAddFilter && paramsContext !== null)) && <ReportParamsBar reportId={report.id} parameters={parameters} values={values} busy={Boolean(pending)} onChange={changeParams} timeZone={view?.timeZone}
       reach={blockReach} onAddFilter={canAddFilter ? editing?.addFilter : undefined} onRemoveFilter={canAddFilter && editing?.removeFilter ? (param) => editing.removeFilter!(param.id) : undefined}
-      onViews={withParams ? () => setViewsOpen(true) : undefined} viewName={shownView?.name ?? null} />}
+      onViews={withParams ? () => setViewsOpen(true) : undefined} viewName={shownView?.name ?? null} excludable={excludable} />}
     {viewsOpen && withParams && <ViewsSheet reportId={report.id} parameters={parameters} values={values} views={views.views} canSaveDefault={views.canSaveDefault && Boolean(editing?.canEdit)}
       onApply={(next) => pushValues(next)} onChanged={views.reload} onSaveDefault={saveAsDefault} onClose={() => setViewsOpen(false)} reopen={() => setViewsOpen(true)} />}
     {!readOnly && <div className="report-view-toolbar">

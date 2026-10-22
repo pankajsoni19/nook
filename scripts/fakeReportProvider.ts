@@ -313,7 +313,7 @@ export function withoutCondition(sql: string, id: string): string {
 export function filterRequestPatch(system: string) {
   const raw = /<request>([\s\S]*?)<\/request>/.exec(system)?.[1];
   if (!system.includes("## The filter request") || !raw) return null;
-  const request = JSON.parse(raw) as { kind: string; id: string; label: string; table?: string; column?: string; chType?: string; optionsQuery?: string };
+  const request = JSON.parse(raw) as { kind: string; id: string; label: string; table?: string; column?: string; chType?: string; optionsQuery?: string; type?: string; condition?: string };
   const specText = /## The current report\n([\s\S]*?)\n\n## The filter request/.exec(system)?.[1] ?? "{}";
   const spec = JSON.parse(specText) as SpecInPrompt;
   if (request.kind === "remove_filter") {
@@ -324,9 +324,13 @@ export function filterRequestPatch(system: string) {
     return { summary: `Remove the filter ${request.label}`, ops };
   }
   const placeholder = `{${request.id}:${request.chType}}`;
-  const condition = `(empty(${placeholder}) OR ${request.column} IN ${placeholder})`;
+  // D568–D570: the condition and the parameter exactly as the prompt gives them (a list filter by default).
+  const condition = request.condition ?? `(empty(${placeholder}) OR ${request.column} IN ${placeholder})`;
+  const wanted = /add_parameter with exactly (\{.*\}) \(copy it/.exec(system)?.[1];
+  const parameter = wanted ? JSON.parse(wanted) as Record<string, unknown> : { id: request.id, label: request.label, type: "multi_select", chType: request.chType, default: [], optionsQuery: request.optionsQuery };
+  const listed = !request.type || request.type === "multi_select";
   const reads = spec.queries.filter((query) => query.sql.includes(request.table!));
-  const groups = (sql: string) => new RegExp(String.raw`GROUP BY[^\n]*\b${request.column}\b`, "i").test(sql);
+  const groups = (sql: string) => listed && new RegExp(String.raw`GROUP BY[^\n]*\b${request.column}\b`, "i").test(sql);
   const filtered = reads.filter((query) => !groups(query.sql));
   const kept = reads.filter((query) => groups(query.sql));
   const clickable = spec.blocks.filter((block) => kept.some((query) => query.key === block.queryKey) && (block.type === "table" || (block.type === "chart" && ["bar", "stacked_bar", "horizontal_bar", "pie", "line", "area"].includes(block.kind ?? "") && block.x === request.column)));
@@ -334,7 +338,7 @@ export function filterRequestPatch(system: string) {
     summary: `Add a ${request.label} filter to ${filtered.map((query) => query.key).join(", ")}`,
     ops: [
       // D562: a narrowed filter goes after the filters it reads (the prompt says after: "<id>").
-      { op: "add_parameter", parameter: { id: request.id, label: request.label, type: "multi_select", chType: request.chType, default: [], optionsQuery: request.optionsQuery }, ...(/Pass after: "([a-z0-9_]+)"/.exec(system) ? { after: /Pass after: "([a-z0-9_]+)"/.exec(system)![1] } : {}) },
+      { op: "add_parameter", parameter, ...(/Pass after: "([a-z0-9_]+)"/.exec(system) ? { after: /Pass after: "([a-z0-9_]+)"/.exec(system)![1] } : {}) },
       ...filtered.map((query) => ({ op: "update_query", key: query.key, sql: withCondition(query.sql, condition) })),
       ...clickable.map((block) => ({ op: "set_click_filter", id: block.id, clickFilter: { param: request.id, column: request.column } }))
     ],

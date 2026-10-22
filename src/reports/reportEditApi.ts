@@ -1,6 +1,6 @@
 import { api } from "../api";
 import type { DocInput } from "../../shared/reportsGenerate";
-import type { FilterColumnsView, FilterPreview, InstructionKind, InstructionsView, PatchOp, ProposalView, ReportInstruction, OwnerReview, OwnerReviewScope, ReportOwners, ReportSharing, SharingInput } from "../../shared/reportsEdit";
+import type { FilterColumnsView, FilterKind, FilterPreview, InstructionKind, InstructionsView, PatchOp, ProposalView, ReportInstruction, OwnerReview, OwnerReviewScope, ReportOwners, ReportSharing, SharingInput } from "../../shared/reportsEdit";
 import type { VersionDiff, VersionHistoryItem, VersionSnapshot } from "../../shared/reportVersions";
 import type { QueryEditPreview } from "../../shared/reportsQueryEdit";
 import type { ParamValues } from "../../shared/reportParams";
@@ -39,8 +39,8 @@ export const suggestQuery = (id: string, queryKey: string, input: { sql: string;
 
 /** D534 (the owner): Add filter's columns, the options a column would give, the request, and Remove filter. */
 export const filterColumns = (id: string) => api<FilterColumnsView>(`/reports/${id}/filters/columns`);
-export const previewFilter = (id: string, table: string, column: string, narrowBy: readonly string[] = []) => api<{ preview: FilterPreview }>(`/reports/${id}/filters/preview`, json("POST", narrowBy.length ? { table, column, narrowBy } : { table, column }));
-export const requestFilter = (id: string, input: { table: string; column: string; label: string; narrowBy?: string[] }) => api<{ instruction: ReportInstruction }>(`/reports/${id}/filters`, json("POST", input));
+export const previewFilter = (id: string, table: string, column: string, narrowBy: readonly string[] = [], kind?: FilterKind) => api<{ preview: FilterPreview }>(`/reports/${id}/filters/preview`, json("POST", { table, column, ...(narrowBy.length ? { narrowBy } : {}), ...(kind && kind !== "multi_select" ? { kind } : {}) }));
+export const requestFilter = (id: string, input: { table: string; column: string; label: string; narrowBy?: string[]; kind?: FilterKind; exclude?: boolean; preset?: string }) => api<{ instruction: ReportInstruction }>(`/reports/${id}/filters`, json("POST", input));
 export const requestFilterRemoval = (id: string, paramId: string) => api<{ instruction: ReportInstruction }>(`/reports/${id}/filters/${paramId}`, { method: "DELETE", body: "{}" });
 
 export const getSharing = (id: string) => api<{ sharing: ReportSharing }>(`/reports/${id}/sharing`);

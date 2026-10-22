@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { AppEnv } from "../auth";
 import { parseJson, uuid } from "../validation";
 import { BLOCK_ID } from "../../shared/reports";
-import { INSTRUCTION_KINDS, INSTRUCTION_LIMITS, SHARE_LEVELS, type ReportPatch } from "../../shared/reportsEdit";
+import { FILTER_KINDS, INSTRUCTION_KINDS, INSTRUCTION_LIMITS, SHARE_LEVELS, type ReportPatch } from "../../shared/reportsEdit";
 import { REPORT_DOC_LIMITS } from "../../shared/reportsGenerate";
 import { TOOL_NAME } from "../agents/toolServers";
 import { ReportError } from "./errors";
@@ -40,8 +40,8 @@ const instructionCreate = z.object({
 }).strict();
 /** D534: a catalog column, as `db.table` and its name (checked against the report's tables and the catalog). */
 const catalogName = z.string().min(1).max(260).refine((value) => !/[\u0000-\u001f\u007f`]/.test(value), "must be a plain name");
-const filterColumnSchema = z.object({ table: catalogName.refine((value) => value.includes("."), "must be db.table"), column: catalogName, narrowBy: z.array(z.string().regex(PARAM_ID)).max(PARAM_LIMITS.parameters).optional() }).strict();
-const filterCreateSchema = filterColumnSchema.extend({ label: z.string().trim().min(1).max(PARAM_LIMITS.label).optional(), id: z.string().regex(PARAM_ID).optional() }).strict();
+const filterColumnSchema = z.object({ table: catalogName.refine((value) => value.includes("."), "must be db.table"), column: catalogName, narrowBy: z.array(z.string().regex(PARAM_ID)).max(PARAM_LIMITS.parameters).optional(), kind: z.enum(FILTER_KINDS).optional() }).strict();
+const filterCreateSchema = filterColumnSchema.extend({ label: z.string().trim().min(1).max(PARAM_LIMITS.label).optional(), id: z.string().regex(PARAM_ID).optional(), exclude: z.boolean().optional(), preset: z.string().max(20).optional() }).strict();
 const reorderSchema = z.object({ ids: z.array(uuid).max(INSTRUCTION_LIMITS.queued * 2) }).strict();
 const autoApplySchema = z.object({ autoApply: z.boolean() }).strict();
 const emptySchema = z.object({}).strict();

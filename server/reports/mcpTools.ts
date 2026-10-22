@@ -5,7 +5,7 @@ import { keyContainerIds } from "../keyResources";
 import { defineTool, McpToolError, type McpErrorCode, type McpKeyContext, type McpToolSpec } from "../mcpToolKit";
 import { CADENCES } from "../../shared/routineSchedule";
 import { BLOCK_ID, QUERY_KEY, REPORT_LIMITS, type ReportBlock } from "../../shared/reports";
-import { INSTRUCTION_KINDS, INSTRUCTION_LIMITS } from "../../shared/reportsEdit";
+import { FILTER_KINDS, INSTRUCTION_KINDS, INSTRUCTION_LIMITS } from "../../shared/reportsEdit";
 import { REPORT_DOC_LIMITS } from "../../shared/reportsGenerate";
 import { docViews } from "./reportDocs";
 import { versionSourceLabel, versionWhoLabel } from "../../shared/reportVersions";
@@ -23,7 +23,7 @@ import { usableDatasource } from "./datasources";
 import { METRIC_ID, METRIC_LIMITS, type CatalogMetricInput } from "../../shared/reportsMetrics";
 import { queryResults, reportRun, startRefresh } from "./refresh";
 import { OPTION_SEARCH, paramResults, runParamSet, searchParamOptions } from "./params";
-import { optionParentsOf, reachOf } from "../../shared/reportParams";
+import { DATE_PRESETS, excludableIds, optionParentsOf, reachOf } from "../../shared/reportParams";
 import { requestAddFilter } from "./filterRequest";
 import { saveSchedule } from "./scheduler";
 import { listReportsPage, parseSpec as parseStoredSpec, setFavorite } from "./service";
@@ -82,7 +82,7 @@ const ROWS_SHOWN = 50;
 const reportId = z.string().uuid().describe("The report id (from list_reports)");
 /** Spec v3 (D489): parameter values by parameter id (get_report lists the parameters and their defaults). */
 const parameterValues = z.record(z.string().max(40), z.unknown()).optional()
-  .describe("Parameter values by id, e.g. {\"period\": {\"preset\": \"7d\"}, \"route\": [\"/api/orders\"]}; a date range is {preset: today|yesterday|7d|30d|90d|this_week|last_week|mtd|last_month|qtd|last_quarter|ytd|12m} or {preset: custom, from, to}; a multi-select [] is All. Omitted: the defaults");
+  .describe("Parameter values by id, e.g. {\"period\": {\"preset\": \"7d\"}, \"route\": [\"/api/orders\"]}; a date range is {preset: today|yesterday|7d|30d|90d|this_week|last_week|mtd|last_month|qtd|last_quarter|ytd|12m} or {preset: custom, from, to}; a multi-select [] is All, or {not: [values]} to leave values out where the report allows it; a number range {min, max} (null is open). Omitted: the defaults");
 
 function ownerRole(userId: string): string | null {
   const owner = db.query("SELECT role FROM users WHERE id = ? AND disabled_at IS NULL").get(userId) as { role: string } | null;
@@ -229,6 +229,8 @@ export const reportTools: McpToolSpec[] = [
         // D533: which queries each parameter reaches (a block whose queries a parameter does not reach is not filtered by it).
         reach: reachOf(spec.parameters, spec.queries),
         // D560: linked filters, the earlier parameters each select's choices follow (search_report_options takes their values).
+        // D568: the multi-selects whose values may be left out ({not: [...]}).
+        excludable: [...excludableIds(spec.parameters, spec.queries)],
         optionParents: Object.fromEntries(spec.parameters.map((param) => [param.id, optionParentsOf(param, spec.parameters)]).filter(([, parents]) => parents!.length)),
         blocks: spec.blocks.map(withoutProvenance), queries: spec.queries.map(({ key: queryKey, sql, purpose, createdBy }) => ({ key: queryKey, sql, purpose, createdBy }))
       };
@@ -455,9 +457,12 @@ export const reportTools: McpToolSpec[] = [
       column: z.string().min(1).max(200).describe("The column to filter by"),
       label: z.string().min(1).max(60).optional().describe("The filter's label (default: from the column name)"),
       parameterId: z.string().regex(/^[a-z][a-z0-9_]{0,29}$/).optional().describe("The parameter id (default: from the column name)"),
-      narrowBy: z.array(z.string().regex(/^[a-z][a-z0-9_]{0,29}$/)).max(8).optional().describe("Linked filter (D562): ids of existing select or multi-select filters on the same table whose picks narrow this filter's choices (e.g. routes of the picked countries)")
+      narrowBy: z.array(z.string().regex(/^[a-z][a-z0-9_]{0,29}$/)).max(8).optional().describe("Linked filter (D562): ids of existing select or multi-select filters on the same table whose picks narrow this filter's choices (e.g. routes of the picked countries)"),
+      kind: z.enum(FILTER_KINDS).optional().describe("multi_select (default for text and whole numbers): pick values from a list; text: a text column whose rows contain what a reader types (D569); date_range: a Date or DateTime column filtered by day (D570, the only kind for dates)"),
+      exclude: z.boolean().optional().describe("multi_select: readers may also leave the picked values out (D568)"),
+      preset: z.enum(DATE_PRESETS.filter((preset) => preset !== "custom") as [string, ...string[]]).optional().describe("date_range: the default window (default 30d). The default results change, so Nook compares nothing: review the proposal by hand")
     }),
-    handler: ({ reportId: id, table, column, label, parameterId: paramId, narrowBy }, key) => asOwner(key, async (role) => ({ instruction: await requestAddFilter({ userId: key.userId, role, keyId: key.keyId }, id, { table, column, ...(label ? { label } : {}), ...(paramId ? { id: paramId } : {}), ...(narrowBy?.length ? { narrowBy } : {}) }) }))
+    handler: ({ reportId: id, table, column, label, parameterId: paramId, narrowBy, kind, exclude, preset }, key) => asOwner(key, async (role) => ({ instruction: await requestAddFilter({ userId: key.userId, role, keyId: key.keyId }, id, { table, column, ...(label ? { label } : {}), ...(paramId ? { id: paramId } : {}), ...(narrowBy?.length ? { narrowBy } : {}), ...(kind ? { kind } : {}), ...(exclude ? { exclude } : {}), ...(preset ? { preset } : {}) }) }))
   }),
   defineTool({
     name: "apply_report_proposal",

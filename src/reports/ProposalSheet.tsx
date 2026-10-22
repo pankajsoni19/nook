@@ -7,6 +7,7 @@ import { useHistoryDialogGuard } from "../ui/useHistoryDialogGuard";
 import type { ReportBlock, ReportDetail } from "../../shared/reports";
 import type { BlockChange, ProposalFilterView, ProposalView, ReportInstruction } from "../../shared/reportsEdit";
 import type { QueryResultView } from "../../shared/reportsView";
+import { DATE_PRESET_LABELS, type DatePreset } from "../../shared/reportParams";
 import { applyProposal, getProposal, rejectProposal } from "./reportEditApi";
 import { codeOf, messageOf } from "./reportsApi";
 import { DataBlockCard, useChartPalette } from "./ReportView";
@@ -70,6 +71,14 @@ export function NewSectionInPlace({ report, proposal, afterBlockId, results, pal
 /** "Filters 1 of 2 blocks" and so on (the bar's own words). */
 const blocksText = (reach: ProposalFilterView["reach"]) => reach.blocks === reach.total ? `Filters all ${countText(reach.total, "block")}` : `Filters ${reach.blocks} of ${countText(reach.total, "block")}`;
 
+/** D568–D570: where a new filter starts. */
+function startsAt(request: Extract<ProposalFilterView["request"], { kind: "add_filter" }>): string {
+  if (request.type === "date_range") return `it starts at ${DATE_PRESET_LABELS[(request.preset ?? "30d") as DatePreset] ?? request.preset}`;
+  if (request.type === "text") return "it starts empty (every row)";
+  return request.exclude ? "it starts at All; readers may also leave values out" : "it starts at All";
+}
+const otherText = (request: ProposalFilterView["request"], value: string) => request.kind === "add_filter" && request.type === "date_range" ? DATE_PRESET_LABELS[value as DatePreset] ?? value : value || "(blank)";
+
 /**
  * D534, D535: what a filter request's proposal did and what Nook checked: the filter (its column),
  * how many blocks it reaches, each changed query with "Default results unchanged ✓" and the value it
@@ -79,12 +88,15 @@ export function FilterFacts({ filter }: { filter: ProposalFilterView }) {
   const request = filter.request;
   return <section className="report-proposal-filter" aria-label="The filter">
     <h3><span className="reports-status">{request.kind === "add_filter" ? "New filter" : "Filter removed"}</span>{request.label}{request.kind === "add_filter" && <code>{request.table}.{request.column}</code>}</h3>
-    {request.kind === "add_filter" && <p className="report-proposal-filter-reach">{blocksText(filter.reach)}; it starts at All.</p>}
+    {request.kind === "add_filter" && <p className="report-proposal-filter-reach">{blocksText(filter.reach)}; {startsAt(request)}.</p>}
+    {/* D570: a date range changes the default results, so nothing was compared. */}
+    {filter.reviewByHand && <p className="report-proposal-filter-review" role="note"><TriangleAlert aria-hidden="true" />The default results change to this window. Nook compared nothing: check each changed query in the SQL below before you apply.</p>}
     <p className="report-proposal-filter-sub">{request.kind === "add_filter" ? "Queries that take the filter" : "Queries it is taken out of"}</p>
     <ul>{filter.checked.map((item) => <li key={item.key}>
       <code>{item.key}</code>
-      <span className="report-proposal-filter-ok"><CircleCheck aria-hidden="true" />Default results unchanged</span>
-      {item.otherValue !== null && <span className="report-proposal-filter-note">{`Ran with ${request.label} = ${item.otherValue || "(blank)"}: ${countText(item.otherRows ?? 0, "row")}`}</span>}
+      {filter.reviewByHand ? <span className="report-proposal-filter-note">{`Runs: ${countText(item.rows, "row")} with the default`}</span>
+        : <span className="report-proposal-filter-ok"><CircleCheck aria-hidden="true" />Default results unchanged</span>}
+      {item.otherValue !== null && <span className="report-proposal-filter-note">{`Ran with ${request.label} = ${otherText(request, item.otherValue)}: ${countText(item.otherRows ?? 0, "row")}`}</span>}
     </li>)}</ul>
     {filter.untouched.length > 0 && <>
       <p className="report-proposal-filter-sub">Not filtered</p>
