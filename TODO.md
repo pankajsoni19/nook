@@ -23,6 +23,12 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
   - [ ] Filter bar order: the "+ Filter" selector (and the search box) stay on the left; applied filter chips come after them, so the selector never moves.
   - [ ] Board settings: auto-archive cards in a done/completed column after N days (default 30); auto-archived cards are hidden from the board, with a board-settings checkbox to show them.
 
+- [ ] **Backups: online, to S3, continuous, and tested** (operator, 2026-10-22; lane BACKUP):
+  - [ ] Online backups without stopping the app (SQLite `VACUUM INTO`/backup API), on a schedule set in `.env` (frequency, how many to keep), written to the existing S3 storage under a new backup prefix (and/or local).
+  - [ ] Litestream continuous replication of the SQLite database to S3 (same bucket, its own prefix), with point-in-time restore.
+  - [ ] Restore drill: a command that restores the latest backup (archive or Litestream) into a scratch instance and verifies it.
+- [ ] **Vault keys: Edit can add access** (operator, 2026-10-22: "allow, wherever possible target ease of use"; lane VAULTKEY): same as general keys (D585): add rows and widen with the password, refuse what the owner can't grant, security mail and bell notice.
+
 ## Waiting on the operator
 
 - [ ] **Real-model check of chat agents on data sources** (lane AGENTSQL, D592): only the scripted provider has called the data tools. On a host with a working model, give an agent a data source (Settings → Report data sources → Chat agents may use this data source) and check that it searches before it queries, aggregates in SQL rather than paging raw rows, and summarizes instead of repeating the table.
