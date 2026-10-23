@@ -69,8 +69,21 @@ Parameters stay the only mechanism: every filter is a spec v3 parameter bound as
 1. **Linked filters:** an options query may read earlier parameters (array order, no cycles); options cached per (param, parents' values hash), ≤ 50 lists a report; child values not in the new options drop with a note. **Shipped** (lane FILT2, D560–D562, migration 069; Add filter's "Narrow by" builds one).
 2. **Table sort and contains, client side:** over loaded rows, state in the URL (`?t.<block>=col.desc`, replace), "within the first N rows" when truncated; personal. **Shipped** (lane FILT2, D563, D564).
 3. **Saved views:** per-viewer named value sets and "my default view" (`report_param_views`); only the owner's "Save as report default" changes the spec. **Shipped** (lane FILT2, D565, D566, migration 069).
-4. **More types:** `number_range`, multi-select exclude, text contains, Add filter on Date/DateTime as a date_range (reviewed by hand, no identity check). **Shipped** (lane FILT2, D567–D570).
+4. **More types:** `number_range`, multi-select exclude, text contains, Add filter on Date/DateTime as a date_range (reviewed by hand, no identity check). **Shipped** (lane FILT2, D567–D570; Add filter's number range and Remove filter for every type, lane FILT3, D670, D671).
 5. **Concurrent parameter runs** under the caller's query slots, measured after F1. **Shipped** (lane FILT2, D571: 4.86 s → 0.34 s for four readers at once).
+
+## Leftovers of the later slices (lane FILT3, 2026-10-23, D670–D677, no migration)
+
+All shipped; threats T445–T447 (docs/plan/THREAT_MODEL.md).
+
+1. **Remove any filter type (D670).** Text contains, number ranges, and date ranges are removed like lists (owner, app only), each compared with the old query at its neutral value (empty text, Any). A date range has none, so its removal is reviewed by hand like adding one (D570). A single select or a number stays with Changes. Remove sits in the filter itself: a list's or a number range's sheet, the date range menu's last choice, a text filter's trash button.
+2. **Number range in Add filter (D671)** on floats, decimals, and integers of any width (`Float64` ends). The condition keeps every row at Any, NULL and NaN too, so the identity check holds; the check's other run starts at the column's median.
+3. **A DateTime's day in the report's zone (D672):** `toDate(col, '<report zone>')` when the column's zone (its type's, or the data source's `timezone()`) differs.
+4. **Narrow by an expression (D673):** a parent whose options query lists an expression of one column of the same table (`lower(country)`) is offered, compared as `toString(<expression>)`; the others are listed with the reason.
+5. **Save as report default names the refused blocks (D674)**, with **Show the block**, and fixes rule 8 in place (a format or unit; a title) in the same version.
+6. **A real-ClickHouse test (D675):** `tests/reportFilterTypesLive.test.ts` with `CLICKHOUSE_TEST_URL`.
+7. **MCP `list_report_views` (D676):** the key owner's own views, read-only.
+8. **Found in QA (D677):** a filter request no longer runs the per-block design rules on blocks it leaves alone (an old KPI without a unit refused every filter change).
 
 ## What not to do
 

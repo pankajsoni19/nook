@@ -13,7 +13,6 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 ## In flight
 
 - [ ] **Views slice 2 and follow-ups** (operator: "complete", 2026-10-23; lane VIEWS2, migration 078 if needed): the "Leftovers (lane VIEWS…)" list below, plus "Show all levels" per person on the server.
-- [ ] **Report filter leftovers** (lane FILT3): the "Leftovers (lane FILT2)" list below.
 - [ ] **Provider and local-embedding leftovers** (lane PROV): Voyage proxy fields in the editor; a lighter local model option.
 - [ ] **Backup leftovers** (lane BACKUP2): the "Leftovers (lane BACKUP)" items that are code (objects copy, streamed manifest, `--from-dir`, Litestream levels).
 
@@ -31,15 +30,12 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 
 - [ ] Claude, checked only against a fake (lane CLAUDE, D539): on the VM, confirm Anthropic accepts `x-api-key` and `Authorization: Bearer` together on `/v1/chat/completions` and `/v1/models`, and Test tool calling reads "Tool calling works (auto)"; keys not scoped to a workspace also need `anthropic-workspace-id`, which Nook cannot send yet.
 
-## Leftovers (lane FILT2)
+## Leftovers (lane FILT3)
 
-- [ ] Remove filter (`DELETE …/filters/:paramId`, D534) still takes only multi-selects: a text-contains, date-range, or number-range filter is removed by asking in Changes. A removal of a date range cannot be identity-checked (its default narrowed the results), so it would need the same "review by hand" path as D570.
-- [ ] Add filter does not offer a number range (D567); generation and the edit agent write them. Offer it on numeric columns (Float, Decimal, and wide integers), with the identity check at Any.
-- [ ] Add filter on a DateTime column filters by `toDate(col)` in the data source's zone, while the presets resolve in the report's zone (D570); write `toDate(col, '<report zone>')` when the two differ.
-- [ ] Narrow by (D562) recognizes a parent only when its options query lists one plain column of one table (Add filter's shape, or `SELECT DISTINCT col FROM db.t`); an agent-written options query with an expression is not offered.
-- [ ] Save as report default (D566) is a manual edit, so the design rules run on every block that reads a changed default and can refuse it (e.g. a KPI without a unit); the sheet shows the refusal, but the owner has to fix the block first.
-- [ ] The new filter types (D567–D569) and linked lists (D560) are proven against the fake ClickHouse and by hand on the QA ClickHouse 26.6; add a `CLICKHOUSE_TEST_URL` variant (`-inf`/`inf` Float64 ends, the `_not` flag, `positionCaseInsensitive` on LowCardinality).
-- [ ] Saved views are app-only (D565). A read-only MCP `list_report_views` would be safe (the key owner's own views) if an agent needs them.
+- [ ] D567's plain `col BETWEEN {id_min} AND {id_max}`, already in agent-written reports, drops NULL and NaN rows even at Any (D675 proved it on 26.6); the prompts now show the guarded form, but stored reports keep theirs until regenerated or edited.
+- [ ] A number range on an integer column binds Float64 (one condition form); Int64 and UInt64 values above 2^53 compare approximately. Bind the column's own integer type with its RANGE_ENDS if exact ends matter there.
+- [ ] D672's zone is written when the filter is added; changing the report's schedule zone later does not rewrite `toDate(col, '<zone>')` in the queries.
+- [ ] **Show the block** (D674) was checked in headless Chrome (scrolls, focuses the block); try it with a screen reader and in a real phone browser.
 
 ## Leftovers (lane VIEWS, slice 2 and follow-ups; plan in docs/plan/TASK_VIEWS.md)
 
