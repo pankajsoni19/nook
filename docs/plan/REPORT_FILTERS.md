@@ -72,7 +72,7 @@ Parameters stay the only mechanism: every filter is a spec v3 parameter bound as
 4. **More types:** `number_range`, multi-select exclude, text contains, Add filter on Date/DateTime as a date_range (reviewed by hand, no identity check). **Shipped** (lane FILT2, D567–D570; Add filter's number range and Remove filter for every type, lane FILT3, D670, D671).
 5. **Concurrent parameter runs** under the caller's query slots, measured after F1. **Shipped** (lane FILT2, D571: 4.86 s → 0.34 s for four readers at once).
 
-## Leftovers of the later slices (lane FILT3, 2026-10-23, D670–D677, no migration)
+## Leftovers of the later slices (lane FILT3, 2026-10-23, D670–D680, no migration)
 
 All shipped; threats T445–T447 (docs/plan/THREAT_MODEL.md).
 
@@ -84,6 +84,8 @@ All shipped; threats T445–T447 (docs/plan/THREAT_MODEL.md).
 6. **A real-ClickHouse test (D675):** `tests/reportFilterTypesLive.test.ts` with `CLICKHOUSE_TEST_URL`.
 7. **MCP `list_report_views` (D676):** the key owner's own views, read-only.
 8. **Found in QA (D677):** a filter request no longer runs the per-block design rules on blocks it leaves alone (an old KPI without a unit refused every filter change).
+9. **Integer ranges bind Int64 or UInt64 (D678)**, so integers compare exactly; floats and decimals keep Float64.
+10. **A schedule zone change proposes the zone fix in Changes (D679)**, and the filter shows a notice with **Fix in Changes** until it is applied (D680).
 
 ## What not to do
 

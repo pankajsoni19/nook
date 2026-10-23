@@ -33,9 +33,8 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 ## Leftovers (lane FILT3)
 
 - [ ] D567's plain `col BETWEEN {id_min} AND {id_max}`, already in agent-written reports, drops NULL and NaN rows even at Any (D675 proved it on 26.6); the prompts now show the guarded form, but stored reports keep theirs until regenerated or edited.
-- [ ] A number range on an integer column binds Float64 (one condition form); Int64 and UInt64 values above 2^53 compare approximately. Bind the column's own integer type with its RANGE_ENDS if exact ends matter there.
-- [ ] D672's zone is written when the filter is added; changing the report's schedule zone later does not rewrite `toDate(col, '<zone>')` in the queries.
 - [ ] **Show the block** (D674) was checked in headless Chrome (scrolls, focuses the block); try it with a screen reader and in a real phone browser.
+- [ ] D679 only sees a date range written with a zone (`toDate(col, '<zone>')`). One added while the report's and the data source's zones agreed is written `toDate(col)`; if the schedule's zone later differs from the data source's, nothing flags it. Detecting it needs the column's zone (catalog type, or the source's `timezone()`) per condition.
 
 ## Leftovers (lane VIEWS, slice 2 and follow-ups; plan in docs/plan/TASK_VIEWS.md)
 
