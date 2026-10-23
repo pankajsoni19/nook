@@ -6,8 +6,8 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 - Contracts: [API](docs/plan/API_CONTRACTS.md) · [Threat model](docs/plan/THREAT_MODEL.md) · [Test plan](docs/plan/TEST_PLAN.md).
 
 **Current state (2026-10-23).**
-- **v0.45.0** is released (2026-10-23): online S3 backups, Litestream and restore drills; Tasks collapse, filter order and archive; vault key Edit adds access; docs site restructure.
-- Migrations: **001–076** are released and immutable (045, 054, 067, 070, 071, 072, 075 unused; 054 reserved for Messages); **077** (`task_view_prefs`, lane VIEWS) is on `main`, unreleased. Next free: **078**.
+- **v0.46.0** is released (2026-10-23): task views work like boards (slice 1), column status icons, archived cards outside the cap.
+- Migrations: **001–077** are released and immutable (045, 054, 067, 070, 071, 072, 075 unused; 054 reserved for Messages). Next free: **078**.
 - Development happens directly on `main`, pushed as each change passes its gates.
 
 ## In flight

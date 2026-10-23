@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -14,6 +14,9 @@ import { createLocalStore, createS3Store, pruneArchives } from "../server/backup
 import type { BackupS3Settings } from "../server/backup/settings";
 import { backupSettings, makeFixture, noLitestream, type Fixture } from "./support/backupFixture";
 import { startFakeS3 } from "./support/fakeS3";
+
+// Backups pack, gzip and read back whole archives; inside the Docker verify image under full-suite load a drill can pass 5 s.
+setDefaultTimeout(30_000);
 
 const roots: string[] = [];
 const fixtures: Fixture[] = [];
@@ -253,7 +256,7 @@ describe("the restore drill and restore", () => {
     const newer = await runDrill({ ...options, from: third!.archive!.name });
     expect(newer?.ok).toBe(false);
     expect(newer?.checks.find((check) => check.name === "Schema")?.detail).toMatch(/9999/);
-  });
+  }, 30_000);
 
   test("restore refuses a used folder and fills an empty one", async () => {
     const made = fixture("restore");

@@ -2,6 +2,25 @@
 
 Release notes for Nook, newest first. Upgrade steps for each release are in [docs/OPERATIONS.md](docs/OPERATIONS.md#upgrades).
 
+## v0.46.0 — 2026-10-23
+
+**Task views work like boards**
+
+- **A view of one board is that board**, with its real columns, collapse, drag, WIP limits, add card and the card dialog. It opens at `/tasks/:board/views/:view`, and old view links redirect there.
+- **Saved views inside a board**: a "View: All cards ▾" picker on the board header, and Save view… / Save / Discard in the filter bar.
+- **Views across boards** show the boards' real columns merged by name (or the three states, as a toggle). Dragging a card moves it to that column on its own board; a lane that can't take it dims and says why.
+- **Collapse lanes in every view** and in My work, saved per person.
+- MCP: `list_views` returns `board_id` and `lanes`; `move_card` accepts a `state` or `columnName`.
+
+**Boards**
+
+- **Column status icons**: a coloured icon before each column name shows Backlog, To do, progress through the In progress columns, and Done.
+- **Archived cards no longer count toward the 1,000-card cap.** "Show archived cards" loads the latest 200, with Show more. A board holds at most 10,000 cards in all, archived ones included.
+
+**Upgrading**
+
+- Migration **077** (`task_view_prefs`) runs once on the first boot; quick. **Back up first** (`./scripts/backup.sh --force`). See [Upgrading to 0.46.0](docs/OPERATIONS.md#upgrades).
+
 ## v0.45.0 — 2026-10-23
 
 **Backups**
