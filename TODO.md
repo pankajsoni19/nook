@@ -65,6 +65,7 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 - [ ] Litestream's compaction levels and L0 retention are its defaults (only the snapshot retention is a setting); expose them if point-in-time granularity matters.
 
 ## Watch (no work unless it shows up)
+- Reports "Runs panel" client test failed once under full-suite load after lane CAP's rebase (passed alone, 40/40). If it recurs, give it a clock or CPU-time budget.
 
 - Chat and agent-editor buttons the lint flags (a reply's Edit / Copy / Regenerate, the chat row, the Agents / Audit log / Settings links, the "Used N tools" toggle, the agent chip, Back and More at 390; the agent editor's emoji trigger, Save width, and Agents back link): **intentional existing design** (operator, 2026-10-22: screens built earlier stay exactly as they are). Not to be changed; add them to scripts/buttonLint.allow.json if the lint's screens ever open a chat.
 
