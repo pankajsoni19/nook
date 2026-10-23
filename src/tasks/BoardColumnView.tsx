@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, ChevronsLeftRight, ChevronsRightLeft, Ellips
 import { CARD_DRAG_TYPE, isCardDrag, isMoveKey, type MoveKey } from "./boardOrder";
 import { CardFace, cardFaceLabel } from "./CardFace";
 import { columnBadge, localDateString } from "./taskActions";
+import { ColumnStatusIcon, ColumnStatusText, columnStatusId, type ColumnStatus } from "./ColumnStatusIcon";
 import type { BoardColumn, BoardTag, CardSummary } from "./tasksApi";
 import type { ColumnNesting } from "./useBoardHierarchy";
 
@@ -52,6 +53,8 @@ type BoardColumnViewProps = {
   onToggleCollapsed?: () => void;
   /** Phones lay the columns out as pages (one per screen), so a collapsed one stays a page. */
   phone?: boolean;
+  /** The column's status icon left of its name (D629), from its state and place on the board. */
+  status?: ColumnStatus;
 };
 
 const cardsWord = (count: number) => count === 1 ? "1 card" : `${count} cards`;
@@ -132,6 +135,9 @@ export function BoardColumnView(props: BoardColumnViewProps) {
   const badge = columnBadge(cards.length, count, column.wip_limit);
   const collapsed = props.collapsed === true;
   const toggle = props.onToggleCollapsed;
+  const status = props.status;
+  const statusId = status ? columnStatusId(column.id) : undefined;
+  const statusText = status && statusId && <ColumnStatusText id={statusId} status={status} />;
 
   if (collapsed && !props.phone) {
     // The strip (D602): one button expands it; a card dropped on it goes to the column's top. The
@@ -140,11 +146,13 @@ export function BoardColumnView(props: BoardColumnViewProps) {
       onDragOver={stripDragOver} onDragEnter={stripDragOver} onDrop={stripDrop}
       onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) props.onDragOverIndex(null); }}>
       <button type="button" className="task-column-strip" aria-expanded="false" onClick={toggle}
-        aria-label={`Expand ${column.name}, ${badge.label}`} title={`Expand ${column.name}`}>
+        aria-label={`Expand ${column.name}, ${badge.label}`} aria-describedby={statusId} title={`Expand ${column.name}`}>
         <ChevronsLeftRight aria-hidden="true" />
         <b className={badge.wip ? `task-wip ${badge.wip}` : undefined} aria-hidden="true">{badge.text}</b>
+        {status && <ColumnStatusIcon status={status} />}
         <span id={`column-${column.id}`} className="task-column-strip-name">{column.name}</span>
       </button>
+      {statusText}
     </section>;
   }
 
@@ -171,10 +179,12 @@ export function BoardColumnView(props: BoardColumnViewProps) {
     {collapsed ? <ChevronsLeftRight /> : <ChevronsRightLeft />}
   </button>;
 
-  return <section className={`task-column${dropIndex !== null ? " drop-active" : ""}${props.refuseDrop ? " drop-refused" : ""}`} aria-labelledby={`column-${column.id}`} data-column-id={column.id}
+  return <section className={`task-column${dropIndex !== null ? " drop-active" : ""}${props.refuseDrop ? " drop-refused" : ""}`} aria-labelledby={`column-${column.id}`} aria-describedby={statusId} data-column-id={column.id}
     onDragOver={dragOver} onDragEnter={dragOver} onDrop={drop}
     onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) props.onDragOverIndex(null); }}>
     <header className="task-column-header">
+      {status && <ColumnStatusIcon status={status} />}
+      {statusText}
       <h2 id={`column-${column.id}`} title={column.name}>{column.name}</h2>
       <b className={badge.wip ? `task-wip ${badge.wip}` : undefined} aria-label={badge.label} title={badge.wip ? `WIP limit ${column.wip_limit}` : undefined}>
         {badge.text}

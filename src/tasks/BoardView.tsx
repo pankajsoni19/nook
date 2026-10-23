@@ -15,6 +15,7 @@ import { ApiError } from "../api";
 import { ConfirmDialog, ModalDialog } from "../files/Dialog";
 import { NameDialog } from "../files/RenameDialog";
 import { BoardColumnView } from "./BoardColumnView";
+import { ColumnStatusIcon, columnStatuses, columnStatusId } from "./ColumnStatusIcon";
 import { AccessSheet } from "../access/AccessSheet";
 import { CardComposer, type ComposerMode } from "./CardComposer";
 import { CardDialog } from "./CardDialog";
@@ -254,6 +255,8 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
     if (!cardPage && track && isMobileViewport()) track.scrollTo({ left: activeColumnRef.current * track.clientWidth, behavior: "instant" as ScrollBehavior });
   }, [cardPage]);
   const columns = [...(detail?.columns ?? [])].sort(byPosition);
+  // Each column's status icon (D629): from its state and its place, left to right.
+  const statuses = columnStatuses(columns);
   const cards = detail?.cards ?? [];
   const shownColumn = Math.max(0, Math.min(activeColumn, columns.length - 1));
   const dialogColumn = dialog && "columnId" in dialog ? columns.find((column) => column.id === dialog.columnId) ?? null : null;
@@ -693,8 +696,10 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
         // The cards on screen; a WIP limit counts every live card (QA 0.9.0).
         const badge = columnBadge(columnCards(shownLane, column.id).length, columnCards(cards, column.id).length, column.wip_limit);
         const folded = collapsed.has(column.id);
-        return <button key={column.id} id={`task-tab-${column.id}`} className={`${index === shownColumn ? "active" : ""}${folded ? " collapsed" : ""}`} aria-current={index === shownColumn ? "true" : undefined} onClick={() => showColumn(index)}>
-          <span>{column.name}</span><b className={badge.wip ? `task-wip ${badge.wip}` : undefined} aria-label={folded ? `${badge.label}, collapsed` : badge.label}>{badge.text}</b>
+        const status = statuses.get(column.id);
+        return <button key={column.id} id={`task-tab-${column.id}`} className={`${index === shownColumn ? "active" : ""}${folded ? " collapsed" : ""}`} aria-current={index === shownColumn ? "true" : undefined}
+          aria-describedby={status ? columnStatusId(column.id) : undefined} onClick={() => showColumn(index)}>
+          {status && <ColumnStatusIcon status={status} />}<span>{column.name}</span><b className={badge.wip ? `task-wip ${badge.wip}` : undefined} aria-label={folded ? `${badge.label}, collapsed` : badge.label}>{badge.text}</b>
         </button>;
       })}
       {canManage && columns.length < MAX_COLUMNS && <button className="task-tab-add" onClick={(event) => openDialog({ kind: "addColumn" }, event.currentTarget)} aria-haspopup="dialog" aria-label="Add column"><Plus /></button>}
@@ -714,6 +719,7 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
         nesting={hierarchy.nesting}
         readOnly={readOnly}
         collapsed={collapsed.has(column.id)}
+        status={statuses.get(column.id)}
         onToggleCollapsed={() => { void toggleCollapsed(column.id); }}
         phone={phone}
         tags={detail.tags}

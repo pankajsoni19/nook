@@ -21,8 +21,6 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 
 - [ ] **Tasks views work like boards** (operator, 2026-10-23; lane VIEWS, research then build): views' column layout has only To do / In progress / Done, no column collapse, and no drag between columns. Operator's ideas: a single-board view behaves as that board with filters (same columns, collapse, drag); a multi-board view gets as much as can work; maybe saved views inside a board. Research and recommend, then build.
 
-- [ ] **Tasks: a coloured status icon left of each column name** (operator, 2026-10-23; lane COLICON): the icon shows the column's status type and progress from the leftmost (backlog) to the rightmost (done) column.
-
 ## Waiting on the operator
 
 - [ ] **Real-model check of chat agents on data sources** (lane AGENTSQL, D592): only the scripted provider has called the data tools. On a host with a working model, give an agent a data source (Settings → Report data sources → Chat agents may use this data source) and check that it searches before it queries, aggregates in SQL rather than paging raw rows, and summarizes instead of repeating the table.

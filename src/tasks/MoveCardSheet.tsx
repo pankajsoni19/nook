@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Archive, ArchiveRestore, ArrowDownToLine, ArrowUpToLine, Check, ChevronLeft, Columns3, Layers, Link as LinkIcon } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowDownToLine, ArrowUpToLine, Check, ChevronLeft, Layers, Link as LinkIcon } from "lucide-react";
+import { ColumnStatusIcon, ColumnStatusText, columnStatuses, columnStatusId } from "./ColumnStatusIcon";
 import { ModalDialog } from "../files/Dialog";
 import { useHistoryDialogGuard } from "../ui/useHistoryDialogGuard";
 import { canEnterColumn } from "./taskActions";
@@ -49,6 +50,7 @@ export function MoveCardSheet({ card, columns, cards = [], onMove, onCancel, par
   const target = columns.find((column) => column.id === chosen) ?? null;
   const full = (column: BoardColumn) => !canEnterColumn(cards, column, card.id);
   const firstOpen = columns.findIndex((column) => !full(column));
+  const statuses = columnStatuses(columns);
 
   async function confirmAction() {
     if (!target) return;
@@ -113,8 +115,12 @@ export function MoveCardSheet({ card, columns, cards = [], onMove, onCancel, par
       {columns.map((column, index) => {
         const current = column.id === card.column_id;
         const refused = full(column);
-        return <button key={column.id} role="radio" aria-checked={chosen === column.id} className={`move-option${chosen === column.id ? " active" : ""}`} disabled={busy || refused} autoFocus={index === firstOpen} onClick={() => setChosen(column.id)}>
-          <Columns3 aria-hidden="true" />
+        // The column's status icon (D629) in place of a generic column icon; its words describe the option.
+        const status = statuses.get(column.id)!;
+        const statusId = columnStatusId(column.id, "move");
+        return <button key={column.id} role="radio" aria-checked={chosen === column.id} className={`move-option${chosen === column.id ? " active" : ""}`} disabled={busy || refused} autoFocus={index === firstOpen} onClick={() => setChosen(column.id)}
+          aria-describedby={statusId}>
+          <ColumnStatusIcon status={status} /><ColumnStatusText id={statusId} status={status} />
           <span>{column.name}{current ? <small>Current column</small> : refused && <small>Full (limit {column.wip_limit})</small>}</span>
           {chosen === column.id && <Check aria-hidden="true" />}
         </button>;

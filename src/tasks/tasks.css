@@ -57,6 +57,16 @@
 .task-column-strip:focus-visible { outline: 2px solid var(--yellow); outline-offset: -2px; }
 .task-column-strip > svg { flex: none; width: 15px; height: 15px; color: #a8a8ae; }
 .task-column-strip b { min-width: 22px; border-radius: 999px; padding: 1px 7px; background: rgb(255 255 255 / 7%); color: #a8a8ae; font-size: .7rem; text-align: center; }
+/* A column's status icon (D629) left of its name: muted for Backlog and To do, the progress yellow for
+   In progress (its pie fills by its place), green for Done (the sprint meter's colours). Also on the
+   collapsed strip, the phone tabs, and Move to…. */
+svg.task-column-status { flex: none; width: 14px; height: 14px; overflow: visible; }
+svg.task-column-status.backlog { color: #8d8d94; }
+svg.task-column-status.todo { color: #a8a8ae; }
+svg.task-column-status.doing { color: var(--yellow); }
+svg.task-column-status.done { color: #6fbf85; }
+.task-column-strip > svg.task-column-status { width: 14px; height: 14px; }
+.move-option svg.task-column-status { width: 16px; height: 16px; justify-self: center; }
 .task-column-strip-name { max-height: 260px; overflow: hidden; color: #e4e4e6; font-size: .86rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; writing-mode: vertical-rl; }
 .task-column-collapsed-note { margin-top: 2px; }
 /* Auto-archived cards, shown only when the viewer asks (D605, D606). */
