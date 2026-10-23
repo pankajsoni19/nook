@@ -5,7 +5,7 @@ import { isAbsolute, join, resolve } from "node:path";
 import type { StorageConfig } from "../config";
 import { verifyMigrations } from "../migrations";
 import { litestreamRestore } from "../litestream";
-import { ArchiveError, DATABASE_NAME, integrityCheck, isEmptyDirectory, readArchive, tableCounts, type Manifest } from "./archive";
+import { ArchiveError, DATABASE_NAME, integrityCheck, isEmptyDirectory, readArchive, tableCounts, type ManifestSummary } from "./archive";
 import { sweepWorkDirs } from "./job";
 import type { BackupSettings, LitestreamSettings } from "./settings";
 import { acquireLock, ensureBackupDir, recordDrill, type DrillCheck, type DrillReport, type Trigger } from "./state";
@@ -155,7 +155,7 @@ async function missingBucketObjects(db: Database, storage: Extract<StorageConfig
  * Checks a restored data folder (shared by the drill and `restore`): integrity, schema, counts, and
  * the files the database names. Appends to `checks`; returns the counts.
  */
-export async function checkRestored(dataDir: string, options: { manifest: Manifest | null; storage: StorageConfig; databaseOnly: boolean; strict?: boolean }, checks: DrillCheck[]) {
+export async function checkRestored(dataDir: string, options: { manifest: ManifestSummary | null; storage: StorageConfig; databaseOnly: boolean; strict?: boolean }, checks: DrillCheck[]) {
   const path = join(dataDir, DATABASE_NAME);
   if (!check(checks, "Database present", existsSync(path), existsSync(path) ? `${statSync(path).size} bytes` : "mynotes.sqlite is missing")) return {};
   // Read-write on the scratch copy only: a legacy archive's -wal needs a writable connection to be read.
@@ -225,7 +225,7 @@ export async function runDrill(options: DrillOptions): Promise<DrillReport | nul
     sweepWorkDirs(dir);
     await mkdir(data, { recursive: true, mode: 0o700 });
     const parsed = parseSource(options.from);
-    let manifest: Manifest | null = null;
+    let manifest: ManifestSummary | null = null;
     if (parsed.kind === "litestream") {
       source = `litestream${parsed.timestamp ? ` as of ${parsed.timestamp}` : " (latest)"}`;
       if (!options.litestream.s3) throw new Error("Litestream is not configured (LITESTREAM_ENABLED=true and an S3 bucket)");
@@ -243,11 +243,11 @@ export async function runDrill(options: DrillOptions): Promise<DrillReport | nul
         log(`Reading ${source}`);
         path = await archiveFile(located, scratch, options.settings.localDir);
       }
-      const read = await readArchive(path, { extractTo: data, legacy: true });
+      const read = await readArchive(path, { extractTo: data, legacy: true, scratchDir: scratch });
       manifest = read.manifest;
       check(checks, "Archive", true, read.manifest
-        ? `${filesWord(read.files.length)} checked against the manifest (SHA-256); made ${read.manifest.createdAt} by Nook ${read.manifest.appVersion}`
-        : `${filesWord(read.files.length)}; an offline archive without a manifest (sizes and hashes not recorded)`, !read.manifest);
+        ? `${filesWord(read.fileCount)} checked against the manifest (SHA-256); made ${read.manifest.createdAt} by Nook ${read.manifest.appVersion}`
+        : `${filesWord(read.fileCount)}; an offline archive without a manifest (sizes and hashes not recorded)`, !read.manifest);
     }
     counts = await checkRestored(data, { manifest, storage: options.storage, databaseOnly: parsed.kind === "litestream", strict: options.strict }, checks);
   } catch (failure) {
@@ -301,7 +301,7 @@ export async function restoreInto(options: RestoreOptions) {
   const checks: DrillCheck[] = [];
   const parsed = parseSource(options.from);
   const stores = options.stores ?? readableStores(options.settings);
-  let manifest: Manifest | null = null;
+  let manifest: ManifestSummary | null = null;
 
   /** Extracts an archive (by source) into the target; a download is staged in the target and removed after. */
   async function extract(from: string) {
@@ -321,7 +321,7 @@ export async function restoreInto(options: RestoreOptions) {
     }
     try {
       const read = await readArchive(path, { extractTo: target, legacy: true });
-      check(checks, "Archive", true, read.manifest ? `${filesWord(read.files.length)} checked against the manifest; made ${read.manifest.createdAt}` : `${filesWord(read.files.length)} (offline archive, no manifest)`, !read.manifest);
+      check(checks, "Archive", true, read.manifest ? `${filesWord(read.fileCount)} checked against the manifest; made ${read.manifest.createdAt}` : `${filesWord(read.fileCount)} (offline archive, no manifest)`, !read.manifest);
       return read.manifest;
     } finally {
       if (download) await unlink(download).catch(() => undefined);

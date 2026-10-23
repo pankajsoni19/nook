@@ -2,7 +2,7 @@ import { readdirSync, rmSync, statSync } from "node:fs";
 import { mkdir, rm, statfs } from "node:fs/promises";
 import { join } from "node:path";
 import type { StorageConfig } from "../config";
-import { archiveName, collectDataFiles, readArchive, snapshotDatabase, writeArchive, type Manifest } from "./archive";
+import { archiveName, collectDataFiles, dataFilesFrom, readArchive, snapshotDatabase, writeArchive, type Manifest } from "./archive";
 import type { BackupSettings } from "./settings";
 import { acquireLock, ensureBackupDir, recordRun, type BackupRun, type TargetResult, type Trigger } from "./state";
 import { createLocalStore, createS3Store, pruneArchives, s3ErrorText, type ArchiveStore } from "./stores";
@@ -75,7 +75,9 @@ export async function runBackup(options: JobOptions): Promise<BackupRun | null> 
   try {
     sweepWorkDirs(dir);
     await mkdir(work, { mode: 0o700 });
-    const { files, skipped, bytes } = await collectDataFiles(options.dataDir, [dir]);
+    // D688: the list of DATA_DIR's files goes to a side file in the work folder, never to memory.
+    const listPath = join(work, "data-files.ndjson");
+    const { skipped, bytes, count, root } = await collectDataFiles(options.dataDir, [dir], { listPath });
     let databaseBytes = 0;
     for (const suffix of ["", "-wal"]) {
       try { databaseBytes += statSync(`${options.databasePath}${suffix}`).size; } catch { /* no WAL */ }
@@ -95,25 +97,25 @@ export async function runBackup(options: JobOptions): Promise<BackupRun | null> 
     const storage: Manifest["storage"] = options.storage.backend === "s3"
       ? { backend: "s3", bucket: options.storage.bucket, prefix: options.storage.prefix, endpointHost: new URL(options.storage.endpoint).host }
       : { backend: "local" };
-    log(`Packing ${files.length} files`);
+    log(`Packing ${count} files`);
     const written = await writeArchive(archivePath, {
       manifest: {
         format: "nook-backup", version: 1, createdAt: started.toISOString(), appVersion: options.appVersion, gitSha: options.gitSha, storage,
         database: { path: "mynotes.sqlite", integrity: "ok", migrations: snapshot.migrations }, counts: snapshot.counts
       },
       database: snapshotPath,
-      files,
+      files: dataFilesFrom(listPath, root),
       skipped
     });
     await rm(snapshotPath, { force: true });
     // Read the whole archive back before it goes anywhere: gzip, tar, and every file's SHA-256.
-    const verified = await readArchive(archivePath);
+    const verified = await readArchive(archivePath, { scratchDir: work });
     if (verified.archiveSha256 !== written.sha256) throw new Error("The archive changed between writing and reading it back");
     const vanished = written.manifest.skipped.filter((entry) => entry.reason === "vanished").length;
     const links = written.manifest.skipped.length - vanished;
     if (vanished) warnings.push(`${vanished} file(s) were removed while the backup ran (purged from the Bin) and are not in it`);
     if (links) warnings.push(`${links} link(s) or special file(s) under DATA_DIR were left out`);
-    archive = { name, size: written.size, sha256: written.sha256, files: written.manifest.files.length, databaseBytes: written.manifest.database.bytes, storage: storage.backend };
+    archive = { name, size: written.size, sha256: written.sha256, files: written.manifest.fileCount, databaseBytes: written.manifest.database.bytes, storage: storage.backend };
 
     const stores = options.stores ?? storesFor(settings);
     targets = [];

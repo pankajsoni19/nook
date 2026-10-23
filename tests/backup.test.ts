@@ -74,8 +74,8 @@ describe("an online backup to the local folder", () => {
     expect(run?.targets).toEqual([{ kind: "local", location: made.backupDir, ok: true, pruned: 0 }]);
     expect(run?.warnings?.some((line) => /link/.test(line))).toBe(true);
     const archive = join(made.backupDir, run!.archive!.name);
-    const read = await readArchive(archive);
-    const names = read.files.map((file) => file.path);
+    const read = await readArchive(archive, { collect: true });
+    const names = read.files!.map((file) => file.path);
     expect(names[0]).toBe("mynotes.sqlite");
     expect(names).toContain(`notes/${made.noteId}/versions/000001.md`);
     expect(names).toContain(`documents/objects/${made.documentId}`);
@@ -162,9 +162,9 @@ describe("an online backup to the local folder", () => {
     made.db.query("UPDATE users SET totp_secret = ? WHERE id = ?").run("v1:ciphertext-only", made.userId);
     const run = await runBackup(jobOptions(made));
     const target = join(made.root, "extracted");
-    const read = await readArchive(join(made.backupDir, run!.archive!.name), { extractTo: target });
-    for (const file of read.files) expect(readFileSync(join(target, file.path)).includes(Buffer.from(key))).toBe(false);
-    expect(read.files.some((file) => file.path.endsWith("vault.key"))).toBe(false);
+    const read = await readArchive(join(made.backupDir, run!.archive!.name), { extractTo: target, collect: true });
+    for (const file of read.files!) expect(readFileSync(join(target, file.path)).includes(Buffer.from(key))).toBe(false);
+    expect(read.files!.some((file) => file.path.endsWith("vault.key"))).toBe(false);
   });
 });
 
@@ -181,7 +181,9 @@ describe("archive verification", () => {
     writeFileSync(corruptPath, corrupt);
     await expect(readArchive(corruptPath)).rejects.toThrow();
     // A well-formed archive whose file disagrees with the manifest.
-    const manifest = (await readArchive(path)).manifest!;
+    const good = await readArchive(path, { collect: true });
+    const { fileCount: _count, ...header } = good.manifest!;
+    const manifest = { ...header, files: good.files };
     const forged = join(made.root, "forged.tar.gz");
     const pack = tar.pack();
     const done = pipeline(pack, createGzip(), createWriteStream(forged));
@@ -190,6 +192,42 @@ describe("archive verification", () => {
     pack.finalize();
     await done;
     await expect(readArchive(forged)).rejects.toThrow(/does not match its manifest|missing/);
+  });
+
+  test("D688: the manifest is streamed, one record a line, from a side file; the list never sits in memory", async () => {
+    const made = fixture("manifest-stream");
+    const many = join(made.dataDir, "many");
+    mkdirSync(many);
+    for (let index = 0; index < 3000; index += 1) writeFileSync(join(many, `f${String(index).padStart(5, "0")}.txt`), `file ${index}\n`);
+    const run = await runBackup(jobOptions(made));
+    expect(run?.ok).toBe(true);
+    const path = join(made.backupDir, run!.archive!.name);
+    // The raw manifest entry: a header line ending in "files":[, then one record a line, then ]}.
+    const extract = tar.extract();
+    const raw = Bun.file(path).stream().pipeThrough(new DecompressionStream("gzip"));
+    let text = "";
+    const done = (async () => { for await (const entry of extract) { if (entry.header.name === MANIFEST_NAME) for await (const chunk of entry) text += Buffer.from(chunk as Uint8Array).toString("utf8"); else entry.resume(); } })();
+    for await (const chunk of raw as unknown as AsyncIterable<Uint8Array>) extract.write(chunk);
+    extract.end();
+    await done;
+    const lines = text.trimEnd().split("\n");
+    expect(lines[0]!.endsWith(',"files":[')).toBe(true);
+    expect(lines.at(-1)).toBe("]}");
+    expect(lines.length).toBe(run!.archive!.files + 2);
+    expect(JSON.parse(lines[1]!.replace(/,$/, ""))).toMatchObject({ path: "mynotes.sqlite" });
+    const parsed = JSON.parse(text) as { files: Array<{ path: string }>; format: string; counts: Record<string, number> };
+    expect(parsed.format).toBe("nook-backup");
+    expect(parsed.files.length).toBe(run!.archive!.files);
+    expect(parsed.files.filter((file) => file.path.startsWith("many/")).length).toBe(3000);
+    // The reader compares the two lists from side files and leaves nothing behind.
+    const read = await readArchive(path);
+    expect(read.files).toBeUndefined();
+    expect(read.fileCount).toBe(run!.archive!.files);
+    expect(read.manifest?.fileCount).toBe(run!.archive!.files);
+    expect(readdirSync(made.backupDir).filter((name) => name.endsWith(".files") || name.startsWith(".work"))).toEqual([]);
+    const report = await runDrill({ from: "latest", settings: backupSettings(made), litestream: noLitestream, databasePath: made.databasePath, storage: { backend: "local" }, trigger: "cli" });
+    expect(report?.ok).toBe(true);
+    expect(report?.checks[0]?.detail).toContain(`${run!.archive!.files} files checked against the manifest`);
   });
 
   test("links in an archive are refused on extraction", async () => {
@@ -211,9 +249,9 @@ describe("archive verification", () => {
     const proc = Bun.spawnSync(["tar", "--exclude=./backup", "-C", made.dataDir, "-czf", offline, "."]);
     expect(proc.exitCode).toBe(0);
     await expect(readArchive(offline)).rejects.toThrow(/no manifest/);
-    const read = await readArchive(offline, { legacy: true, extractTo: join(made.root, "offline-out") });
+    const read = await readArchive(offline, { legacy: true, extractTo: join(made.root, "offline-out"), collect: true });
     expect(read.manifest).toBeNull();
-    expect(read.files.map((file) => file.path)).toContain("mynotes.sqlite");
+    expect(read.files!.map((file) => file.path)).toContain("mynotes.sqlite");
   });
 });
 

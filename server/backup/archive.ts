@@ -1,8 +1,10 @@
 import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
-import { constants, createReadStream, createWriteStream } from "node:fs";
-import { lstat, mkdir, open, readdir, realpath, rm, stat, utimes } from "node:fs/promises";
+import { closeSync, constants, createReadStream, createWriteStream, openSync, writeSync } from "node:fs";
+import { lstat, mkdir, mkdtemp, open, readdir, readFile, realpath, rm, stat, utimes } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
+import { createInterface } from "node:readline";
 import { pipeline } from "node:stream/promises";
 import { createGunzip, createGzip } from "node:zlib";
 import * as tar from "tar-stream";
@@ -17,6 +19,12 @@ import * as tar from "tar-stream";
  *
  * Packing and reading stream (one file and one gzip window in memory at a time). Reading checks every
  * entry against the manifest; extraction writes only regular files under the target, never a link.
+ *
+ * D688: the manifest's file list never sits in memory. Packing appends each file's record to a side
+ * file and writes the manifest as one JSON object whose `files` array comes last, one record a line
+ * (`{…header…,"files":[` / `{record},` … / `]}`), streamed from that side file; reading streams the
+ * manifest and the records it read to two side files and compares them line by line, in archive order.
+ * Manifests written before (one `JSON.stringify(…, null, 1)` document) are still read, whole.
  */
 
 export const DATABASE_NAME = "mynotes.sqlite";
@@ -54,6 +62,9 @@ export type Manifest = {
   skipped: Array<{ path: string; reason: "symlink" | "special" | "vanished" }>;
   counts: Record<string, number>;
 };
+
+/** A manifest without its file list, as packing and reading return it (D688: the list stays on disk). */
+export type ManifestSummary = Omit<Manifest, "files"> & { fileCount: number };
 
 export class ArchiveError extends Error {
   constructor(message: string) {
@@ -122,14 +133,17 @@ export type DataFile = { path: string; abs: string };
 /**
  * Every regular file under DATA_DIR that belongs in an archive, sorted. Leaves out the live database,
  * staging, `*.tmp` (atomic writes in flight), the backup folder when it is inside DATA_DIR, and links
- * (never followed; listed in `skipped`).
+ * (never followed; listed in `skipped`). D688: with `listPath`, the list goes to that file (one path a
+ * line, read back with `dataFilesFrom`) instead of memory, and `files` is empty.
  */
-export async function collectDataFiles(dataDir: string, excludeDirs: string[] = []) {
+export async function collectDataFiles(dataDir: string, excludeDirs: string[] = [], options: { listPath?: string } = {}) {
   const root = await realpath(dataDir);
   const excluded = new Set(await Promise.all(excludeDirs.map(async (dir) => { try { return await realpath(dir); } catch { return resolve(dir); } })));
   const files: DataFile[] = [];
   const skipped: Manifest["skipped"] = [];
   let bytes = 0;
+  let count = 0;
+  const list = options.listPath ? await LineFile.create(options.listPath) : null;
   async function walk(dir: string) {
     const entries = (await readdir(dir, { withFileTypes: true })).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
     for (const entry of entries) {
@@ -142,25 +156,102 @@ export async function collectDataFiles(dataDir: string, excludeDirs: string[] = 
       } else if (entry.isDirectory()) {
         await walk(abs);
       } else if (entry.isFile()) {
-        files.push({ path: rel, abs });
+        if (list) await list.write(`${JSON.stringify(rel)}\n`);
+        else files.push({ path: rel, abs });
+        count += 1;
         try { bytes += (await stat(abs)).size; } catch { /* gone; packing records it */ }
       } else {
         skipped.push({ path: rel, reason: "special" });
       }
     }
   }
-  await walk(root);
-  return { files, skipped, bytes };
+  try {
+    await walk(root);
+  } finally {
+    await list?.close();
+  }
+  return { files, skipped, bytes, count, root };
 }
 
-type PackInput = { manifest: Omit<Manifest, "files" | "skipped" | "database"> & { database: Omit<Manifest["database"], "sha256" | "bytes"> }; database: string; files: DataFile[]; skipped: Manifest["skipped"] };
+/** The files a `collectDataFiles` list names, streamed (D688). */
+export async function* dataFilesFrom(listPath: string, root: string): AsyncIterable<DataFile> {
+  for await (const line of linesOf(listPath)) {
+    if (!line) continue;
+    const path = JSON.parse(line) as string;
+    yield { path, abs: join(root, ...path.split("/")) };
+  }
+}
+
+type PackInput = { manifest: Omit<Manifest, "files" | "skipped" | "database"> & { database: Omit<Manifest["database"], "sha256" | "bytes"> }; database: string; files: Iterable<DataFile> | AsyncIterable<DataFile>; skipped: Manifest["skipped"] };
+
+/** Appends lines to a file through one 64 KiB buffer (D688: lists that may hold a million records). */
+class LineFile {
+  private buffer = "";
+  private fd: number | null;
+  bytes = 0;
+  // A plain descriptor, written synchronously in 64 KiB batches: no FileHandle for the garbage collector
+  // to find open (Bun reports one collected open as an error), and closing twice is harmless.
+  private constructor(fd: number) { this.fd = fd; }
+  static async create(path: string) {
+    return new LineFile(openSync(path, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600));
+  }
+  async write(text: string) {
+    this.buffer += text;
+    this.bytes += Buffer.byteLength(text);
+    if (this.buffer.length >= 65_536) await this.flush();
+  }
+  /** Raw bytes (a manifest entry streamed to disk: chunks may split a character). */
+  async writeBytes(bytes: Buffer) {
+    await this.flush();
+    if (this.fd === null) return;
+    this.bytes += bytes.byteLength;
+    for (let at = 0; at < bytes.byteLength;) at += writeSync(this.fd, bytes, at);
+  }
+  async flush() {
+    if (!this.buffer || this.fd === null) return;
+    const bytes = Buffer.from(this.buffer);
+    this.buffer = "";
+    for (let at = 0; at < bytes.byteLength;) at += writeSync(this.fd, bytes, at);
+  }
+  async close() {
+    if (this.fd === null) return;
+    try {
+      await this.flush();
+    } finally {
+      closeSync(this.fd);
+      this.fd = null;
+    }
+  }
+}
+
+/** The lines of a file, streamed. */
+const linesOf = (path: string) => createInterface({ input: createReadStream(path, { encoding: "utf8", highWaterMark: 256 * 1024 }), crlfDelay: Infinity });
+
+const FILES_OPEN = `,"files":[`;
+const FILES_CLOSE = "\n]}\n";
+
+/** Writes the streamed manifest entry (D688): the header, the side file of records, and the close. */
+async function writeManifestEntry(pack: tar.Pack, header: Omit<Manifest, "files">, listPath: string, listBytes: number) {
+  const head = `${JSON.stringify(header).slice(0, -1)}${FILES_OPEN}`;
+  const size = Buffer.byteLength(head) + listBytes + Buffer.byteLength(FILES_CLOSE);
+  let finished!: (error?: Error | null) => void;
+  const written = new Promise<void>((resolveEntry, reject) => { finished = (error) => error ? reject(error) : resolveEntry(); });
+  const entry = pack.entry({ name: MANIFEST_NAME, size, mode: 0o600, mtime: new Date(header.createdAt), type: "file" }, (error) => finished(error));
+  const put = async (chunk: Buffer) => { if (!entry.write(chunk)) await new Promise<void>((resolveDrain) => entry.once("drain", () => resolveDrain())); };
+  await put(Buffer.from(head));
+  for await (const chunk of createReadStream(listPath, { highWaterMark: 256 * 1024 }) as AsyncIterable<Buffer>) await put(chunk);
+  await put(Buffer.from(FILES_CLOSE));
+  (entry as unknown as { end(): void }).end();
+  await written;
+}
 
 /**
  * Writes the archive: the snapshot first, then the files, then the manifest. Each file is opened once
  * and read from that descriptor up to the size it had when opened (notes and objects are replaced by
  * rename, never rewritten in place, so the bytes are one version). A file gone before it was opened is
- * recorded in `skipped` as vanished (a purge raced the backup). Returns the manifest, the archive's
- * size, and its SHA-256.
+ * recorded in `skipped` as vanished (a purge raced the backup). Each file's record goes to a side file
+ * beside the archive (`<archive>.files`, removed after), never to memory (D688). Returns the manifest
+ * without its list, the archive's size, and its SHA-256.
  */
 export async function writeArchive(outPath: string, input: PackInput) {
   const pack = tar.pack();
@@ -177,8 +268,14 @@ export async function writeArchive(outPath: string, input: PackInput) {
   // A failure inside the pipeline must not leave addEntry waiting on a callback that never comes.
   let failed: unknown = null;
   done.catch((error) => { failed = error; });
-  const files: ManifestFile[] = [];
   const skipped = [...input.skipped];
+  const listPath = `${outPath}.files`;
+  let list: LineFile | null = null;
+  let fileCount = 0;
+  const record = async (file: ManifestFile) => {
+    await list!.write(`${fileCount === 0 ? "\n" : ",\n"}${JSON.stringify(file)}`);
+    fileCount += 1;
+  };
 
   async function addEntry(name: string, abs: string) {
     let handle;
@@ -212,24 +309,30 @@ export async function writeArchive(outPath: string, input: PackInput) {
   }
 
   try {
+    list = await LineFile.create(listPath);
     const database = await addEntry(DATABASE_NAME, input.database);
     if (!database) throw new ArchiveError("The database snapshot is missing");
-    files.push(database);
-    for (const file of input.files) {
+    await record(database);
+    for await (const file of input.files) {
       const added = await addEntry(file.path, file.abs);
-      if (added) files.push(added);
+      if (added) await record(added);
       else skipped.push({ path: file.path, reason: "vanished" });
     }
-    const manifest: Manifest = { ...input.manifest, database: { ...input.manifest.database, bytes: database.size, sha256: database.sha256 }, files, skipped } as Manifest;
-    pack.entry({ name: MANIFEST_NAME, mode: 0o600, mtime: new Date(manifest.createdAt) }, Buffer.from(`${JSON.stringify(manifest, null, 1)}\n`));
+    await list.close();
+    const header = { ...input.manifest, database: { ...input.manifest.database, bytes: database.size, sha256: database.sha256 }, skipped } as Omit<Manifest, "files">;
+    await writeManifestEntry(pack, header, listPath, list.bytes);
     pack.finalize();
     await done;
+    const manifest: ManifestSummary = { ...header, fileCount };
     return { manifest, size: archiveBytes, sha256: archiveHash.digest("hex") };
   } catch (error) {
     pack.destroy(error as Error);
     await done.catch(() => undefined);
+    await list?.close().catch(() => undefined);
     await rm(outPath, { force: true });
     throw failed ?? error;
+  } finally {
+    await rm(listPath, { force: true });
   }
 }
 
@@ -244,12 +347,51 @@ export function safeEntryName(raw: string) {
 }
 
 export type ReadResult = {
-  manifest: Manifest | null;
-  /** Every regular file read, with its size and SHA-256. */
-  files: ManifestFile[];
+  /** The manifest without its file list (D688), or null for an offline archive. */
+  manifest: ManifestSummary | null;
+  /** How many regular files were read (the manifest not counted). */
+  fileCount: number;
+  /** Every regular file read, with its size and SHA-256: only with `collect` (tests, small archives). */
+  files?: ManifestFile[];
   archiveBytes: number;
   archiveSha256: string;
 };
+
+const sameFile = (a: ManifestFile, b: ManifestFile) => a.path === b.path && a.size === b.size && a.sha256 === b.sha256;
+
+/** The manifest's header and its records, in order, from the side file it was streamed to (D688; or a whole older manifest). */
+async function openManifest(path: string): Promise<{ header: Omit<Manifest, "files">; records: AsyncIterable<ManifestFile> }> {
+  const invalid = () => new ArchiveError("The archive's manifest is not valid JSON");
+  const lines = linesOf(path);
+  const iterator = lines[Symbol.asyncIterator]();
+  const first = await iterator.next();
+  const firstLine = first.done ? "" : first.value;
+  if (firstLine.endsWith(FILES_OPEN)) {
+    let header: Omit<Manifest, "files">;
+    try { header = JSON.parse(`${firstLine.slice(0, -FILES_OPEN.length)}}`) as Omit<Manifest, "files">; } catch { lines.close(); throw invalid(); }
+    async function* records() {
+      try {
+        for (;;) {
+          const next = await iterator.next();
+          if (next.done) throw invalid();
+          const line = next.value;
+          if (line === "]}") break;
+          try { yield JSON.parse(line.endsWith(",") ? line.slice(0, -1) : line) as ManifestFile; } catch { throw invalid(); }
+        }
+      } finally {
+        lines.close();
+      }
+    }
+    return { header, records: records() };
+  }
+  // A manifest from before D688: one JSON document (its list was in memory when it was written, too).
+  lines.close();
+  let whole: Manifest;
+  try { whole = JSON.parse(await readFile(path, "utf8")) as Manifest; } catch { throw invalid(); }
+  if (!whole || !Array.isArray(whole.files)) throw new ArchiveError("The archive's manifest is not a Nook backup manifest (version 1)");
+  const { files, ...header } = whole;
+  return { header, records: (async function* () { yield* files; })() };
+}
 
 /**
  * Reads an archive end to end: every entry is hashed, and (when the archive has a manifest) checked
@@ -257,12 +399,23 @@ export type ReadResult = {
  * Archives without a manifest are the offline `mynotes-*.tar.gz` (`legacy: true` accepts them).
  * With `extractTo` (an empty or new directory), files are written there as they are read: regular files
  * only (0600, directories 0700), each opened with O_EXCL and O_NOFOLLOW under the target, with the
- * archive's modification times. Links and devices fail the read.
+ * archive's modification times. Links and devices fail the read. D688: the records read and the manifest
+ * go to two side files in a private folder under `scratchDir` (default the system's temporary folder),
+ * removed afterwards, and are compared line by line; `collect` also returns the records (tests).
  */
-export async function readArchive(archivePath: string, options: { extractTo?: string; legacy?: boolean } = {}): Promise<ReadResult> {
+export async function readArchive(archivePath: string, options: { extractTo?: string; legacy?: boolean; collect?: boolean; scratchDir?: string } = {}): Promise<ReadResult> {
   const target = options.extractTo ? resolve(options.extractTo) : null;
   if (target) await mkdir(target, { recursive: true, mode: 0o700 });
   const targetReal = target ? await realpath(target) : null;
+  const scratch = await mkdtemp(join(options.scratchDir ?? tmpdir(), "nook-read-"));
+  try {
+    return await readInto(archivePath, options, target, targetReal, scratch);
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function readInto(archivePath: string, options: { legacy?: boolean; collect?: boolean }, target: string | null, targetReal: string | null, scratch: string): Promise<ReadResult> {
   const archiveHash = createHash("sha256");
   let archiveBytes = 0;
   const raw = createReadStream(archivePath, { highWaterMark: 256 * 1024 });
@@ -273,77 +426,105 @@ export async function readArchive(archivePath: string, options: { extractTo?: st
   gunzip.on("error", (error) => extract.destroy(new ArchiveError(`The archive is not a valid gzip file: ${error.message}`)));
   raw.pipe(gunzip).pipe(extract as unknown as NodeJS.WritableStream);
 
-  const files: ManifestFile[] = [];
-  let manifestText: string | null = null;
-  const seen = new Set<string>();
+  const readPath = join(scratch, "read.ndjson");
+  const manifestPath = join(scratch, "manifest.json");
+  const readList = await LineFile.create(readPath);
+  const collected: ManifestFile[] | undefined = options.collect ? [] : undefined;
+  let fileCount = 0;
+  let sawManifest = false;
+  let hasDatabase = false;
   try {
-    for await (const entry of extract) {
-      const header = entry.header;
-      const name = safeEntryName(header.name);
-      const type = header.type ?? "file";
-      if (type === "directory" || name === null) {
-        if (name && target) await mkdir(join(target, name), { recursive: true, mode: 0o700 });
-        entry.resume();
-        continue;
-      }
-      if (type !== "file" && type !== "contiguous-file") throw new ArchiveError(`The archive holds a ${type} (${name}); only regular files are restored`);
-      if (seen.has(name)) throw new ArchiveError(`The archive names ${name} twice`);
-      seen.add(name);
-      if (name === MANIFEST_NAME) {
-        const chunks: Buffer[] = [];
-        for await (const chunk of entry) chunks.push(chunk as Buffer);
-        manifestText = Buffer.concat(chunks).toString("utf8");
-        continue;
-      }
-      if (manifestText !== null) throw new ArchiveError("The archive has entries after its manifest");
-      const hash = createHash("sha256");
-      let size = 0;
-      let handle = null;
-      if (target && targetReal) {
-        const path = join(target, name);
-        await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-        const parent = await realpath(dirname(path));
-        if (parent !== targetReal && !parent.startsWith(targetReal + sep)) throw new ArchiveError(`Unsafe path in the archive: ${name}`);
-        handle = await open(path, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW, 0o600);
-      }
-      try {
-        for await (const chunk of entry) {
-          hash.update(chunk as Buffer);
-          size += (chunk as Buffer).byteLength;
-          if (handle) await handle.write(chunk as Buffer);
+    try {
+      for await (const entry of extract) {
+        const header = entry.header;
+        const name = safeEntryName(header.name);
+        const type = header.type ?? "file";
+        if (type === "directory" || name === null) {
+          if (name && target) await mkdir(join(target, name), { recursive: true, mode: 0o700 });
+          entry.resume();
+          continue;
         }
-      } finally {
-        await handle?.close();
+        if (type !== "file" && type !== "contiguous-file") throw new ArchiveError(`The archive holds a ${type} (${name}); only regular files are restored`);
+        if (name === MANIFEST_NAME) {
+          if (sawManifest) throw new ArchiveError(`The archive names ${name} twice`);
+          sawManifest = true;
+          const manifestFile = await LineFile.create(manifestPath);
+          try {
+            for await (const chunk of entry) await manifestFile.writeBytes(chunk as Buffer);
+          } finally {
+            await manifestFile.close();
+          }
+          continue;
+        }
+        if (sawManifest) throw new ArchiveError("The archive has entries after its manifest");
+        const hash = createHash("sha256");
+        let size = 0;
+        let handle = null;
+        if (target && targetReal) {
+          const path = join(target, name);
+          await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+          const parent = await realpath(dirname(path));
+          if (parent !== targetReal && !parent.startsWith(targetReal + sep)) throw new ArchiveError(`Unsafe path in the archive: ${name}`);
+          // O_EXCL: an archive that names a file twice fails here.
+          try {
+            handle = await open(path, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW, 0o600);
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new ArchiveError(`The archive names ${name} twice`);
+            throw error;
+          }
+        }
+        try {
+          for await (const chunk of entry) {
+            hash.update(chunk as Buffer);
+            size += (chunk as Buffer).byteLength;
+            if (handle) await handle.write(chunk as Buffer);
+          }
+        } finally {
+          await handle?.close();
+        }
+        if (target && header.mtime) await utimes(join(target, name), header.mtime, header.mtime).catch(() => undefined);
+        const file = { path: name, size, sha256: hash.digest("hex") };
+        await readList.write(`${JSON.stringify(file)}\n`);
+        collected?.push(file);
+        fileCount += 1;
+        if (name === DATABASE_NAME) hasDatabase = true;
       }
-      if (target && header.mtime) await utimes(join(target, name), header.mtime, header.mtime).catch(() => undefined);
-      files.push({ path: name, size, sha256: hash.digest("hex") });
+    } finally {
+      await readList.close();
     }
   } catch (error) {
     raw.destroy();
     throw error instanceof ArchiveError ? error : new ArchiveError(`The archive could not be read: ${error instanceof Error ? error.message : String(error)}`);
   }
 
-  let manifest: Manifest | null = null;
-  if (manifestText !== null) {
+  let manifest: ManifestSummary | null = null;
+  if (sawManifest) {
+    const { header, records } = await openManifest(manifestPath);
+    if (header.format !== "nook-backup" || header.version !== 1) throw new ArchiveError("The archive's manifest is not a Nook backup manifest (version 1)");
+    // Both lists are in archive order (the database first): compare them record by record.
+    const readLines = linesOf(readPath);
+    const read = readLines[Symbol.asyncIterator]();
+    let listed = 0;
     try {
-      manifest = JSON.parse(manifestText) as Manifest;
-    } catch {
-      throw new ArchiveError("The archive's manifest is not valid JSON");
+      for await (const expected of records) {
+        listed += 1;
+        const next = await read.next();
+        if (next.done) throw new ArchiveError(`The archive is missing ${expected.path}, which its manifest lists`);
+        const actual = JSON.parse(next.value) as ManifestFile;
+        if (actual.path !== expected.path) throw new ArchiveError(`The archive is missing ${expected.path}, which its manifest lists (found ${actual.path} in its place)`);
+        if (!sameFile(actual, expected)) throw new ArchiveError(`${expected.path} does not match its manifest (size or SHA-256)`);
+      }
+      const extra = await read.next();
+      if (!extra.done) throw new ArchiveError(`The archive holds ${fileCount - listed} file(s) its manifest does not list, such as ${(JSON.parse(extra.value) as ManifestFile).path}`);
+    } finally {
+      readLines.close();
     }
-    if (manifest.format !== "nook-backup" || manifest.version !== 1 || !Array.isArray(manifest.files)) throw new ArchiveError("The archive's manifest is not a Nook backup manifest (version 1)");
-    const read = new Map(files.map((file) => [file.path, file]));
-    for (const expected of manifest.files) {
-      const actual = read.get(expected.path);
-      if (!actual) throw new ArchiveError(`The archive is missing ${expected.path}, which its manifest lists`);
-      if (actual.size !== expected.size || actual.sha256 !== expected.sha256) throw new ArchiveError(`${expected.path} does not match its manifest (size or SHA-256)`);
-      read.delete(expected.path);
-    }
-    if (read.size) throw new ArchiveError(`The archive holds ${read.size} file(s) its manifest does not list, such as ${[...read.keys()][0]}`);
+    manifest = { ...header, fileCount: listed };
   } else if (!options.legacy) {
     throw new ArchiveError("The archive has no manifest (nook-backup.json); it is not an online backup");
   }
-  if (!files.some((file) => file.path === DATABASE_NAME)) throw new ArchiveError("The archive holds no mynotes.sqlite");
-  return { manifest, files, archiveBytes, archiveSha256: archiveHash.digest("hex") };
+  if (!hasDatabase) throw new ArchiveError("The archive holds no mynotes.sqlite");
+  return { manifest, fileCount, ...(collected ? { files: collected } : {}), archiveBytes, archiveSha256: archiveHash.digest("hex") };
 }
 
 /** True when `dir` does not exist or holds nothing (a restore never writes into a used data directory). */
