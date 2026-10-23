@@ -101,7 +101,7 @@ const NEUTRAL_VALUES: Record<Exclude<RemovableFilterType, "date_range">, unknown
 export function wantedParameter(request: AddFilterRequest): Record<string, unknown> {
   if (request.type === "text") return { id: request.id, label: request.label, type: "text", chType: "String", default: "" };
   if (request.type === "date_range") return { id: request.id, label: request.label, type: "date_range", chType: "Date", default: { preset: request.preset ?? "30d" } };
-  if (request.type === "number_range") return { id: request.id, label: request.label, type: "number_range", chType: "Float64", default: { min: null, max: null } };
+  if (request.type === "number_range") return { id: request.id, label: request.label, type: "number_range", chType: request.chType, default: { min: null, max: null } };
   return { id: request.id, label: request.label, type: "multi_select", chType: request.chType, default: [], optionsQuery: request.optionsQuery };
 }
 
@@ -109,7 +109,7 @@ export function wantedParameter(request: AddFilterRequest): Record<string, unkno
 export function requiredPlaceholders(request: AddFilterRequest): Array<{ name: string; type: string }> {
   if (request.type === "text") return [{ name: request.id, type: "String" }];
   if (request.type === "date_range") return [{ name: `${request.id}_from`, type: "Date" }, { name: `${request.id}_to`, type: "Date" }];
-  if (request.type === "number_range") return [{ name: `${request.id}_min`, type: "Float64" }, { name: `${request.id}_max`, type: "Float64" }];
+  if (request.type === "number_range") return [{ name: `${request.id}_min`, type: request.chType }, { name: `${request.id}_max`, type: request.chType }];
   return [{ name: request.id, type: request.chType }, ...(request.exclude ? [{ name: `${request.id}_not`, type: "UInt8" }] : [])];
 }
 
@@ -222,7 +222,12 @@ export async function filterIdentityChecks(before: ReportSpec, after: ReportSpec
   // D570: a date range runs once with another window instead of values.
   if (dated && request.kind === "add_filter") candidates = [request.preset === "7d" ? "30d" : "7d"];
   // D671: a number range runs once from the column's median up (or from 0 when Nook read no numbers).
-  else if (ranged) candidates = [String(request.numbers?.median ?? 0)];
+  // D678: an integer range starts at the whole median (0 past what a JSON number holds exactly).
+  else if (ranged) {
+    const median = request.numbers?.median ?? 0;
+    const whole = request.chType === "Int64" || request.chType === "UInt64";
+    candidates = [String(!whole ? median : Number.isSafeInteger(Math.trunc(median)) ? Math.max(request.chType === "UInt64" ? 0 : -Infinity, Math.trunc(median)) : 0)];
+  }
   else if (request.kind === "add_filter") {
     try {
       candidates = (await runOptionsQuery(context.datasource, request.optionsQuery, { userId: context.userId, queryId: queryIdFor("fltchk", short, request.id), signal: context.signal, params: newBound })).options.slice(0, FILTER_CHECK_VALUES);

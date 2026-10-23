@@ -317,6 +317,12 @@ ul.report-block-problem { display: block; padding-left: 18px; }
 .report-params-add:focus-visible { outline: 2px solid var(--report-accent); outline-offset: 1px; }
 .report-params-add-narrow { margin-left: auto; min-height: 44px; }
 .report-param-remove { margin-right: auto; }
+/* D680: a date range still counted in an old time zone: an amber note under the bar; the owner's Fix in Changes at its end. */
+.report-params-zone { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; margin: 0 0 10px; border: 1px solid color-mix(in srgb, var(--report-accent, var(--yellow)) 40%, var(--report-border, var(--border))); border-radius: 8px; padding: 8px 10px; background: var(--report-accent-bg, transparent); color: var(--report-text); font-size: .84rem; }
+.report-params-zone > svg { width: 16px; height: 16px; flex: none; color: var(--report-accent); }
+.report-params-zone > span { flex: 1 1 240px; min-width: 0; overflow-wrap: anywhere; }
+.report-params-zone .secondary-button { min-height: 36px; }
+@media (max-width: 760px) { .report-params-zone .secondary-button { min-height: 44px; width: 100%; } }
 /* D670: a text filter's Remove (the owner): a 36 px trash after the field (44 px on a phone's sheet). */
 .report-param-text { display: inline-flex; align-items: center; gap: 2px; min-width: 0; max-width: 100%; }
 .report-param-field .report-param-text { display: flex; }

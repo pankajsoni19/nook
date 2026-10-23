@@ -1,6 +1,6 @@
 import { audit } from "../db";
 import type { ReportSpec } from "../../shared/reports";
-import { bindValues, DATE_PRESET_LABELS, DATE_PRESETS, defaultValues, PARAM_ID, PARAM_LIMITS, placeholdersIn, placeholdersOf, type DatePreset } from "../../shared/reportParams";
+import { bindValues, DATE_PRESET_LABELS, DATE_PRESETS, defaultValues, PARAM_ID, PARAM_LIMITS, placeholdersIn, placeholdersOf, RANGE_ENDS, type DatePreset } from "../../shared/reportParams";
 import { FILTER_LIMITS, REMOVABLE_FILTER_TYPES, type AddFilterRequest, type FilterColumn, type FilterColumnsView, type FilterKind, type FilterNarrowSkipped, type FilterNumbers, type FilterPreview, type RemovableFilterType, type ReportInstruction } from "../../shared/reportsEdit";
 import { ownedReport } from "./access";
 import { tableAllowed } from "./allowlist";
@@ -78,6 +78,17 @@ export function dateTimeZoneOf(type: string): string | null | undefined {
   return /^DateTime(64)?(\(\s*\d+\s*\))?$/.test(inner) ? null : undefined;
 }
 
+/**
+ * D678: the type a number range on a column binds as: an integer up to 64 bits as Int64 or UInt64 (its
+ * values compare exactly, past 2^53 too), anything else (floats, decimals, 128- and 256-bit integers) as Float64.
+ */
+export function numberRangeChType(type: string): "Int64" | "UInt64" | "Float64" {
+  const inner = innerType(type);
+  if (/^Int(8|16|32|64)$/.test(inner)) return "Int64";
+  if (/^UInt(8|16|32|64)$/.test(inner)) return "UInt64";
+  return "Float64";
+}
+
 /** D569, D570, D671: what Add filter offers for a column type: text a list or "contains", whole numbers a list or a range, other numbers a range, dates a date range. */
 export function filterKinds(type: string): FilterKind[] {
   if (isDateType(type)) return ["date_range"];
@@ -100,7 +111,12 @@ export function filterCondition(kind: FilterKind, id: string, column: string, ch
   const col = columnRef(column);
   if (kind === "text") return `(empty({${id}:String}) OR positionCaseInsensitive(toString(${col}), {${id}:String}) > 0)`;
   if (kind === "date_range") return `${zone ? `toDate(${col}, ${sqlString(zone)})` : `toDate(${col})`} BETWEEN {${id}_from:Date} AND {${id}_to:Date}`;
-  if (kind === "number_range") return `(({${id}_min:Float64} = -inf AND {${id}_max:Float64} = inf) OR ${col} BETWEEN {${id}_min:Float64} AND {${id}_max:Float64})`;
+  if (kind === "number_range") {
+    // D678: the open ends are the bind type's lowest and highest (Float64's infinities, Int64's and UInt64's bounds).
+    const type = chType === "Int64" || chType === "UInt64" ? chType : "Float64";
+    const [low, high] = RANGE_ENDS[type]!;
+    return `(({${id}_min:${type}} = ${low} AND {${id}_max:${type}} = ${high}) OR ${col} BETWEEN {${id}_min:${type}} AND {${id}_max:${type}})`;
+  }
   const placeholder = `{${id}:${chType}}`;
   return exclude ? `(empty(${placeholder}) OR (${col} IN ${placeholder}) != {${id}_not:UInt8})` : `(empty(${placeholder}) OR ${col} IN ${placeholder})`;
 }
@@ -327,7 +343,7 @@ function pickedKind(found: FilterColumn, kind: FilterKind | undefined): FilterKi
 }
 
 /** The bind type a kind's parameter has (a list keeps the column's). */
-const kindChType = (kind: FilterKind, found: FilterColumn) => kind === "date_range" ? "Date" : kind === "text" ? "String" : kind === "number_range" ? "Float64" : found.chType;
+const kindChType = (kind: FilterKind, found: FilterColumn) => kind === "date_range" ? "Date" : kind === "text" ? "String" : kind === "number_range" ? numberRangeChType(found.type) : found.chType;
 
 /**
  * Runs the options query and counts the distinct values (refused past FILTER_LIMITS.distinct or with no
@@ -457,7 +473,7 @@ export type AddFilterInput = { table: string; column: string; label?: string; id
  * same table whose picks narrow this one's choices (its options query reads them; the agent adds it after them).
  * D568: `exclude` lets readers leave values out; D569: `kind: "text"` is a text-contains filter; D570:
  * `kind: "date_range"` with a default `preset` (the default results change: reviewed by hand; D672: by
- * day in the report's zone); D671: `kind: "number_range"` (Float64 ends, starting at Any).
+ * day in the report's zone); D671: `kind: "number_range"` (starting at Any; D678: Int64 or UInt64 ends on an integer column, else Float64).
  */
 export async function requestAddFilter(actor: Actor, reportId: string, input: AddFilterInput): Promise<ReportInstruction> {
   ownerActor(actor, reportId);
@@ -481,7 +497,8 @@ export async function requestAddFilter(actor: Actor, reportId: string, input: Ad
     request = { kind: "add_filter", type: "date_range", id, label, table: found.table, column: found.column, chType: "Date", optionsQuery: "", preset, condition: filterCondition("date_range", id, found.column, "Date", false, zone), ...(zone ? { zone } : {}) };
   } else if (kind === "number_range") {
     const numbers = await readNumbers(context, actor.userId, reportId);
-    request = { kind: "add_filter", type: "number_range", id, label, table: found.table, column: found.column, chType: "Float64", optionsQuery: "", condition: filterCondition("number_range", id, found.column, "Float64"), numbers };
+    const rangeType = numberRangeChType(found.type);
+    request = { kind: "add_filter", type: "number_range", id, label, table: found.table, column: found.column, chType: rangeType, optionsQuery: "", condition: filterCondition("number_range", id, found.column, rangeType), numbers };
   } else if (kind === "text") {
     const read = await readOptions(context, actor.userId, reportId, [], "text");
     request = { kind: "add_filter", type: "text", id, label, table: found.table, column: found.column, chType: "String", optionsQuery: read.optionsQuery, condition: filterCondition("text", id, found.column, "String") };

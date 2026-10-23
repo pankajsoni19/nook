@@ -66,6 +66,26 @@ function api() {
 
 const notes = () => [...document.querySelectorAll(".report-block")].map((block) => `${block.getAttribute("aria-label")}: ${block.querySelector(".report-block-unfiltered")?.textContent ?? "-"}`);
 
+describe("D680: a date range counted in an old time zone", () => {
+  test("readers see the notice (no button); it names the filter, its old zone, and the report's zone", async () => {
+    const zoned = { ...report, spec: { ...spec, queries: spec.queries.map((query) => query.key === "totals" ? { ...query, sql: query.sql.replace("day >= {period_from:Date} AND day <= {period_to:Date}", "toDate(ts, 'Asia/Kolkata') BETWEEN {period_from:Date} AND {period_to:Date}") } : query) } } as ReportDetail;
+    api();
+    function Zoned() {
+      const [search, setSearch] = useState<Record<string, string[]> | undefined>(undefined);
+      return <ReportParamsContext.Provider value={{ search, onChange: (next) => setSearch(next) }}><ReportView report={zoned} canWrite={false} /></ReportParamsContext.Provider>;
+    }
+    const view = await render(<Zoned />);
+    const note = await view.waitFor(() => document.querySelector(".report-params-zone"));
+    expect(note.textContent).toBe("Period counts days in Asia/Kolkata, but the report's time zone is now UTC. Its owner can fix it.");
+    expect(note.querySelector("button")).toBeNull();
+    view.container.remove();
+    // In the report's own zone there is nothing to say.
+    const plain = await render(<Page />);
+    await plain.waitFor(() => document.querySelector(".report-params"));
+    expect(document.querySelector(".report-params-zone")).toBeNull();
+  });
+});
+
 describe("D533: what each filter reaches", () => {
   test("reachText", () => {
     expect(reachText({ blocks: 4, total: 6 })).toBe("Filters 4 of 6 blocks");

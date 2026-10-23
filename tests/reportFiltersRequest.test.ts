@@ -488,6 +488,58 @@ describe("D670–D672: Remove any filter type, Add filter's number range, and Da
     expect(await waitStatus(removal.body.instruction.id, ["proposed", "failed"])).toEqual({ status: "proposed", error: null });
   });
 
+  test("D678: a number range on an integer column binds the column's 64-bit integer type, its open ends the type's bounds", async () => {
+    const { numberRangeChType, filterCondition } = await import("../server/reports/filterRequest");
+    expect(["Int8", "Nullable(Int32)", "Int64", "UInt16", "LowCardinality(UInt64)", "Int128", "UInt256", "Float32", "Decimal(10, 2)"].map(numberRangeChType))
+      .toEqual(["Int64", "Int64", "Int64", "UInt64", "UInt64", "Float64", "Float64", "Float64", "Float64"]);
+    expect(filterCondition("number_range", "n", "n", "UInt64")).toBe("(({n_min:UInt64} = 0 AND {n_max:UInt64} = 18446744073709551615) OR n BETWEEN {n_min:UInt64} AND {n_max:UInt64})");
+    const reportId = await seededReport();
+    const asked = await send(owner, "POST", `/reports/${reportId}/filters`, { table: "eval_top_routes.requests", column: "status", kind: "number_range", label: "Status code" });
+    expect(asked.body.instruction.request).toMatchObject({ type: "number_range", chType: "UInt64", condition: "(({status_min:UInt64} = 0 AND {status_max:UInt64} = 18446744073709551615) OR status BETWEEN {status_min:UInt64} AND {status_max:UInt64})" });
+    expect(await waitStatus(asked.body.instruction.id, ["proposed", "failed"])).toEqual({ status: "proposed", error: null });
+    // The check's other run starts at the whole median, bound as UInt64.
+    expect(fake.requests.some((item) => item.params.param_status_min === "48" && item.params.param_status_max === "18446744073709551615")).toBe(true);
+    await apply(reportId, asked.body.instruction.id);
+    expect(specOf(reportId).parameters).toEqual([{ id: "status", label: "Status code", type: "number_range", chType: "UInt64", default: { min: null, max: null } }]);
+  });
+
+  test("D679, D680: a schedule zone change proposes rewriting a date range's zone in Changes (never silently); Fix in Changes finds the same proposal", async () => {
+    const oldZone = instanceTimeZone();
+    const newZone = oldZone === "UTC" ? "Asia/Kolkata" : "UTC";
+    const report = await send(owner, "POST", "/reports", { title: "Zoned traffic", datasourceId });
+    const reportId = report.body.report.id as string;
+    const golden = goldenSpec();
+    const condition = `toDate(ts, '${oldZone}') BETWEEN {ts_from:Date} AND {ts_to:Date}`;
+    const zoned: ReportSpec = { ...golden, parameters: [{ id: "ts", label: "Period", type: "date_range", chType: "Date", default: { preset: "30d" } }], queries: golden.queries.map((query) => query.key === "errors" ? { ...query, sql: withCondition(query.sql, condition) } : query) };
+    db.query("UPDATE reports SET spec_json = ?, status = 'ready' WHERE id = ?").run(JSON.stringify(zoned), reportId);
+    await refresh.startRefresh(owner.userId, reportId, { trigger: "user" }).done;
+    expect((await send(owner, "POST", `/reports/${reportId}/filters/zone-fix`, {})).body.instruction).toBeNull();
+
+    expect((await send(owner, "PUT", `/reports/${reportId}/schedule`, { cadence: "manual", atTime: null, weekday: null, tz: newZone, enabled: false })).status).toBe(200);
+    const row = await waitFor(() => db.query("SELECT id, status, text FROM report_instructions WHERE report_id = ? AND text LIKE 'Count the days%'").get(reportId) as { id: string; status: string; text: string } | null, (value) => value?.status === "proposed");
+    expect(row.text).toBe(`Count the days of Period in ${newZone}`);
+    // Nothing was rewritten yet.
+    expect(specOf(reportId).queries.find((query) => query.key === "errors")!.sql).toContain(`toDate(ts, '${oldZone}')`);
+    const proposal = await proposalOf(reportId, row.id);
+    expect(proposal.summary).toContain(`Period: count days in ${newZone}, the report's time zone, instead of ${oldZone}`);
+    expect((proposal.queries as Json[]).find((query) => query.key === "errors")!.after).toContain(`toDate(ts, '${newZone}') BETWEEN {ts_from:Date} AND {ts_to:Date}`);
+    // The notice's Fix in Changes answers the same proposal; a commenter cannot ask for one.
+    expect((await send(owner, "POST", `/reports/${reportId}/filters/zone-fix`, {})).body.instruction.id).toBe(row.id);
+    expect((await send(commenter, "POST", `/reports/${reportId}/filters/zone-fix`, {})).status).toBe(404);
+    await apply(reportId, row.id);
+    expect(specOf(reportId).queries.find((query) => query.key === "errors")!.sql).toContain(`toDate(ts, '${newZone}')`);
+    expect((await send(owner, "POST", `/reports/${reportId}/filters/zone-fix`, {})).body.instruction).toBeNull();
+  });
+
+  test("D679: the stale zones of a spec, and the rewrite touches only the named date ranges' zones", async () => {
+    const { rezonedSql, staleZoneFilters } = await import("../shared/filterZones");
+    const sql = "SELECT 1 FROM t WHERE toDate(ts, 'Asia/Kolkata') BETWEEN {p_from:Date} AND {p_to:Date} AND toDate(`at`, 'UTC') BETWEEN {q_from:Date} AND {q_to:Date} AND toDate(x, 'O\\'Hare') = today()";
+    const spec = { parameters: [{ id: "p", label: "Period", type: "date_range" }, { id: "q", label: "Shipped", type: "date_range" }], queries: [{ key: "a", sql }, { key: "b", sql: "SELECT 2" }] };
+    expect(staleZoneFilters(spec, "UTC")).toEqual([{ paramId: "p", label: "Period", zones: ["Asia/Kolkata"], queryKeys: ["a"] }]);
+    expect(staleZoneFilters(spec, "Asia/Kolkata")).toEqual([{ paramId: "q", label: "Shipped", zones: ["UTC"], queryKeys: ["a"] }]);
+    expect(rezonedSql(sql, new Set(["p"]), "Europe/O'Ville")).toBe(sql.replace("toDate(ts, 'Asia/Kolkata')", "toDate(ts, 'Europe/O\\'Ville')"));
+  });
+
   test("D672: a DateTime whose type names the report's zone, and a Date, need no zone", async () => {
     const { dateTimeZoneOf, filterCondition } = await import("../server/reports/filterRequest");
     expect(dateTimeZoneOf("DateTime('Europe/Berlin')")).toBe("Europe/Berlin");

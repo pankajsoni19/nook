@@ -24,7 +24,8 @@ import { dropUnlinked, parentsKey, parentValuesOf } from "./linkedFilters";
 import { CONTAINS_CHARS, containsKey, formatSort, parseSort, sortKey } from "./tableView";
 import { TABLE_KEY } from "../router";
 import { activeView, defaultOps, useReportViews, viewValues, ViewsSheet } from "./ReportViews";
-import { editSpec } from "./reportEditApi";
+import { editSpec, proposeZoneFix } from "./reportEditApi";
+import { staleZoneFilters } from "../../shared/filterZones";
 
 /** D563: a table block's sort (raw `column.desc`) and contains text from the URL, and how to change them. */
 type TableControl = { sort: string | undefined; contains: string; onSort: (raw: string | null) => void; onContains: (text: string) => void };
@@ -442,6 +443,7 @@ export function ReportView({ report, canWrite, generating = false, initial, read
     {(withParams || (canAddFilter && paramsContext !== null)) && <ReportParamsBar reportId={report.id} parameters={parameters} values={values} busy={Boolean(pending)} onChange={changeParams} timeZone={view?.timeZone}
       reach={blockReach} onAddFilter={canAddFilter ? editing?.addFilter : undefined} onRemoveFilter={canAddFilter && editing?.removeFilter ? (param) => editing.removeFilter!(param.id) : undefined}
       onViews={withParams ? () => setViewsOpen(true) : undefined} viewName={shownView?.name ?? null} excludable={excludable} />}
+    {withParams && view?.timeZone && <ZoneNotice reportId={report.id} spec={report.spec} zone={view.timeZone} onFix={canAddFilter && editing?.openChanges ? () => editing.openChanges!(null) : undefined} />}
     {viewsOpen && withParams && <ViewsSheet reportId={report.id} parameters={parameters} values={values} views={views.views} canSaveDefault={views.canSaveDefault && Boolean(editing?.canEdit)}
       onApply={(next) => pushValues(next)} onChanged={views.reload} onSaveDefault={saveAsDefault} blocks={blocks} onShowBlock={showBlock} onClose={() => setViewsOpen(false)} reopen={() => setViewsOpen(true)} />}
     {!readOnly && <div className="report-view-toolbar">
@@ -513,6 +515,35 @@ export function ReportView({ report, canWrite, generating = false, initial, read
 }
 
 const noChange = () => undefined;
+
+/**
+ * D680: a date range whose days some queries still count in another zone than the report's (the
+ * schedule's zone changed after the filter was added, D679). Everyone sees it; the owner gets **Fix in
+ * Changes**, which proposes the rewrite (or finds the one already waiting) and opens Changes.
+ */
+function ZoneNotice({ reportId, spec, zone, onFix }: { reportId: string; spec: ReportDetail["spec"]; zone: string; onFix?: () => void }) {
+  const stale = useMemo(() => staleZoneFilters(spec, zone), [spec, zone]);
+  const [busy, setBusy] = useState(false);
+  if (!stale.length) return null;
+  const fix = async () => {
+    setBusy(true);
+    try {
+      const { instruction } = await proposeZoneFix(reportId);
+      if (instruction) notify.success("The time zone fix waits for you in Changes");
+      else notify.info("Every date range already counts days in the report's time zone");
+      onFix?.();
+    } catch (reason) {
+      notify.error(messageOf(reason, "Could not propose the fix"));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return <div className="report-params-zone" role="note">
+    <Clock3 aria-hidden="true" />
+    <span>{stale.map((item) => `${item.label} counts days in ${item.zones.join(" and ")}`).join("; ")}, but the report's time zone is now {zone}.{onFix ? "" : " Its owner can fix it."}</span>
+    {onFix && <button type="button" className="secondary-button" disabled={busy} onClick={() => void fix()}>{busy ? <LoaderCircle className="spin" aria-hidden="true" /> : null}Fix in Changes</button>}
+  </div>;
+}
 
 /** D525: the trash on a block header or a section title, the same size and colour as Inspect and ⋯. */
 function RemoveButton({ label, disabled, className = "", onClick }: { label: string; disabled?: boolean; className?: string; onClick: () => void }) {

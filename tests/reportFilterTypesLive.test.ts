@@ -45,15 +45,16 @@ CREATE TABLE ${DB}.orders (
   price Decimal(10, 2),
   big Int128,
   ts DateTime('UTC'),
-  ts_local DateTime
+  ts_local DateTime,
+  wide Nullable(Int64)
 ) ENGINE = MergeTree ORDER BY id;
 INSERT INTO ${DB}.orders VALUES
-  (1, 'DE', 'Shipped', 10.5, 10.50, 1, '2026-01-01 20:00:00', '2026-01-01 20:00:00'),
-  (2, 'DE', 'pending', 99, 99.00, 170141183460469231731687303715884105727, '2026-01-01 10:00:00', '2026-01-01 10:00:00'),
-  (3, 'FR', 'SHIPPED', NULL, 5.25, -5, '2026-01-02 01:00:00', '2026-01-02 01:00:00'),
-  (4, 'FR', 'cancelled', nan, 1000.00, 42, '2026-01-02 19:00:00', '2026-01-02 19:00:00'),
-  (5, 'US', 'shipped', 250, 0.01, 0, '2026-01-03 12:00:00', '2026-01-03 12:00:00'),
-  (6, 'de', 'returned', -3, 12.00, 7, '2026-01-03 23:30:00', '2026-01-03 23:30:00');
+  (1, 'DE', 'Shipped', 10.5, 10.50, 1, '2026-01-01 20:00:00', '2026-01-01 20:00:00', 9007199254740993),
+  (2, 'DE', 'pending', 99, 99.00, 170141183460469231731687303715884105727, '2026-01-01 10:00:00', '2026-01-01 10:00:00', 9007199254740992),
+  (3, 'FR', 'SHIPPED', NULL, 5.25, -5, '2026-01-02 01:00:00', '2026-01-02 01:00:00', NULL),
+  (4, 'FR', 'cancelled', nan, 1000.00, 42, '2026-01-02 19:00:00', '2026-01-02 19:00:00', 9007199254740991),
+  (5, 'US', 'shipped', 250, 0.01, 0, '2026-01-03 12:00:00', '2026-01-03 12:00:00', -9223372036854775807),
+  (6, 'de', 'returned', -3, 12.00, 7, '2026-01-03 23:30:00', '2026-01-03 23:30:00', 5);
 `;
 
 type Json = Record<string, any>;
@@ -107,6 +108,21 @@ describe.skipIf(!url)("Filter types and linked lists on a real ClickHouse (CLICK
     expect(await column(ids(filterCondition("number_range", "price", "price", "Float64")), [range("price")], { price: { min: 5.25, max: 99 } })).toEqual([1, 2, 3, 6]);
     expect(await column(ids(filterCondition("number_range", "big", "big", "Float64")), [range("big")], { big: { min: 0, max: 50 } })).toEqual([1, 4, 5, 6]);
     expect(await column(ids(filterCondition("number_range", "big", "big", "Float64")), [range("big")], { big: { min: 1e30, max: null } })).toEqual([2]);
+  });
+
+  test("D678: an integer number range binds Int64 or UInt64: Any keeps NULL and the type's extremes; ends compare exactly past 2^53", async () => {
+    const ids = (condition: string) => `SELECT id FROM ${DB}.orders WHERE ${condition} ORDER BY id`;
+    const int: ReportParameter = { id: "wide", label: "wide", type: "number_range", chType: "Int64", default: { min: null, max: null } };
+    const wide = filterCondition("number_range", "wide", "wide", "Int64");
+    expect(wide).toBe("(({wide_min:Int64} = -9223372036854775808 AND {wide_max:Int64} = 9223372036854775807) OR wide BETWEEN {wide_min:Int64} AND {wide_max:Int64})");
+    expect(await column(ids(wide), [int], {})).toEqual([1, 2, 3, 4, 5, 6]);
+    // 2^53 - 1 is the largest end a JSON number holds exactly; 2^53 and 2^53 + 1 stay out, NULL too once an end is set.
+    expect(await column(ids(wide), [int], { wide: { min: 9007199254740991, max: null } })).toEqual([1, 2, 4]);
+    expect(await column(ids(wide), [int], { wide: { min: 0, max: 9007199254740991 } })).toEqual([4, 6]);
+    const unsigned: ReportParameter = { id: "id", label: "id", type: "number_range", chType: "UInt64", default: { min: null, max: null } };
+    const byId = filterCondition("number_range", "id", "id", "UInt64");
+    expect(await column(ids(byId), [unsigned], {})).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(await column(ids(byId), [unsigned], { id: { min: 3, max: 4 } })).toEqual([3, 4]);
   });
 
   test("the _not flag: a list keeps or leaves out its picks, and All keeps everything", async () => {

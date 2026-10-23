@@ -16,6 +16,7 @@ import { addOwner, listOwners, removeOwner } from "./owners";
 import { getVersion, listVersions, previewVersion, previousVersion, restoreVersion, versionDiff } from "./versions";
 import { ownedReport } from "./access";
 import { filterColumns, previewFilter, requestAddFilter, requestRemoveFilter } from "./filterRequest";
+import { proposeZoneFix } from "./querySuggest";
 import { PARAM_ID, PARAM_LIMITS } from "../../shared/reportParams";
 
 /**
@@ -78,6 +79,11 @@ export function registerReportEditRoutes(app: Hono<AppEnv>) {
     const reportId = id(c, "reportId");
     const body = await parseJson(c.req.raw, filterCreateSchema);
     return c.json({ instruction: await requestAddFilter({ userId: user.id, role: user.role }, reportId, body) }, 201);
+  }));
+  // D680: the owner proposes the zone fix from the filter's notice (D679 when the schedule save could not).
+  app.post("/api/reports/:reportId/filters/zone-fix", handle(async (c) => {
+    const user = c.get("user");
+    return { instruction: await proposeZoneFix({ userId: user.id, role: user.role }, id(c, "reportId"), c.req.raw.signal) };
   }));
   app.delete("/api/reports/:reportId/filters/:paramId", handle(async (c) => {
     const user = c.get("user");

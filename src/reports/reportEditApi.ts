@@ -42,6 +42,7 @@ export const filterColumns = (id: string) => api<FilterColumnsView>(`/reports/${
 export const previewFilter = (id: string, table: string, column: string, narrowBy: readonly string[] = [], kind?: FilterKind) => api<{ preview: FilterPreview }>(`/reports/${id}/filters/preview`, json("POST", { table, column, ...(narrowBy.length ? { narrowBy } : {}), ...(kind && kind !== "multi_select" ? { kind } : {}) }));
 export const requestFilter = (id: string, input: { table: string; column: string; label: string; narrowBy?: string[]; kind?: FilterKind; exclude?: boolean; preset?: string }) => api<{ instruction: ReportInstruction }>(`/reports/${id}/filters`, json("POST", input));
 export const requestFilterRemoval = (id: string, paramId: string) => api<{ instruction: ReportInstruction }>(`/reports/${id}/filters/${paramId}`, { method: "DELETE", body: "{}" });
+export const proposeZoneFix = (id: string) => api<{ instruction: ReportInstruction | null }>(`/reports/${id}/filters/zone-fix`, json("POST", {}));
 
 export const getSharing = (id: string) => api<{ sharing: ReportSharing }>(`/reports/${id}/sharing`);
 export const saveSharing = (id: string, input: SharingInput) => api<{ sharing: ReportSharing }>(`/reports/${id}/sharing`, json("PUT", input));

@@ -3,12 +3,14 @@ import { audit, db, now } from "../db";
 import { blockKeys, REPORT_LIMITS, type ReportBlock, type ReportSpec } from "../../shared/reports";
 import { INSTRUCTION_LIMITS, type ReportInstruction } from "../../shared/reportsEdit";
 import { QUERY_EDIT_LIMITS, type PreviewBlockCheck, type QueryEditPreview } from "../../shared/reportsQueryEdit";
-import { commentableReport, type ReportRow } from "./access";
+import { commentableReport, ownedReport, type ReportRow } from "./access";
 import { usableDatasource } from "./datasources";
 import { proposalResults, type InstructionRow, type StoredProposal } from "./edit";
+import type { SavedOutcome } from "./versions";
 import { ReportError } from "./errors";
 import { getInstruction, kick } from "./instructions";
-import { reportToday } from "./paramZone";
+import { reportTimeZone, reportToday } from "./paramZone";
+import { rezonedSql, staleZoneFilters } from "../../shared/filterZones";
 import { parameterErrors, resolveSet } from "./params";
 import { applyPatch, changedBlockIds, changedQueryKeys, diffSpecs } from "./patch";
 import { queryResults, takeRunLock } from "./refresh";
@@ -37,7 +39,11 @@ import { checkColumns, checkSpecShape, validateSpec } from "./specValidate";
 type Actor = { userId: string; role: string; keyId?: string | null };
 
 /** The extra a suggestion's stored proposal carries, so it can move onto a spec that changed elsewhere. */
-type SuggestionMeta = { queryKey: string; baseSql: string; parametersSha256: string };
+type SuggestionMeta = {
+  queryKey: string; baseSql: string; parametersSha256: string;
+  /** D679: a zone fix changes several queries (each with the SQL it was made from) and names the zone it counts days in. */
+  queries?: Array<{ queryKey: string; baseSql: string }>; zoneFix?: string;
+};
 type StoredSuggestion = StoredProposal & { suggestion?: SuggestionMeta };
 
 const previews = new Map<string, number[]>();
@@ -78,9 +84,10 @@ const blockTitle = (block: ReportBlock) => block.title ?? (block.type === "kpi" 
  * defaults and record auto-fixes on the whole spec, and a suggestion changes one query (and what its
  * readers draw), never the rest of the page (so the review shows only those blocks as changed).
  */
-function onlyReaders(checked: ReportSpec, current: ReportSpec, key: string): ReportSpec {
+function onlyReaders(checked: ReportSpec, current: ReportSpec, key: string | readonly string[]): ReportSpec {
+  const keys = typeof key === "string" ? [key] : key;
   const now = new Map(current.blocks.map((block) => [block.id, block]));
-  return { ...checked, blocks: checked.blocks.map((block) => readsKey(block, key) ? block : now.get(block.id) ?? block) };
+  return { ...checked, blocks: checked.blocks.map((block) => keys.some((item) => readsKey(block, item)) ? block : now.get(block.id) ?? block) };
 }
 
 /** The parameters a suggestion's queries ran with (their SHA-256): its stored rows hold only while they stay. */
@@ -221,18 +228,110 @@ export function promoteSuggestion(row: SuggestionRow) {
   const stored = JSON.parse(row.proposal_json) as StoredSuggestion;
   const meta = stored.suggestion;
   const current = parseSpec(report.spec_json);
-  const stale = "The report changed since this was suggested; suggest it again";
-  const query = meta ? current.queries.find((item) => item.key === meta.queryKey) : undefined;
-  if (!meta || !query || query.sql !== meta.baseSql || parametersHash(current) !== meta.parametersSha256) return fail(row, stale);
-  const sql = stored.spec.queries.find((item) => item.key === meta.queryKey)?.sql;
-  const result = stored.results[meta.queryKey];
-  const applied = sql && result ? applyPatch(current, { ops: [{ op: "update_query", key: meta.queryKey, sql }] }, "user") : null;
-  if (!applied?.ok || !result) return fail(row, stale);
-  if (checkColumns({ blocks: applied.spec.blocks.filter((block) => readsKey(block, meta.queryKey)) }, new Map([[meta.queryKey, result]])).length) return fail(row, stale);
+  const stale = meta?.zoneFix ? "The report changed since this was proposed; propose the time zone fix again from the filter" : "The report changed since this was suggested; suggest it again";
+  if (!meta || parametersHash(current) !== meta.parametersSha256) return fail(row, stale);
+  // D679: a zone fix moves only when every query it changes is as it was.
+  const targets = meta.queries ?? [{ queryKey: meta.queryKey, baseSql: meta.baseSql }];
+  const ops: Array<{ op: "update_query"; key: string; sql: string }> = [];
+  const results = new Map<string, SavedOutcome>();
+  for (const target of targets) {
+    const query = current.queries.find((item) => item.key === target.queryKey);
+    const sql = stored.spec.queries.find((item) => item.key === target.queryKey)?.sql;
+    const result = stored.results[target.queryKey];
+    if (!query || query.sql !== target.baseSql || !sql || !result) return fail(row, stale);
+    ops.push({ op: "update_query", key: target.queryKey, sql });
+    results.set(target.queryKey, result);
+  }
+  const applied = applyPatch(current, { ops }, "user");
+  if (!applied.ok) return fail(row, stale);
+  const keys = targets.map((target) => target.queryKey);
+  if (checkColumns({ blocks: applied.spec.blocks.filter((block) => keys.some((key) => readsKey(block, key))) }, results).length) return fail(row, stale);
   const shape = checkSpecShape(forValidation(applied.spec));
   if (!shape.ok) return fail(row, stale);
-  const moved: StoredSuggestion = { ...stored, spec: onlyReaders(reattach(shape.spec, applied.spec), current, meta.queryKey) };
+  const moved: StoredSuggestion = { ...stored, spec: onlyReaders(reattach(shape.spec, applied.spec), current, keys) };
   db.query("UPDATE report_instructions SET status = 'proposed', proposal_json = ?, base_spec_sha256 = ?, base_revision = ?, updated_at = ? WHERE id = ? AND status = 'queued'")
     .run(JSON.stringify(moved), specHash(report.spec_json), report.revision, at, row.id);
-  audit(row.author_id, null, "reports.query.suggest_rebased", { reportId: row.report_id, instructionId: row.id, queryKey: meta.queryKey });
+  audit(row.author_id, null, "reports.query.suggest_rebased", { reportId: row.report_id, instructionId: row.id, queryKey: meta.queryKey, ...(meta.zoneFix ? { zoneFix: true } : {}) });
+}
+
+/**
+ * D679 (lane FILT3): the report's zone changed (its schedule's) after a DateTime date range was added
+ * in the old one (D672's `toDate(col, '<zone>')`). Nook proposes the rewrite in Changes, never applies
+ * it: every query counting a date range's days in another zone counts them in the report's, nothing else
+ * changes. It is checked as the owner's Save would check it (the guard, a run of each query with the
+ * defaults and one other set) under the report's run lock, except the design rules on blocks it does
+ * not change (D677), and queued as an instruction that already holds its proposal, like a suggested
+ * query edit (no AI). One pending fix per report: the same zone answers it again; an older zone's fails.
+ * Answers null when nothing counts days in another zone.
+ */
+export async function proposeZoneFix(actor: Actor, reportId: string, signal?: AbortSignal): Promise<ReportInstruction | null> {
+  const report = ownedReport(reportId, actor.userId);
+  if (actor.role === "viewer" || actor.role === "guest") throw new ReportError(403, "ROLE_READ_ONLY", "Your role cannot change reports");
+  const current = parseSpec(report.spec_json);
+  const zone = reportTimeZone(reportId);
+  const stale = staleZoneFilters(current, zone);
+  if (!stale.length) return null;
+  const pending = db.query("SELECT id, json_extract(proposal_json, '$.suggestion.zoneFix') AS zone FROM report_instructions WHERE report_id = ? AND status IN ('queued', 'proposed') AND json_extract(proposal_json, '$.suggestion.zoneFix') IS NOT NULL").all(reportId) as Array<{ id: string; zone: string }>;
+  const same = pending.find((item) => item.zone === zone);
+  if (same) return getInstruction(reportId, same.id, actor.userId);
+  for (const item of pending) {
+    const at = now();
+    db.query("UPDATE report_instructions SET status = 'failed', error = ?, finished_at = ?, updated_at = ? WHERE id = ? AND status IN ('queued', 'proposed')").run("The report's time zone changed again; a newer fix replaces this one", at, at, item.id);
+  }
+  const queued = (db.query("SELECT COUNT(*) AS count FROM report_instructions WHERE report_id = ? AND status = 'queued'").get(reportId) as { count: number }).count;
+  if (queued >= INSTRUCTION_LIMITS.queued) throw new ReportError(429, "LIMIT_REACHED", `At most ${INSTRUCTION_LIMITS.queued} instructions can wait at once`);
+  const ids = new Set(stale.map((item) => item.paramId));
+  const keys = [...new Set(stale.flatMap((item) => item.queryKeys))];
+  const targets = keys.map((key) => ({ queryKey: key, baseSql: current.queries.find((query) => query.key === key)!.sql }));
+  const applied = applyPatch(current, { ops: targets.map((target) => ({ op: "update_query" as const, key: target.queryKey, sql: rezonedSql(target.baseSql, ids, zone) })) }, "user");
+  if (!applied.ok) throw new ReportError(400, "INVALID", applied.errors[0] ?? "The fix is not valid", { details: applied.errors });
+  const spec = applied.spec;
+  const changed = changedQueryKeys(diffSpecs(current, spec));
+  const datasource = usableDatasource(report.datasource_id);
+  const run = takeRunLock({ reportId, kind: "edit", trigger: actor.keyId ? "mcp" : "user", userId: actor.userId, queryKeys: [...changed] });
+  const finish = (status: "succeeded" | "failed", error: string | null) =>
+    db.query("UPDATE report_runs SET status = ?, error = ?, finished_at = ?, lease_until = NULL WHERE id = ? AND status = 'running'").run(status, error?.slice(0, 1000) ?? null, now(), run.id);
+  let check: Awaited<ReturnType<typeof validateSpec>>;
+  try {
+    check = await validateSpec(datasource, forValidation(spec), { userId: actor.userId, runId: run.id, signal, changedBlockIds: [] });
+  } catch (error) {
+    finish("failed", error instanceof ReportError ? error.message : "The check failed");
+    throw error;
+  }
+  if (!check.ok) {
+    finish("failed", check.errors[0] ?? "The fix did not pass the checks");
+    throw new ReportError(400, "INVALID", check.errors[0] ?? "The fix did not pass the checks", { details: check.errors });
+  }
+  const labels = stale.map((item) => item.label).join(" and ");
+  const summary = `${labels}: count days in ${zone}, the report's time zone, instead of ${[...new Set(stale.flatMap((item) => item.zones))].join(" and ")}. The results shift by the hours between the zones; review them before you apply.`;
+  const proposal: StoredSuggestion = {
+    spec: onlyReaders(reattach(check.spec, spec), current, keys), summary: summary.slice(0, INSTRUCTION_LIMITS.summary), results: proposalResults(check.results, changed), docSnapshotId: null,
+    suggestion: { queryKey: keys[0]!, baseSql: targets[0]!.baseSql, parametersSha256: parametersHash(current), queries: targets, zoneFix: zone }
+  };
+  const id = crypto.randomUUID();
+  const at = now();
+  db.transaction(() => {
+    const position = ((db.query("SELECT max(position) AS position FROM report_instructions WHERE report_id = ?").get(reportId) as { position: number | null }).position ?? 0) + 1;
+    db.query(`INSERT INTO report_instructions (id, report_id, block_id, text, author_id, via, key_id, status, position, run_id, base_revision, base_spec_sha256, base_datasource_id,
+      base_datasource_revision, proposal_json, summary, suggested_query, created_at, updated_at, started_at, finished_at)
+      VALUES (?, ?, NULL, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, reportId, `Count the days of ${labels} in ${zone}`.slice(0, INSTRUCTION_LIMITS.text), actor.userId, actor.keyId ? "mcp" : "web", actor.keyId ?? null, position, run.id, report.revision,
+        specHash(report.spec_json), datasource.id, datasource.revision, JSON.stringify(proposal), proposal.summary, keys[0]!, at, at, at, at);
+    finish("succeeded", null);
+  })();
+  audit(actor.userId, null, "reports.filter.zone_fix", { reportId, instructionId: id, zone, params: [...ids], queries: keys, runId: run.id, ...(actor.keyId ? { via: "mcp", keyId: actor.keyId } : {}) });
+  kick(reportId);
+  return getInstruction(reportId, id, actor.userId);
+}
+
+/**
+ * D679: after the owner saved a schedule whose zone differs from the report's zone before, propose the
+ * zone fix in the background (the save answers at once). When it cannot be proposed now (a refresh holds
+ * the run lock, the checks fail), the filter's notice offers "Propose the fix" (D680); nothing is rewritten.
+ */
+export function proposeZoneFixAfterSave(actor: Actor, reportId: string, before: string): Promise<void> {
+  if (reportTimeZone(reportId) === before) return Promise.resolve();
+  return proposeZoneFix(actor, reportId).then(() => undefined, (error: unknown) => {
+    audit(actor.userId, null, "reports.filter.zone_fix_deferred", { reportId, error: error instanceof ReportError ? error.code : "ERROR" });
+  });
 }

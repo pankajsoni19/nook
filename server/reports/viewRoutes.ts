@@ -15,6 +15,8 @@ import { ReportError } from "./errors";
 import { listRuns, reportResults, reportRun, runRow, runView, startRefresh } from "./refresh";
 import { handle, id } from "./routes";
 import { getSchedule, saveSchedule } from "./scheduler";
+import { reportTimeZone } from "./paramZone";
+import { proposeZoneFixAfterSave } from "./querySuggest";
 import { runHistory, runLog } from "./runHistory";
 import { storedPlan } from "./planner";
 import { paramResults, reportParamOptions, runParamSet, searchParamOptions } from "./params";
@@ -181,6 +183,12 @@ export function registerReportViewRoutes(app: Hono<AppEnv>) {
   app.get("/api/reports/:reportId/schedule", handle((c) => ({ schedule: getSchedule(id(c, "reportId"), c.get("user").id) })));
   app.put("/api/reports/:reportId/schedule", handle(async (c) => {
     const reportId = id(c, "reportId");
-    return { schedule: saveSchedule(c.get("user").id, reportId, await parseJson(c.req.raw, scheduleSchema)) };
+    const user = c.get("user");
+    const body = await parseJson(c.req.raw, scheduleSchema);
+    const before = reportTimeZone(reportId);
+    const schedule = saveSchedule(user.id, reportId, body);
+    // D679: a new zone proposes rewriting date ranges still counted in the old one (in Changes, never applied).
+    void proposeZoneFixAfterSave({ userId: user.id, role: user.role }, reportId, before);
+    return { schedule };
   }));
 }

@@ -16,7 +16,7 @@ import { ReportError } from "./errors";
 import { startGenerate } from "./generate";
 import { addInstruction, applyProposal, getInstruction, proposalView, rejectProposal } from "./instructions";
 import { manualEdit } from "./manualEdit";
-import { suggestQueryEdit } from "./querySuggest";
+import { proposeZoneFixAfterSave, suggestQueryEdit } from "./querySuggest";
 import { QUERY_EDIT_LIMITS } from "../../shared/reportsQueryEdit";
 import { catalogRow, metricCatalogView, saveCatalogEdit } from "./metricCatalog";
 import { usableDatasource } from "./datasources";
@@ -26,6 +26,7 @@ import { OPTION_SEARCH, paramResults, runParamSet, searchParamOptions } from "./
 import { DATE_PRESETS, excludableIds, optionParentsOf, reachOf } from "../../shared/reportParams";
 import { requestAddFilter } from "./filterRequest";
 import { listViews } from "./views";
+import { reportTimeZone } from "./paramZone";
 import { saveSchedule } from "./scheduler";
 import { listReportsPage, parseSpec as parseStoredSpec, setFavorite } from "./service";
 import { createFolder, listFolders, moveReportToFolder, updateFolder } from "./folders";
@@ -436,8 +437,11 @@ export const reportTools: McpToolSpec[] = [
       tz: z.string().min(1).max(64),
       enabled: z.boolean()
     }),
-    handler: (args, key) => asOwner(key, () => {
+    handler: (args, key) => asOwner(key, (role) => {
+      const before = reportTimeZone(args.reportId);
       const schedule = saveSchedule(key.userId, args.reportId, { cadence: args.cadence, atTime: args.atTime ?? null, weekday: args.weekday ?? null, tz: args.tz, enabled: args.enabled });
+      // D679: a new zone proposes rewriting date ranges still counted in the old one (in Changes, never applied).
+      void proposeZoneFixAfterSave({ userId: key.userId, role, keyId: key.keyId }, args.reportId, before);
       audit(key.userId, null, "reports.mcp.schedule", { via: "mcp", keyId: key.keyId, reportId: args.reportId, cadence: args.cadence, enabled: args.enabled });
       return { schedule };
     })
