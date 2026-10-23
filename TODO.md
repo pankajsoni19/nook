@@ -30,7 +30,6 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 ## Leftovers (lane CLAUDE)
 
 - [ ] Claude, checked only against a fake (lane CLAUDE, D539): on the VM, confirm Anthropic accepts `x-api-key` and `Authorization: Bearer` together on `/v1/chat/completions` and `/v1/models`, and Test tool calling reads "Tool calling works (auto)"; keys not scoped to a workspace also need `anthropic-workspace-id`, which Nook cannot send yet.
-- [ ] Voyage AI behind a proxy: `compat.flavor: "voyage"` and `dimensionsParam` are API-only (the editor offers only Anthropic's headers). (A provider's embedding model and size now have fields, lane LOCALEMB D547.)
 
 ## Leftovers (lane FILT2)
 

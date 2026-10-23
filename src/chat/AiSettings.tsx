@@ -8,8 +8,8 @@ import { SettingsTabs, settingsTabIds, type SettingsTab } from "../settings/Sett
 import { Select } from "../ui/Select";
 import { useConfirm } from "../ui/useConfirm";
 import { useHistoryDialogGuard } from "../ui/useHistoryDialogGuard";
-import { AGENT_BOUNDS, AGENT_ROLE_OPTIONS, DEFAULT_BASE_URL, DEFAULT_COMPAT, DEFAULT_MODEL, FLAVOR_LABELS, flavorDefaults, normalizeKnownBaseUrl, providerChats, providerEmbeds, providerFlavor, REASONING_EFFORTS, type AgentRole, type ProviderCompat, type ProviderFlavor, type ReasoningEffort, type AgentSettings, type ProviderSummary } from "../../shared/agents";
-import { agentsStatus, createProvider, deleteProvider, listProviders, messageOf, probeProviderTools, readSettings, testProvider, updateProvider, writeSettings, errorCode, type AgentsStatus, type ProviderTest } from "./chatApi";
+import { AGENT_BOUNDS, AGENT_ROLE_OPTIONS, DEFAULT_BASE_URL, DEFAULT_COMPAT, DEFAULT_MODEL, FLAVOR_LABELS, flavorDefaults, normalizeKnownBaseUrl, providerChats, providerEmbeds, providerFlavor, REASONING_EFFORTS, type AgentRole, type CompatFlavor, type ProviderCompat, type ProviderFlavor, type ReasoningEffort, type AgentSettings, type ProviderSummary } from "../../shared/agents";
+import { agentsStatus, createProvider, deleteProvider, listProviders, messageOf, probeProviderTools, readSettings, testProvider, updateProvider, writeSettings, errorCode, type AgentsStatus, type ProviderInput, type ProviderTest } from "./chatApi";
 import type { ToolCallingProbe } from "../../shared/reportsModel";
 import { ToolServersSection } from "./ToolServers";
 import { policyDraft, policyFromDraft, policySummary, ProviderKnowledgeFields } from "./ProviderKnowledgePolicy";
@@ -260,19 +260,31 @@ function ProviderDialog({ provider, local, onCancel, onSaved }: { provider: Prov
   // D539–D542: what the provider can do, and Anthropic's headers for a proxy (the host decides for api.anthropic.com).
   const [chat, setChat] = useState(provider ? providerChats(provider.compat) : true);
   const [embeddings, setEmbeddings] = useState(provider ? providerEmbeds(provider.compat) : true);
-  const [anthropicHeaders, setAnthropicHeaders] = useState(provider?.compat.flavor === "anthropic");
+  // D685: a proxy's kind (OpenAI-compatible, Anthropic, Voyage AI) and an OpenAI-compatible endpoint's size field, in Advanced.
+  const [kindChoice, setKindChoice] = useState<EndpointKind>(provider?.compat.flavor ?? "openai");
+  const [dimensionsParam, setDimensionsParam] = useState<SizeParam>(provider?.compat.dimensionsParam ?? "dimensions");
   // A new provider follows the host's defaults until the admin changes a field they set.
   const [touched, setTouched] = useState<Set<string>>(new Set());
   const touch = (field: string) => setTouched((current) => current.has(field) ? current : new Set(current).add(field));
   const detected = providerFlavor(normalizeKnownBaseUrl(baseUrl));
-  function changeUrl(value: string) {
-    setBaseUrl(value);
-    if (provider) return;
-    const defaults = { ...DEFAULT_COMPAT, ...flavorDefaults(providerFlavor(normalizeKnownBaseUrl(value)) ?? (anthropicHeaders ? "anthropic" : null)) };
+  // The kind Nook will treat the endpoint as: its host first, else the Advanced choice.
+  const effectiveKind = detected ?? (kindChoice === "openai" ? null : kindChoice);
+  function applyDefaults(flavor: ProviderFlavor | null) {
+    const defaults = { ...DEFAULT_COMPAT, ...flavorDefaults(flavor) };
     if (!touched.has("tokenParam")) setTokenParam(defaults.tokenParam);
     if (!touched.has("contextTokens")) setContextTokens(defaults.contextTokens);
     if (!touched.has("chat")) setChat(defaults.chat !== false);
     if (!touched.has("embeddings")) setEmbeddings(defaults.embeddings !== false);
+  }
+  function changeUrl(value: string) {
+    setBaseUrl(value);
+    if (provider) return;
+    applyDefaults(providerFlavor(normalizeKnownBaseUrl(value)) ?? (kindChoice === "openai" ? null : kindChoice));
+  }
+  // D685: choosing a kind in Advanced moves the fields the admin has not touched to that kind's defaults (also when editing: the form shows what will be saved).
+  function changeKind(value: EndpointKind) {
+    setKindChoice(value);
+    applyDefaults(value === "openai" ? null : value);
   }
   // A provider's own embedding model and size (API `embeddingModel`, `embeddingDims`): new knowledge bases start with them.
   const [embeddingModel, setEmbeddingModel] = useState(provider?.embeddingModel ?? "");
@@ -281,7 +293,7 @@ function ProviderDialog({ provider, local, onCancel, onSaved }: { provider: Prov
   const [vision, setVision] = useState(() => visionDraft(provider?.vision));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const ids = { name: useId(), url: useId(), key: useId(), model: useId(), context: useId(), param: useId(), effort: useId(), kind: useId(), embeddingModel: useId(), embeddingDims: useId() };
+  const ids = { name: useId(), url: useId(), key: useId(), model: useId(), context: useId(), param: useId(), effort: useId(), kind: useId(), embeddingModel: useId(), embeddingDims: useId(), endpointKind: useId(), sizeParam: useId() };
   useHistoryDialogGuard(true, onCancel, { blocked: busy });
 
   async function submit(event: FormEvent) {
@@ -310,7 +322,7 @@ function ProviderDialog({ provider, local, onCancel, onSaved }: { provider: Prov
     setBusy(true);
     setError(null);
     const own = embeddings ? { embeddingModel: embeddingModel.trim() || null, embeddingDims: size } : {};
-    const compat = { tokenParam, streamUsage, contextTokens, reasoningEffort, chat, embeddings, ...(detected ? {} : { flavor: anthropicHeaders ? "anthropic" as const : provider?.compat.flavor === "voyage" ? "voyage" as const : null }) };
+    const compat = { tokenParam, streamUsage, contextTokens, reasoningEffort, chat, embeddings, ...endpointKindCompat({ detected, choice: kindChoice, dimensionsParam, embeddings, before: provider ? providerFlavor(provider.baseUrl, provider.compat) : null }) };
     try {
       if (provider) await updateProvider(provider.id, { name: name.trim(), baseUrl: baseUrl.trim(), ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}), removeSecret, defaultModel: defaultModel.trim() || DEFAULT_MODEL, ...own, compat, vision: images.policy, knowledge: policy.policy, expectedRevision: provider.revision });
       else await createProvider({ name: name.trim(), baseUrl: baseUrl.trim(), apiKey: apiKey.trim() || null, defaultModel: defaultModel.trim() || DEFAULT_MODEL, ...own, compat, vision: images.policy, knowledge: policy.policy });
@@ -359,7 +371,7 @@ function ProviderDialog({ provider, local, onCancel, onSaved }: { provider: Prov
         <input id={ids.context} type="number" min={1024} max={10_000_000} value={contextTokens} onChange={(event) => { touch("contextTokens"); setContextTokens(Math.min(10_000_000, Math.max(1024, Math.floor(Number(event.target.value) || 1024)))); }} />
         <label className="ai-check"><input type="checkbox" checked={streamUsage} onChange={(event) => setStreamUsage(event.target.checked)} />The server reports token usage while streaming (off: tokens are estimated)</label>
       </>}
-      <details className="ai-advanced" open={reasoningEffort !== "omit" || (anthropicHeaders && !detected) || undefined}>
+      <details className="ai-advanced" open={reasoningEffort !== "omit" || (kindChoice !== "openai" && !detected) || (embeddings && effectiveKind !== "voyage" && dimensionsParam !== "dimensions") || undefined}>
         <summary>Advanced</summary>
         {chat && <>
           <span className="ai-label" id={ids.effort}>Reasoning effort</span>
@@ -367,17 +379,23 @@ function ProviderDialog({ provider, local, onCancel, onSaved }: { provider: Prov
           <p className="file-dialog-hint">Sent as reasoning_effort with every request to this provider. Some newer OpenAI models refuse tools at their default reasoning in Chat Completions; none fixes that (Test tool calling sets it when it finds this). Nook does not use OpenAI's Responses API yet.</p>
         </>}
         {detected ? <p className="file-dialog-hint">{FLAVOR_LABELS[detected]}: known by its address.</p> : <>
-          <label className="ai-check"><input type="checkbox" checked={anthropicHeaders} onChange={(event) => setAnthropicHeaders(event.target.checked)} />Send Anthropic's headers (anthropic-version, x-api-key)</label>
-          <p className="file-dialog-hint">For a proxy in front of Anthropic. Nook sends them by itself to api.anthropic.com.</p>
+          <span className="ai-label" id={ids.endpointKind}>Provider kind</span>
+          <Select<EndpointKind> labelledBy={ids.endpointKind} label="Provider kind" value={kindChoice} onChange={changeKind} options={ENDPOINT_KIND_OPTIONS} />
+          <p className="file-dialog-hint">{ENDPOINT_KIND_HINT}</p>
         </>}
+        {embeddings && (effectiveKind === "voyage" ? <p className="file-dialog-hint">Embedding size field: output_dimension (Voyage AI's).</p> : <>
+          <span className="ai-label" id={ids.sizeParam}>Embedding size field</span>
+          <Select<SizeParam> labelledBy={ids.sizeParam} label="Embedding size field" value={dimensionsParam} onChange={setDimensionsParam} options={SIZE_PARAM_OPTIONS} />
+          <p className="file-dialog-hint">{SIZE_PARAM_HINT}</p>
+        </>)}
       </details>
       {chat && <ProviderVisionFields providerId={provider?.id ?? null} defaultModel={defaultModel.trim() || DEFAULT_MODEL} draft={vision} onChange={setVision} disabled={busy} />}
       {embeddings && <>
         <label htmlFor={ids.embeddingModel}>Embedding model</label>
-        <input id={ids.embeddingModel} value={embeddingModel} maxLength={AGENT_BOUNDS.model} autoComplete="off" spellCheck={false} placeholder={`${detected === "voyage" ? "voyage-3.5" : "text-embedding-3-small"} (default)`} onChange={(event) => setEmbeddingModel(event.target.value.replace(/\s+/g, ""))} />
+        <input id={ids.embeddingModel} value={embeddingModel} maxLength={AGENT_BOUNDS.model} autoComplete="off" spellCheck={false} placeholder={`${effectiveKind === "voyage" ? "voyage-3.5" : "text-embedding-3-small"} (default)`} onChange={(event) => setEmbeddingModel(event.target.value.replace(/\s+/g, ""))} />
         <label htmlFor={ids.embeddingDims}>Embedding size (dimensions)</label>
         <input id={ids.embeddingDims} type="number" inputMode="numeric" min={64} max={3072} value={embeddingDims} placeholder="512 (default)" onChange={(event) => setEmbeddingDims(event.target.value)} />
-        <p className="file-dialog-hint">New knowledge bases on this provider start with this model and size; their owners may choose others. {detected === "voyage" ? "Voyage AI takes 256, 512, 1,024, or 2,048." : "Models that take no size (not text-embedding-3) answer in their own."}</p>
+        <p className="file-dialog-hint">New knowledge bases on this provider start with this model and size; their owners may choose others. {effectiveKind === "voyage" ? "Voyage AI takes 256, 512, 1,024, or 2,048." : "Models that take no size (not text-embedding-3) answer in their own."}</p>
         <ProviderKnowledgeFields providerId={provider?.id ?? null} draft={knowledge} onChange={setKnowledge} disabled={busy} />
       </>}
       </>}
@@ -388,6 +406,37 @@ function ProviderDialog({ provider, local, onCancel, onSaved }: { provider: Prov
       </footer>
     </form>
   </ModalDialog>;
+}
+
+/** D685: the kinds an endpoint can be told to be in Advanced when its host does not say (a proxy). */
+export type EndpointKind = "openai" | CompatFlavor;
+type SizeParam = NonNullable<ProviderCompat["dimensionsParam"]>;
+type ProviderCompatPatch = NonNullable<ProviderInput["compat"]>;
+export const ENDPOINT_KIND_OPTIONS: Array<{ value: EndpointKind; label: string; description: string }> = [
+  { value: "openai", label: "OpenAI-compatible", description: "OpenAI, Z.ai, vLLM, LiteLLM, Ollama" },
+  { value: "anthropic", label: "Anthropic", description: "Sends anthropic-version and x-api-key" },
+  { value: "voyage", label: "Voyage AI", description: "Embeddings only, sized by output_dimension" }
+];
+export const ENDPOINT_KIND_HINT = "For a proxy in front of Anthropic or Voyage AI. Nook knows api.anthropic.com and api.voyageai.com by their address.";
+export const SIZE_PARAM_OPTIONS: Array<{ value: SizeParam; label: string; description: string }> = [
+  { value: "dimensions", label: "dimensions", description: "OpenAI (text-embedding-3 models)" },
+  { value: "output_dimension", label: "output_dimension", description: "Voyage AI's name (its sized models)" }
+];
+export const SIZE_PARAM_HINT = "The embeddings request's size field. output_dimension also leaves out encoding_format and sends input_type, as Voyage AI expects.";
+
+/**
+ * D685: the compat fields the form's kind and size-field choices save. An address that names its kind
+ * (`detected`) saves no flavor; otherwise the choice does (null for OpenAI-compatible). A Voyage AI
+ * kind is always sized by `output_dimension`; another kind sends the form's field when it embeds. A
+ * provider that was Voyage AI and no longer is drops Voyage's four sizes.
+ */
+export function endpointKindCompat(input: { detected: ProviderFlavor | null; choice: EndpointKind; dimensionsParam: SizeParam; embeddings: boolean; before: ProviderFlavor | null }): Pick<ProviderCompatPatch, "flavor" | "dimensionsParam" | "embeddingSizes"> {
+  const kind = input.detected ?? (input.choice === "openai" ? null : input.choice);
+  return {
+    ...(input.detected ? {} : { flavor: input.choice === "openai" ? null : input.choice }),
+    ...(kind === "voyage" ? { dimensionsParam: "output_dimension" as const } : input.embeddings ? { dimensionsParam: input.dimensionsParam } : {}),
+    ...(input.before === "voyage" && kind !== "voyage" ? { embeddingSizes: null } : {})
+  };
 }
 
 /** One probed choice as words: works, not supported (and why), or inconclusive (the flag is unchanged). */

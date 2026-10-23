@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { capabilitiesHint, capabilitiesSummary, endpointLabel, probeSummary, testText } from "../src/chat/AiSettings";
+import { capabilitiesHint, capabilitiesSummary, endpointKindCompat, endpointLabel, ENDPOINT_KIND_OPTIONS, probeSummary, SIZE_PARAM_OPTIONS, testText } from "../src/chat/AiSettings";
 import { searchLine } from "../src/chat/KnowledgeSettings";
 import { KEYWORD_CHANGE_EFFECT } from "../src/chat/KnowledgeModel";
 import { DEFAULT_COMPAT } from "../shared/agents";
@@ -16,6 +16,24 @@ const probe = (patch: Partial<ToolCallingProbe>): ToolCallingProbe => ({
   named: { ok: false, outcome: "unsupported", status: 400, error: "PROVIDER_ERROR: toolchoice: type tool and any are not supported for this model.", forcedRefused: true },
   auto: { ok: true, outcome: "supported", status: 200, error: null },
   toolCalling: "auto", compat: { requiredToolChoice: false, namedToolChoice: false }, reasoning: null, inconclusive: false, model: "claude-opus-5-5", ms: 900, ...patch
+});
+
+describe("the editor's Advanced kind and size field (D685)", () => {
+  test("offers OpenAI-compatible, Anthropic, and Voyage AI, and both size fields", () => {
+    expect(ENDPOINT_KIND_OPTIONS.map((option) => option.label)).toEqual(["OpenAI-compatible", "Anthropic", "Voyage AI"]);
+    expect(SIZE_PARAM_OPTIONS.map((option) => option.value)).toEqual(["dimensions", "output_dimension"]);
+  });
+  test("saves the chosen kind for a proxy, never for a known address; Voyage is always output_dimension", () => {
+    const base = { detected: null, dimensionsParam: "dimensions" as const, embeddings: true, before: null };
+    expect(endpointKindCompat({ ...base, choice: "openai" })).toEqual({ flavor: null, dimensionsParam: "dimensions" });
+    expect(endpointKindCompat({ ...base, choice: "anthropic", embeddings: false })).toEqual({ flavor: "anthropic" });
+    expect(endpointKindCompat({ ...base, choice: "voyage" })).toEqual({ flavor: "voyage", dimensionsParam: "output_dimension" });
+    expect(endpointKindCompat({ ...base, choice: "openai", dimensionsParam: "output_dimension" })).toEqual({ flavor: null, dimensionsParam: "output_dimension" });
+    expect(endpointKindCompat({ ...base, detected: "voyage", choice: "openai" })).toEqual({ dimensionsParam: "output_dimension" });
+    expect(endpointKindCompat({ ...base, detected: "anthropic", choice: "voyage", embeddings: false })).toEqual({});
+    // Leaving Voyage AI drops its four sizes.
+    expect(endpointKindCompat({ ...base, choice: "openai", before: "voyage" })).toEqual({ flavor: null, dimensionsParam: "dimensions", embeddingSizes: null });
+  });
 });
 
 describe("the provider card", () => {

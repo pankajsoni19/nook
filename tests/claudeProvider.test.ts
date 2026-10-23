@@ -283,6 +283,33 @@ describe("Voyage AI, embeddings only (D542)", () => {
     expect(takesDimensions("text-embedding-3-large")).toBe(true);
   });
 
+  test("D685: the editor's kind and size field turn any address into Voyage AI behind a proxy, and back", async () => {
+    // An OpenAI-compatible provider at a proxy address (the fake Voyage), as Add provider saves it.
+    const made = await send(admin, "POST", "/agents/admin/providers", { name: `Proxy ${crypto.randomUUID().slice(0, 6)}`, baseUrl: voyage.baseUrl, apiKey: "pa-test-not-real-0002", defaultModel: "gpt-6-luna", compat: { flavor: null, dimensionsParam: "dimensions" } });
+    expect(made.status).toBe(201);
+    const id = ids.proxy = made.body.provider.id as string;
+    expect(made.body.provider.compat).not.toHaveProperty("flavor");
+    expect(made.body.provider.compat).not.toHaveProperty("dimensionsParam");
+    // Advanced → Provider kind: Voyage AI (the form also unticks Chat, its kind's default).
+    const toVoyage = await send(admin, "PATCH", `/agents/admin/providers/${id}`, { embeddingModel: "voyage-3.5", embeddingDims: 512, compat: { flavor: "voyage", dimensionsParam: "output_dimension", chat: false, embeddings: true }, expectedRevision: revisionOf(id) });
+    expect(toVoyage.status).toBe(200);
+    expect(toVoyage.body.provider.compat).toMatchObject({ flavor: "voyage", dimensionsParam: "output_dimension", embeddingSizes: [256, 512, 1024, 2048], chat: false });
+    voyage.calls.length = 0;
+    expect((await send(admin, "POST", `/agents/admin/providers/${id}/test`)).body.test).toMatchObject({ ok: true, models: { skipped: true }, embeddings: { ok: true, dims: 512 } });
+    expect(voyage.calls.map((call) => call.body)).toEqual([{ model: "voyage-3.5", input: ["ok"], output_dimension: 512 }]);
+    // Back to OpenAI-compatible, keeping Voyage's size field: the sizes go, output_dimension stays an admin's choice.
+    const back = await send(admin, "PATCH", `/agents/admin/providers/${id}`, { compat: { flavor: null, dimensionsParam: "output_dimension", embeddingSizes: null, chat: false, embeddings: true }, expectedRevision: revisionOf(id) });
+    expect(back.status).toBe(200);
+    expect(back.body.provider.compat).not.toHaveProperty("flavor");
+    expect(back.body.provider.compat).not.toHaveProperty("embeddingSizes");
+    expect(back.body.provider.compat.dimensionsParam).toBe("output_dimension");
+    expect(embeddingBody(connectionFor(id, null, "embeddings"), "voyage-3.5", 1024, ["a"], "document")).toEqual({ model: "voyage-3.5", input: ["a"], output_dimension: 1024, input_type: "document" });
+    // And `dimensions` again: OpenAI's wire.
+    const plainAgain = await send(admin, "PATCH", `/agents/admin/providers/${id}`, { compat: { dimensionsParam: "dimensions" }, expectedRevision: revisionOf(id) });
+    expect(plainAgain.body.provider.compat).not.toHaveProperty("dimensionsParam");
+    expect(embeddingBody(connectionFor(id, null, "embeddings"), "text-embedding-3-small", 512, ["a"], "document")).toEqual({ model: "text-embedding-3-small", input: ["a"], encoding_format: "float", dimensions: 512 });
+  });
+
   test("an admin may mark any provider \"Embeddings: none\" and turn it back on", async () => {
     const off = await send(admin, "PATCH", `/agents/admin/providers/${ids.plain}`, { compat: { embeddings: false }, expectedRevision: revisionOf(ids.plain!) });
     expect(off.status).toBe(200);
