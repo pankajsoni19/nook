@@ -38,8 +38,8 @@ beforeEach(() => { resetTaskQueryRateLimit(); resetMcpLimits(); });
 
 describe("grouped lanes (D650, D651)", () => {
   test("assignee lanes: one per person, a card with two people in both, No assignee last, counts over the whole match", async () => {
-    const owner = await createUser("Group lanes owner");
-    const mate = await createUser("Group lanes mate");
+    const owner = await createUser("Views2 Group lanes owner");
+    const mate = await createUser("Views2 Group lanes mate");
     const a = await board(owner, "Group A");
     const b = await board(owner, "Group B");
     await share(owner, a.id, [mate.userId]);
@@ -50,7 +50,7 @@ describe("grouped lanes (D650, D651)", () => {
     expect(result.status).toBe(200);
     expect(result.body.lanes).toBe("assignee");
     const lanes = result.body.columns as Array<{ key: string; label: string; userId?: string; columns: unknown[] }>;
-    expect(lanes.map((lane) => lane.label)).toEqual(["Group lanes mate", "Group lanes owner", "No assignee"]);
+    expect(lanes.map((lane) => lane.label)).toEqual(["Views2 Group lanes mate", "Views2 Group lanes owner", "No assignee"]);
     expect(lanes.at(-1)!.key).toBe("none:a");
     expect(result.body.laneCounts).toEqual({ [`a:${mate.userId}`]: 1, [`a:${owner.userId}`]: 2, "none:a": 1 });
     // The boards with matches, with the viewer's level (Add a card offers the editable ones, D654).
@@ -58,7 +58,7 @@ describe("grouped lanes (D650, D651)", () => {
   });
 
   test("tag lanes merge names across boards and know each board's tag; sprint lanes list open sprints first after Backlog", async () => {
-    const owner = await createUser("Tag lanes owner");
+    const owner = await createUser("Views2 Tag lanes owner");
     const a = await board(owner, "Tags A", "scrum");
     const b = await board(owner, "Tags B", "scrum");
     const urgentA = await tag(owner, a.id, "Urgent");
@@ -81,8 +81,8 @@ describe("grouped lanes (D650, D651)", () => {
     expect((sprints.body.laneBoards as Array<{ sprints: boolean }>).every((item) => item.sprints)).toBe(true);
   });
 
-  test("due and board lanes are always there, read-only groupings; too many people fall back to state lanes", async () => {
-    const owner = await createUser("Due lanes owner");
+  test("due and board lanes are always there, read-only groupings; too many tags fall back to state lanes", async () => {
+    const owner = await createUser("Views2 Due lanes owner");
     const a = await board(owner, "Due A");
     const today = new Date().toISOString().slice(0, 10);
     await card(owner, a.id, a.columns[0]!.id, "Today", { dueOn: today });
@@ -93,12 +93,10 @@ describe("grouped lanes (D650, D651)", () => {
     const boards = await call(owner, "POST", "/query", { q: `board:${a.id}`, lanes: "board" });
     expect(boards.body.columns).toEqual([{ key: `b:${a.id}`, label: "Due A", columns: [] }]);
 
-    const many = await board(owner, "Many people");
-    const people: string[] = [];
-    for (let index = 0; index < 20; index += 1) people.push((await createUser(`Many person ${index}`)).userId);
-    await share(owner, many.id, people);
-    for (const person of people) await card(owner, many.id, many.columns[0]!.id, `For ${person}`, { assigneeIds: [person] });
-    const fallback = await call(owner, "POST", "/query", { q: `board:${many.id}`, lanes: "assignee" });
+    // Twenty tags in use plus No tag is 21 lanes: state lanes instead (no extra users, which other suites count).
+    const many = await board(owner, "Many tags");
+    for (let index = 0; index < 20; index += 1) await card(owner, many.id, many.columns[0]!.id, `Tagged ${index}`, { tagIds: [await tag(owner, many.id, `Tag ${index}`)] });
+    const fallback = await call(owner, "POST", "/query", { q: `board:${many.id}`, lanes: "tag" });
     expect(fallback.body.lanes).toBe("state");
     expect(fallback.body.lanesFallback).toBe(true);
     expect(Object.keys(fallback.body.laneCounts)).toEqual(["s:todo", "s:doing", "s:done"]);
@@ -108,7 +106,7 @@ describe("grouped lanes (D650, D651)", () => {
 
 describe("collapsed lanes and a board view's own collapse (D644, D653, D657)", () => {
   test("grouped lanes that are gone are trimmed; My work trims against the filter it sends", async () => {
-    const owner = await createUser("Trim owner");
+    const owner = await createUser("Views2 Trim owner");
     const a = await board(owner, "Trim A");
     const urgent = await tag(owner, a.id, "Urgent");
     await card(owner, a.id, a.columns[0]!.id, "Tagged", { tagIds: [urgent], assigneeIds: [owner.userId] });
@@ -126,7 +124,7 @@ describe("collapsed lanes and a board view's own collapse (D644, D653, D657)", (
   });
 
   test("a board view keeps its own collapsed columns and rows only when asked; a cross-board view cannot", async () => {
-    const owner = await createUser("Own collapse owner");
+    const owner = await createUser("Views2 Own collapse owner");
     const a = await board(owner, "Own collapse");
     const view = (await call(owner, "POST", "/views", { name: "On A", query: `board:${a.id} state:todo` })).body.view;
     const first = await call(owner, "GET", `/views/${view.id}/prefs`);
@@ -141,8 +139,8 @@ describe("collapsed lanes and a board view's own collapse (D644, D653, D657)", (
   });
 
   test("Show all levels and collapsed swimlanes are per person on the board (D656, D659)", async () => {
-    const owner = await createUser("Levels owner");
-    const reader = await createUser("Levels reader");
+    const owner = await createUser("Views2 Levels owner");
+    const reader = await createUser("Views2 Levels reader");
     const a = await board(owner, "Levels board");
     await share(owner, a.id, [reader.userId]);
     const parent = await card(owner, a.id, a.columns[0]!.id, "Parent");
@@ -160,10 +158,10 @@ describe("collapsed lanes and a board view's own collapse (D644, D653, D657)", (
 
 describe("views pinned on a board (D658, T448)", () => {
   test("the owner or a manager pins a view they own; every reader of the board then reads it, listed first", async () => {
-    const owner = await createUser("Pin owner");
-    const manager = await createUser("Pin manager");
-    const editor = await createUser("Pin editor");
-    const outsider = await createUser("Pin outsider");
+    const owner = await createUser("Views2 Pin owner");
+    const manager = await createUser("Views2 Pin manager");
+    const editor = await createUser("Views2 Pin editor");
+    const outsider = await createUser("Views2 Pin outsider");
     const a = await board(owner, "Pin board");
     const other = await board(owner, "Pin other");
     await share(owner, a.id, [manager.userId, editor.userId]);
@@ -229,8 +227,8 @@ describe("MCP save_view (D660, T449)", () => {
   }
 
   test("creates a private view and changes an owned one with a revision check; sharing stays in the app", async () => {
-    const owner = await createUser("Save view owner");
-    const other = await createUser("Save view other");
+    const owner = await createUser("Views2 Save view owner");
+    const other = await createUser("Views2 Save view other");
     const a = await board(owner, "Save view board");
     const writer = key(owner, [all("tasks", "write")]);
     const created = await tool(writer, "save_view", { name: "From an agent", filter: `board:${a.id} state:todo`, layout: "board", lanes: "assignee" });
@@ -256,7 +254,7 @@ describe("MCP save_view (D660, T449)", () => {
   });
 
   test("a key limited to chosen items is never offered save_view (T449)", async () => {
-    const owner = await createUser("Save view scoped");
+    const owner = await createUser("Views2 Save view scoped");
     const a = await board(owner, "Scoped board");
     const view = (await call(owner, "POST", "/views", { name: "Scoped view", query: `board:${a.id}` })).body.view;
     const scoped = key(owner, [on("tasks", "write", "task_view", view.id)]);
@@ -270,7 +268,7 @@ describe("MCP save_view (D660, T449)", () => {
 
 describe("migration 078", () => {
   test("pins go with the view or the board; the new prefs columns are bounded", async () => {
-    const owner = await createUser("Migration 078 owner");
+    const owner = await createUser("Views2 Migration 078 owner");
     const a = await board(owner, "Migration 078 board");
     const view = (await call(owner, "POST", "/views", { name: "M78", query: `board:${a.id}` })).body.view;
     await call(owner, "PUT", `/boards/${a.id}/pins/${view.id}`);
