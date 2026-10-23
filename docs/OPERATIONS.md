@@ -775,7 +775,7 @@ Every image carries immutable numbered migrations under `server/migrations`. The
 
 **Report filters (lane FILT3, D670–D677).** No migration and no new settings. Owners can remove text, number range, and date range filters from the filter itself (a date range's removal is reviewed by hand), Add filter offers number ranges on numeric columns, and a DateTime date range is filtered by its day in the report's zone; when a schedule's time zone changes later, Nook proposes the matching rewrite in Changes and the filter shows a notice until it is applied (never rewritten silently). Number ranges on integer columns bind Int64 or UInt64. MCP keys with `reports:read` gain the read-only `list_report_views` (the key owner's own saved views); chat agents do not get it. To run the new real-ClickHouse test: `CLICKHOUSE_TEST_URL=http://nook:nooktest@127.0.0.1:22200 bun --no-env-file test tests/reportFilterTypesLive.test.ts` (it drops and recreates the `eval_filter_types` database on that server, so point it at a test server only).
 
-**Tasks views (lane VIEWS2, D650–D662).** Lanes by assignee, tag, sprint, due date, or board with drag; swimlanes; Add a card in lanes; views pinned on a board; a board view's own collapse; "Show all levels" per person; and MCP `save_view`. One migration runs once on the first boot, before the HTTP server answers; it is recorded in `schema_migrations` and cannot be undone except by restoring a backup. **Back up first:** `./scripts/backup.sh --force`.
+**Tasks views (lane VIEWS2, D650–D669).** Lanes by assignee, tag, sprint, due date, or board with drag; swimlanes on boards and across boards; Add a card in lanes and swimlane cells; views pinned on a board (and their order); a board view's own collapse; "Show all levels" per person; MCP `save_view`, and `list_views` with pinned views. `scripts/dragSmoke.ts` checks real drags before a release (see "Checking a shared button change"). One migration runs once on the first boot, before the HTTP server answers; it is recorded in `schema_migrations` and cannot be undone except by restoring a backup. **Back up first:** `./scripts/backup.sh --force`.
 
 | Migration | What it does | Cost |
 | --- | --- | --- |
@@ -1136,6 +1136,12 @@ NOOK_QA_EMAIL=… NOOK_QA_PASSWORD=… bun --no-env-file scripts/buttonMetrics.t
 ```
 
 Intentional exceptions go in `scripts/buttonLint.allow.json`: `[{ "screen": "*" | "<screen name>", "selector": "button.class.class", "label"?: "<exact label>", "rule": "overflow" | "wrap" | "padding" | "target" | "narrow" | "*", "reason": "…" }]`. The selector is the tag plus its classes, sorted, as the report prints it. The rules are tested on a synthetic page in `tests/buttonLint.test.ts`.
+
+**Drag smoke (Tasks).** `scripts/dragSmoke.ts` (lane VIEWS2, D668) checks real pointer drags in Tasks against a running instance: it drives headless Chrome (`CHROME_BIN`, default `google-chrome`, an OS-assigned debugging port and a throwaway profile) with `Input.dispatchMouseEvent` press, moves, and release, so Chrome itself starts each HTML5 drag. Signed in as the QA account, it makes two "Drag smoke …" boards with cards and tags and a cross-board view, checks six drags through the API (a person lane to No assignee, a collapsed Done strip, board swimlane rows and columns, tag lane to tag lane, a tag created on drop, and cross-board rows and lanes), then deletes its view and moves its boards to the Bin. It prints PASS or FAIL per drag and exits 1 on any failure. Run it before a release:
+
+```sh
+NOOK_QA_EMAIL=… NOOK_QA_PASSWORD=… bun --no-env-file scripts/dragSmoke.ts http://qa.localhost:22195
+```
 
 ### Testing against a real ClickHouse
 

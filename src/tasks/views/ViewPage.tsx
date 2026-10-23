@@ -44,7 +44,7 @@ type ViewPageProps = {
 
 type ViewDialog = { kind: "menu" | "saveAs" | "rename" | "share" | "delete" } | { kind: "conflict"; latest: TaskView };
 
-const displayOf = (query: HomeQuery) => ({ layout: query.layout, group: query.group, sort: query.sort, lanes: query.lanes ?? "columns" as const });
+const displayOf = (query: HomeQuery) => ({ layout: query.layout, group: query.group, sort: query.sort, lanes: query.lanes ?? "columns" as const, swimlanes: query.swim ?? null });
 
 /**
  * One saved view (§10.2): its filter bar, layouts, and Save / Save as / Duplicate / Share / Delete.

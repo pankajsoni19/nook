@@ -25,13 +25,16 @@ export type HomeSort = typeof HOME_SORTS[number];
  * `lanes` (lane VIEWS, D640; VIEWS2, D650): the board layout's lanes, merged columns (the default, left out),
  * `state`, or a field (`assignee`, `tag`, `sprint`, `due`, `board`). In the URL as `lanes=<mode>`.
  */
-export type HomeQuery = { layout: HomeLayout; group: HomeGroup; sort: HomeSort; filter: TaskQuery; lanes?: LaneMode };
+export type HomeQuery = { layout: HomeLayout; group: HomeGroup; sort: HomeSort; filter: TaskQuery; lanes?: LaneMode; /** Lane VIEWS2 (D665): the lanes split into rows by person or board; `swim=` in the URL. */ swim?: HomeSwim };
+export type HomeSwim = "assignee" | "board";
+const isHomeSwim = (value: unknown): value is HomeSwim => value === "assignee" || value === "board";
 
 /** The lanes a query shows (columns unless it names another mode). */
 export const homeLanes = (query: Pick<HomeQuery, "lanes">): LaneMode => isLaneMode(query.lanes) ? query.lanes : "columns";
-const lanesFrom = (params: URLSearchParams): Pick<HomeQuery, "lanes"> => {
+const lanesFrom = (params: URLSearchParams): Pick<HomeQuery, "lanes" | "swim"> => {
   const value = params.get("lanes");
-  return isLaneMode(value) && value !== "columns" ? { lanes: value } : {};
+  const swim = params.get("swim");
+  return { ...(isLaneMode(value) && value !== "columns" ? { lanes: value } : {}), ...(isHomeSwim(swim) ? { swim } : {}) };
 };
 
 export type TasksHome =
@@ -105,6 +108,7 @@ export function formatMyWorkSearch(query: HomeQuery): string {
   if (query.group !== base.group && oneOf(HOME_GROUPS, query.group)) params.set("group", query.group);
   if (query.sort !== base.sort && oneOf(HOME_SORTS, query.sort)) params.set("sort", query.sort);
   if (homeLanes(query) !== "columns") params.set("lanes", homeLanes(query));
+  if (isHomeSwim(query.swim)) params.set("swim", query.swim);
   const filter = withAssigneeMe(query.filter);
   if (format(filter) !== format(base.filter)) {
     encodeFilterParams(filter, params);
@@ -138,6 +142,7 @@ export function formatViewSearch(query: HomeQuery): string {
   params.set("group", oneOf(HOME_GROUPS, query.group) ?? "none");
   params.set("sort", oneOf(HOME_SORTS, query.sort) ?? "due");
   if (homeLanes(query) !== "columns") params.set("lanes", homeLanes(query));
+  if (isHomeSwim(query.swim)) params.set("swim", query.swim);
   encodeFilterParams(query.filter, params);
   return readable(params);
 }
@@ -157,7 +162,7 @@ export function isSelectiveQuery(filter: TaskQuery) {
   return filter.terms.some((term) => !term.negate && term.key !== "text");
 }
 
-export type SavedDisplay = { layout: string; group: string; sort: string; lanes?: string };
+export type SavedDisplay = { layout: string; group: string; sort: string; lanes?: string; swimlanes?: string | null };
 
 /** A saved view's stored query and display as a home query (unknown values fall back). */
 export function viewHomeQuery(view: { query: string; display: SavedDisplay }): HomeQuery {
@@ -167,13 +172,14 @@ export function viewHomeQuery(view: { query: string; display: SavedDisplay }): H
     group: oneOf(HOME_GROUPS, view.display.group) ?? base.group,
     sort: oneOf(HOME_SORTS, view.display.sort) ?? base.sort,
     filter: parsed(view.query),
-    ...(isLaneMode(view.display.lanes) && view.display.lanes !== "columns" ? { lanes: view.display.lanes } : {})
+    ...(isLaneMode(view.display.lanes) && view.display.lanes !== "columns" ? { lanes: view.display.lanes } : {}),
+    ...(isHomeSwim(view.display.swimlanes) ? { swim: view.display.swimlanes } : {})
   };
 }
 
 /** Whether two home queries show the same thing (the unsaved-changes indicator). */
 export function sameHomeQuery(left: HomeQuery, right: HomeQuery) {
-  return left.layout === right.layout && left.group === right.group && left.sort === right.sort && homeLanes(left) === homeLanes(right) && format(left.filter) === format(right.filter);
+  return left.layout === right.layout && left.group === right.group && left.sort === right.sort && homeLanes(left) === homeLanes(right) && (left.swim ?? null) === (right.swim ?? null) && format(left.filter) === format(right.filter);
 }
 
 /** The server's group for a home group: assignee and tag group the loaded cards instead. */

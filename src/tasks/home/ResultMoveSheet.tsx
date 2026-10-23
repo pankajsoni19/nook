@@ -48,7 +48,7 @@ export function ResultMoveSheet({ card, onMoved, onCancel, onError, lanes }: Res
           const drop = verdict(lane);
           const refused = !here && "refusal" in drop ? drop.refusal === "SAME_LANE" ? `Already in ${lane.label}` : drop.message : null;
           const status = statuses[index];
-          const note = here ? "Here now" : refused ?? (!status || status.label.toLowerCase() === lane.label.toLowerCase() ? null : status.label);
+          const note = here ? "Here now" : refused ?? ("kind" in drop && drop.kind === "createTag" ? `Creates the tag on ${drop.boardName}` : null) ?? (!status || status.label.toLowerCase() === lane.label.toLowerCase() ? null : status.label);
           return <button key={lane.key} type="button" className={`move-option${here ? " current" : ""}`} autoFocus={index === firstOpen} disabled={here || refused !== null}
             aria-current={here ? "true" : undefined} onClick={() => lanes.onLane(lane)}>
             {here ? <Check aria-hidden="true" /> : status ? <ColumnStatusIcon status={status} /> : <ArrowRight aria-hidden="true" />}

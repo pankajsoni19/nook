@@ -31,6 +31,8 @@ export function cardsByLane(layout: QueryLanes, cards: readonly QueriedCard[], t
 export type LaneDrop =
   | { kind: "column"; columnId: string; column: LaneColumn }
   | { kind: "group"; change: GroupChange }
+  /** A tag lane whose name the card's board has no tag for (D666): create it there, then retag. */
+  | { kind: "createTag"; tagName: string; color: string; boardId: string; boardName: string }
   | { refusal: DropRefusal; message: string };
 
 export const isDropAllowed = (drop: LaneDrop): drop is Exclude<LaneDrop, { refusal: DropRefusal }> => !("refusal" in drop);
@@ -47,6 +49,8 @@ export function laneDrop(layout: QueryLanes, lane: QueryLane, card: QueriedCard,
   if (isGroupLaneMode(mode)) {
     const board = layout.laneBoards?.find((item) => item.id === card.board_id) ?? null;
     const resolved = resolveGroupDrop(mode, lane, card, canEdit, { fromKey, board });
+    // D666: a tag the card's board lacks can be made there by someone who edits its cards (any reader may add tags).
+    if ("refusal" in resolved && resolved.refusal === "NO_TAG") return { kind: "createTag", tagName: lane.label, color: lane.color ?? "gray", boardId: card.board_id, boardName: card.board_name };
     if ("refusal" in resolved) return { refusal: resolved.refusal, message: refusalMessage(resolved.refusal, lane, card, mode) };
     return { kind: "group", change: resolved };
   }

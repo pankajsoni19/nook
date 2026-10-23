@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Bookmark, BookmarkPlus, Copy, Ellipsis, Lock, Pencil, Pin, PinOff, Save, Share2, SquareCheck, Square, Trash2, Undo2 } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Bookmark, BookmarkPlus, Copy, Ellipsis, Lock, Pencil, Pin, PinOff, Save, Share2, SquareCheck, Square, Trash2, Undo2 } from "lucide-react";
 import type { TaskQuery } from "../../../shared/taskQuery";
 import { ApiError } from "../../api";
 import { ConfirmDialog, ModalDialog } from "../../files/Dialog";
@@ -11,7 +11,8 @@ import { useRole } from "../../team/roleAccess";
 import type { BoardViewId } from "../boardUrl";
 import type { TaskNotify } from "../taskActions";
 import { taskErrorCode, taskErrorMessage } from "../tasksApi";
-import { createView, deleteView, duplicateView, getView, getViewLanePrefs, listBoardViews, pinBoardView, saveViewPrefs, saveViewSharing, unpinBoardView, updateView, type TaskView, type ViewPrefs } from "../home/homeApi";
+import { PinnedOrderSheet, pinStep } from "./PinnedOrder";
+import { createView, deleteView, duplicateView, getView, getViewLanePrefs, listBoardViews, movePinnedView, pinBoardView, saveViewPrefs, saveViewSharing, unpinBoardView, updateView, type TaskView, type ViewPrefs } from "../home/homeApi";
 import type { SwimlaneMode } from "../../../shared/swimlanes";
 import { boardViewQueryText, displayLayoutOf, sameFilter, savedBoardFilter } from "./boardViewModel";
 import { announceViewsChanged, onViewsChanged, ownedViewActions, validateViewName, viewNameHint, viewRoleAccess, viewUndoBody, viewVisibilityLabel } from "./viewActions";
@@ -41,7 +42,7 @@ type Options = {
   boardCollapse?: { columns: string[]; rows: string[] };
 };
 
-type Dialog = { kind: "menu" | "saveAs" | "rename" | "share" | "delete" } | { kind: "conflict"; latest: TaskView };
+type Dialog = { kind: "menu" | "saveAs" | "rename" | "share" | "delete" | "reorder" } | { kind: "conflict"; latest: TaskView };
 
 /** A board view's own collapse (D657), while "Keep this view's own collapsed columns" is on. */
 export type OwnCollapse = { on: boolean; columns: string[]; rows: string[] };
@@ -130,6 +131,21 @@ export function useBoardSavedViews({ boardId, savedViewId, routeFilter, unsaved,
     notify(on ? "This view keeps its own collapsed columns now" : "This view shows the board's collapsed columns again");
   }
 
+  /** Reorders the pinned views (D667): saved at once; the picker follows. */
+  async function movePin(viewId: string, afterViewId: string | null) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const lists = await movePinnedView(boardId, viewId, afterViewId);
+      setPinned(lists.pinned);
+      setViews(lists.views);
+      announceViewsChanged();
+    } catch (reason) {
+      notify.error(taskErrorMessage(reason, "Could not move the pinned view"));
+    } finally {
+      setBusy(false);
+    }
+  }
   /** Pin for everyone on this board, or unpin (D658). */
   async function setPinnedView(pin: boolean) {
     if (!current || busy) return;
@@ -331,10 +347,14 @@ export function useBoardSavedViews({ boardId, savedViewId, routeFilter, unsaved,
         </button>}
         {canPinThis && <button className="move-option" onClick={() => { void setPinnedView(true); }} disabled={busy}><Pin aria-hidden="true" /><span>Pin for everyone on this board<small>Everyone who can open the board sees it first in View</small></span></button>}
         {canUnpinThis && <button className="move-option" onClick={() => { void setPinnedView(false); }} disabled={busy}><PinOff aria-hidden="true" /><span>Unpin<small>It stays a view; only the people it is shared with see it</small></span></button>}
+        {isPinned && canPin && pinned.length > 1 && <button className="move-option" onClick={() => { const step = pinStep(pinned.map((item) => item.id), current.id, -1); if (step !== undefined) void movePin(current.id, step); }} disabled={busy || pinned[0]?.id === current.id}><ArrowUp aria-hidden="true" /><span>Move up<small>Earlier in View for everyone</small></span></button>}
+        {isPinned && canPin && pinned.length > 1 && <button className="move-option" onClick={() => { const step = pinStep(pinned.map((item) => item.id), current.id, 1); if (step !== undefined) void movePin(current.id, step); }} disabled={busy || pinned.at(-1)?.id === current.id}><ArrowDown aria-hidden="true" /><span>Move down<small>Later in View for everyone</small></span></button>}
+        {canPin && pinned.length > 1 && <button className="move-option" onClick={() => setDialog({ kind: "reorder" })}><ArrowUpDown aria-hidden="true" /><span>Reorder pinned views…<small>Drag them into the order everyone sees</small></span></button>}
         {owner && canShare && <button className="move-option" onClick={() => setDialog({ kind: "share" })}><Share2 aria-hidden="true" /><span>Share…<small>{viewVisibilityLabel(current.visibility)}</small></span></button>}
         {owner && actions.edit && <button className="move-option danger" onClick={() => setDialog({ kind: "delete" })}><Trash2 aria-hidden="true" /><span>Delete view</span></button>}
       </div>
     </ModalDialog>}
+    {dialog?.kind === "reorder" && <PinnedOrderSheet pinned={pinned} busy={busy} onClose={closeDialog} onMove={(viewId, afterViewId) => { void movePin(viewId, afterViewId); }} />}
     {dialog?.kind === "saveAs" && <NameDialog title={current ? "Save as a new view" : "Save view"} eyebrow="Views" label="View name" initialValue={current ? `${current.name} (copy)`.slice(0, 80) : ""} submitLabel="Save view"
       hint={viewNameHint(canShare)} validate={(value) => validateViewName(value)} onSubmit={saveAs} onCancel={closeDialog} />}
     {dialog?.kind === "rename" && current && <NameDialog title="Rename view" eyebrow="Views" label="View name" initialValue={current.name} submitLabel="Rename" hint="Up to 80 characters."

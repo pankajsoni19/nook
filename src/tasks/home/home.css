@@ -104,3 +104,4 @@
   .task-view-actions { width: 100%; justify-content: flex-end; }
   .task-view-actions .icon-button, .task-view-header .task-back { width: 44px; height: 44px; }
 }
+.task-query-swim .task-swimlanes { padding: 2px 0 10px; }

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
-import { CalendarDays, ChevronsLeftRight, ChevronsRightLeft, Ellipsis, KanbanSquare, Plus, Timer, UserRound } from "lucide-react";
+import { CalendarDays, ChevronDown, ChevronRight, ChevronsLeftRight, ChevronsRightLeft, Ellipsis, KanbanSquare, Plus, Timer, UserRound } from "lucide-react";
 import type { QueryLane } from "../../../shared/taskLanes";
 import { CARD_DRAG_TYPE, columnIndexFromScroll, isCardDrag, readCardDragPayload } from "../boardOrder";
 import { KeyboardMoveHint } from "../boardViewParts";
@@ -10,6 +10,9 @@ import { useRole } from "../../team/roleAccess";
 import { canChangeCard, type QueriedCard, type QueryLanes as QueryLaneLayout } from "./homeApi";
 import { cardLaneKeysOf, cardsByLane, faceOf, isDropAllowed, laneDrop, lanesAcceptDrops, laneStatuses, nextOpenLane } from "./laneModel";
 import { LANE_MODE_NOUNS } from "../../../shared/taskLanes";
+import { buildSwimlanes, NONE_ROW, type Swimlane } from "../../../shared/swimlanes";
+import { QuerySwimlanes, type QuerySwimMode } from "./QuerySwimlanes";
+import type { RowChange } from "./HomeResultsPane";
 
 type QueryLanesProps = {
   cards: QueriedCard[];
@@ -22,13 +25,15 @@ type QueryLanesProps = {
   /** "Move to…": the lanes (and the card's own board) in a sheet; on phones the only way to move (D646). */
   onMoveCard: (card: QueriedCard, trigger: HTMLElement, fromKey: string) => void;
   /** A drop or Alt+←/→ that resolved to a column of the card's board or a change of a field (D641, D651): the host does it. */
-  onDropCard: (card: QueriedCard, lane: QueryLane, fromKey: string) => void;
+  onDropCard: (card: QueriedCard, lane: QueryLane | null, fromKey: string, row?: RowChange) => void;
   /** A refused drop or key move: the host says why. */
   onRefused: (message: string) => void;
   /** Add a card on a lane (D654): the host picks the board; null when the lane offers none. */
   onAddCard?: (lane: QueryLane, trigger: HTMLElement) => void;
   canAddCard?: (lane: QueryLane) => boolean;
   phone: boolean;
+  /** Swimlanes in a cross-board view (D665): rows by person or board, their folded rows, and folding one. */
+  swim?: { mode: QuerySwimMode; collapsedRows: ReadonlySet<string>; onToggleRow: (row: Swimlane) => void };
 };
 
 const LANE_INDEX_KEY = "mynotes.tasks.lane";
@@ -55,9 +60,22 @@ function LaneMark({ lane, mode, status }: { lane: QueryLane; mode: QueryLaneLayo
  * a lane. A collapsed lane is the board's 44 px strip and still takes a drop. On phones the lanes
  * are pages with tabs, as on a board, and drag is off ("Move to…" instead).
  */
-export function QueryLanes({ cards, layout, today, collapsed, onToggleCollapsed, onOpenCard, onMoveCard, onDropCard, onRefused, onAddCard, canAddCard, phone }: QueryLanesProps) {
+export function QueryLanes(props: QueryLanesProps) {
+  const { cards, layout, today, collapsed, onToggleCollapsed, onOpenCard, onMoveCard, onDropCard, onRefused, onAddCard, canAddCard, phone, swim } = props;
   const { readOnly: roleReadOnly } = useRole();
   const lanes = layout.columns;
+  // Swimlanes (D665): the rows of the loaded cards; on phones they group each lane page's cards.
+  const swimRows = swim && phone ? buildSwimlanes(swim.mode, cards) : null;
+  const rowHeader = (row: Swimlane, count: number) => {
+    const folded = swim?.collapsedRows.has(row.key) ?? false;
+    return <h3 className="task-swim-row-header">
+      <button type="button" aria-expanded={!folded} onClick={() => swim?.onToggleRow(row)} title={folded ? "Expand row" : "Collapse row"}>
+        {folded ? <ChevronRight aria-hidden="true" /> : <ChevronDown aria-hidden="true" />}
+        <span className={row.key === NONE_ROW.assignee ? "task-swim-none" : undefined}>{row.label}</span>
+        <b aria-label={`${count} loaded`}>{count}</b>
+      </button>
+    </h3>;
+  };
   const byLane = cardsByLane(layout, cards, today);
   // Each lane's status icon (COLICON's, D629): from its state and place, left to right.
   const statuses = laneStatuses(lanes);
@@ -158,6 +176,11 @@ export function QueryLanes({ cards, layout, today, collapsed, onToggleCollapsed,
     window.setTimeout(() => document.querySelector<HTMLElement>(`.task-query-lanes [data-lane-key="${CSS.escape(targetKey)}"] [data-card-id="${card.id}"]`)?.focus(), 0);
   }
 
+  if (swim && !phone) {
+    return <QuerySwimlanes mode={swim.mode} cards={cards} layout={layout} today={today} collapsed={collapsed} onToggleCollapsed={onToggleCollapsed}
+      collapsedRows={swim.collapsedRows} onToggleRow={swim.onToggleRow} onOpenCard={onOpenCard} onMoveCard={onMoveCard} onDropCard={onDropCard} onRefused={onRefused}
+      onAddCard={onAddCard} canAddCard={canAddCard} mark={(lane, index) => <LaneMark lane={lane} mode={layout.lanes} status={statuses[index] ?? null} />} />;
+  }
   const noun = LANE_MODE_NOUNS[layout.lanes === "state" && layout.lanesFallback ? "columns" : layout.lanes];
   return <div className="task-query-lanes">
     {droppable && <KeyboardMoveHint id="task-lane-keys">Press Alt with the left or right arrow to move a card to the next lane that takes it.</KeyboardMoveHint>}
@@ -176,9 +199,14 @@ export function QueryLanes({ cards, layout, today, collapsed, onToggleCollapsed,
     <div className="task-columns" ref={trackRef} onScroll={onScroll}>
       {lanes.map((lane, laneIndex) => {
         const laneCards = byLane.get(lane.key) ?? [];
+        // Phones with swimlanes (D665): the lane's cards grouped under their rows, each row folding away.
+        const entries: Array<{ card: QueriedCard; key: string } | { header: Swimlane; count: number; key: string }> = swimRows
+          ? swimRows.flatMap((row) => { const items = laneCards.filter((card) => row.cardIds.includes(card.id)); return items.length ? [{ header: row, count: items.length, key: `h-${row.key}` }, ...(swim!.collapsedRows.has(row.key) ? [] : items.map((card) => ({ card, key: `${row.key}-${card.id}` })))] : []; })
+          : laneCards.map((card) => ({ card, key: card.id }));
         const count = layout.laneCounts[lane.key] ?? laneCards.length;
         const result = verdict(lane);
         const refused = result && "refusal" in result && result.refusal !== "SAME_LANE" ? result.message : null;
+        const createNote = result && "kind" in result && result.kind === "createTag" ? `Drop to create “${result.tagName}” on ${result.boardName}` : null;
         const folded = collapsed.has(lane.key);
         const headingId = `task-lane-${laneIndex}`;
         const status = statuses[laneIndex]!;
@@ -220,15 +248,17 @@ export function QueryLanes({ cards, layout, today, collapsed, onToggleCollapsed,
             <button type="button" className="task-column-show-all" onClick={() => onToggleCollapsed(lane.key)}>Expand</button>
           </p>}
           {!folded && <>
-            {refused && <p className="task-column-full-hint" role="status">{refused}</p>}
+            {(refused ?? createNote) && <p className="task-column-full-hint" role="status">{refused ?? createNote}</p>}
             <ul className="task-card-list" aria-label={`${lane.label} cards`}>
-              {laneCards.map((card) => {
+              {entries.map((entry) => {
+                if ("header" in entry) return <li key={entry.key} className="task-swim-phone-row">{rowHeader(entry.header, entry.count)}</li>;
+                const card = entry.card;
                 const face = faceOf(card);
                 const movable = !phone && droppable && canMove(card);
                 const label = cardFaceLabel({ card: face.card, tags: face.tags, done: card.is_done === 1, today });
                 const excerptId = `task-lane-excerpt-${laneIndex}-${card.id}`;
                 const showColumn = layout.lanes !== "columns";
-                return <li key={card.id} className="task-card-item">
+                return <li key={entry.key} className="task-card-item">
                   <div className={`task-card${dragging?.card.id === card.id && dragging.fromKey === lane.key ? " dragging" : ""}${card.archived_at ? " archived" : ""}`} tabIndex={0} data-card-id={card.id}
                     draggable={movable} role="group" aria-label={`${label}, on ${card.board_name}${showColumn ? `, ${card.column_name}` : ""}`}
                     aria-roledescription={movable ? "Draggable card" : "Card"}

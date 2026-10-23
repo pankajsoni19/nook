@@ -2,7 +2,7 @@ import { audit, db, now } from "../db";
 import { withResourceLock } from "../storage";
 import { format, parse, scopedBoardId } from "../../shared/taskQuery";
 import { LANE_MODES, laneModeOfKey, normalizeCollapsedLanes, NONE_LANE, type LaneMode } from "../../shared/taskLanes";
-import { isSwimlaneMode, type SwimlaneMode } from "../../shared/swimlanes";
+import { isSwimlaneMode, normalizeCollapsedRows, type SwimlaneMode } from "../../shared/swimlanes";
 import { boardLevel, readableBoardPredicate, type BoardVisibility } from "./access";
 import { planInsert } from "./boardOrder";
 import { filterError, laneKeysOf, QUERY_GROUPS, QUERY_SORTS, runQuery, type QueryGroup, type QueryResult, type QuerySort } from "./query";
@@ -364,7 +364,7 @@ function storedPrefs(userId: string, viewKey: string): ViewLanePrefs {
     collapsedLanes: row ? normalizeCollapsedLanes(parsedList(row.collapsed_lanes)) : [],
     ownCollapse: row?.own_collapse === 1,
     collapsedColumnIds: row ? parsedList(row.collapsed_columns).filter((id): id is string => typeof id === "string") : [],
-    collapsedRows: row ? parsedList(row.collapsed_rows).filter((key): key is string => typeof key === "string") : []
+    collapsedRows: row ? normalizeCollapsedRows(parsedList(row.collapsed_rows)) : []
   };
 }
 
@@ -420,14 +420,17 @@ export function writeViewLanePrefs(userId: string, viewKey: string, input: ViewL
     collapsedLanes = trimToLanes(userId, view ? (parsed?.ok ? parsed.query : null) : myWorkFilter(input.q), collapsedLanes);
   }
   const boardId = view?.board_id ?? null;
-  if (!boardId && (input.ownCollapse || input.collapsedColumnIds?.length || input.collapsedRows?.length)) {
+  if (!boardId && (input.ownCollapse || input.collapsedColumnIds?.length)) {
     throw new TaskError(400, "Only a view on one board keeps its own collapsed columns", "NOT_A_BOARD_VIEW");
   }
+  // Rows: a board view's are trimmed to its board; a cross-board view's or My work's swimlanes (person
+  // or board rows, lane VIEWS2, D669) are kept well formed and bounded.
+  const rows = input.collapsedRows === undefined ? current.collapsedRows : boardId ? boardRowKeys(boardId, input.collapsedRows) : normalizeCollapsedRows(input.collapsedRows);
   const next: ViewLanePrefs = {
     collapsedLanes,
     ownCollapse: input.ownCollapse ?? current.ownCollapse,
     collapsedColumnIds: input.collapsedColumnIds === undefined || !boardId ? current.collapsedColumnIds : boardColumnIds(boardId, input.collapsedColumnIds),
-    collapsedRows: input.collapsedRows === undefined || !boardId ? current.collapsedRows : boardRowKeys(boardId, input.collapsedRows)
+    collapsedRows: rows
   };
   db.query(`INSERT INTO task_view_prefs (user_id, view_key, collapsed_lanes, own_collapse, collapsed_columns, collapsed_rows, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT (user_id, view_key) DO UPDATE SET collapsed_lanes = excluded.collapsed_lanes, own_collapse = excluded.own_collapse,
@@ -511,6 +514,42 @@ export function unpinView(userId: string, boardId: string, viewId: string) {
     audit(userId, null, "task.view_unpin", { boardId, viewId });
   })();
   return listBoardViews(userId, boardId);
+}
+
+/**
+ * `PATCH /api/tasks/boards/:b/pins/:v { afterViewId }` (lane VIEWS2, D667): the board's owner or a
+ * manager reorders the pinned views; `null` puts the view first. Positions are renumbered 1…n under
+ * the board's pin lock. Audited.
+ */
+export function movePinnedView(userId: string, boardId: string, viewId: string, afterViewId: string | null) {
+  requireBoardManager(boardId, userId);
+  return withResourceLock(`task-view-pins:${boardId}`, async () => {
+    const order = (db.query("SELECT view_id FROM task_view_pins WHERE board_id = ? ORDER BY position, view_id").all(boardId) as Array<{ view_id: string }>).map((row) => row.view_id);
+    if (!order.includes(viewId) || (afterViewId !== null && (afterViewId === viewId || !order.includes(afterViewId)))) throw new TaskError(404, "Pinned view not found");
+    const rest = order.filter((id) => id !== viewId);
+    rest.splice(afterViewId === null ? 0 : rest.indexOf(afterViewId) + 1, 0, viewId);
+    db.transaction(() => {
+      const update = db.query("UPDATE task_view_pins SET position = ? WHERE board_id = ? AND view_id = ?");
+      rest.forEach((id, index) => update.run(index + 1, boardId, id));
+      audit(userId, null, "task.view_pin_move", { boardId, viewId });
+    })();
+    return listBoardViews(userId, boardId);
+  });
+}
+
+/**
+ * Views pinned on boards the caller can read, with the boards they are pinned on (MCP `list_views`,
+ * lane VIEWS2, D663). Only views the caller can read, which a pin on a readable board already makes.
+ */
+export function pinnedViewsFor(userId: string) {
+  const rows = db.query(`SELECT DISTINCT p.board_id, p.view_id FROM task_view_pins p JOIN boards b ON b.id = p.board_id WHERE ${readableBoardPredicate}`)
+    .all({ userId }) as Array<{ board_id: string; view_id: string }>;
+  const boardsOf = new Map<string, string[]>();
+  for (const row of rows) boardsOf.set(row.view_id, [...(boardsOf.get(row.view_id) ?? []), row.board_id]);
+  const ids = [...boardsOf.keys()];
+  const views = ids.length ? toViews(db.query(`${viewSelect} WHERE v.id IN (SELECT value FROM json_each($ids)) AND ${readableViewPredicate} ORDER BY v.name COLLATE NOCASE, v.id`)
+    .all({ ids: JSON.stringify(ids), userId }) as ViewRow[], userId) : [];
+  return { views, boardsOf };
 }
 
 // ---------------------------------------------------------------------------

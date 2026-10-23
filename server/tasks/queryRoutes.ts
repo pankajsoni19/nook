@@ -24,6 +24,7 @@ import {
   VIEW_LIMITS,
   viewCards,
   listBoardViews,
+  movePinnedView,
   pinView,
   unpinView,
   readViewLanePrefs,
@@ -231,6 +232,12 @@ export function registerTaskQueryRoutes(app: Hono<AppEnv>) {
     const boardId = boardParam(c);
     const id = viewId(c);
     return respond(c, () => pinView(c.get("user").id, boardId, id));
+  });
+  app.patch("/api/tasks/boards/:boardId/pins/:viewId", async (c) => {
+    const boardId = boardParam(c);
+    const id = viewId(c);
+    const body = await parseJson(c.req.raw, z.object({ afterViewId: uuid.nullable() }).strict());
+    return respond(c, () => movePinnedView(c.get("user").id, boardId, id, body.afterViewId));
   });
   app.delete("/api/tasks/boards/:boardId/pins/:viewId", (c) => {
     const boardId = boardParam(c);

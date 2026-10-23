@@ -136,3 +136,5 @@ export type BoardViews = { pinned: TaskView[]; views: TaskView[]; canPin: boolea
 export const listBoardViews = (boardId: string) => api<BoardViews>(`/tasks/boards/${boardId}/views`);
 export const pinBoardView = (boardId: string, viewId: string) => api<BoardViews>(`/tasks/boards/${boardId}/pins/${viewId}`, json("PUT", {}));
 export const unpinBoardView = (boardId: string, viewId: string) => api<BoardViews>(`/tasks/boards/${boardId}/pins/${viewId}`, json("DELETE", {}));
+/** Lane VIEWS2 (D667): reorder pinned views; `null` puts the view first. */
+export const movePinnedView = (boardId: string, viewId: string, afterViewId: string | null) => api<BoardViews>(`/tasks/boards/${boardId}/pins/${viewId}`, json("PATCH", { afterViewId }));

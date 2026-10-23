@@ -5,6 +5,8 @@ import { buildAssigneeLanes, buildDueLanes, buildTagLanes, type LaneBoard } from
 import { format, parse } from "../shared/taskQuery";
 import { DEFAULT_BOARD_QUERY, formatBoardSearch, parseBoardSearch, withBoardQuery } from "../src/tasks/boardUrl";
 import { widenToBoards } from "../src/tasks/views/boardViewModel";
+import { pinDropAnchor, pinStep } from "../src/tasks/views/PinnedOrder";
+import { buildSwimlanes, swimlaneChange } from "../shared/swimlanes";
 import { cardsByLane, changeMessage, laneAddTargets, laneDrop, lanesAcceptDrops, withGroupChange } from "../src/tasks/home/laneModel";
 import { formatViewSearch, homeLanes, parseMyWorkSearch, parseViewSearch, viewHomeQuery } from "../src/tasks/home/homeUrl";
 import { QueryLanes } from "../src/tasks/home/QueryLanes";
@@ -159,5 +161,56 @@ describe("swimlanes (D655, D656) and the Board field (D661)", () => {
     expect(widened.droppedColumns).toBe(true);
     expect(widenToBoards(filter(`board:${BA} state:todo`), BA)).toBeNull();
     expect(widenToBoards(filter("state:todo"), BA)).toBeNull();
+  });
+});
+
+describe("leftovers on the client (D664–D667)", () => {
+  test("pinned view moves: up and down by one, and a drop before another", () => {
+    const order = ["a", "b", "c"];
+    expect(pinStep(order, "b", -1)).toBeNull();
+    expect(pinStep(order, "b", 1)).toBe("c");
+    expect(pinStep(order, "a", 1)).toBe("b");
+    expect(pinStep(order, "a", -1)).toBeUndefined();
+    expect(pinDropAnchor(order, "a", "c")).toBe("b");
+    expect(pinDropAnchor(order, "c", "a")).toBeNull();
+    expect(pinDropAnchor(order, "b", "c")).toBeUndefined();
+    expect(pinDropAnchor(order, "a", null)).toBe("c");
+  });
+
+  test("a tag lane the card's board lacks offers to create the tag; board rows keep a card on its board", () => {
+    const tags = buildTagLanes([{ id: "t1", board_id: BB, name: "Urgent", color: "red", count: 1 }]);
+    const layout: LaneLayout = { lanes: "tag", columns: tags.lanes, laneCounts: {}, laneBoards: boards };
+    expect(laneDrop(layout, tags.lanes[0]!, card("k1"), true, "none:t")).toEqual({ kind: "createTag", tagName: "Urgent", color: "red", boardId: BA, boardName: "Alpha" });
+    expect(laneDrop(layout, tags.lanes[0]!, card("k1"), false, "none:t")).toMatchObject({ refusal: "READ_ONLY" });
+    const rows = buildSwimlanes("board", [card("k1"), card("k2", { board_id: BB, board_name: "Beta" })]);
+    expect(rows.map((row) => row.label)).toEqual(["Alpha", "Beta"]);
+    expect(swimlaneChange("board", rows[0]!.key, rows[1]!, {})).toEqual({ refused: "BOARD" });
+  });
+
+  test("cross-board swimlanes render rows across the lanes; cells offer Add a card on a board", () => {
+    const noop = () => undefined;
+    const layout: LaneLayout = { lanes: "state", columns: [{ key: "s:todo", label: "To do", state: "todo", columns: [] }, { key: "s:done", label: "Done", state: "done", columns: [] }], laneCounts: { "s:todo": 2 }, laneBoards: boards };
+    const cards = [card("k1", { assignees: [person(ME, "Asha")] }), card("k2")];
+    const html = renderToStaticMarkup(<QueryLanes cards={cards} layout={layout} today="2026-10-23" collapsed={new Set()} onToggleCollapsed={noop} onOpenCard={noop} onMoveCard={noop} onDropCard={noop} onRefused={noop}
+      phone={false} swim={{ mode: "assignee", collapsedRows: new Set(["none:a"]), onToggleRow: noop }} />);
+    expect(html).toContain('data-row-key="a:11111111-1111-4111-8111-111111111111"');
+    expect(html).toContain('class="task-swim-row collapsed"');
+    expect(html).toContain("Alt with an arrow key");
+    const phone = renderToStaticMarkup(<QueryLanes cards={cards} layout={layout} today="2026-10-23" collapsed={new Set()} onToggleCollapsed={noop} onOpenCard={noop} onMoveCard={noop} onDropCard={noop} onRefused={noop}
+      phone swim={{ mode: "assignee", collapsedRows: new Set(), onToggleRow: noop }} />);
+    expect(phone).toContain("task-swim-phone-row");
+    const columns: BoardColumn[] = [{ id: "c1", board_id: BA, name: "To do", position: 1, is_done: 0, wip_limit: null, created_at: "", updated_at: "" }];
+    const board = renderToStaticMarkup(<BoardSwimlanes mode="assignee" columns={columns} statuses={new Map()} cards={[]} allCards={[]} tags={[]} today="2026-10-23" noneLabel="No assignee"
+      collapsedColumns={new Set()} onToggleColumn={noop} collapsedRows={new Set()} onToggleRow={noop} readOnly={false} phone={false} trackRef={createRef<HTMLDivElement>()} onTrackScroll={noop}
+      canEnter={() => true} onDrop={noop} onKeyMove={noop} onOpenCard={noop} onCardMenu={noop} onAddCard={noop} />);
+    expect(board).toContain('aria-label="Add a card to No assignee in To do"');
+  });
+
+  test("swim= in a view's URL and its saved display", () => {
+    const view = parseViewSearch(`?layout=board&group=none&sort=due&swim=board&q=board:${BA}`)!;
+    expect(view.swim).toBe("board");
+    expect(formatViewSearch(view)).toContain("swim=board");
+    expect(viewHomeQuery({ query: "", display: { layout: "board", group: "none", sort: "due", swimlanes: "assignee" } }).swim).toBe("assignee");
+    expect(viewHomeQuery({ query: "", display: { layout: "board", group: "none", sort: "due", swimlanes: "parent" } }).swim).toBeUndefined();
   });
 });

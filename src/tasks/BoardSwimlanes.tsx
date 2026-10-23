@@ -1,5 +1,5 @@
 import { useRef, useState, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from "react";
-import { ChevronDown, ChevronRight, ChevronsLeftRight, ChevronsRightLeft, Ellipsis } from "lucide-react";
+import { ChevronDown, ChevronRight, ChevronsLeftRight, ChevronsRightLeft, Ellipsis, Plus } from "lucide-react";
 import { buildSwimlanes, NONE_ROW, type Swimlane, type SwimlaneMode } from "../../shared/swimlanes";
 import { CARD_DRAG_TYPE, columnCards, isCardDrag, isMoveKey, readCardDragPayload, type MoveKey } from "./boardOrder";
 import { CardFace, cardFaceLabel } from "./CardFace";
@@ -36,6 +36,10 @@ type BoardSwimlanesProps = {
   onKeyMove: (card: CardSummary, key: MoveKey) => void;
   onOpenCard: (card: CardSummary) => void;
   onCardMenu: (card: CardSummary, trigger: HTMLElement) => void;
+  /** Add a card in a cell (D664): the host opens the composer on that column with the row's person or parent. */
+  onAddCard?: (row: Swimlane, columnId: string) => void;
+  /** A key move that cannot happen (the first or last row): the host says why. */
+  onKeyRefused?: (message: string) => void;
 };
 
 /** Which slot a pointer at `clientY` points to among a cell's cards (the dragged one excluded). */
@@ -93,11 +97,43 @@ export function BoardSwimlanes(props: BoardSwimlanesProps) {
     props.onDrop(cardId, fromRow, row, columnId, others, list ? dropIndexFor(list, event.clientY, cardId) : 0);
   }
 
-  function cardKeyDown(event: ReactKeyboardEvent<HTMLElement>, card: CardSummary) {
+  /**
+   * `Alt` + ↑ / ↓ (D664): up or down within the cell, and past its first or last card into the row
+   * above or below (to the bottom or top of that row's cell), changing the row's field as a drop does.
+   * `Alt` + ← / → moves to the next column, staying in the row (the board's own key move).
+   */
+  function cardKeyDown(event: ReactKeyboardEvent<HTMLElement>, card: CardSummary, row: Swimlane, columnId: string) {
     if (event.key === "Enter" && event.target === event.currentTarget) { event.preventDefault(); props.onOpenCard(card); return; }
     if (readOnly || !event.altKey || event.ctrlKey || event.metaKey || !isMoveKey(event.key)) return;
     event.preventDefault();
-    props.onKeyMove(card, event.key);
+    if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      props.onKeyMove(card, event.key);
+      return;
+    }
+    const cell = cellCards(row, columnId).map((item) => item.id);
+    const index = cell.indexOf(card.id);
+    const others = cell.filter((id) => id !== card.id);
+    const up = event.key === "ArrowUp";
+    let target = row;
+    let slot: number;
+    let targetCell = others;
+    if (up ? index > 0 : index < cell.length - 1) slot = up ? index - 1 : index + 1;
+    else {
+      const next = rows[rows.findIndex((item) => item.key === row.key) + (up ? -1 : 1)];
+      if (!next) {
+        props.onKeyRefused?.(up ? "Already in the first row" : "Already in the last row");
+        return;
+      }
+      if (mode === "board") {
+        props.onKeyRefused?.("A card stays on its board");
+        return;
+      }
+      target = next;
+      targetCell = cellCards(next, columnId).map((item) => item.id).filter((id) => id !== card.id);
+      slot = up ? targetCell.length : 0;
+    }
+    props.onDrop(card.id, row.key, target, columnId, targetCell, slot);
+    window.setTimeout(() => document.querySelector<HTMLElement>(`[data-row-key="${target.key}"] [data-card-id="${card.id}"]`)?.focus(), 400);
   }
 
   const cardItem = (card: CardSummary, row: Swimlane, columnId: string, slot: number, indicator: boolean) => {
@@ -117,13 +153,19 @@ export function BoardSwimlanes(props: BoardSwimlanesProps) {
           setDragging({ cardId: card.id, fromRow: row.key });
         }}
         onDragEnd={() => { setDragging(null); setTarget(null); }}
-        onKeyDown={(event) => cardKeyDown(event, card)}
+        onKeyDown={(event) => cardKeyDown(event, card, row, columnId)}
         onClick={(event) => { if (!(event.target as Element).closest("button")) props.onOpenCard(card); }}>
         <CardFace {...face} excerptId={excerptId} />
         <button className="icon-button task-card-more" onClick={(event) => props.onCardMenu(card, event.currentTarget)} aria-haspopup="dialog" aria-label={`More actions for “${card.title}”`} title="More actions" draggable={false}><Ellipsis /></button>
       </div>
     </li>;
   };
+
+  /** Add a card in this row and column (D664): it starts with the row's person or parent. */
+  const addButton = (row: Swimlane, column: BoardColumn) => props.onAddCard && !readOnly
+    ? <button type="button" className="icon-button task-swim-add" onClick={() => props.onAddCard!(row, column.id)} aria-haspopup="dialog"
+      aria-label={`Add a card to ${row.label} in ${column.name}`} title={`Add a card to ${row.label} in ${column.name}`}><Plus /></button>
+    : null;
 
   const rowHeader = (row: Swimlane, count: number) => {
     const folded = collapsedRows.has(row.key);
@@ -160,6 +202,7 @@ export function BoardSwimlanes(props: BoardSwimlanesProps) {
               return <div key={row.key} className="task-swim-page-row">
                 {rowHeader(row, items.length)}
                 {!collapsedRows.has(row.key) && <ul className="task-card-list" aria-label={`${row.label} in ${column.name}`}>{items.map((card, slot) => cardItem(card, row, column.id, slot, false))}</ul>}
+                {!collapsedRows.has(row.key) && addButton(row, column)}
               </div>;
             })}
             {!cards.some((card) => card.column_id === column.id) && <p className="task-column-empty">{all ? "No matching cards" : "No cards yet"}</p>}
@@ -218,6 +261,7 @@ export function BoardSwimlanes(props: BoardSwimlanesProps) {
                   {items.map((card) => cardItem(card, row, column.id, others.indexOf(card), active))}
                   {active && target!.index >= others.length && <li className="task-drop-indicator" aria-hidden="true" />}
                 </ul>}
+              {!foldedColumn && addButton(row, column)}
             </div>;
           })}
         </div>}

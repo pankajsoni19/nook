@@ -7,7 +7,7 @@ import { QUERY_GROUPS, QUERY_SORTS, queryCards, type QueriedCard, type QueryResu
 import { taskQueryRateLimited } from "./queryRoutes";
 import { TaskError } from "./service";
 import { LANE_MODES } from "../../shared/taskLanes";
-import { listViews, saveView, viewCards, VIEW_GROUPS, VIEW_LAYOUTS } from "./views";
+import { listViews, pinnedViewsFor, saveView, viewCards, VIEW_GROUPS, VIEW_LAYOUTS } from "./views";
 
 /**
  * MCP tools for saved views and the cross-board query (research 2026-09-26
@@ -80,7 +80,7 @@ export const taskViewTools: McpToolSpec[] = [
   defineTool({
     name: "list_views",
     title: "List saved task views",
-    description: "List the saved cross-board task views the user can open: their own, views shared with them, and views shared with everyone. Each has a filter in the task query language; run one with query_cards. board_id is set when the view is on one board the user can read (it opens as that board with the filter); lanes is how its board layout groups cards across boards (columns: merged by column name and state; state: to do, in progress, done).",
+    description: "List the saved cross-board task views the user can open: their own, views shared with them, and views shared with everyone. Each has a filter in the task query language; run one with query_cards. board_id is set when the view is on one board the user can read (it opens as that board with the filter); pinned_board_ids lists the boards a board owner pinned it on for everyone who reads them; lanes is how its board layout groups cards across boards (columns: merged by column name and state; state: to do, in progress, done).",
     scopes: ["tasks:read"],
     access: { mode: "list", lists: ["task_view"] },
     write: false,
@@ -90,8 +90,15 @@ export const taskViewTools: McpToolSpec[] = [
       // A key limited to chosen items lists only the views it was given (T203); board grants give
       // no views, since a view reaches across boards.
       const chosen = keyContainerIds(key, "tasks:read", "task_view");
+      // Lane VIEWS2 (D663): views pinned on boards the user can read are listed too, marked with the
+      // boards they are pinned on (only boards the key reaches).
+      const pins = pinnedViewsFor(key.userId);
+      const chosenBoards = keyContainerIds(key, "tasks:read", "board");
+      const listed = [...mine, ...shared, ...everyone];
+      const all = [...listed, ...pins.views.filter((view) => !listed.some((item) => item.id === view.id))];
       return {
-        views: [...mine, ...shared, ...everyone].filter((view) => chosen === null || chosen.includes(view.id)).map((view) => ({
+        views: all.filter((view) => chosen === null || chosen.includes(view.id)).map((view) => ({
+          pinned_board_ids: (pins.boardsOf.get(view.id) ?? []).filter((boardId) => chosenBoards === null || chosenBoards.includes(boardId)),
           id: view.id, name: view.name, owner_name: view.owner_name, is_owner: view.is_owner, visibility: view.visibility, query: view.query,
           // Lane VIEWS (D645): the one board the view is on (null across boards), and its board lanes.
           board_id: view.board_id, lanes: view.display.lanes ?? "columns",

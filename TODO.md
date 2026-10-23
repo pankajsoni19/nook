@@ -34,12 +34,9 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 
 ## Leftovers (lane VIEWS2; plan in docs/plan/TASK_VIEWS.md)
 
-- [ ] MCP `list_views` lists the key owner's, shared, and everyone views, not the views pinned on boards they read (D658); `query_cards` runs a pinned view by id. Add a `pinned` list (per board) if agents need to find them.
-- [ ] Swimlanes have no **Add a card** per cell (it would start with the row's person or parent), and `Alt` + ↑ / ↓ reorders within the whole column rather than moving a card to the next row; rows change by drag or the card's own fields.
-- [ ] Swimlanes are on the board and in board views only; a cross-board view's lanes cannot also be split into rows.
-- [ ] A drop on a tag lane is refused when the card's board has no tag of that name (D651); creating the tag on the fly (any reader may create tags) would let it land.
-- [ ] Pinned views keep the order they were pinned in; there is no reordering of pins.
-- [ ] The real pointer drags (D662) ran from a scratch script against the QA instance; a `scripts/` headless-Chrome drag smoke (seeded boards, `Input.dispatchMouseEvent`) would keep them checked.
+- [ ] Cross-board swimlane rows (D665) are built from the loaded cards (200 a page), so a row's count is of loaded cards, not the whole match as lane counts are; a server row count (`rowCounts`, like `laneCounts`) would make them true.
+- [ ] **Reorder pinned views…** (D667) is in a pinned view's ⋯, so a manager opens one pinned view first; the board's **View** picker could offer it from All cards too.
+- [ ] On phones a swimlane page shows only the rows that have cards in that column, so its **+** reaches only those rows (New card covers the rest).
 
 ## Leftovers (lane LOCALEMB)
 

@@ -8,6 +8,9 @@ import { useRole } from "../../team/roleAccess";
 import type { QueryLane } from "../../../shared/taskLanes";
 import { canChangeCard, type QueriedCard, type QueryLanes as QueryLaneLayout } from "./homeApi";
 import { QueryLanes } from "./QueryLanes";
+import type { QuerySwimMode } from "./QuerySwimlanes";
+import type { RowChange } from "./HomeResultsPane";
+import type { Swimlane } from "../../../shared/swimlanes";
 import { groupResults, STATE_LABELS, stateLanes } from "./homeResults";
 import type { HomeGroup, HomeLayout } from "./homeUrl";
 
@@ -33,7 +36,9 @@ type QueryResultsProps = {
     layout: QueryLaneLayout;
     collapsed: ReadonlySet<string>;
     onToggleCollapsed: (key: string) => void;
-    onDropCard: (card: QueriedCard, lane: QueryLane, fromKey: string) => void;
+    onDropCard: (card: QueriedCard, lane: QueryLane | null, fromKey: string, row?: RowChange) => void;
+    /** Swimlanes across boards (D665). */
+    swim?: { mode: QuerySwimMode; collapsedRows: ReadonlySet<string>; onToggleRow: (row: Swimlane) => void };
     /** Add a card on a lane (D654). */
     onAddCard?: (lane: QueryLane, trigger: HTMLElement) => void;
     canAddCard?: (lane: QueryLane) => boolean;

@@ -2,7 +2,7 @@
 
 Operator, 2026-10-23: "boards have capability to collapse columns. but views in tasks dont have that … views only have 3 columns … drag and drop dont work here … what i wanted was views to be same as boards in the functionality they offer … if view has only 1 board in it we can offer similar capability as the board, as it's essentially a board with filters. if needed we can place this sort of view inside board."
 
-Decisions start at **D635** (D628–D634 are lanes CAP and COLICON's). Threats start at **T442**. Migration **077**. Slice 2 (lane VIEWS2) is D650–D662, T448–T450, migration 078.
+Decisions start at **D635** (D628–D634 are lanes CAP and COLICON's). Threats start at **T442**. Migration **077**. Slice 2 (lane VIEWS2) is D650–D669, T448–T450, migration 078.
 
 ## Why views fell short
 
@@ -41,7 +41,7 @@ Decisions start at **D635** (D628–D634 are lanes CAP and COLICON's). Threats s
 
 ## Slice 2 (lane VIEWS2, as built)
 
-Operator, 2026-10-23: "complete". Decisions **D650–D662**, threats **T448–T450**, migration **078** (`task_view_pins`; `board_view_prefs.show_all_levels`, `collapsed_rows`; `task_view_prefs.own_collapse`, `collapsed_columns`, `collapsed_rows`).
+Operator, 2026-10-23: "complete". Decisions **D650–D669**, threats **T448–T450**, migration **078** (`task_view_pins`; `board_view_prefs.show_all_levels`, `collapsed_rows`; `task_view_prefs.own_collapse`, `collapsed_columns`, `collapsed_rows`).
 
 ### 1. Lanes by a field across boards
 
@@ -68,6 +68,15 @@ Operator, 2026-10-23: "complete". Decisions **D650–D662**, threats **T448–T4
 - **D660 — MCP `save_view`** (`tasks:write`): create a private view (name and filter) or change one the key's owner owns (`viewId` and `baseRevision` from `list_views`, which now returns `revision` and `layout`); `VIEW_CHANGED` with `currentRevision` when stale. Sharing and pinning stay app-only (D180). Only keys over the whole Tasks module see it (T449); chat agents are never offered it.
 - **D662 — A real pointer drag.** `Input.dispatchMouseEvent` press, moves, and release in Chrome's new headless mode start real HTML5 drags (dragstart, dragenter, dragover, drop, dragend in Chrome's own input pipeline; no synthetic `DragEvent`). Checked on the QA instance: a swimlane drag that changed the person and the column; a cross-board drag between person lanes; a drop on a collapsed lane's strip (to Done); a drag across parent rows; a tag-lane drag that swapped the tag; and a refused drop (another board's tag) that changed nothing. `Input.setInterceptDrags` was not needed.
 
+### 5. Leftovers done (operator: "complete", D663–D669)
+
+- **D663 — Pinned views over MCP.** `list_views` also lists views pinned on boards the key's owner reads, and every view carries `pinned_board_ids` (only boards a key limited to chosen boards reaches; a key limited to chosen views still lists only those).
+- **D664 — Swimlane cells.** Each cell of the board's swimlanes has **Add a card** (+): the composer opens on that column with the row's person, or under the row's parent. `Alt` + ↑ / ↓ moves a card up or down within its cell and, past the first or last card, into the row above or below (to that cell's bottom or top), changing the person or parent as a drop does; the first and last rows say so. `Alt` + ← / → still moves to the next column in the row.
+- **D665 — Swimlanes across boards.** A cross-board view's (and My work's) lanes split into rows by **Assignee** or **Board** (`swim=assignee|board`, saved with the view as `display.swimlanes`; not the same field as the lanes). Rows come from the loaded cards. A drop in another lane does what a lane drop does; in another person's row it swaps the source row's person for the target's, both in one PATCH plus the move. Board rows only show (a card stays on its board). `Alt` + arrows move to the next lane or row that takes the card. On phones the lane pages group their cards under the rows.
+- **D666 — Create the tag on drop.** A card dropped on a tag lane whose name its board has no tag for is no longer refused when the viewer can edit cards there: the lane says "Drop to create …", and the drop asks **Create tag “X” on <board> and move** (any reader may create tags; an existing tag of that name is used). Without edit it stays refused with the reason.
+- **D667 — Reorder pinned views.** The board's owner or a manager reorders them (`PATCH /boards/:b/pins/:v { afterViewId }`, audited `task.view_pin_move`): **Move up** and **Move down** in a pinned view's options, and **Reorder pinned views…**, a sheet to drag them or use the arrows.
+- **D668 — `scripts/dragSmoke.ts`.** The real pointer drags (D662) as a script against a QA instance: it signs in as the QA account, makes its own boards, cards, tags, and view, checks six drags through the API (a person lane to No assignee, a collapsed Done strip, board swimlane rows and columns, tag to tag, a tag created on drop, and cross-board rows and lanes), cleans up, and exits 1 on a failure. Run it before a release (docs/OPERATIONS.md).
+- **D669 — Folded rows across boards.** A cross-board view's and My work's folded swimlanes are kept in `task_view_prefs.collapsed_rows` (well formed and bounded; board views still trim theirs to their board). No migration.
 ## Tests
 
 Board-view detection and the board-term drop (`tasksViews`), lane merge, order, and refusal (`taskLanes`), `laneCounts` and `columns` over the whole match, migration 077, prefs trimming, the drop permission and WIP matrix, `taskQueryParity` for board views, MCP `list_views` and `move_card` by state and name, the router and Back parity for the new URLs, and the client lanes (drag refusal, collapse, phone pager).

@@ -43,6 +43,7 @@ import { hasBoardFilter, withBoardQuery, type BoardQuery, type BoardViewId } fro
 import type { TaskQuery } from "../../shared/taskQuery";
 import { isSwimlaneMode, type Swimlane, type SwimlaneMode, swimlaneChange } from "../../shared/swimlanes";
 import { BoardSwimlanes } from "./BoardSwimlanes";
+import type { ComposerPrefill } from "./composerDraft";
 import { Select } from "../ui/Select";
 import type { FilterField } from "./boardQuery";
 import { useBoardSavedViews } from "./views/BoardSavedViews";
@@ -185,7 +186,7 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
   const [dropTarget, setDropTarget] = useState<{ columnId: string; index: number } | null>(null);
   const [announcement, setAnnouncement] = useState("");
   // The card composer (a guarded dialog, no history entry): the column it was opened from, or null.
-  const [composer, setComposer] = useState<{ columnId: string | null; parentId?: string } | null>(null);
+  const [composer, setComposer] = useState<{ columnId: string | null; parentId?: string; prefill?: ComposerPrefill } | null>(null);
   // Read-only Team roles never get the composer (the card dialog hides its Add controls too), and
   // neither do members below `edit` on this board (Wave 32, D272: viewers and commenters).
   const { readOnly: roleReadOnly } = useRole();
@@ -553,7 +554,7 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
         return;
       }
       await hierarchy.reparent(cardId, change.parentId);
-    } else if (change) {
+    } else if (change && "assigneeIds" in change) {
       try {
         const { card: saved } = await updateCard(cardId, { assigneeIds: change.assigneeIds, revision: card.revision });
         setDetail((value) => value ? applyCardDetail(value, saved) : value);
@@ -810,7 +811,7 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
   const parentLevel = hierarchy.structure.levels.length > 1 ? hierarchy.structure.levels[Math.max(0, hierarchy.structure.workLevel - 1)] : undefined;
   // The URL's choice, else (in a saved view) the view's own, else none.
   const swimChoice = query.swim === "none" ? null : isSwimlaneMode(query.swim) ? query.swim : savedViewId ? savedViews.view?.display.swimlanes ?? null : null;
-  const swimMode: SwimlaneMode | null = swimChoice && (swimChoice === "assignee" || parentLevel) ? swimChoice : null;
+  const swimMode: SwimlaneMode | null = swimChoice && (swimChoice === "assignee" || (swimChoice === "parent" && parentLevel)) ? swimChoice : null;
   const swimSelect = view === "board" ? <Select<string> variant="chip" label="Swimlanes" value={swimMode ?? "none"} searchable={false} className="task-swim-select"
     options={[{ value: "none", label: "Swimlanes: None" }, { value: "assignee", label: "Swimlanes: Assignee" }, ...(parentLevel ? [{ value: "parent", label: `Swimlanes: ${parentLevel.name}` }] : [])]}
     onChange={(value) => onQueryChange(withBoardQuery(query, { swim: isSwimlaneMode(value) ? value : savedViewId ? "none" : null }))} /> : null;
@@ -906,6 +907,13 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
       readOnly={readOnly} phone={phone} trackRef={trackRef} onTrackScroll={onTrackScroll}
       canEnter={(cardId, columnId) => { const column = columns.find((item) => item.id === columnId); return !column || canEnterColumn(cards, column, cardId); }}
       onDrop={(cardId, fromRow, row, columnId, cellCardIds, index) => { void dropInSwimlane(swimMode, cardId, fromRow, row, columnId, cellCardIds, index); }}
+      onKeyRefused={(message) => { notify(message); setAnnouncement(message); }}
+      onAddCard={readOnly ? undefined : (row, columnId) => {
+        const column = columns.find((item) => item.id === columnId);
+        const refusal = column ? addCardRefusal(cards, column) : null;
+        if (refusal) { notify.warning(refusal); setAnnouncement(refusal); return; }
+        setComposer({ columnId, ...(row.parentId ? { parentId: row.parentId } : {}), ...(row.userId ? { prefill: { assignees: [{ id: row.userId, display_name: row.label, can_read: 1 as const }] } } : {}) });
+      }}
       onKeyMove={keyMove} onOpenCard={(card) => onOpenCard(card.id)} onCardMenu={(card, trigger) => openDialog({ kind: "moveCard", cardId: card.id }, trigger)} />}
     {detail && view === "board" && !swimMode && <div className="task-columns" ref={trackRef} onScroll={onTrackScroll}>
       {columns.map((column, index) => {
@@ -1001,7 +1009,7 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
       initialParentId={composer.parentId}
       sprints={sprints.enabled ? sprints.sprints : undefined}
       initialSprintId={composerStart && composerStart.sprintId !== undefined ? composerStart.sprintId : sprints.composerSprintId}
-      prefill={composerStart?.prefill}
+      prefill={composer.prefill ?? composerStart?.prefill}
     />}
     {savedViews.dialogs}
     {(dialog?.kind === "settings" || overSettings) && board && <BoardSettingsSheet board={board} owner={canManage} isOwner={owner} showAllLevels={hierarchy.showAll} onShowAllLevels={hierarchy.setShowAll}

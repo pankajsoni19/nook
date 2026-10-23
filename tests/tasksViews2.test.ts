@@ -217,6 +217,50 @@ describe("views pinned on a board (D658, T448)", () => {
   }, 20_000);
 });
 
+describe("leftovers: pin order, pinned views over MCP, rows across boards (D663, D667, D669)", () => {
+  test("the owner or a manager reorders pinned views; anyone else cannot; the order is the picker's", async () => {
+    const owner = await createUser("Views2 Order owner");
+    const editor = await createUser("Views2 Order editor");
+    const a = await board(owner, "Order board");
+    await share(owner, a.id, [editor.userId]);
+    const ids: string[] = [];
+    for (const name of ["First", "Second", "Third"]) {
+      const view = (await call(owner, "POST", "/views", { name, query: `board:${a.id}` })).body.view;
+      await call(owner, "PUT", `/boards/${a.id}/pins/${view.id}`);
+      ids.push(view.id);
+    }
+    const moved = await call(owner, "PATCH", `/boards/${a.id}/pins/${ids[2]}`, { afterViewId: null });
+    expect(moved.body.pinned.map((view: { name: string }) => view.name)).toEqual(["Third", "First", "Second"]);
+    expect((await call(owner, "PATCH", `/boards/${a.id}/pins/${ids[2]}`, { afterViewId: ids[1] })).body.pinned.map((view: { name: string }) => view.name)).toEqual(["First", "Second", "Third"]);
+    expect((await call(editor, "GET", `/boards/${a.id}/views`)).body.pinned.map((view: { name: string }) => view.name)).toEqual(["First", "Second", "Third"]);
+    expect((await call(editor, "PATCH", `/boards/${a.id}/pins/${ids[0]}`, { afterViewId: null })).body.code).toBe("MANAGER_REQUIRED");
+    expect((await call(owner, "PATCH", `/boards/${a.id}/pins/${ids[0]}`, { afterViewId: ids[0] })).status).toBe(404);
+    expect((await call(owner, "PATCH", `/boards/${a.id}/pins/${crypto.randomUUID()}`, { afterViewId: null })).status).toBe(404);
+    expect((db.query("SELECT COUNT(*) AS count FROM audit_log WHERE actor_id = ? AND event_type = 'task.view_pin_move'").get(owner.userId) as { count: number }).count).toBe(2);
+  });
+
+  test("MCP list_views lists views pinned on boards the key reads, with the boards", async () => {
+    const owner = await createUser("Views2 Listed owner");
+    const reader = await createUser("Views2 Listed reader");
+    const a = await board(owner, "Listed board");
+    await share(owner, a.id, [reader.userId]);
+    const view = (await call(owner, "POST", "/views", { name: "Pinned for all", query: `board:${a.id}` })).body.view;
+    const keyId = createApiKey(reader.userId, { name: "Reader", surfaces: "both", grants: [{ module: "tasks", permission: "read", resourceKind: null, resourceId: null }], expiresInDays: 30 }).id;
+    const list = async () => JSON.parse((await invokeMcpToolForTests("list_views", {}, keyId)).content[0]!.text).views as Array<{ id: string; pinned_board_ids: string[] }>;
+    expect((await list()).some((item) => item.id === view.id)).toBe(false);
+    await call(owner, "PUT", `/boards/${a.id}/pins/${view.id}`);
+    expect((await list()).find((item) => item.id === view.id)).toMatchObject({ pinned_board_ids: [a.id], is_owner: 0, board_id: a.id });
+  });
+
+  test("a cross-board view and My work keep their own folded swimlanes", async () => {
+    const owner = await createUser("Views2 Rows owner");
+    const view = (await call(owner, "POST", "/views", { name: "Across", query: "assignee:me" })).body.view;
+    const saved = await call(owner, "PUT", `/views/${view.id}/prefs`, { collapsedRows: [`a:${owner.userId}`, `b:${crypto.randomUUID()}`, "none:a", "junk"] });
+    expect(saved.body.collapsedRows).toHaveLength(3);
+    expect((await call(owner, "PUT", "/views/my/prefs", { collapsedRows: ["none:a"] })).body.collapsedRows).toEqual(["none:a"]);
+    expect((await call(owner, "GET", "/views/my/prefs")).body.collapsedRows).toEqual(["none:a"]);
+  });
+});
 describe("MCP save_view (D660, T449)", () => {
   const all = (module: Grant["module"], permission: Grant["permission"]): Grant => ({ module, permission, resourceKind: null, resourceId: null });
   const on = (module: Grant["module"], permission: Grant["permission"], kind: NonNullable<Grant["resourceKind"]>, id: string): Grant => ({ module, permission, resourceKind: kind, resourceId: id });
