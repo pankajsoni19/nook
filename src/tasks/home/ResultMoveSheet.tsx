@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Check, Columns3 } from "lucide-react";
+import { ArrowRight, Check, Columns3 } from "lucide-react";
 import type { QueryLane } from "../../../shared/taskLanes";
 import { ModalDialog } from "../../files/Dialog";
 import { sheetMoveAnchor } from "../boardOrder";
@@ -8,7 +8,7 @@ import { columnFullMessage } from "../taskActions";
 import { getBoard, moveCard, taskErrorCode, taskErrorMessage, type BoardDetail, type CardSummary } from "../tasksApi";
 import { columnState, type QueriedCard, type QueryLanes, type StatefulColumn } from "./homeApi";
 import { STATE_LABELS } from "./homeResults";
-import { cardLaneKey, laneDrop, laneStatuses } from "./laneModel";
+import { cardLaneKeysOf, isDropAllowed, laneDrop, lanesAcceptDrops, laneStatuses } from "./laneModel";
 import { ColumnStatusIcon } from "../ColumnStatusIcon";
 
 type ResultMoveSheetProps = {
@@ -17,11 +17,11 @@ type ResultMoveSheetProps = {
   onCancel: () => void;
   onError: (message: string) => void;
   /**
-   * Lane VIEWS (D646): with board lanes, the sheet first lists the lanes (merged columns or states),
-   * each moving the card like a drop, refused ones disabled with the reason; "Other column on its
-   * board…" opens the board's own list.
+   * Lane VIEWS (D646, D651): with board lanes, the sheet first lists the lanes (merged columns,
+   * states, people, tags, or sprints), each moving the card like a drop from `fromKey`, refused ones
+   * disabled with the reason; "Other column on its board…" opens the board's own list.
    */
-  lanes?: { layout: QueryLanes; canEdit: boolean; onLane: (lane: QueryLane) => void };
+  lanes?: { layout: QueryLanes; canEdit: boolean; fromKey: string; today: string; onLane: (lane: QueryLane) => void };
 };
 
 /**
@@ -34,22 +34,24 @@ export const movedMessage = (columnName: string, stateLabel: string) =>
 
 export function ResultMoveSheet({ card, onMoved, onCancel, onError, lanes }: ResultMoveSheetProps) {
   const [board, setBoard] = useState<BoardDetail | null>(null);
-  const [boardList, setBoardList] = useState(!lanes);
+  const [boardList, setBoardList] = useState(!lanes || !lanesAcceptDrops(lanes.layout));
   if (!boardList && lanes) {
-    const current = cardLaneKey(lanes.layout, card);
+    const current = cardLaneKeysOf(lanes.layout, card, lanes.today);
     const statuses = laneStatuses(lanes.layout.columns);
-    const firstOpen = lanes.layout.columns.findIndex((lane) => lane.key !== current && "columnId" in laneDrop(lane, card, lanes.canEdit));
+    const verdict = (lane: QueryLane) => laneDrop(lanes.layout, lane, card, lanes.canEdit, lanes.fromKey);
+    const firstOpen = lanes.layout.columns.findIndex((lane) => !current.includes(lane.key) && isDropAllowed(verdict(lane)));
+    const grouped = lanes.layout.columns.some((lane) => !lane.state);
     return <ModalDialog title={`Move “${card.title}”`} eyebrow={card.board_name} onClose={onCancel}>
       <div className="move-list task-menu task-lane-moves">
         {lanes.layout.columns.map((lane, index) => {
-          const here = lane.key === current;
-          const drop = laneDrop(lane, card, lanes.canEdit);
-          const refused = !here && !("columnId" in drop) ? drop.message : null;
-          const status = statuses[index]!;
-          const note = here ? "Here now" : refused ?? (status.label.toLowerCase() === lane.label.toLowerCase() ? null : status.label);
+          const here = lane.key === lanes.fromKey || (!grouped && current.includes(lane.key));
+          const drop = verdict(lane);
+          const refused = !here && "refusal" in drop ? drop.refusal === "SAME_LANE" ? `Already in ${lane.label}` : drop.message : null;
+          const status = statuses[index];
+          const note = here ? "Here now" : refused ?? (!status || status.label.toLowerCase() === lane.label.toLowerCase() ? null : status.label);
           return <button key={lane.key} type="button" className={`move-option${here ? " current" : ""}`} autoFocus={index === firstOpen} disabled={here || refused !== null}
             aria-current={here ? "true" : undefined} onClick={() => lanes.onLane(lane)}>
-            {here ? <Check aria-hidden="true" /> : <ColumnStatusIcon status={statuses[index]!} />}
+            {here ? <Check aria-hidden="true" /> : status ? <ColumnStatusIcon status={status} /> : <ArrowRight aria-hidden="true" />}
             <span>{lane.label}{note && <small>{note}</small>}</span>
           </button>;
         })}

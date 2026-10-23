@@ -1,11 +1,13 @@
 import { audit, db, now } from "../db";
 import { withResourceLock } from "../storage";
 import { format, parse, scopedBoardId } from "../../shared/taskQuery";
-import { LANE_MODES, normalizeCollapsedLanes, type LaneMode } from "../../shared/taskLanes";
-import { readableBoardPredicate, type BoardVisibility } from "./access";
+import { LANE_MODES, laneModeOfKey, normalizeCollapsedLanes, NONE_LANE, type LaneMode } from "../../shared/taskLanes";
+import { isSwimlaneMode, type SwimlaneMode } from "../../shared/swimlanes";
+import { boardLevel, readableBoardPredicate, type BoardVisibility } from "./access";
 import { planInsert } from "./boardOrder";
-import { filterError, QUERY_GROUPS, QUERY_SORTS, runQuery, type QueryGroup, type QueryResult, type QuerySort } from "./query";
-import { applyRenumber, limitReached, TaskError } from "./service";
+import { filterError, laneKeysOf, QUERY_GROUPS, QUERY_SORTS, runQuery, type QueryGroup, type QueryResult, type QuerySort } from "./query";
+import { applyRenumber, limitReached, requireReadableBoard, TaskError } from "./service";
+import { boardColumnIds, boardRowKeys, parsedList } from "./archive";
 import { AUDIENCE_ALL_USERS } from "../team/roles";
 import { canWriteContent } from "../team/userRole";
 import { mailShared, shareMembers } from "../mail/triggers";
@@ -47,6 +49,8 @@ export type ViewDisplay = {
   sort: QuerySort;
   /** The board layout's lanes for a multi-board view (lane VIEWS, D640): merged columns (default) or states. */
   lanes?: LaneMode;
+  /** A board view's swimlanes (lane VIEWS2, D655): rows by assignee or by parent. */
+  swimlanes?: SwimlaneMode;
   fields?: Array<typeof VIEW_FIELDS[number]>;
 };
 export const DEFAULT_VIEW_DISPLAY: ViewDisplay = { layout: "list", group: "none", sort: "due" };
@@ -71,12 +75,21 @@ const viewSelect = `SELECT v.id, v.owner_id, u.display_name AS owner_name, v.nam
   FROM task_views v JOIN users u ON u.id = v.owner_id`;
 
 /**
+ * Lane VIEWS2 (D658, T445): a view its owner pinned on a board, as that board's owner or manager, is
+ * read by everyone who can open the board. The view still runs as the viewer (T115), so the pin
+ * shares only its name, filter, and layout. Pins exist only while the view is on that one board.
+ */
+const pinnedOnReadableBoard = `EXISTS (SELECT 1 FROM task_view_pins pv JOIN boards b ON b.id = pv.board_id WHERE pv.view_id = v.id AND ${readableBoardPredicate})`;
+
+/**
  * Whether `$userId` may read view `v` (owner `u`): the owner, or, while the
- * owner is enabled, everyone for `all_users` and members for `selected`.
+ * owner is enabled, everyone for `all_users`, members for `selected`, and
+ * the readers of a board the view is pinned on (D658).
  */
 export const readableViewPredicate = `(v.owner_id = $userId OR (u.disabled_at IS NULL AND ((v.visibility = 'all_users' AND ${AUDIENCE_ALL_USERS})
   OR (v.visibility = 'selected' AND (EXISTS (SELECT 1 FROM task_view_members m WHERE m.view_id = v.id AND m.user_id = $userId)
-    OR ${groupGrantExists("task_view", "v.id")})))))`;
+    OR ${groupGrantExists("task_view", "v.id")}))
+  OR ${pinnedOnReadableBoard})))`;
 
 /** The single board a stored filter is on (D635), or null. */
 export function viewBoardId(query: string) {
@@ -100,6 +113,7 @@ function toView(row: ViewRow, userId: string, readable?: ReadonlySet<string>): T
     // The CHECK keeps it valid JSON; fall back to defaults if a newer build wrote something unreadable.
   }
   if (display.lanes !== undefined && !(LANE_MODES as readonly string[]).includes(display.lanes)) delete display.lanes;
+  if (display.swimlanes !== undefined && !isSwimlaneMode(display.swimlanes)) delete display.swimlanes;
   const boardId = viewBoardId(row.query);
   const onBoard = boardId && (readable ?? readableBoardIds(userId, [boardId])).has(boardId) ? boardId : null;
   return { ...rest, is_owner: row.owner_id === userId ? 1 : 0, display, board_id: onBoard };
@@ -234,6 +248,11 @@ export function patchView(userId: string, viewId: string, input: ViewPatchInput)
         timestamp, viewId, revision: input.revision
       });
       if (updated.changes !== 1) throw new Error("Concurrent view update detected");
+      // A pin lasts only while the view is on that board (D658): a filter edited onto other boards drops it.
+      if (query !== undefined) {
+        const onBoard = viewBoardId(query);
+        db.query("DELETE FROM task_view_pins WHERE view_id = ? AND board_id IS NOT ?").run(viewId, onBoard);
+      }
       audit(userId, null, "task.view_update", {
         viewId,
         ...(input.name !== undefined ? { renamed: true } : {}),
@@ -252,8 +271,9 @@ export function deleteView(userId: string, viewId: string) {
     requireEditableOwnedView(viewId, userId);
     db.transaction(() => {
       db.query("DELETE FROM task_views WHERE id = ?").run(viewId);
-      // Everyone's collapsed lanes go with it (D644).
+      // Everyone's collapsed lanes go with it (D644), and its pins (D658).
       db.query("DELETE FROM task_view_prefs WHERE view_key = ?").run(viewId);
+      db.query("DELETE FROM task_view_pins WHERE view_id = ?").run(viewId);
       audit(userId, null, "task.view_delete", { viewId });
     })();
     return { ok: true as const };
@@ -316,42 +336,201 @@ export function viewCards(userId: string, viewId: string, input: { cursor?: stri
 }
 
 // ---------------------------------------------------------------------------
-// One person's collapsed lanes (lane VIEWS, D644, migration 077).
+// One person's collapsed lanes (lane VIEWS, D644, migration 077), and a board view's own collapse
+// (lane VIEWS2, D657, migration 078).
 
-export type ViewLanePrefs = { collapsedLanes: string[] };
+export type ViewLanePrefs = {
+  collapsedLanes: string[];
+  /** A board view keeps its own collapsed columns and rows instead of the board's (D657); off by default. */
+  ownCollapse: boolean;
+  /** The view's own collapsed columns (board views, while `ownCollapse` is on): ids of its board's columns. */
+  collapsedColumnIds: string[];
+  /** The view's own collapsed swimlanes (D656, while `ownCollapse` is on). */
+  collapsedRows: string[];
+};
+
+export type ViewLanePrefsInput = { collapsedLanes?: readonly string[]; ownCollapse?: boolean; collapsedColumnIds?: readonly string[]; collapsedRows?: readonly string[]; q?: string };
 
 /** A view the caller reads (404 otherwise), or `my` (My work, anyone). */
 function requirePrefsTarget(userId: string, viewKey: string) {
   return viewKey === "my" ? null : toView(requireReadableView(viewKey, userId), userId);
 }
 
+type PrefsRow = { collapsed_lanes: string; own_collapse: number; collapsed_columns: string; collapsed_rows: string };
+
+function storedPrefs(userId: string, viewKey: string): ViewLanePrefs {
+  const row = db.query("SELECT collapsed_lanes, own_collapse, collapsed_columns, collapsed_rows FROM task_view_prefs WHERE user_id = ? AND view_key = ?").get(userId, viewKey) as PrefsRow | null;
+  return {
+    collapsedLanes: row ? normalizeCollapsedLanes(parsedList(row.collapsed_lanes)) : [],
+    ownCollapse: row?.own_collapse === 1,
+    collapsedColumnIds: row ? parsedList(row.collapsed_columns).filter((id): id is string => typeof id === "string") : [],
+    collapsedRows: row ? parsedList(row.collapsed_rows).filter((key): key is string => typeof key === "string") : []
+  };
+}
+
 export function readViewLanePrefs(userId: string, viewKey: string): ViewLanePrefs {
-  requirePrefsTarget(userId, viewKey);
-  const row = db.query("SELECT collapsed_lanes FROM task_view_prefs WHERE user_id = ? AND view_key = ?").get(userId, viewKey) as { collapsed_lanes: string } | null;
-  let stored: unknown = [];
-  try { stored = row ? JSON.parse(row.collapsed_lanes) : []; } catch { /* the CHECK keeps it valid JSON */ }
-  return { collapsedLanes: Array.isArray(stored) ? normalizeCollapsedLanes(stored) : [] };
+  const view = requirePrefsTarget(userId, viewKey);
+  const stored = storedPrefs(userId, viewKey);
+  // A board view's own columns are its board's (a column deleted since is left out).
+  return { ...stored, collapsedColumnIds: view?.board_id ? boardColumnIds(view.board_id, stored.collapsedColumnIds) : [] };
+}
+
+/** My work always carries a positive `assignee:me` (Q11); only such a filter is run to trim its lanes (D656). */
+function myWorkFilter(q: string | undefined) {
+  if (q === undefined) return null;
+  const parsed = parse(q);
+  if (!parsed.ok) return null;
+  return parsed.query.terms.some((term) => term.key === "assignee" && !term.negate && term.values.length === 1 && term.values[0] === "me") ? parsed.query : null;
 }
 
 /**
- * `PUT /views/:v/prefs` (a reader of the view; `my` for anyone): replaces the set. Malformed keys are
- * dropped, at most 40 are kept within 1 KiB, and for a saved view a merged-column lane stays only
- * while it is a lane of the view's current results, so the row never fills with lanes that are gone.
- * State lanes always exist. Not audited: it is one person's view, like a sort.
+ * Lane keys that are no longer lanes of these results (D644, D656): for each grouped kind present
+ * (merged columns, people, tags, sprints, boards), the query's lanes in that mode are run once and
+ * keys outside them are dropped. State and due lanes, and the "none" lanes, always exist.
  */
-export function writeViewLanePrefs(userId: string, viewKey: string, collapsedLanes: readonly string[]): ViewLanePrefs {
+function trimToLanes(userId: string, query: ReturnType<typeof myWorkFilter>, keys: string[]) {
+  if (!query) return keys;
+  const modes = new Set(keys.filter((key) => !key.startsWith("none:")).map(laneModeOfKey).filter((mode): mode is LaneMode => mode !== null && mode !== "state" && mode !== "due"));
+  const known = new Map<LaneMode, Set<string> | null>();
+  for (const mode of modes) known.set(mode, laneKeysOf(userId, query, mode));
+  return keys.filter((key) => {
+    if (Object.values(NONE_LANE).includes(key as typeof NONE_LANE[keyof typeof NONE_LANE])) return true;
+    const mode = laneModeOfKey(key);
+    if (!mode || !known.has(mode)) return true;
+    const lanes = known.get(mode);
+    // A mode that fell back (too many lanes) shows none of its own: its keys are kept for when it fits again.
+    return lanes === null || lanes!.has(key);
+  });
+}
+
+/**
+ * `PUT /views/:v/prefs` (a reader of the view; `my` for anyone): replaces the fields sent. Lanes:
+ * malformed keys are dropped, at most 40 are kept within 1 KiB, and grouped lanes stay only while
+ * they are lanes of the results (a saved view's own filter; for My work, the `q` it sends, when that
+ * is a filter with `assignee:me`). A board view's own collapse (D657): `ownCollapse` turns it on or
+ * off, and its columns and rows are trimmed to its board as the board's are. Not audited: it is one
+ * person's view, like a sort.
+ */
+export function writeViewLanePrefs(userId: string, viewKey: string, input: ViewLanePrefsInput): ViewLanePrefs {
   const view = requirePrefsTarget(userId, viewKey);
-  let kept = normalizeCollapsedLanes(collapsedLanes);
-  if (view && kept.some((key) => key.startsWith("c:"))) {
-    const parsed = parse(view.query);
-    if (parsed.ok) {
-      const { columns = [], lanes } = runQuery(userId, parsed.query, { tz: "UTC", limit: 1, lanes: "columns" });
-      const known = new Set(lanes === "columns" ? columns.map((lane) => lane.key) : []);
-      kept = kept.filter((key) => !key.startsWith("c:") || known.has(key));
-    }
+  const current = readViewLanePrefs(userId, viewKey);
+  let collapsedLanes = input.collapsedLanes === undefined ? current.collapsedLanes : normalizeCollapsedLanes(input.collapsedLanes);
+  if (input.collapsedLanes !== undefined && collapsedLanes.length) {
+    const parsed = view ? parse(view.query) : null;
+    collapsedLanes = trimToLanes(userId, view ? (parsed?.ok ? parsed.query : null) : myWorkFilter(input.q), collapsedLanes);
   }
-  db.query(`INSERT INTO task_view_prefs (user_id, view_key, collapsed_lanes, updated_at) VALUES (?, ?, ?, ?)
-    ON CONFLICT (user_id, view_key) DO UPDATE SET collapsed_lanes = excluded.collapsed_lanes, updated_at = excluded.updated_at`)
-    .run(userId, viewKey, JSON.stringify(kept), now());
-  return { collapsedLanes: kept };
+  const boardId = view?.board_id ?? null;
+  if (!boardId && (input.ownCollapse || input.collapsedColumnIds?.length || input.collapsedRows?.length)) {
+    throw new TaskError(400, "Only a view on one board keeps its own collapsed columns", "NOT_A_BOARD_VIEW");
+  }
+  const next: ViewLanePrefs = {
+    collapsedLanes,
+    ownCollapse: input.ownCollapse ?? current.ownCollapse,
+    collapsedColumnIds: input.collapsedColumnIds === undefined || !boardId ? current.collapsedColumnIds : boardColumnIds(boardId, input.collapsedColumnIds),
+    collapsedRows: input.collapsedRows === undefined || !boardId ? current.collapsedRows : boardRowKeys(boardId, input.collapsedRows)
+  };
+  db.query(`INSERT INTO task_view_prefs (user_id, view_key, collapsed_lanes, own_collapse, collapsed_columns, collapsed_rows, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT (user_id, view_key) DO UPDATE SET collapsed_lanes = excluded.collapsed_lanes, own_collapse = excluded.own_collapse,
+      collapsed_columns = excluded.collapsed_columns, collapsed_rows = excluded.collapsed_rows, updated_at = excluded.updated_at`)
+    .run(userId, viewKey, JSON.stringify(next.collapsedLanes), next.ownCollapse ? 1 : 0, JSON.stringify(next.collapsedColumnIds), JSON.stringify(next.collapsedRows), now());
+  return next;
+}
+
+// ---------------------------------------------------------------------------
+// Views pinned on a board for everyone who can open it (lane VIEWS2, D658, T445, migration 078).
+
+export const MAX_PINNED_VIEWS = 20;
+
+const pinNotOnBoard = () => new TaskError(400, "Only a view on this one board can be pinned on it", "VIEW_NOT_ON_BOARD");
+
+/** The board's owner or a manager, with a Team role that writes (403 MANAGER_REQUIRED otherwise). */
+function requireBoardManager(boardId: string, userId: string) {
+  const board = requireReadableBoard(boardId, userId);
+  const level = boardLevel(board, userId);
+  if ((level !== "owner" && level !== "manage") || !canWriteContent(userId)) throw new TaskError(403, "Only the board owner or a manager can pin views for everyone", "MANAGER_REQUIRED");
+  return { board, level };
+}
+
+/**
+ * `GET /api/tasks/boards/:b/views` (any reader of the board): the views pinned on it, in pin order,
+ * then the caller's other readable views on this board (their own, shared with them, shared with
+ * everyone), and whether the caller may pin (`canPin`: the board's owner or a manager).
+ */
+export function listBoardViews(userId: string, boardId: string) {
+  const board = requireReadableBoard(boardId, userId);
+  const level = boardLevel(board, userId);
+  const pinnedRows = db.query(`${viewSelect} JOIN task_view_pins p ON p.view_id = v.id
+    WHERE p.board_id = $boardId AND ${readableViewPredicate} ORDER BY p.position, v.id`).all({ boardId, userId }) as ViewRow[];
+  const pinned = toViews(pinnedRows, userId).filter((view) => view.board_id === boardId);
+  const pinnedIds = new Set(pinned.map((view) => view.id));
+  const lists = listViews(userId);
+  const views = [...lists.mine, ...lists.shared, ...lists.everyone].filter((view) => view.board_id === boardId && !pinnedIds.has(view.id));
+  return { pinned, views, canPin: (level === "owner" || level === "manage") && canWriteContent(userId) };
+}
+
+/**
+ * `PUT /api/tasks/boards/:b/pins/:v`: pins a view the caller owns on its board, for everyone who can
+ * open the board (D658). The caller is the board's owner or a manager; the view's filter is on
+ * exactly this board. At most 20 per board; pinning a pinned view changes nothing. Audited.
+ */
+export function pinView(userId: string, boardId: string, viewId: string) {
+  requireBoardManager(boardId, userId);
+  const view = toView(requireOwnedView(viewId, userId), userId);
+  if (viewBoardId(view.query) !== boardId) throw pinNotOnBoard();
+  return withResourceLock(`task-view-pins:${boardId}`, async () => {
+    const pinned = db.query("SELECT view_id, position FROM task_view_pins WHERE board_id = ? ORDER BY position").all(boardId) as Array<{ view_id: string; position: number }>;
+    if (!pinned.some((row) => row.view_id === viewId)) {
+      if (pinned.length >= MAX_PINNED_VIEWS) throw limitReached(`A board can have up to ${MAX_PINNED_VIEWS} pinned views`);
+      db.transaction(() => {
+        db.query("INSERT INTO task_view_pins (board_id, view_id, pinned_by, position, created_at) VALUES (?, ?, ?, ?, ?)")
+          .run(boardId, viewId, userId, (pinned[pinned.length - 1]?.position ?? 0) + 1, now());
+        audit(userId, null, "task.view_pin", { boardId, viewId });
+      })();
+    }
+    return listBoardViews(userId, boardId);
+  });
+}
+
+/**
+ * `DELETE /api/tasks/boards/:b/pins/:v`: unpins, by the board's owner or a manager, or by the view's
+ * owner. A view that is not pinned there is 404 for anyone who could not read it. Audited.
+ */
+export function unpinView(userId: string, boardId: string, viewId: string) {
+  const board = requireReadableBoard(boardId, userId);
+  const level = boardLevel(board, userId);
+  const row = db.query("SELECT v.owner_id FROM task_view_pins p JOIN task_views v ON v.id = p.view_id WHERE p.board_id = ? AND p.view_id = ?").get(boardId, viewId) as { owner_id: string } | null;
+  if (!row) {
+    requireReadableView(viewId, userId);
+    return listBoardViews(userId, boardId);
+  }
+  if (row.owner_id !== userId && !((level === "owner" || level === "manage") && canWriteContent(userId))) {
+    throw new TaskError(403, "Only the board owner, a manager, or the view's owner can unpin it", "MANAGER_REQUIRED");
+  }
+  db.transaction(() => {
+    db.query("DELETE FROM task_view_pins WHERE board_id = ? AND view_id = ?").run(boardId, viewId);
+    audit(userId, null, "task.view_unpin", { boardId, viewId });
+  })();
+  return listBoardViews(userId, boardId);
+}
+
+// ---------------------------------------------------------------------------
+// MCP save_view (lane VIEWS2, D660, T446).
+
+export type SaveViewInput = { viewId?: string; name?: string; filter?: string; display?: Partial<ViewDisplay>; baseRevision?: number };
+
+/**
+ * Creates a private view (no `viewId`: `name` and `filter` required) or changes one the key's owner
+ * owns (`viewId` with `baseRevision`: a revision compare-and-swap, 409 VIEW_CHANGED with the current
+ * view). The same services and rules as the app: the filter is checked and stored canonical, the
+ * 50-view cap holds, and only the owner changes a view. Sharing and pins stay app-only (D180).
+ */
+export async function saveView(userId: string, input: SaveViewInput) {
+  if (input.viewId === undefined) {
+    if (input.name === undefined || input.filter === undefined) throw new TaskError(400, "A new view needs a name and a filter");
+    if (input.baseRevision !== undefined) throw new TaskError(400, "baseRevision goes with viewId");
+    return { created: true, ...(await createView(userId, { name: input.name, query: input.filter, ...(input.display ? { display: input.display } : {}) })) };
+  }
+  if (input.baseRevision === undefined) throw new TaskError(400, "Changing a view needs its baseRevision (from list_views)");
+  if (input.name === undefined && input.filter === undefined && input.display === undefined) throw new TaskError(400, "Provide a name, a filter, or display options");
+  return { created: false, ...(await patchView(userId, input.viewId, { revision: input.baseRevision, ...(input.name !== undefined ? { name: input.name } : {}), ...(input.filter !== undefined ? { query: input.filter } : {}), ...(input.display ? { display: input.display } : {}) })) };
 }

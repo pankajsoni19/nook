@@ -143,21 +143,21 @@ describe("collapsed lanes (D644, migration 077)", () => {
     const other = await board(owner, "Prefs other");
     await card(owner, a.columns[0]!.id, a.id, "Prefs card");
     const view = (await call(owner, "POST", "/views", { name: "Prefs", query: `board:${a.id},${other.id}` })).body.view;
-    expect((await call(owner, "GET", `/views/${view.id}/prefs`)).body).toEqual({ collapsedLanes: [] });
+    expect((await call(owner, "GET", `/views/${view.id}/prefs`)).body).toMatchObject({ collapsedLanes: [] });
     const saved = await call(owner, "PUT", `/views/${view.id}/prefs`, { collapsedLanes: ["c:done:done", "c:doing:no such lane", "s:done", "nonsense", "s:done"] });
-    expect(saved.body).toEqual({ collapsedLanes: ["c:done:done", "s:done"] });
-    expect((await call(owner, "GET", `/views/${view.id}/prefs`)).body).toEqual({ collapsedLanes: ["c:done:done", "s:done"] });
+    expect(saved.body).toMatchObject({ collapsedLanes: ["c:done:done", "s:done"] });
+    expect((await call(owner, "GET", `/views/${view.id}/prefs`)).body).toMatchObject({ collapsedLanes: ["c:done:done", "s:done"] });
     // Per person: a reader of the view has their own; a stranger gets 404, like a missing view.
     await call(owner, "PUT", `/views/${view.id}/sharing`, { visibility: "selected", userIds: [reader.userId] });
-    expect((await call(reader, "GET", `/views/${view.id}/prefs`)).body).toEqual({ collapsedLanes: [] });
+    expect((await call(reader, "GET", `/views/${view.id}/prefs`)).body).toMatchObject({ collapsedLanes: [] });
     expect((await call(reader, "PUT", `/views/${view.id}/prefs`, { collapsedLanes: ["s:todo"] })).status).toBe(200);
     expect((await call(stranger, "PUT", `/views/${view.id}/prefs`, { collapsedLanes: ["s:todo"] })).status).toBe(404);
     expect((await call(stranger, "GET", `/views/${crypto.randomUUID()}/prefs`)).status).toBe(404);
     expect((await call(owner, "PUT", `/views/${view.id}/prefs`, { collapsedLanes: "s:todo" })).status).toBe(400);
     expect((await call(owner, "PUT", "/views/not-a-view/prefs", { collapsedLanes: [] })).status).toBe(400);
     // My work.
-    expect((await call(stranger, "PUT", "/views/my/prefs", { collapsedLanes: ["s:done", "c:done:anything"] })).body).toEqual({ collapsedLanes: ["s:done", "c:done:anything"] });
-    expect((await call(stranger, "GET", "/views/my/prefs")).body).toEqual({ collapsedLanes: ["s:done", "c:done:anything"] });
+    expect((await call(stranger, "PUT", "/views/my/prefs", { collapsedLanes: ["s:done", "c:done:anything"] })).body).toMatchObject({ collapsedLanes: ["s:done", "c:done:anything"] });
+    expect((await call(stranger, "GET", "/views/my/prefs")).body).toMatchObject({ collapsedLanes: ["s:done", "c:done:anything"] });
     // Not audited.
     expect((db.query("SELECT COUNT(*) AS count FROM audit_log WHERE actor_id = ?").get(stranger.userId) as { count: number }).count).toBe(0);
     // Deleted with the view, for everyone.

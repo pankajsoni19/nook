@@ -74,9 +74,14 @@ export const boardPatchSchema = z.object({
 /** `PUT /boards/:b/view` (D602, D606): the caller's own collapsed columns and archived-card choice. */
 export const boardViewSchema = z.object({
   collapsedColumnIds: z.array(uuid).max(40).optional(),
-  showArchived: z.boolean().optional()
+  showArchived: z.boolean().optional(),
+  /** Lane VIEWS2 (D659): "Show all levels on the board", per person. */
+  showAllLevels: z.boolean().optional(),
+  /** Lane VIEWS2 (D656): collapsed swimlanes; malformed keys are dropped by the service. */
+  collapsedRows: z.array(z.string().max(64)).max(100).optional()
 }).strict()
-  .refine((value) => value.collapsedColumnIds !== undefined || value.showArchived !== undefined, "Provide collapsedColumnIds or showArchived");
+  .refine((value) => value.collapsedColumnIds !== undefined || value.showArchived !== undefined || value.showAllLevels !== undefined || value.collapsedRows !== undefined,
+    "Provide collapsedColumnIds, showArchived, showAllLevels, or collapsedRows");
 export const boardSharingSchema = z.object({
   visibility: z.enum(["private", "selected", "all_users"]),
   userIds: z.array(uuid).max(100).default([])

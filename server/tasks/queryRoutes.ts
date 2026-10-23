@@ -5,6 +5,7 @@ import { validTimeZone } from "../today/registry";
 import { parseJson, uuid } from "../validation";
 import { TASK_QUERY_LIMITS } from "../../shared/taskQuery";
 import { LANE_MODES, type LaneMode } from "../../shared/taskLanes";
+import { SWIMLANE_MODES } from "../../shared/swimlanes";
 import { QUERY_GROUPS, QUERY_PAGE, QUERY_SORTS, queryCards, withBoardLevels } from "./query";
 import { TaskError } from "./service";
 import { withAssigneeAvatars } from "../avatars";
@@ -22,6 +23,9 @@ import {
   VIEW_LAYOUTS,
   VIEW_LIMITS,
   viewCards,
+  listBoardViews,
+  pinView,
+  unpinView,
   readViewLanePrefs,
   writeViewLanePrefs
 } from "./views";
@@ -93,6 +97,7 @@ export const viewDisplaySchema = z.object({
   group: z.enum(VIEW_GROUPS).optional(),
   sort: z.enum(QUERY_SORTS).optional(),
   lanes: z.enum(LANE_MODES).optional(),
+  swimlanes: z.enum(SWIMLANE_MODES).optional(),
   fields: z.array(z.enum(VIEW_FIELDS)).max(VIEW_FIELDS.length).refine((values) => new Set(values).size === values.length, "Fields must be unique").optional()
 }).strict();
 export const viewCreateSchema = z.object({
@@ -116,7 +121,16 @@ export const viewSharingSchema = z.object({
 const invalid = (detail: string) => ({ error: "Invalid request", details: [detail] });
 
 /** `PUT /views/:v/prefs` (D644): the lanes this person collapsed; malformed keys are dropped by the service. */
-export const viewPrefsSchema = z.object({ collapsedLanes: z.array(z.string().max(300)).max(100) }).strict();
+export const viewPrefsSchema = z.object({
+  collapsedLanes: z.array(z.string().max(400)).max(100).optional(),
+  /** Lane VIEWS2 (D657): a board view keeps its own collapsed columns and rows. */
+  ownCollapse: z.boolean().optional(),
+  collapsedColumnIds: z.array(uuid).max(40).optional(),
+  collapsedRows: z.array(z.string().max(64)).max(100).optional(),
+  /** My work only (D656): its filter, so grouped lanes that are gone can be trimmed. */
+  q: z.string().max(TASK_QUERY_LIMITS.length).optional()
+}).strict().refine((value) => value.collapsedLanes !== undefined || value.ownCollapse !== undefined || value.collapsedColumnIds !== undefined || value.collapsedRows !== undefined,
+  "Provide collapsedLanes, ownCollapse, collapsedColumnIds, or collapsedRows");
 
 /** Runs a service call and maps TaskError to its JSON response. */
 async function respond(c: Context<AppEnv>, operation: () => unknown, status: 200 | 201 = 200) {
@@ -179,7 +193,7 @@ export function registerTaskQueryRoutes(app: Hono<AppEnv>) {
     const tz = c.req.query("tz") ?? "UTC";
     const lanesParam = c.req.query("lanes");
     if (cursor !== undefined && !cursorSchema.safeParse(cursor).success) return c.json(invalid("cursor is invalid"), 400);
-    if (lanesParam !== undefined && !(LANE_MODES as readonly string[]).includes(lanesParam)) return c.json(invalid("lanes must be columns or state"), 400);
+    if (lanesParam !== undefined && !(LANE_MODES as readonly string[]).includes(lanesParam)) return c.json(invalid(`lanes must be one of ${LANE_MODES.join(", ")}`), 400);
     const lanes = lanesParam as LaneMode | undefined;
     if (limitParam !== undefined && (!/^\d+$/.test(limitParam) || !(lanes ? lanesPageLimitSchema : pageLimitSchema).safeParse(Number(limitParam)).success)) {
       return c.json(invalid(`limit must be an integer from 1 to ${lanes ? QUERY_PAGE.lanes : QUERY_PAGE.max}`), 400);
@@ -203,7 +217,24 @@ export function registerTaskQueryRoutes(app: Hono<AppEnv>) {
     const limited = rateLimitedResponse(c);
     if (limited) return limited;
     const body = await parseJson(c.req.raw, viewPrefsSchema);
-    return respond(c, () => writeViewLanePrefs(c.get("user").id, key, body.collapsedLanes));
+    return respond(c, () => writeViewLanePrefs(c.get("user").id, key, body));
+  });
+
+  // Views on a board: the pinned ones first, then the reader's own (D658). Pinning is audited.
+  const boardParam = (c: Context<AppEnv>) => uuid.parse(c.req.param("boardId"));
+  app.get("/api/tasks/boards/:boardId/views", (c) => {
+    const boardId = boardParam(c);
+    return respond(c, () => listBoardViews(c.get("user").id, boardId));
+  });
+  app.put("/api/tasks/boards/:boardId/pins/:viewId", (c) => {
+    const boardId = boardParam(c);
+    const id = viewId(c);
+    return respond(c, () => pinView(c.get("user").id, boardId, id));
+  });
+  app.delete("/api/tasks/boards/:boardId/pins/:viewId", (c) => {
+    const boardId = boardParam(c);
+    const id = viewId(c);
+    return respond(c, () => unpinView(c.get("user").id, boardId, id));
   });
 
   app.post("/api/tasks/query", async (c) => {

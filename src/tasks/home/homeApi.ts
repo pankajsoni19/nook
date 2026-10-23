@@ -1,7 +1,8 @@
 import { api } from "../../api";
 import { levelAtLeast, type ItemLevel } from "../../access/accessLevels";
 import type { TaskState } from "../../../shared/taskQuery";
-import type { LaneMode, QueryLane } from "../../../shared/taskLanes";
+import type { LaneBoard, LaneMode, QueryLane } from "../../../shared/taskLanes";
+import type { SwimlaneMode } from "../../../shared/swimlanes";
 import type { BoardColumn, BoardVisibility, CardAssignee, TagColor } from "../tasksApi";
 import type { HomeGroup, HomeLayout, HomeSort } from "./homeUrl";
 
@@ -34,6 +35,11 @@ export type QueriedCard = {
   updated_at: string;
   /** The caller's level on the card's board (Wave 32): below edit the card offers no Move. Older servers omit it. */
   board_level?: ItemLevel;
+  /** Hierarchy and sprints (17A, 17B): the level, the parent, and the card's sprint (inherited below the work level). */
+  level?: number;
+  parent_card_id?: string | null;
+  sprint_id?: string | null;
+  sprint_name?: string | null;
 };
 
 /**
@@ -54,7 +60,7 @@ export type QueryRefs = {
  * Lane VIEWS (D643): with `lanes`, the first page also carries the lanes of the whole match, each with
  * its board columns (WIP limit, live card count), and the true count per lane.
  */
-export type QueryLanes = { lanes: LaneMode; lanesFallback?: true; columns: QueryLane[]; laneCounts: Record<string, number> };
+export type QueryLanes = { lanes: LaneMode; lanesFallback?: true; columns: QueryLane[]; laneCounts: Record<string, number>; /** Lane VIEWS2 (D651, D654); older servers omit it. */ laneBoards?: LaneBoard[] };
 
 export type QueryPage = { query: string; cards: QueriedCard[]; nextCursor: string | null; total?: number; refs?: QueryRefs } & Partial<QueryLanes>;
 
@@ -66,7 +72,7 @@ const json = (method: string, body: unknown): RequestInit => ({ method, body: JS
 export const queryTaskCards = (body: QueryRequest, signal?: AbortSignal) =>
   api<QueryPage>("/tasks/query", { ...json("POST", body), ...(signal ? { signal } : {}) });
 
-export type ViewDisplay = { layout: HomeLayout; group: HomeGroup; sort: HomeSort; lanes?: LaneMode };
+export type ViewDisplay = { layout: HomeLayout; group: HomeGroup; sort: HomeSort; lanes?: LaneMode; /** A board view's swimlanes (D655). */ swimlanes?: SwimlaneMode };
 
 export type TaskView = {
   id: string;
@@ -114,7 +120,19 @@ export const columnState = (column: StatefulColumn): TaskState => column.state ?
 export const updateColumnState = (columnId: string, state: TaskState) =>
   api<{ column: StatefulColumn; columns: StatefulColumn[] }>(`/tasks/columns/${columnId}`, json("PATCH", { state }));
 
-/** One person's collapsed lanes for a saved view, or `my` for My work (D644). */
-export const getViewLanePrefs = (viewKey: string) => api<{ collapsedLanes: string[] }>(`/tasks/views/${viewKey}/prefs`);
-export const saveViewLanePrefs = (viewKey: string, collapsedLanes: string[]) =>
-  api<{ collapsedLanes: string[] }>(`/tasks/views/${viewKey}/prefs`, json("PUT", { collapsedLanes }));
+/**
+ * One person's prefs for a saved view, or `my` for My work (D644): collapsed lanes, and for a board
+ * view (lane VIEWS2, D657) whether it keeps its own collapsed columns and rows, and those.
+ */
+export type ViewPrefs = { collapsedLanes: string[]; ownCollapse?: boolean; collapsedColumnIds?: string[]; collapsedRows?: string[] };
+export const getViewLanePrefs = (viewKey: string) => api<ViewPrefs>(`/tasks/views/${viewKey}/prefs`);
+/** `q`: My work's filter, so lanes that are gone are trimmed (D656). */
+export const saveViewLanePrefs = (viewKey: string, collapsedLanes: string[], q?: string) =>
+  api<ViewPrefs>(`/tasks/views/${viewKey}/prefs`, json("PUT", { collapsedLanes, ...(q !== undefined ? { q } : {}) }));
+export const saveViewPrefs = (viewKey: string, change: Omit<Partial<ViewPrefs>, "collapsedLanes">) => api<ViewPrefs>(`/tasks/views/${viewKey}/prefs`, json("PUT", change));
+
+/** The views on a board (D658): the pinned ones (for everyone who can open it) first, then the viewer's own. */
+export type BoardViews = { pinned: TaskView[]; views: TaskView[]; canPin: boolean };
+export const listBoardViews = (boardId: string) => api<BoardViews>(`/tasks/boards/${boardId}/views`);
+export const pinBoardView = (boardId: string, viewId: string) => api<BoardViews>(`/tasks/boards/${boardId}/pins/${viewId}`, json("PUT", {}));
+export const unpinBoardView = (boardId: string, viewId: string) => api<BoardViews>(`/tasks/boards/${boardId}/pins/${viewId}`, json("DELETE", {}));

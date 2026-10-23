@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { RotateCcw, SlidersHorizontal, TriangleAlert } from "lucide-react";
-import type { FilterKey } from "../../../shared/taskQuery";
+import { format, type FilterKey } from "../../../shared/taskQuery";
 import { LANE_MODES, type LaneMode, type QueryLane } from "../../../shared/taskLanes";
 import { api } from "../../api";
 import type { User } from "../../types";
@@ -8,11 +8,12 @@ import { Select } from "../../ui/Select";
 import { useHistoryDialogGuard } from "../../ui/useHistoryDialogGuard";
 import { BoardViewSwitch } from "../BoardViewSwitch";
 import { columnFullMessage, localDateString, type TaskNotify } from "../taskActions";
-import { listBoards, moveCard, taskErrorCode, taskErrorMessage } from "../tasksApi";
+import { listBoards, moveCard, taskErrorCode, taskErrorMessage, updateCard } from "../tasksApi";
 import { useIsPhone } from "../../ui/Listbox";
 import { useRole } from "../../team/roleAccess";
 import { canChangeCard, getViewLanePrefs, saveViewLanePrefs, type QueriedCard } from "./homeApi";
-import { laneDrop, withLaneMove } from "./laneModel";
+import { cardLaneKeysOf, changeMessage, laneAddTargets, laneDrop, withGroupChange, withLaneMove, type LaneAddTarget } from "./laneModel";
+import { LaneAddCard } from "./LaneAddCard";
 import { HomeFilterBar } from "./HomeFilterBar";
 import { refNames, STATE_LABELS } from "./homeResults";
 import { HOME_GROUPS, HOME_SORTS, homeLanes, type HomeGroup, type HomeLayout, type HomeQuery, type HomeSort } from "./homeUrl";
@@ -38,7 +39,7 @@ export function useHomeDirectory(): HomeDirectory {
 
 export const GROUP_LABELS: Record<HomeGroup, string> = { none: "No grouping", board: "Board", state: "State", due: "Due date", assignee: "Assignee", tag: "Tag" };
 export const SORT_LABELS: Record<HomeSort, string> = { due: "Due date", updated: "Recently updated", created: "Recently created", title: "Title", board: "Board" };
-export const LANE_LABELS: Record<LaneMode, string> = { columns: "Columns", state: "State" };
+export const LANE_LABELS: Record<LaneMode, string> = { columns: "Columns", state: "State", assignee: "Assignee", tag: "Tag", sprint: "Sprint", due: "Due date", board: "Board" };
 
 /** The board layout asks for lanes (D643); the other layouts do not. */
 export function withLanes(source: CardSource, lanes: LaneMode | null): CardSource {
@@ -52,7 +53,9 @@ export function withLanes(source: CardSource, lanes: LaneMode | null): CardSourc
  * One person's collapsed lanes (D644): loaded once per view (or My work), changed at once on screen,
  * then saved; a failed save puts it back. `null` (an unsaved new view) keeps them in memory.
  */
-function useCollapsedLanes(prefsKey: string | null, enabled: boolean, notify: TaskNotify) {
+function useCollapsedLanes(prefsKey: string | null, enabled: boolean, notify: TaskNotify, myWorkFilter?: string) {
+  const filterRef = useRef(myWorkFilter);
+  filterRef.current = myWorkFilter;
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const collapsedRef = useRef(collapsed);
   collapsedRef.current = collapsed;
@@ -70,7 +73,8 @@ function useCollapsedLanes(prefsKey: string | null, enabled: boolean, notify: Ta
     if (collapsing) next.add(key); else next.delete(key);
     setCollapsed(next);
     if (!prefsKey) return;
-    saveViewLanePrefs(prefsKey, [...next]).catch((reason) => {
+    // My work sends its filter, so the server can drop lanes that are gone (D656).
+    saveViewLanePrefs(prefsKey, [...next], prefsKey === "my" ? filterRef.current : undefined).catch((reason) => {
       setCollapsed(before);
       notify.error(taskErrorMessage(reason, `Could not ${collapsing ? "collapse" : "expand"} ${label}`));
     });
@@ -112,12 +116,15 @@ export function HomeResultsPane({ userId, query, onQuery, source, idle, director
   const result = useCardQuery(source ? withLanes(source, lanesMode) : null);
   const phone = useIsPhone();
   const { readOnly: roleReadOnly } = useRole();
-  const lanes = useCollapsedLanes(prefsKey, lanesMode !== null, notify);
+  const lanes = useCollapsedLanes(prefsKey, lanesMode !== null, notify, prefsKey === "my" ? format(query.filter) : undefined);
   const resultRef = useRef(result);
   resultRef.current = result;
-  const [moving, setMoving] = useState<QueriedCard | null>(null);
+  const [moving, setMoving] = useState<{ card: QueriedCard; fromKey: string | null } | null>(null);
   const closeMove = useCallback(() => setMoving(null), []);
   useHistoryDialogGuard(moving !== null, closeMove);
+  // Add a card on a lane (D654): the lane and the boards it offers.
+  const [adding, setAdding] = useState<{ lane: QueryLane; targets: LaneAddTarget[] } | null>(null);
+  const closeAdding = useCallback(() => setAdding(null), []);
   const today = localDateString();
   const boards = useMemo(() => new Map(directory.boards.map((board) => [board.id, board.name])), [directory.boards]);
   const users = useMemo(() => new Map(directory.users.map((user) => [user.id, user.displayName])), [directory.users]);
@@ -134,29 +141,51 @@ export function HomeResultsPane({ userId, query, onQuery, source, idle, director
   const filterCount = activeFilterCount(query.filter.terms, lockedKeys, hiddenKeys);
 
   /**
-   * A drop on a lane (D641, D642): to the top of the lane's column on the card's own board, at once
-   * on screen; the server stays the judge (edit level, WIP 409, the done and archive clocks), and a
-   * refusal puts the card back and says why.
+   * A drop on a lane (D641, D642, D651): to the top of the lane's column on the card's own board, or
+   * a change of its people, tags, or sprint, at once on screen; the server stays the judge (edit
+   * level, WIP 409, the revision, the done and archive clocks). A refusal says why and fetches the
+   * results again (D652), so a change that landed meanwhile shows too.
    */
-  const dropOnLane = useCallback(async (card: QueriedCard, lane: QueryLane) => {
+  const dropOnLane = useCallback(async (card: QueriedCard, lane: QueryLane, fromKey: string | null) => {
     const layout = resultRef.current.lanes;
     if (!layout) return;
-    const drop = laneDrop(lane, card, canChangeCard(card, roleReadOnly));
-    if (!("columnId" in drop)) {
+    const drop = laneDrop(layout, lane, card, canChangeCard(card, roleReadOnly), fromKey);
+    if ("refusal" in drop) {
       if (drop.refusal !== "SAME_LANE") notify.warning(drop.message);
       return;
     }
-    const snapshot = { cards: resultRef.current.cards, lanes: layout };
-    resultRef.current.update((state) => withLaneMove(state, card.id, drop.column));
-    try {
-      const saved = await moveCard(card.id, drop.columnId, null);
-      resultRef.current.patchCard(card.id, { revision: saved.card.revision, updated_at: saved.card.updated_at, archived_at: saved.card.archived_at ?? null });
-      notify(movedMessage(drop.column.name, STATE_LABELS[drop.column.state]));
-    } catch (reason) {
-      resultRef.current.update((state) => ({ ...state, cards: state.cards.map((item) => item.id === card.id ? snapshot.cards.find((old) => old.id === card.id) ?? item : item), lanes: snapshot.lanes }));
-      const code = taskErrorCode(reason);
-      notify.warning(code === "COLUMN_FULL" ? columnFullMessage(drop.column.name, drop.column.wip_limit) : taskErrorMessage(reason, "Could not move the card"));
+    if (drop.kind === "column") {
+      resultRef.current.update((state) => withLaneMove(state, card.id, drop.column));
+      try {
+        const saved = await moveCard(card.id, drop.columnId, null);
+        resultRef.current.patchCard(card.id, { revision: saved.card.revision, updated_at: saved.card.updated_at, archived_at: saved.card.archived_at ?? null });
+        notify(movedMessage(drop.column.name, STATE_LABELS[drop.column.state]));
+      } catch (reason) {
+        const code = taskErrorCode(reason);
+        notify.warning(code === "COLUMN_FULL" ? columnFullMessage(drop.column.name, drop.column.wip_limit) : taskErrorMessage(reason, "Could not move the card"));
+        void resultRef.current.refresh();
+      }
+      return;
     }
+    const change = drop.change;
+    resultRef.current.update((state) => withGroupChange(state, card.id, change));
+    try {
+      const body = change.field === "assignees" ? { assigneeIds: change.assigneeIds } : change.field === "tags" ? { tagIds: change.tagIds } : { sprintId: change.sprintId };
+      const { card: saved } = await updateCard(card.id, { ...body, revision: card.revision });
+      resultRef.current.patchCard(card.id, { revision: saved.revision, updated_at: saved.updated_at, ...(change.field === "assignees" && saved.assignees ? { assignees: saved.assignees } : {}) });
+      notify(changeMessage(change, lane));
+    } catch (reason) {
+      notify.warning(taskErrorCode(reason) === "CARD_CHANGED" ? "Someone else changed that card. Showing the latest results." : taskErrorMessage(reason, "Could not change the card"));
+      void resultRef.current.refresh();
+    }
+  }, [notify, roleReadOnly]);
+
+  const openAdd = useCallback((lane: QueryLane) => {
+    const layout = resultRef.current.lanes;
+    if (!layout) return;
+    const targets = laneAddTargets(layout, lane, roleReadOnly);
+    if (!targets.length) notify("None of these boards can take a card here");
+    else setAdding({ lane, targets });
   }, [notify, roleReadOnly]);
 
   return <div className={`task-home-pane${filtersOpen ? " filters-open" : ""}`}>
@@ -168,7 +197,7 @@ export function HomeResultsPane({ userId, query, onQuery, source, idle, director
       </button>
       <span className="task-home-collapsible task-home-sorts">
         {lanesMode && <Select<LaneMode> variant="chip" label="Lanes" value={lanesMode} searchable={false}
-          options={LANE_MODES.map((mode) => ({ value: mode, label: `Lanes: ${LANE_LABELS[mode]}` }))} onChange={(mode) => onQuery({ ...query, lanes: mode === "state" ? "state" : undefined }, { push: false })} />}
+          options={LANE_MODES.map((mode) => ({ value: mode, label: `Lanes: ${LANE_LABELS[mode]}` }))} onChange={(mode) => onQuery({ ...query, lanes: mode === "columns" ? undefined : mode }, { push: false })} />}
         {query.layout === "list" && <Select<HomeGroup> variant="chip" label="Group by" value={query.group} searchable={false}
           options={HOME_GROUPS.map((group) => ({ value: group, label: `Group: ${GROUP_LABELS[group]}` }))} onChange={(group) => onQuery({ ...query, group }, { push: false })} />}
         <Select<HomeSort> variant="chip" label="Sort by" value={query.sort} searchable={false}
@@ -191,19 +220,31 @@ export function HomeResultsPane({ userId, query, onQuery, source, idle, director
       </div>}
       {source && result.status === "ready" && <QueryResults cards={result.cards} layout={query.layout} group={query.group} today={today} userId={userId}
         total={result.total} nextCursor={result.nextCursor} loadingMore={result.loadingMore} onLoadMore={() => { void result.loadMore(); }}
-        onOpenCard={onOpenCard} onMoveCard={(card) => setMoving(card)} emptyText={emptyText}
+        onOpenCard={onOpenCard} onMoveCard={(card, _trigger, fromKey) => setMoving({ card, fromKey: fromKey ?? null })} emptyText={emptyText}
         lanes={result.lanes && lanesMode ? { layout: result.lanes, collapsed: lanes.collapsed, phone,
           onToggleCollapsed: (key) => lanes.toggle(key, result.lanes?.columns.find((lane) => lane.key === key)?.label ?? "the lane"),
-          onDropCard: (card, lane) => { void dropOnLane(card, lane); }, onRefused: (message) => notify(message) } : undefined} />}
+          onDropCard: (card, lane, fromKey) => { void dropOnLane(card, lane, fromKey); }, onRefused: (message) => notify(message),
+          onAddCard: (lane) => openAdd(lane), canAddCard: (lane) => result.lanes ? laneAddTargets(result.lanes, lane, roleReadOnly).length > 0 : false } : undefined} />}
       {source && result.status === "ready" && result.error && <p className="file-dialog-error" role="alert">{result.error}</p>}
     </div>
-    {moving && <ResultMoveSheet card={moving} onCancel={closeMove} onError={onMoveError}
-      lanes={result.lanes && lanesMode ? { layout: result.lanes, canEdit: canChangeCard(moving, roleReadOnly), onLane: (lane) => { const card = moving; setMoving(null); void dropOnLane(card, lane); } } : undefined}
+    {moving && <ResultMoveSheet card={moving.card} onCancel={closeMove} onError={onMoveError}
+      lanes={result.lanes && lanesMode ? {
+        layout: result.lanes, canEdit: canChangeCard(moving.card, roleReadOnly), today,
+        fromKey: moving.fromKey ?? cardLaneKeysOf(result.lanes, moving.card, today)[0]!,
+        onLane: (lane) => { const { card, fromKey } = moving; setMoving(null); void dropOnLane(card, lane, fromKey ?? cardLaneKeysOf(result.lanes!, card, today)[0]!); }
+      } : undefined}
       onMoved={(change, message) => {
-      result.patchCard(moving.id, change);
+      result.patchCard(moving.card.id, change);
       setMoving(null);
       notify(message);
     }} />}
+    {adding && <LaneAddCard lane={adding.lane} targets={adding.targets} userId={userId} notify={notify} onClose={closeAdding}
+      onCreated={(card, board, mode) => {
+        if (mode !== "another") setAdding(null);
+        notify.success(`Added “${card.title}” to ${board.board.name}`);
+        void resultRef.current.refresh();
+        if (mode === "open") onOpenCard({ id: card.id, board_id: board.board.id } as QueriedCard);
+      }} />}
   </div>;
 }
 

@@ -11,7 +11,7 @@
 // Filters are the one task grammar (shared/taskQuery.ts) as a canonical `q=`; the presentation keys
 // are `layout`, `group`, and `sort`. Decoding never throws: bad values fall back to the default.
 import { decodeFilterParams, encodeFilterParams, format, parse, type FilterTerm, type TaskQuery } from "../../../shared/taskQuery";
-import type { LaneMode } from "../../../shared/taskLanes";
+import { isLaneMode, type LaneMode } from "../../../shared/taskLanes";
 
 export const HOME_LAYOUTS = ["list", "table", "board"] as const;
 export type HomeLayout = typeof HOME_LAYOUTS[number];
@@ -22,14 +22,17 @@ export const HOME_SORTS = ["due", "updated", "created", "title", "board"] as con
 export type HomeSort = typeof HOME_SORTS[number];
 
 /**
- * `lanes` (lane VIEWS, D640): the board layout's lanes, merged columns (the default, left out) or
- * `state`. In the URL as `lanes=state`.
+ * `lanes` (lane VIEWS, D640; VIEWS2, D650): the board layout's lanes, merged columns (the default, left out),
+ * `state`, or a field (`assignee`, `tag`, `sprint`, `due`, `board`). In the URL as `lanes=<mode>`.
  */
 export type HomeQuery = { layout: HomeLayout; group: HomeGroup; sort: HomeSort; filter: TaskQuery; lanes?: LaneMode };
 
-/** The lanes a query shows (columns unless it says state). */
-export const homeLanes = (query: Pick<HomeQuery, "lanes">): LaneMode => query.lanes === "state" ? "state" : "columns";
-const lanesFrom = (params: URLSearchParams): Pick<HomeQuery, "lanes"> => params.get("lanes") === "state" ? { lanes: "state" } : {};
+/** The lanes a query shows (columns unless it names another mode). */
+export const homeLanes = (query: Pick<HomeQuery, "lanes">): LaneMode => isLaneMode(query.lanes) ? query.lanes : "columns";
+const lanesFrom = (params: URLSearchParams): Pick<HomeQuery, "lanes"> => {
+  const value = params.get("lanes");
+  return isLaneMode(value) && value !== "columns" ? { lanes: value } : {};
+};
 
 export type TasksHome =
   | { section: "my"; query?: HomeQuery }
@@ -101,7 +104,7 @@ export function formatMyWorkSearch(query: HomeQuery): string {
   if (query.layout !== base.layout && oneOf(HOME_LAYOUTS, query.layout)) params.set("layout", query.layout);
   if (query.group !== base.group && oneOf(HOME_GROUPS, query.group)) params.set("group", query.group);
   if (query.sort !== base.sort && oneOf(HOME_SORTS, query.sort)) params.set("sort", query.sort);
-  if (homeLanes(query) === "state") params.set("lanes", "state");
+  if (homeLanes(query) !== "columns") params.set("lanes", homeLanes(query));
   const filter = withAssigneeMe(query.filter);
   if (format(filter) !== format(base.filter)) {
     encodeFilterParams(filter, params);
@@ -134,7 +137,7 @@ export function formatViewSearch(query: HomeQuery): string {
   params.set("layout", oneOf(HOME_LAYOUTS, query.layout) ?? "list");
   params.set("group", oneOf(HOME_GROUPS, query.group) ?? "none");
   params.set("sort", oneOf(HOME_SORTS, query.sort) ?? "due");
-  if (homeLanes(query) === "state") params.set("lanes", "state");
+  if (homeLanes(query) !== "columns") params.set("lanes", homeLanes(query));
   encodeFilterParams(query.filter, params);
   return readable(params);
 }
@@ -164,7 +167,7 @@ export function viewHomeQuery(view: { query: string; display: SavedDisplay }): H
     group: oneOf(HOME_GROUPS, view.display.group) ?? base.group,
     sort: oneOf(HOME_SORTS, view.display.sort) ?? base.sort,
     filter: parsed(view.query),
-    ...(view.display.lanes === "state" ? { lanes: "state" as const } : {})
+    ...(isLaneMode(view.display.lanes) && view.display.lanes !== "columns" ? { lanes: view.display.lanes } : {})
   };
 }
 

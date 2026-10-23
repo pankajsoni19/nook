@@ -82,6 +82,8 @@ export type McpErrorCode =
   | "STALE_POSITION"
   | "LIMIT_REACHED"
   | "CARD_CHANGED"
+  // Lane VIEWS2 (D660): save_view's revision check, as the HTTP 409 VIEW_CHANGED.
+  | "VIEW_CHANGED"
   | "OWNER_ONLY"
   | "COLUMN_FULL"
   | "RELATION_EXISTS"

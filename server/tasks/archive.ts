@@ -1,4 +1,5 @@
 import { audit, db } from "../db";
+import { normalizeCollapsedRows } from "../../shared/swimlanes";
 import { listColumns, requireBoardRoom, requireCardAt, requireReadableBoard, withBoardLock, cardDetail } from "./service";
 
 /**
@@ -10,7 +11,8 @@ import { listColumns, requireBoardRoom, requireCardAt, requireReadableBoard, wit
  * - Restoring (`POST /cards/:k/unarchive`, or moving the card to another column) clears it; in a done
  *   column the done clock starts again, so the next sweep does not take it straight back.
  * - `board_view_prefs` keeps one reader's collapsed columns and whether they show archived cards
- *   (D602, D606). It is view state: it changes nothing for anyone else.
+ *   (D602, D606), and (migration 078) "Show all levels" and their collapsed swimlanes (D656, D659).
+ *   It is view state: it changes nothing for anyone else.
  */
 
 export const AUTO_ARCHIVE_DEFAULT_DAYS = 30;
@@ -18,19 +20,55 @@ export const AUTO_ARCHIVE_MAX_DAYS = 365;
 /** Cards archived per statement; the sweep loops until a batch comes back short. */
 export const AUTO_ARCHIVE_BATCH = 500;
 
-export type BoardViewPrefs = { collapsedColumnIds: string[]; showArchived: boolean };
+export type BoardViewPrefs = {
+  collapsedColumnIds: string[];
+  showArchived: boolean;
+  /** "Show all levels on the board" (D659): null until the person chooses (the app then carries an older per-device choice over once). */
+  showAllLevels: boolean | null;
+  /** The swimlanes they collapsed (D656), row keys (`a:<user>`, `k:<card>`, `none:a`, `none:k`). */
+  collapsedRows: string[];
+};
 
-const NO_PREFS: BoardViewPrefs = { collapsedColumnIds: [], showArchived: false };
+const NO_PREFS: BoardViewPrefs = { collapsedColumnIds: [], showArchived: false, showAllLevels: null, collapsedRows: [] };
+
+export const parsedList = (text: string) => {
+  try {
+    const value = JSON.parse(text) as unknown;
+    return Array.isArray(value) ? value : [];
+  } catch {
+    return []; // the CHECK keeps it valid JSON
+  }
+};
 
 /** The viewer's view of the board; ids of columns deleted since are left out. Call after the read check. */
 export function readViewPrefs(boardId: string, userId: string): BoardViewPrefs {
-  const row = db.query("SELECT collapsed_columns, show_archived FROM board_view_prefs WHERE board_id = ? AND user_id = ?").get(boardId, userId) as { collapsed_columns: string; show_archived: number } | null;
+  const row = db.query("SELECT collapsed_columns, show_archived, show_all_levels, collapsed_rows FROM board_view_prefs WHERE board_id = ? AND user_id = ?").get(boardId, userId) as
+    { collapsed_columns: string; show_archived: number; show_all_levels: number | null; collapsed_rows: string } | null;
   if (!row) return { ...NO_PREFS };
-  let stored: unknown = [];
-  try { stored = JSON.parse(row.collapsed_columns); } catch { /* the CHECK keeps it valid JSON */ }
-  const columns = new Set(listColumns(boardId).map((column) => column.id));
-  const collapsedColumnIds = Array.isArray(stored) ? stored.filter((id): id is string => typeof id === "string" && columns.has(id)) : [];
-  return { collapsedColumnIds, showArchived: row.show_archived === 1 };
+  return {
+    collapsedColumnIds: boardColumnIds(boardId, parsedList(row.collapsed_columns)),
+    showArchived: row.show_archived === 1,
+    showAllLevels: row.show_all_levels === null ? null : row.show_all_levels === 1,
+    collapsedRows: normalizeCollapsedRows(parsedList(row.collapsed_rows))
+  };
+}
+
+/** The ids that are columns of this board, in board order (canonical JSON). */
+export function boardColumnIds(boardId: string, ids: readonly unknown[]) {
+  const wanted = new Set(ids.filter((id): id is string => typeof id === "string").map((id) => id.toLowerCase()));
+  return listColumns(boardId).filter((column) => wanted.has(column.id)).map((column) => column.id);
+}
+
+/**
+ * Collapsed swimlanes as stored (D656): well formed and bounded; a parent row stays only while its
+ * card is a live card of this board, so no key says whether a card exists elsewhere.
+ */
+export function boardRowKeys(boardId: string, keys: readonly unknown[]) {
+  const rows = normalizeCollapsedRows(keys);
+  const cardIds = rows.filter((key) => key.startsWith("k:")).map((key) => key.slice(2));
+  const live = cardIds.length ? new Set((db.query("SELECT id FROM cards WHERE board_id = ? AND deleted_at IS NULL AND id IN (SELECT value FROM json_each(?))")
+    .all(boardId, JSON.stringify(cardIds)) as Array<{ id: string }>).map((row) => row.id)) : new Set<string>();
+  return rows.filter((key) => !key.startsWith("k:") || live.has(key.slice(2)));
 }
 
 /**
@@ -38,18 +76,21 @@ export function readViewPrefs(boardId: string, userId: string): BoardViewPrefs {
  * columns of this board are dropped (a column deleted meanwhile), so no id says whether a column
  * exists elsewhere. Not audited: it is one person's view, like a sort order.
  */
-export function writeViewPrefs(userId: string, boardId: string, input: { collapsedColumnIds?: string[]; showArchived?: boolean }) {
+export function writeViewPrefs(userId: string, boardId: string, input: { collapsedColumnIds?: string[]; showArchived?: boolean; showAllLevels?: boolean; collapsedRows?: string[] }) {
   requireReadableBoard(boardId, userId);
   const current = readViewPrefs(boardId, userId);
-  const columns = listColumns(boardId);
-  const wanted = input.collapsedColumnIds === undefined ? null : new Set(input.collapsedColumnIds.map((id) => id.toLowerCase()));
-  // Board order, so the stored JSON is canonical.
-  const collapsedColumnIds = wanted ? columns.filter((column) => wanted.has(column.id)).map((column) => column.id) : current.collapsedColumnIds;
-  const showArchived = input.showArchived ?? current.showArchived;
-  db.query(`INSERT INTO board_view_prefs (board_id, user_id, collapsed_columns, show_archived, updated_at) VALUES (?, ?, ?, ?, ?)
-    ON CONFLICT (board_id, user_id) DO UPDATE SET collapsed_columns = excluded.collapsed_columns, show_archived = excluded.show_archived, updated_at = excluded.updated_at`)
-    .run(boardId, userId, JSON.stringify(collapsedColumnIds), showArchived ? 1 : 0, new Date().toISOString());
-  return { view: { collapsedColumnIds, showArchived } satisfies BoardViewPrefs };
+  const next: BoardViewPrefs = {
+    collapsedColumnIds: input.collapsedColumnIds === undefined ? current.collapsedColumnIds : boardColumnIds(boardId, input.collapsedColumnIds),
+    showArchived: input.showArchived ?? current.showArchived,
+    showAllLevels: input.showAllLevels ?? current.showAllLevels,
+    collapsedRows: input.collapsedRows === undefined ? current.collapsedRows : boardRowKeys(boardId, input.collapsedRows)
+  };
+  db.query(`INSERT INTO board_view_prefs (board_id, user_id, collapsed_columns, show_archived, show_all_levels, collapsed_rows, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT (board_id, user_id) DO UPDATE SET collapsed_columns = excluded.collapsed_columns, show_archived = excluded.show_archived,
+      show_all_levels = excluded.show_all_levels, collapsed_rows = excluded.collapsed_rows, updated_at = excluded.updated_at`)
+    .run(boardId, userId, JSON.stringify(next.collapsedColumnIds), next.showArchived ? 1 : 0, next.showAllLevels === null ? null : next.showAllLevels ? 1 : 0,
+      JSON.stringify(next.collapsedRows), new Date().toISOString());
+  return { view: next };
 }
 
 /**

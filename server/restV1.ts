@@ -64,6 +64,7 @@ export const REST_STATUS: Partial<Record<McpErrorCode, number>> = {
   TOO_LARGE: 413,
   DRAFT_CHANGED: 409,
   CARD_CHANGED: 409,
+  VIEW_CHANGED: 409,
   EVENT_CHANGED: 409,
   ROW_CHANGED: 409,
   SCHEMA_CHANGED: 409,

@@ -132,7 +132,7 @@ describe("MCP list_views and query_cards", () => {
     const listed = (await callTool(bobKey, "list_views")).value.views as Array<Record<string, unknown>>;
     expect(listed.find((view) => view.id === w.viewId)).toEqual({
       id: w.viewId, name: "Shared view everything", owner_name: "Shared view Alice", is_owner: 0, visibility: "selected",
-      board_id: null, lanes: "columns",
+      board_id: null, lanes: "columns", layout: "list", revision: 2,
       query:[w.privateBoardId, w.sharedBoardId].sort().reduce((text, id, index) => `${text}${index ? "," : "board:"}${id}`, "")
     });
     const asBob = await callTool(bobKey, "query_cards", { viewId: w.viewId });
@@ -142,10 +142,10 @@ describe("MCP list_views and query_cards", () => {
     expect(JSON.stringify(asBob.value)).not.toContain("Private plan");
     const asAlice = await callTool(aliceKey, "query_cards", { viewId: w.viewId });
     expect(titles(asAlice.value)).toEqual(["Private plan", "Shared plan"]);
-    // Reads are not audited and there are no view write tools.
+    // Reads are not audited (save_view, lane VIEWS2, is the one view write).
     expect((db.query("SELECT COUNT(*) AS count FROM audit_log WHERE actor_id = ? AND event_type LIKE 'task.view%'").get(w.bob.userId) as { count: number }).count).toBe(0);
     const writerTools = ((await rpc(bobKey, "tools/list")).result!.tools!).map((tool) => tool.name);
-    expect(writerTools.some((name) => /view/.test(name) && name !== "list_views")).toBe(false);
+    expect(writerTools.filter((name) => /view/.test(name) && name !== "list_views")).toEqual(["save_view"]);
   });
 
   test("query_cards shares the per-user query limit with the REST routes, for views and filters (T117)", async () => {

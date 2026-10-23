@@ -6,7 +6,8 @@ import { TASK_QUERY_LIMITS } from "../../shared/taskQuery";
 import { QUERY_GROUPS, QUERY_SORTS, queryCards, type QueriedCard, type QueryResult } from "./query";
 import { taskQueryRateLimited } from "./queryRoutes";
 import { TaskError } from "./service";
-import { listViews, viewCards } from "./views";
+import { LANE_MODES } from "../../shared/taskLanes";
+import { listViews, saveView, viewCards, VIEW_GROUPS, VIEW_LAYOUTS } from "./views";
 
 /**
  * MCP tools for saved views and the cross-board query (research 2026-09-26
@@ -14,8 +15,9 @@ import { listViews, viewCards } from "./views";
  * bucket, not audited, as other reads. They call the same services as
  * `GET /api/tasks/views` and `POST /api/tasks/query`, as the key's owner, so a
  * view or filter never reaches a board the owner cannot read (T115) and ids
- * of such boards resolve as `restricted` (T116). There are no view write tools.
- * `query_cards` shares the per-user query limit with the REST routes (T117).
+ * of such boards resolve as `restricted` (T116). `save_view` is the one view write.
+ * `query_cards` shares the per-user query limit with the REST routes (T117). Lane VIEWS2 adds
+ * `save_view` (`tasks:write`, D660): create a private view or change an owned one.
  */
 
 export const MCP_QUERY_PAGE_MAX = 50;
@@ -92,7 +94,9 @@ export const taskViewTools: McpToolSpec[] = [
         views: [...mine, ...shared, ...everyone].filter((view) => chosen === null || chosen.includes(view.id)).map((view) => ({
           id: view.id, name: view.name, owner_name: view.owner_name, is_owner: view.is_owner, visibility: view.visibility, query: view.query,
           // Lane VIEWS (D645): the one board the view is on (null across boards), and its board lanes.
-          board_id: view.board_id, lanes: view.display.lanes ?? "columns"
+          board_id: view.board_id, lanes: view.display.lanes ?? "columns",
+          // Lane VIEWS2 (D660): what save_view needs to change it.
+          layout: view.display.layout, revision: view.revision
         }))
       };
     }
@@ -139,6 +143,52 @@ export const taskViewTools: McpToolSpec[] = [
         const boardIds = keyContainerIds(key, "tasks:read", "board");
         return mcpResult(queryCards(key.userId, { q: filter!, sort, group, ...page, ...(boardIds ? { boardIds } : {}) }));
       });
+    }
+  }),
+  // Lane VIEWS2 (D660, T446): the one view write. Sharing and pinning stay in the app (D180).
+  defineTool({
+    name: "save_view",
+    title: "Save a task view",
+    description: [
+      "Create a private saved view of cards (omit viewId; name and filter required), or change a view the user owns (viewId and baseRevision from list_views, plus any of name, filter, layout, group, sort, lanes).",
+      "The filter is the task query language of query_cards; a view whose filter has exactly one board: term opens as that board in the app.",
+      "If the view changed since baseRevision the call fails with VIEW_CHANGED and the current revision. Views are private when made here; sharing and pinning are done in the app. Up to 50 views per person."
+    ].join(" "),
+    scopes: ["tasks:write"],
+    // A view reaches across every board the user can read, so only a key over the whole module may write one (T446).
+    access: { mode: "global", related: ["viewId"] },
+    write: true,
+    dailyBucket: "task_write",
+    inputSchema: z.object({
+      viewId: uuid.optional().describe("The view to change (from list_views); omit to create a view"),
+      baseRevision: z.number().int().min(1).optional().describe("With viewId: the revision from list_views"),
+      name: z.string().trim().min(1).max(80).optional().describe("Up to 80 characters"),
+      filter: z.string().max(TASK_QUERY_LIMITS.length).optional().describe("A filter in the task query language, as for query_cards"),
+      layout: z.enum(VIEW_LAYOUTS).optional().describe("list (default), table, or board"),
+      group: z.enum(VIEW_GROUPS).optional().describe("The list's grouping: none, board, state, due, assignee, or tag"),
+      sort: z.enum(QUERY_SORTS).optional().describe("due (default), updated, created, title, or board"),
+      lanes: z.enum(LANE_MODES).optional().describe("The board layout's lanes across boards: columns (default), state, assignee, tag, sprint, due, or board")
+    }).strict(),
+    handler: async ({ viewId, baseRevision, name, filter, layout, group, sort, lanes }, key) => {
+      if (name !== undefined && /[\u0000-\u001F\u007F-\u009F‪-‮⁦-⁩]/.test(name)) throw new McpToolError("INVALID", "Names cannot contain control characters");
+      const display = { ...(layout ? { layout } : {}), ...(group ? { group } : {}), ...(sort ? { sort } : {}), ...(lanes ? { lanes } : {}) };
+      try {
+        const saved = await saveView(key.userId, { viewId, baseRevision, name, filter, ...(Object.keys(display).length ? { display } : {}) });
+        const view = saved.view;
+        return { created: saved.created, view: { id: view.id, name: view.name, query: view.query, visibility: view.visibility, board_id: view.board_id, layout: view.display.layout, lanes: view.display.lanes ?? "columns", revision: view.revision } };
+      } catch (error) {
+        if (!(error instanceof TaskError)) throw error;
+        if (error.status === 404) throw new McpToolError("NOT_FOUND", error.message);
+        if (error.code === "VIEW_CHANGED") {
+          const current = (error.extra as { view?: { revision: number } } | undefined)?.view;
+          throw new McpToolError("VIEW_CHANGED", error.message, current ? { currentRevision: current.revision } : {});
+        }
+        if (error.code === "OWNER_ONLY") throw new McpToolError("OWNER_ONLY", error.message);
+        if (error.code === "LIMIT_REACHED") throw new McpToolError("LIMIT_REACHED", error.message);
+        if (error.code === "VIEW_SHARED_READ_ONLY") throw new McpToolError("READ_ONLY", error.message, { reason: error.code });
+        if (error.status === 400) throw new McpToolError("INVALID", error.message, { ...(error.code ? { reason: error.code } : {}), ...error.extra });
+        throw new McpToolError("INTERNAL", error.message);
+      }
     }
   })
 ];

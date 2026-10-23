@@ -23,17 +23,20 @@ type QueryResultsProps = {
   onLoadMore: () => void;
   onOpenCard: (card: QueriedCard) => void;
   /** "Move to…": in the list and table, and on a lane card (with the lanes first, D646). */
-  onMoveCard: (card: QueriedCard, trigger: HTMLElement) => void;
+  onMoveCard: (card: QueriedCard, trigger: HTMLElement, fromKey?: string) => void;
   emptyText: string;
   /**
-   * The board layout's lanes (lane VIEWS, D640–D646): merged columns or states with drag and
+   * The board layout's lanes (lane VIEWS, D640–D646; VIEWS2, D650–D654): merged columns, states, or a field, with drag and
    * collapse. Without them (an older server) the layout falls back to the three state lanes.
    */
   lanes?: {
     layout: QueryLaneLayout;
     collapsed: ReadonlySet<string>;
     onToggleCollapsed: (key: string) => void;
-    onDropCard: (card: QueriedCard, lane: QueryLane) => void;
+    onDropCard: (card: QueriedCard, lane: QueryLane, fromKey: string) => void;
+    /** Add a card on a lane (D654). */
+    onAddCard?: (lane: QueryLane, trigger: HTMLElement) => void;
+    canAddCard?: (lane: QueryLane) => boolean;
     onRefused: (message: string) => void;
     phone: boolean;
   };

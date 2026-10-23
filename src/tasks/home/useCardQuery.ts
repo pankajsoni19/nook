@@ -57,10 +57,17 @@ export function clearCardQueryCache() {
   cache.clear();
 }
 
-function fetchPage(source: CardSource, cursor: string | undefined, signal: AbortSignal): Promise<QueryPage> {
-  if (source.kind === "view") return viewCards(source.viewId, { cursor, limit: pageSize(source), tz: source.tz, ...(source.lanes ? { lanes: source.lanes } : {}) }, signal);
-  return queryTaskCards({ ...source.request, limit: pageSize(source), ...(cursor ? { cursor } : {}) }, signal);
+function fetchPage(source: CardSource, cursor: string | undefined, signal: AbortSignal, limit = pageSize(source)): Promise<QueryPage> {
+  if (source.kind === "view") return viewCards(source.viewId, { cursor, limit, tz: source.tz, ...(source.lanes ? { lanes: source.lanes } : {}) }, signal);
+  return queryTaskCards({ ...source.request, limit, ...(cursor ? { cursor } : {}) }, signal);
 }
+
+/** The most a refresh asks for at once: the server's page cap with lanes (200) or without (100). */
+const refreshCap = (source: CardSource) => (source.kind === "view" ? source.lanes : source.request.lanes) ? LANES_PAGE_SIZE : 100;
+
+const lanesOf = (page: QueryPage) => page.columns && page.laneCounts && page.lanes
+  ? { lanes: page.lanes, columns: page.columns, laneCounts: page.laneCounts, ...(page.laneBoards ? { laneBoards: page.laneBoards } : {}), ...(page.lanesFallback ? { lanesFallback: true as const } : {}) }
+  : undefined;
 
 function failure(reason: unknown): Pick<CardQueryState, "error" | "errorCode"> {
   const code = taskErrorCode(reason);
@@ -100,7 +107,7 @@ export function useCardQuery(source: CardSource | null) {
     if (!hit) setState({ ...idle, status: "loading" });
     fetchPage(current, undefined, controller.signal).then((page) => {
       if (controller.signal.aborted) return;
-      const lanes = page.columns && page.laneCounts && page.lanes ? { lanes: page.lanes, columns: page.columns, laneCounts: page.laneCounts, ...(page.lanesFallback ? { lanesFallback: true as const } : {}) } : undefined;
+      const lanes = lanesOf(page);
       const next: CardQueryState = { cards: page.cards, nextCursor: page.nextCursor, total: page.total, refs: page.refs, status: "ready", loadingMore: false, error: null, ...(lanes ? { lanes } : {}) };
       remember(key, next);
       setState(next);
@@ -153,5 +160,30 @@ export function useCardQuery(source: CardSource | null) {
 
   const retry = useCallback(() => setReload((value) => value + 1), []);
 
-  return { ...state, loadMore, patchCard, update, retry };
+  /**
+   * Fetches the first page again behind what is on screen (lane VIEWS2, D652): as many cards as are
+   * loaded (up to the page cap), so a failed lane move shows the server's truth, including changes
+   * that landed meanwhile, without a loading state. A failure keeps the screen and says so.
+   */
+  const refresh = useCallback(async () => {
+    const current = sourceRef.current;
+    const startKey = keyRef.current;
+    if (!current) return;
+    const limit = Math.min(Math.max(stateRef.current.cards.length, pageSize(current)), refreshCap(current));
+    try {
+      const page = await fetchPage(current, undefined, new AbortController().signal, limit);
+      if (keyRef.current !== startKey) return;
+      const lanes = lanesOf(page);
+      setState((previous) => {
+        const next: CardQueryState = { ...previous, cards: page.cards, nextCursor: page.nextCursor, total: page.total, refs: page.refs ?? previous.refs, status: "ready", error: null, ...(lanes ? { lanes } : {}) };
+        remember(startKey, next);
+        return next;
+      });
+    } catch (reason) {
+      if (keyRef.current !== startKey) return;
+      setState((previous) => ({ ...previous, ...failure(reason) }));
+    }
+  }, []);
+
+  return { ...state, loadMore, patchCard, update, retry, refresh };
 }

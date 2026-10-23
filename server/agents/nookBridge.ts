@@ -68,6 +68,8 @@ export const NOOK_NEVER_TOOLS: ReadonlySet<string> = new Set([
   "attach_file_to_event",
   // Uploads everywhere U3: attaching shares the file with the row's readers, and has no proposal kind yet.
   "attach_file_to_row",
+  // Lane VIEWS2 (D660): a saved view is a person's own organisation of Tasks and has no proposal kind.
+  "save_view",
   // Analytics reports (Wave 45, Wave 48; C2): agents read reports (NOOK_AGENT_TOOLS) but never the data
   // sources, and never change a report: its queries (`update_report_query`, an open SQL proxy, T383),
   // schedule, instructions, or proposals. A report's own edit agent works through its instructions.

@@ -151,13 +151,13 @@ describe("lanes on the client (D640–D646)", () => {
   });
 
   test("refusals say why: no such column on the card's board, a full column, a board the viewer cannot edit", () => {
-    expect(laneDrop(named("Review"), cards[0]!, true)).toMatchObject({ refusal: "NO_COLUMN", message: "Alpha has no Review column" });
-    expect(laneDrop(named("Doing"), cards[0]!, true)).toMatchObject({ refusal: "COLUMN_FULL", message: "“Doing” is full (limit 3). Move a card out of it first." });
-    expect(laneDrop(named("Done"), cards[2]!, false)).toMatchObject({ refusal: "READ_ONLY", message: "You can't move cards on Beta" });
-    expect(laneDrop(named("Done"), cards[1]!, true)).toMatchObject({ columnId: "b3" });
+    expect(laneDrop(layout, named("Review"), cards[0]!, true)).toMatchObject({ refusal: "NO_COLUMN", message: "Alpha has no Review column" });
+    expect(laneDrop(layout, named("Doing"), cards[0]!, true)).toMatchObject({ refusal: "COLUMN_FULL", message: "“Doing” is full (limit 3). Move a card out of it first." });
+    expect(laneDrop(layout, named("Done"), cards[2]!, false)).toMatchObject({ refusal: "READ_ONLY", message: "You can't change cards on Beta" });
+    expect(laneDrop(layout, named("Done"), cards[1]!, true)).toMatchObject({ columnId: "b3" });
     // Alt+→ skips lanes that refuse: Alpha's To do card goes past the full Doing and the missing Review to Done.
-    expect(nextOpenLane(layout.columns, 0, 1, cards[0]!, true)).toMatchObject({ index: 3, drop: { columnId: "a3" } });
-    expect(nextOpenLane(layout.columns, 0, -1, cards[0]!, true)).toBeNull();
+    expect(nextOpenLane(layout, 0, 1, cards[0]!, true)).toMatchObject({ index: 3, drop: { columnId: "a3" } });
+    expect(nextOpenLane(layout, 0, -1, cards[0]!, true)).toBeNull();
   });
 
   test("the lane card shows its board and reads as a board card", () => {

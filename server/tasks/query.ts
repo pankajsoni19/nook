@@ -11,7 +11,11 @@ import { TaskError } from "./service";
 import { AUDIENCE_ALL_USERS, audienceAllUsersFor, can } from "../team/roles";
 import { userRole } from "../team/userRole";
 import { groupGrantExists } from "../access/groups";
-import { buildLanes, laneKeyOf, type LaneColumn, type LaneMode, type QueryLane } from "../../shared/taskLanes";
+import {
+  boardLaneKey, buildAssigneeLanes, buildBoardLanes, buildDueLanes, buildLanes, buildSprintLanes, buildTagLanes, DUE_BUCKETS, dueLaneKey, laneKeyOf, NONE_LANE, sprintLaneKey, tagLaneKey,
+  assigneeLaneKey, type LaneBoard, type LaneColumn, type LaneLayout, type LaneMode, type QueryLane, type SprintState
+} from "../../shared/taskLanes";
+import { parseStructure } from "../../shared/boardStructure";
 
 /**
  * The cross-board card query (research 2026-09-26 §10.3–§10.4, D140, D144,
@@ -297,7 +301,11 @@ export type QueryInput = {
   lanes?: LaneMode;
 };
 
-export type QueryLanes = { lanes: LaneMode; lanesFallback?: true; columns: QueryLane[]; laneCounts: Record<string, number> };
+/**
+ * `laneBoards` (lane VIEWS2, D651, D654): the boards with matches, with each one's work level and
+ * whether sprints are on, so the client can refuse a sprint drop and offer Add a card per board.
+ */
+export type QueryLanes = { lanes: LaneMode; lanesFallback?: true; columns: QueryLane[]; laneCounts: Record<string, number>; laneBoards: LaneBoard[] };
 export type QueryResult = { query: string; cards: QueriedCard[]; nextCursor: string | null; total?: number; refs?: QueryRefs } & Partial<QueryLanes>;
 
 const FLAG_ORDER = ["urgent", "blocked", "needs_review", "on_hold"];
@@ -421,7 +429,7 @@ export function runQuery(userId: string, query: TaskQuery, input: Omit<QueryInpu
     const counted = (db.query(`SELECT COUNT(*) AS count FROM (SELECT 1 ${from} LIMIT $cap)`).get({ ...compiled.params, ...(input.boardIds ? { keyBoards: params.keyBoards! } : {}), cap: QUERY_TOTAL_CAP + 1 }) as { count: number }).count;
     if (counted <= QUERY_TOTAL_CAP) result.total = counted;
     result.refs = resolveRefs(userId, query, result.cards, input.boardIds);
-    if (input.lanes) Object.assign(result, queryLanes(input.lanes, from, { ...compiled.params, ...(input.boardIds ? { keyBoards: params.keyBoards! } : {}) }));
+    if (input.lanes) Object.assign(result, queryLanes(input.lanes, from, { ...compiled.params, ...(input.boardIds ? { keyBoards: params.keyBoards! } : {}) }, { today, weekEnd: params.weekEnd as string }));
   }
   return result;
 }
@@ -432,22 +440,86 @@ export function runQuery(userId: string, query: TaskQuery, input: Omit<QueryInpu
  * column carries its WIP limit and live, unarchived card count, so the client can refuse a drop on a
  * full column before asking (the server still checks, 409 COLUMN_FULL).
  */
-function queryLanes(mode: LaneMode, from: string, params: Record<string, Binding>): QueryLanes {
+function queryLanes(mode: LaneMode, from: string, params: Record<string, Binding>, dates: { today: string; weekEnd: string }): QueryLanes {
   const matched = db.query(`SELECT k.column_id AS column_id, k.board_id AS board_id, COUNT(*) AS count ${from} GROUP BY k.column_id`).all(params) as Array<{ column_id: string; board_id: string; count: number }>;
   const boardIds = [...new Set(matched.map((row) => row.board_id))];
+  const boardList = JSON.stringify(boardIds);
   const columns = boardIds.length ? db.query(`SELECT c.id, c.board_id, c.name, c.state, c.position, c.wip_limit,
       (SELECT COUNT(*) FROM cards x WHERE x.column_id = c.id AND x.deleted_at IS NULL AND x.archived_at IS NULL) AS card_count
-    FROM board_columns c WHERE c.board_id IN (SELECT value FROM json_each(?)) ORDER BY c.board_id, c.position, c.id`).all(JSON.stringify(boardIds)) as LaneColumn[] : [];
-  const layout = buildLanes(mode, columns);
-  const byId = new Map(columns.map((column) => [column.id, column]));
-  const laneCounts: Record<string, number> = Object.fromEntries(layout.lanes.map((lane) => [lane.key, 0]));
-  for (const row of matched) {
-    const column = byId.get(row.column_id);
-    if (!column) continue;
-    const key = laneKeyOf(layout.mode, column);
-    laneCounts[key] = (laneCounts[key] ?? 0) + row.count;
+    FROM board_columns c WHERE c.board_id IN (SELECT value FROM json_each(?)) ORDER BY c.board_id, c.position, c.id`).all(boardList) as LaneColumn[] : [];
+  const laneBoards: LaneBoard[] = boardIds.length ? (db.query("SELECT id, name, structure_json FROM boards WHERE id IN (SELECT value FROM json_each(?)) ORDER BY lower(name), id")
+    .all(boardList) as Array<{ id: string; name: string; structure_json: string }>).map((board) => {
+    const structure = parseStructure(board.structure_json);
+    return { id: board.id, name: board.name, work_level: structure.workLevel, sprints: structure.sprints === true };
+  }) : [];
+  const counts = new Map<string, number>();
+  const add = (key: string, count: number) => counts.set(key, (counts.get(key) ?? 0) + count);
+  // Lane VIEWS2 (D650): grouped lanes count over the whole match, a card once per person or tag it has.
+  let layout: LaneLayout;
+  const inMatch = `IN (SELECT k.id ${from})`;
+  switch (mode) {
+    case "assignee": {
+      const people = db.query(`SELECT ca.user_id AS id, u.display_name, COUNT(*) AS count FROM card_assignees ca JOIN users u ON u.id = ca.user_id
+        WHERE ca.card_id ${inMatch} GROUP BY ca.user_id`).all(params) as Array<{ id: string; display_name: string; count: number }>;
+      for (const person of people) add(assigneeLaneKey(person.id), person.count);
+      add(NONE_LANE.assignee, (db.query(`SELECT COUNT(*) AS count ${from} AND NOT EXISTS (SELECT 1 FROM card_assignees ca WHERE ca.card_id = k.id)`).get(params) as { count: number }).count);
+      layout = buildAssigneeLanes(people);
+      break;
+    }
+    case "tag": {
+      const used = new Map((db.query(`SELECT ct.tag_id, COUNT(*) AS count FROM card_tags ct WHERE ct.card_id ${inMatch} GROUP BY ct.tag_id`).all(params) as Array<{ tag_id: string; count: number }>)
+        .map((row) => [row.tag_id, row.count]));
+      const tags = boardIds.length ? (db.query("SELECT id, board_id, name, color FROM board_tags WHERE board_id IN (SELECT value FROM json_each(?))").all(boardList) as Array<{ id: string; board_id: string; name: string; color: string }>)
+        .map((tag) => ({ ...tag, count: used.get(tag.id) ?? 0 })) : [];
+      for (const tag of tags) add(tagLaneKey(tag.name), tag.count);
+      add(NONE_LANE.tag, (db.query(`SELECT COUNT(*) AS count ${from} AND NOT EXISTS (SELECT 1 FROM card_tags ct WHERE ct.card_id = k.id)`).get(params) as { count: number }).count);
+      layout = buildTagLanes(tags);
+      break;
+    }
+    case "sprint": {
+      const bySprint = db.query(`SELECT ${EFFECTIVE_SPRINT_SQL} AS sprint_id, COUNT(*) AS count ${from} GROUP BY 1`).all(params) as Array<{ sprint_id: string | null; count: number }>;
+      const used = new Map(bySprint.map((row) => [row.sprint_id, row.count]));
+      const sprints = boardIds.length ? (db.query("SELECT id, board_id, name, state, position FROM board_sprints WHERE board_id IN (SELECT value FROM json_each(?))").all(boardList) as Array<{ id: string; board_id: string; name: string; state: SprintState; position: number }>)
+        .map((sprint) => ({ ...sprint, count: used.get(sprint.id) ?? 0 })) : [];
+      for (const sprint of sprints) add(sprintLaneKey(sprint.name), sprint.count);
+      add(NONE_LANE.sprint, used.get(null) ?? 0);
+      layout = buildSprintLanes(sprints);
+      break;
+    }
+    case "due": {
+      const due = db.query(`SELECT CASE WHEN k.due_on IS NULL THEN 4 WHEN k.due_on < $today THEN 0 WHEN k.due_on = $today THEN 1 WHEN k.due_on <= $weekEnd THEN 2 ELSE 3 END AS bucket,
+          COUNT(*) AS count ${from} GROUP BY 1`).all({ ...params, today: dates.today, weekEnd: dates.weekEnd }) as Array<{ bucket: number; count: number }>;
+      for (const row of due) add(dueLaneKey(DUE_BUCKETS[row.bucket]!), row.count);
+      layout = buildDueLanes();
+      break;
+    }
+    case "board": {
+      for (const row of matched) add(boardLaneKey(row.board_id), row.count);
+      layout = buildBoardLanes(laneBoards);
+      break;
+    }
+    default:
+      layout = buildLanes(mode, columns);
   }
-  return { lanes: layout.mode, ...(layout.fallback ? { lanesFallback: true as const } : {}), columns: layout.lanes, laneCounts };
+  if (layout.fallback || layout.mode === "columns" || layout.mode === "state") {
+    // Columns, states, and the fallback of any mode with too many lanes count by column.
+    if (layout.fallback) layout = { ...buildLanes("state", columns), fallback: true };
+    counts.clear();
+    const byId = new Map(columns.map((column) => [column.id, column]));
+    for (const row of matched) {
+      const column = byId.get(row.column_id);
+      if (column) add(laneKeyOf(layout.mode, column), row.count);
+    }
+  }
+  const laneCounts: Record<string, number> = Object.fromEntries(layout.lanes.map((lane) => [lane.key, counts.get(lane.key) ?? 0]));
+  return { lanes: layout.mode, ...(layout.fallback ? { lanesFallback: true as const } : {}), columns: layout.lanes, laneCounts, laneBoards };
+}
+
+/** The lane keys of a query's lanes in one mode (prefs trimming, D644, D656); null when the mode fell back. */
+export function laneKeysOf(userId: string, query: TaskQuery, mode: LaneMode): Set<string> | null {
+  const result = runQuery(userId, query, { tz: "UTC", limit: 1, lanes: mode });
+  if (result.lanes !== mode) return null;
+  return new Set((result.columns ?? []).map((lane) => lane.key));
 }
 
 /**
@@ -455,7 +527,7 @@ function queryLanes(mode: LaneMode, from: string, params: Record<string, Binding
  * so a card on a board they only view or comment on offers no Move, edit, or delete. Resolved once
  * per board on the page. The web routes add it; MCP results keep their shape.
  */
-export function withBoardLevels<T extends { cards: QueriedCard[] }>(userId: string, result: T): T & { cards: Array<QueriedCard & { board_level: ItemLevel }> } {
+export function withBoardLevels<T extends { cards: QueriedCard[]; laneBoards?: LaneBoard[] }>(userId: string, result: T): T & { cards: Array<QueriedCard & { board_level: ItemLevel }> } {
   const levels = new Map<string, ItemLevel>();
   const levelOf = (boardId: string) => {
     let level = levels.get(boardId);
@@ -466,7 +538,12 @@ export function withBoardLevels<T extends { cards: QueriedCard[] }>(userId: stri
     }
     return level;
   };
-  return { ...result, cards: result.cards.map((card) => ({ ...card, board_level: levelOf(card.board_id) })) };
+  return {
+    ...result,
+    cards: result.cards.map((card) => ({ ...card, board_level: levelOf(card.board_id) })),
+    // Lane VIEWS2 (D654): Add a card in a lane offers the boards the viewer can edit.
+    ...(result.laneBoards ? { laneBoards: result.laneBoards.map((board) => ({ ...board, level: levelOf(board.id) })) } : {})
+  };
 }
 
 /** Adds assignees, tags, and flags to a page with one grouped query each (no per-card subqueries). */
