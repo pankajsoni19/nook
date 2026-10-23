@@ -15,6 +15,14 @@ const TRIGGER_WORDS = { schedule: "Scheduled", manual: "Back up now", cli: "Comm
 const messageOf = (reason: unknown, fallback: string) => reason instanceof ApiError || reason instanceof Error ? reason.message || fallback : fallback;
 
 /** "2 h ago · 12.4 MB · S3 and this server's disk" for a run. */
+/** What an archive holds (D612, D687: BACKUP_S3_OBJECTS=copy adds the bucket's files, with their size from the database). */
+export function holdsText(settings: Pick<BackupsView["settings"], "storage" | "objects" | "objectsEstimate">) {
+  if (settings.storage !== "s3") return "The database, note Markdown, files, and pictures.";
+  if (settings.objects !== "copy") return "The database and the data directory. Files stay in the S3 bucket and are not copied; keep bucket versioning on.";
+  const estimate = settings.objectsEstimate;
+  return `The database, the data directory, and a copy of the bucket's files (BACKUP_S3_OBJECTS=copy)${estimate ? `: ${estimate.count.toLocaleString("en-US")} ${estimate.count === 1 ? "file" : "files"}, about ${formatBytes(estimate.bytes)} more in every backup` : ""}.`;
+}
+
 function runLine(run: BackupRun) {
   const where = run.targets?.filter((target) => target.ok).map((target) => target.kind === "s3" ? "S3" : "this server's disk") ?? [];
   return [relativeTime(run.finishedAt), run.archive ? formatBytes(run.archive.size) : null, where.length ? where.join(" and ") : null].filter(Boolean).join(" · ");
@@ -91,7 +99,7 @@ export function Backups() {
       <li className="report-source">
         <div className="report-source-head">
           <strong><HardDrive aria-hidden="true" />Online backups{!settings.enabled && <span className="reports-status">Schedule off</span>}{status.consecutiveFailures > 0 && <span className="reports-status reports-status-error">{status.consecutiveFailures === 1 ? "Last run failed" : `${status.consecutiveFailures} failed in a row`}</span>}</strong>
-          <small>{running?.kind === "backup" ? `Backing up since ${relativeTime(running.startedAt)}…` : status.lastSuccess ? `Last good backup ${runLine(status.lastSuccess)}` : "No backup yet"}</small>
+          <small>{running?.kind === "backup" ? `Backing up since ${relativeTime(running.startedAt)}…${running.progress ? ` ${running.progress}` : ""}` : status.lastSuccess ? `Last good backup ${runLine(status.lastSuccess)}` : "No backup yet"}</small>
         </div>
         {last && !last.ok && <div className="report-test failed" role="status"><p><TriangleAlert aria-hidden="true" />{last.error ?? "The last run failed"} <span className="backups-when">({relativeTime(last.finishedAt)})</span></p></div>}
         {status.lastSuccess?.warnings?.map((warning) => <p key={warning} className="backups-warning"><TriangleAlert aria-hidden="true" />{warning}</p>)}
@@ -101,7 +109,7 @@ export function Backups() {
           <div><dt>Kept on</dt><dd>{TARGET_WORDS[settings.target]}</dd></div>
           {settings.target !== "s3" && <div><dt>Folder</dt><dd><code>{settings.localDir}</code></dd></div>}
           {s3Where && <div><dt>Bucket</dt><dd><code>{s3Where}</code>{settings.s3?.sse === "required" ? " · encryption at rest required" : ""}</dd></div>}
-          <div><dt>Holds</dt><dd>{settings.storage === "s3" ? "The database and the data directory. Files stay in the S3 bucket and are not copied; keep bucket versioning on." : "The database, note Markdown, files, and pictures."}</dd></div>
+          <div><dt>Holds</dt><dd>{holdsText(settings)}</dd></div>
           <div><dt>Alerts</dt><dd>Admins are told after {settings.alertAfter} failed {settings.alertAfter === 1 ? "run" : "runs in a row"}</dd></div>
         </dl>
         <div className="report-source-actions">

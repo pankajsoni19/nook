@@ -70,6 +70,7 @@ switch (command) {
       appVersion: config.appVersion, gitSha: config.gitSha, trigger: trigger(),
       log: (line) => log.info(line)
     });
+    // (D687: runBackup puts its progress in the lock itself.)
     if (!run) {
       const lock = currentLock(settings.localDir);
       fail(`Another backup or restore drill is running${lock ? ` (${lock.op}, started ${lock.startedAt})` : ""}; try again when it has finished.`, BUSY);
@@ -77,7 +78,9 @@ switch (command) {
     if (run.ok) {
       log.info("Backup finished", { archive: run.archive?.name, bytes: run.archive?.size, files: run.archive?.files, ms: run.ms, targets: run.targets?.map((target) => target.kind).join(",") });
       console.log(`Backup created: ${run.archive?.name} (${mib(run.archive?.size ?? 0)}, ${run.archive?.files} file${run.archive?.files === 1 ? "" : "s"}) in ${run.targets?.map((target) => target.location).join(" and ")}`);
-      if (run.archive?.storage === "s3") console.log("STORAGE_BACKEND=s3: the archive holds the database and DATA_DIR; file bytes stay in the bucket (docs/OPERATIONS.md, Backup and restore).");
+      if (run.archive?.storage === "s3") console.log(run.archive.objects !== undefined
+        ? `STORAGE_BACKEND=s3 with BACKUP_S3_OBJECTS=copy: the archive also holds ${run.archive.objects} object(s) from the bucket (${mib(run.archive.objectBytes ?? 0)}).`
+        : "STORAGE_BACKEND=s3: the archive holds the database and DATA_DIR; file bytes stay in the bucket (docs/OPERATIONS.md, Backup and restore).");
     } else {
       log.error("Backup failed", { error: run.error, ms: run.ms });
       console.error(`Backup failed: ${run.error}`);
@@ -109,7 +112,7 @@ switch (command) {
     if (status.lastRun && !status.lastRun.ok) console.log(`Last run failed (${status.consecutiveFailures} in a row): ${status.lastRun.error}`);
     if (drill.last) printDrill(drill.last);
     const lock = currentLock(settings.localDir);
-    if (lock) console.log(`Running now: ${lock.op} since ${lock.startedAt}`);
+    if (lock) console.log(`Running now: ${lock.op} since ${lock.startedAt}${lock.progress ? `; ${lock.progress}` : ""}`);
     break;
   }
   case "restore-drill": {

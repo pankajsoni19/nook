@@ -34,6 +34,11 @@ export type BackupSettings = {
   alertAfter: number;
   /** BACKUP_DRILL_INTERVAL: a restore drill on its own schedule, or null (off, the default). */
   drillIntervalMs: number | null;
+  /**
+   * BACKUP_S3_OBJECTS (D687): `off` (the default, D612: the bucket's objects stay in the bucket) or
+   * `copy` (with STORAGE_BACKEND=s3, every archive also carries them; with local storage it changes nothing).
+   */
+  objects: "off" | "copy";
 };
 
 export type LitestreamSettings = {
@@ -142,7 +147,9 @@ export function parseBackupSettings(env: Record<string, string | undefined>, opt
   if (target !== "local" && !bucket) throw new Error(`BACKUP_TARGET=${target} needs an S3 bucket: STORAGE_BACKEND=s3, or S3_BUCKET with the S3_* settings, or BACKUP_S3_BUCKET with the BACKUP_S3_* settings`);
   const prefix = keyPrefix(env, "BACKUP_S3_PREFIX", "backups/");
   const s3 = bucket && target !== "local" ? { ...bucket, prefix: `${bucket.basePrefix}${prefix}`, sse: sseRaw as "off" | "required" } : null;
-  return { enabled, intervalMs, keep, target, localDir, s3, alertAfter, drillIntervalMs };
+  const objectsRaw = env.BACKUP_S3_OBJECTS?.trim().toLowerCase() || "off";
+  if (objectsRaw !== "off" && objectsRaw !== "copy") throw new Error("BACKUP_S3_OBJECTS must be off or copy");
+  return { enabled, intervalMs, keep, target, localDir, s3, alertAfter, drillIntervalMs, objects: objectsRaw };
 }
 
 /** Litestream (D615, D616). Uses the same bucket as backups (parseBackupBucket); never refuses to start for a missing bucket. */

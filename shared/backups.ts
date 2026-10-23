@@ -15,7 +15,7 @@ export type BackupRun = {
   ok: boolean;
   ms: number;
   error?: string;
-  archive?: { name: string; size: number; sha256: string; files: number; databaseBytes: number; storage: "local" | "s3" };
+  archive?: { name: string; size: number; sha256: string; files: number; databaseBytes: number; storage: "local" | "s3"; /** D687: objects copied from the bucket (BACKUP_S3_OBJECTS=copy). */ objects?: number; objectBytes?: number };
   targets?: BackupTargetResult[];
   warnings?: string[];
 };
@@ -71,8 +71,11 @@ export type BackupsView = {
     alertAfter: number;
     drillInterval: string | null;
     storage: "local" | "s3";
+    /** D687: BACKUP_S3_OBJECTS, and (with S3 storage and copy) what the bucket's live files add to each archive, from the database's sizes. */
+    objects: "off" | "copy";
+    objectsEstimate: { count: number; bytes: number } | null;
   };
-  running: { kind: "backup" | "drill"; trigger: BackupTrigger; startedAt: string } | null;
+  running: { kind: "backup" | "drill"; trigger: BackupTrigger; startedAt: string; progress?: string } | null;
   status: BackupStatus;
   nextBackupAt: string | null;
   nextDrillAt: string | null;

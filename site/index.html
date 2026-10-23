@@ -339,6 +339,7 @@ docker compose ps</code></pre></div></article></div>
           <tr><td><code>BACKUP_DIR</code></td><td><code>DATA_DIR/backup</code></td><td>Local archives, work folder, lock, and status (absolute path).</td></tr>
           <tr><td><code>BACKUP_S3_PREFIX</code></td><td><code>backups/</code></td><td>Archive prefix, after <code>S3_PREFIX</code>.</td></tr>
           <tr><td><code>BACKUP_S3_SSE</code></td><td><code>off</code></td><td><code>required</code>: an archive the bucket did not encrypt at rest is removed and the run fails.</td></tr>
+          <tr><td><code>BACKUP_S3_OBJECTS</code></td><td><code>off</code></td><td>With S3 storage, <code>copy</code> streams every file from the bucket into each archive so it restores alone (archives grow by the bucket's size).</td></tr>
           <tr><td><code>BACKUP_S3_BUCKET</code></td><td>empty</td><td>A separate bucket for archives and Litestream, with the <code>BACKUP_S3_*</code> settings.</td></tr>
           <tr><td><code>BACKUP_S3_ENDPOINT</code></td><td>empty</td><td>As <code>S3_ENDPOINT</code>, for the backup bucket.</td></tr>
           <tr><td><code>BACKUP_S3_REGION</code></td><td>empty</td><td>As <code>S3_REGION</code>, for the backup bucket.</td></tr>

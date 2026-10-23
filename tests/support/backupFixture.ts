@@ -50,7 +50,7 @@ export function makeFixture(label = "backup"): Fixture {
 }
 
 export function backupSettings(fixture: Pick<Fixture, "backupDir">, overrides: Partial<BackupSettings> = {}): BackupSettings {
-  return { enabled: true, intervalMs: 86_400_000, keep: 14, target: "local", localDir: fixture.backupDir, s3: null, alertAfter: 2, drillIntervalMs: null, ...overrides };
+  return { enabled: true, intervalMs: 86_400_000, keep: 14, target: "local", localDir: fixture.backupDir, s3: null, alertAfter: 2, drillIntervalMs: null, objects: "off", ...overrides };
 }
 
 export const noLitestream: LitestreamSettings = { enabled: false, s3: null, retentionMs: 7 * 86_400_000, metricsAddr: null };

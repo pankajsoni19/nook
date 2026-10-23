@@ -384,6 +384,66 @@ describe("S3 targets (fake S3)", () => {
     }
   });
 
+  test("D687: BACKUP_S3_OBJECTS=copy streams the bucket's objects into the archive, with progress; the drill and a restore check them", async () => {
+    const made = fixture("s3-objects");
+    const storage = { backend: "s3" as const, bucket: fake.bucket, endpoint: fake.url, region: "us-east-1", accessKeyId: fake.accessKeyId, secretAccessKey: fake.secretAccessKey, prefix: "store/", timeoutMs: 10_000 };
+    const put = (key: string, bytes: Uint8Array) => fake.objects.set(key, { bytes, lastModified: new Date(), etag: '"x"', contentType: "application/octet-stream" });
+    // The fixture's document: in the bucket with the bytes the database records (and a stale local copy, left out).
+    put(`store/documents/${made.documentId}`, new TextEncoder().encode("document bytes\n"));
+    writeFileSync(join(made.dataDir, "documents", "objects", made.documentId), "stale local leftover");
+    // A large one, a picture, one that differs from its recorded SHA-256, and one the bucket lost.
+    const now = new Date().toISOString();
+    const big = crypto.getRandomValues(new Uint8Array(3 * 1024 * 1024));
+    const bigId = crypto.randomUUID();
+    const changedId = crypto.randomUUID();
+    const lostId = crypto.randomUUID();
+    for (const [id, size, sha] of [[bigId, big.byteLength, new Bun.CryptoHasher("sha256").update(big).digest("hex")], [changedId, 4, "0".repeat(64)], [lostId, 9, "1".repeat(64)]] as const) {
+      made.db.query(`INSERT INTO documents (id, owner_id, name, mime_type, preview_kind, size_bytes, sha256, created_at, updated_at) VALUES (?, ?, 'f.bin', 'application/octet-stream', 'none', ?, ?, ?, ?)`).run(id, made.userId, size, sha, now, now);
+    }
+    put(`store/documents/${bigId}`, big);
+    put(`store/documents/${changedId}`, new TextEncoder().encode("abcd"));
+    const avatarId = "0192f000-0000-8000-8000-00000000abcd";
+    made.db.query("UPDATE users SET avatar_id = ? WHERE id = ?").run(avatarId, made.userId);
+    put(`store/avatars/${avatarId}`, new TextEncoder().encode("picture"));
+    const settings = backupSettings(made, { objects: "copy" });
+    const progress: string[] = [];
+    const inLock: Array<string | null> = [];
+    const run = await runBackup(jobOptions(made, { settings, storage, progressMs: 0, onProgress: (text) => { progress.push(text); inLock.push(currentLock(made.backupDir)?.progress ?? null); } }));
+    // The lock carries it (Settings → Backups and `status` read it there).
+    expect(inLock).toEqual(progress);
+    expect(run?.ok).toBe(true);
+    expect(run?.archive).toMatchObject({ storage: "s3", objects: 4, objectBytes: 15 + big.byteLength + 4 + 7 });
+    expect(run?.warnings?.some((line) => line.includes("1 object(s) the database names were not in the bucket"))).toBe(true);
+    expect(run?.warnings?.some((line) => line.includes("1 object(s) in the bucket differ from the SHA-256"))).toBe(true);
+    expect(progress[0]).toContain("Copying objects from the bucket: 0 of 5");
+    expect(progress.at(-1)).toContain("5 of 5");
+    // Only reads: the bucket holds what it held.
+    expect(fake.log.filter((line) => /^(PUT|DELETE|POST) store\//.test(line))).toEqual([]);
+    const read = await readArchive(join(made.backupDir, run!.archive!.name), { collect: true });
+    const names = read.files!.map((file) => file.path);
+    expect(names.filter((name) => name === `documents/objects/${made.documentId}`)).toHaveLength(1);
+    expect(names).toContain(`documents/objects/${bigId}`);
+    expect(names).toContain(`avatars/${avatarId}`);
+    expect(names).not.toContain(`documents/objects/${lostId}`);
+    expect(read.manifest?.objects).toEqual({ mode: "copy", count: 4, bytes: 15 + big.byteLength + 4 + 7, missing: 1, mismatched: 1 });
+    expect(read.manifest?.skipped).toContainEqual({ path: `documents/objects/${lostId}`, reason: "missing" });
+    // The drill checks them in the archive (not the bucket) and passes with warnings.
+    const report = await runDrill({ from: "latest", settings, litestream: noLitestream, databasePath: made.databasePath, storage, trigger: "cli" });
+    expect(report?.ok).toBe(true);
+    expect(report?.checks.find((check) => check.name === "Files the database names")).toMatchObject({ ok: true, warning: true });
+    expect(report?.checks.find((check) => check.name === "Objects copied from the bucket")?.detail).toContain("4 object(s)");
+    // A restore is a complete local-storage data directory: the bucket's bytes, not the stale local copy.
+    const target = join(made.root, "restored-objects");
+    const restored = await restoreInto({ from: run!.archive!.name, to: target, settings, litestream: noLitestream, databasePath: made.databasePath, storage: { backend: "local" } });
+    expect(readFileSync(join(target, "documents", "objects", made.documentId), "utf8")).toBe("document bytes\n");
+    expect(readFileSync(join(target, "avatars", avatarId), "utf8")).toBe("picture");
+    expect(restored.checks.find((check) => check.name === "Files the database names")?.ok).toBe(true);
+    // Off (the default): the same storage copies nothing.
+    const plain = await runBackup(jobOptions(made, { settings: backupSettings(made), storage }));
+    expect(plain?.archive?.objects).toBeUndefined();
+    expect((await readArchive(join(made.backupDir, plain!.archive!.name), { collect: true })).files!.some((file) => file.path === `documents/objects/${bigId}`)).toBe(false);
+  }, 30_000);
+
   test("pruning ignores names that are not archives", async () => {
     const store = createS3Store(s3("prune/"));
     for (const name of ["nook-backup-20260101T000000Z-aaaaaa.tar.gz", "nook-backup-20260102T000000Z-bbbbbb.tar.gz", "nook-backup-20260103T000000Z-cccccc.tar.gz"]) {

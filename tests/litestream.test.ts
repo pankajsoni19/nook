@@ -24,7 +24,10 @@ const S3_ENV = { S3_BUCKET: "nook-files", S3_REGION: "eu-west-1", S3_ACCESS_KEY_
 
 describe("backup settings", () => {
   test("defaults: on, daily, 14 kept, local in DATA_DIR/backup, alerts after 2, no drill", () => {
-    expect(parse({})).toEqual({ enabled: true, intervalMs: 86_400_000, keep: 14, target: "local", localDir: join(dataDir, "backup"), s3: null, alertAfter: 2, drillIntervalMs: null });
+    expect(parse({})).toEqual({ enabled: true, intervalMs: 86_400_000, keep: 14, target: "local", localDir: join(dataDir, "backup"), s3: null, alertAfter: 2, drillIntervalMs: null, objects: "off" });
+    // D687: the bucket's objects are copied only when asked.
+    expect(parse({ BACKUP_S3_OBJECTS: " COPY " }).objects).toBe("copy");
+    expect(() => parse({ BACKUP_S3_OBJECTS: "all" })).toThrow("BACKUP_S3_OBJECTS must be off or copy");
   });
 
   test("durations, counts, and targets are checked", () => {

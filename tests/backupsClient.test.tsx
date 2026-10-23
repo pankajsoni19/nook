@@ -14,7 +14,7 @@ function view(overrides: Partial<BackupsView> = {}): BackupsView {
   const ok = { id: "r1", trigger: "schedule" as const, startedAt: at(120), finishedAt: at(119), ok: true, ms: 4200, archive: { name: "nook-backup-20261022T030000Z-abcdef.tar.gz", size: 12_582_912, sha256: "0".repeat(64), files: 40, databaseBytes: 8_000_000, storage: "s3" as const }, targets: [{ kind: "s3" as const, location: "s3://nook/backups/", ok: true }] };
   const failed = { id: "r2", trigger: "schedule" as const, startedAt: at(10), finishedAt: at(9), ok: false, ms: 900, error: "s3: S3 error AccessDenied" };
   return {
-    settings: { enabled: true, interval: "6h", keep: 14, target: "s3", localDir: "/data/backup", s3: { bucket: "nook", prefix: "nook/backups/", endpointHost: "s3.eu-west-1.amazonaws.com", separate: false, sse: "off" }, alertAfter: 2, drillInterval: null, storage: "s3" },
+    settings: { enabled: true, interval: "6h", keep: 14, target: "s3", localDir: "/data/backup", s3: { bucket: "nook", prefix: "nook/backups/", endpointHost: "s3.eu-west-1.amazonaws.com", separate: false, sse: "off" }, alertAfter: 2, drillInterval: null, storage: "s3", objects: "off", objectsEstimate: null },
     running: null,
     status: { lastRun: failed, lastSuccess: ok, consecutiveFailures: 2, recent: [failed, ok] },
     nextBackupAt: new Date(Date.now() + 50 * 60_000).toISOString(),
@@ -43,6 +43,18 @@ describe("Settings → Backups", () => {
     expect(text).toContain("To any time in the last 7 days");
     expect(text).toContain("nook-backup-20261022T030000Z-abcdef.tar.gz");
     expect(text).not.toMatch(/secret|access key/i);
+  });
+
+  test("D687: with BACKUP_S3_OBJECTS=copy it says what the bucket's files add, and a running copy shows its progress", async () => {
+    const base = view();
+    mockApi({ "GET /admin/backups": () => view({ settings: { ...base.settings, objects: "copy", objectsEstimate: { count: 1234, bytes: 5 * 1024 ** 3 } }, running: { kind: "backup", trigger: "schedule", startedAt: at(2), progress: "Copying objects from the bucket: 600 of 1234 (2.4 GiB of about 5.0 GiB)" } }) });
+    const page = await render(<Backups />);
+    await page.waitFor(() => document.querySelector(".backups-settings .report-source-list"));
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("a copy of the bucket's files (BACKUP_S3_OBJECTS=copy): 1,234 files, about 5");
+    expect(text).toContain("more in every backup");
+    expect(text).toContain("Copying objects from the bucket: 600 of 1234");
+    expect(text).not.toContain("Files stay in the S3 bucket and are not copied");
   });
 
   test("Back up now starts a job and the page follows it until it ends", async () => {

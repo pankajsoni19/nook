@@ -181,12 +181,21 @@ export async function checkRestored(dataDir: string, options: { manifest: Manife
     }
     if (options.databaseOnly) {
       check(checks, "Files", true, "Database only (Litestream): note Markdown and files come from an archive", true);
-    } else if ((options.manifest?.storage.backend ?? options.storage.backend) === "local") {
+    } else if ((options.manifest?.storage.backend ?? options.storage.backend) === "local" || options.manifest?.objects?.mode === "copy") {
+      // Local storage, or (D687) an S3 archive that copied the bucket's objects in: every file is in the archive.
       const { missing, checked } = missingLocalFiles(db, dataDir);
-      const vanished = new Set((options.manifest?.skipped ?? []).filter((entry) => entry.reason === "vanished").map((entry) => entry.path));
-      const unexplained = missing.filter((entry) => !vanished.has(entry));
+      const skipped = options.manifest?.skipped ?? [];
+      const vanished = new Set(skipped.filter((entry) => entry.reason === "vanished").map((entry) => entry.path));
+      const notInBucket = new Set(skipped.filter((entry) => entry.reason === "missing").map((entry) => entry.path));
+      const unexplained = missing.filter((entry) => !vanished.has(entry) && !notInBucket.has(entry));
+      const lost = missing.filter((entry) => notInBucket.has(entry)).length;
+      const purged = missing.length - unexplained.length - lost;
       check(checks, "Files the database names", unexplained.length === 0,
-        unexplained.length ? `${unexplained.length} of ${checked} missing or the wrong size, such as ${unexplained.slice(0, 3).join(", ")}` : `All ${checked} present${missing.length ? ` (${missing.length} purged while the backup ran)` : ""}`);
+        unexplained.length ? `${unexplained.length} of ${checked} missing or the wrong size, such as ${unexplained.slice(0, 3).join(", ")}` : `All ${checked} present${purged ? ` (${purged} purged while the backup ran)` : ""}${lost ? `; ${lost} were not in the bucket when the backup ran` : ""}`, lost > 0);
+      const copied = options.manifest?.objects;
+      if (copied?.mode === "copy") {
+        check(checks, "Objects copied from the bucket", true, `${copied.count} object(s), ${copied.bytes} bytes, in the archive and checked against the manifest (SHA-256)${copied.mismatched ? `; ${copied.mismatched} differed from the database's SHA-256 when copied` : ""}${copied.missing ? `; ${copied.missing} named but not in the bucket` : ""}`, copied.mismatched > 0 || copied.missing > 0);
+      }
     } else if (options.storage.backend === "s3" && (!options.manifest || options.manifest.storage.backend !== "s3" || (options.manifest.storage.bucket === options.storage.bucket && options.manifest.storage.prefix === options.storage.prefix))) {
       try {
         const { missing, checked } = await missingBucketObjects(db, options.storage);

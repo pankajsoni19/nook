@@ -68,7 +68,7 @@ export function recordDrill(dir: string, report: DrillReport) {
 export const readAlert = (dir: string): AlertState => readJson(join(dir, ALERT_FILE), { alertedAt: null, failures: 0 });
 export const writeAlert = (dir: string, state: AlertState) => writeJson(join(dir, ALERT_FILE), state);
 
-export type LockInfo = { op: "backup" | "drill" | "restore"; pid: number; startedAt: string; trigger: Trigger };
+export type LockInfo = { op: "backup" | "drill" | "restore"; pid: number; startedAt: string; trigger: Trigger; /** D687: how far the job is, in words (copying the bucket's objects). */ progress?: string };
 
 /** The job holding the lock right now, or null (no lock, or a stale one). */
 export function currentLock(dir: string, nowMs = Date.now()): LockInfo | null {
@@ -108,6 +108,11 @@ export function acquireLock(dir: string, info: Omit<LockInfo, "pid" | "startedAt
       timer.unref?.();
       let released = false;
       return {
+        /** Records how far the job is (D687), for Settings → Backups and `status`; the lock stays the job's. */
+        progress(text: string) {
+          if (released) return;
+          try { writeFileSync(path, JSON.stringify({ ...JSON.parse(body) as LockInfo, progress: text } satisfies LockInfo)); } catch { /* released meanwhile */ }
+        },
         release() {
           if (released) return;
           released = true;

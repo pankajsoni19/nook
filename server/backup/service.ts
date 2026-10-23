@@ -204,6 +204,25 @@ async function cachedLitestream() {
   return value;
 }
 
+/**
+ * D687: what copying the bucket's objects adds to each archive, from the database's own sizes (live
+ * documents, whiteboard scenes and snapshots; profile pictures are counted, at no size). Cached with the
+ * archive list.
+ */
+let estimateCache: { at: number; value: { count: number; bytes: number } } | null = null;
+function objectsEstimate() {
+  if (estimateCache && Date.now() - estimateCache.at < CACHE_MS) return estimateCache.value;
+  const live = "d.purge_started_at IS NULL";
+  const row = db.query(`SELECT COUNT(*) AS count, COALESCE(SUM(size), 0) AS bytes FROM (
+      SELECT d.size_bytes AS size FROM documents d WHERE ${live} AND NOT EXISTS (SELECT 1 FROM whiteboards w WHERE w.document_id = d.id)
+      UNION ALL SELECT d.size_bytes FROM whiteboards w JOIN documents d ON d.id = w.document_id WHERE ${live}
+      UNION ALL SELECT s.size_bytes FROM whiteboard_snapshots s JOIN documents d ON d.id = s.document_id WHERE ${live})`).get() as { count: number; bytes: number };
+  const pictures = (db.query("SELECT COUNT(*) AS count FROM users WHERE avatar_id IS NOT NULL AND avatar_id <> '00000000-0000-8000-8000-000000000000' AND substr(avatar_id, 15, 1) = '8'").get() as { count: number }).count;
+  const value = { count: row.count + pictures, bytes: row.bytes };
+  estimateCache = { at: Date.now(), value };
+  return value;
+}
+
 /** Settings → Backups (D618): settings without credentials, the last runs, the archives, the drill, and Litestream. */
 export async function backupsView(): Promise<BackupsView> {
   const settings = config.backup;
@@ -218,9 +237,11 @@ export async function backupsView(): Promise<BackupsView> {
     settings: {
       enabled: settings.enabled, interval: formatDuration(settings.intervalMs), keep: settings.keep, target: settings.target, localDir: dir,
       s3: s3 ? { bucket: s3.bucket, prefix: s3.prefix, endpointHost: new URL(s3.endpoint).host, separate: s3.separate, sse: s3.sse } : null,
-      alertAfter: settings.alertAfter, drillInterval: settings.drillIntervalMs ? formatDuration(settings.drillIntervalMs) : null, storage: config.storage.backend
+      alertAfter: settings.alertAfter, drillInterval: settings.drillIntervalMs ? formatDuration(settings.drillIntervalMs) : null, storage: config.storage.backend,
+      objects: settings.objects, objectsEstimate: config.storage.backend === "s3" && settings.objects === "copy" ? objectsEstimate() : null
     },
-    running: running ? { kind: running.kind, trigger: running.trigger, startedAt: running.startedAt } : lock ? { kind: lock.op === "drill" ? "drill" : "backup", trigger: lock.trigger, startedAt: lock.startedAt } : null,
+    // D687: the job runs in a child process; its progress is in the lock.
+    running: running ? { kind: running.kind, trigger: running.trigger, startedAt: running.startedAt, ...(lock?.progress ? { progress: lock.progress } : {}) } : lock ? { kind: lock.op === "drill" ? "drill" : "backup", trigger: lock.trigger, startedAt: lock.startedAt, ...(lock.progress ? { progress: lock.progress } : {}) } : null,
     status,
     nextBackupAt: next === null ? null : new Date(Math.max(next, Date.now())).toISOString(),
     nextDrillAt: nextDrill === null ? null : new Date(Math.max(nextDrill, Date.now())).toISOString(),

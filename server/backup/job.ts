@@ -2,7 +2,8 @@ import { readdirSync, rmSync, statSync } from "node:fs";
 import { mkdir, rm, statfs } from "node:fs/promises";
 import { join } from "node:path";
 import type { StorageConfig } from "../config";
-import { archiveName, collectDataFiles, dataFilesFrom, readArchive, snapshotDatabase, writeArchive, type Manifest } from "./archive";
+import { archiveName, collectDataFiles, dataFilesFrom, readArchive, snapshotDatabase, writeArchive, type Manifest, type PackObjects } from "./archive";
+import { bucketObjectReader, listSnapshotObjects, LOCAL_OBJECT_DIRS, objectsFrom } from "./objects";
 import type { BackupSettings } from "./settings";
 import { acquireLock, ensureBackupDir, recordRun, type BackupRun, type TargetResult, type Trigger } from "./state";
 import { createLocalStore, createS3Store, pruneArchives, s3ErrorText, type ArchiveStore } from "./stores";
@@ -26,9 +27,15 @@ export type JobOptions = {
   trigger: Trigger;
   /** Tests: other stores than the settings name. */
   stores?: ArchiveStore[];
+  /** Tests: how often progress is reported (default every 2 s). */
+  progressMs?: number;
   now?: () => Date;
   log?: (line: string) => void;
+  /** D687: progress in words while the bucket's objects are copied (the CLI puts it in the lock for Settings → Backups). */
+  onProgress?: (text: string) => void;
 };
+
+const mebibytes = (bytes: number) => `${(bytes / 1048576).toFixed(bytes < 10 * 1048576 ? 2 : 1)} MiB`;
 
 export function storesFor(settings: BackupSettings): ArchiveStore[] {
   const stores: ArchiveStore[] = [];
@@ -64,6 +71,8 @@ export async function runBackup(options: JobOptions): Promise<BackupRun | null> 
   ensureBackupDir(dir);
   const lock = acquireLock(dir, { op: "backup", trigger: options.trigger });
   if (!lock) return null;
+  // D687: progress goes into the lock (Settings → Backups and `status` read it) and to the caller.
+  const report = (text: string) => { lock.progress(text); options.onProgress?.(text); };
   const now = options.now ?? (() => new Date());
   const started = now();
   const id = crypto.randomUUID();
@@ -75,9 +84,12 @@ export async function runBackup(options: JobOptions): Promise<BackupRun | null> 
   try {
     sweepWorkDirs(dir);
     await mkdir(work, { mode: 0o700 });
+    // D687: with the bucket's objects copied in, DATA_DIR's own object folders (leftovers of a migration) stay out: no name twice.
+    const copyObjects = options.storage.backend === "s3" && settings.objects === "copy";
+    const excluded = [dir, ...(copyObjects ? LOCAL_OBJECT_DIRS.map((folder) => join(options.dataDir, ...folder.split("/"))) : [])];
     // D688: the list of DATA_DIR's files goes to a side file in the work folder, never to memory.
     const listPath = join(work, "data-files.ndjson");
-    const { skipped, bytes, count, root } = await collectDataFiles(options.dataDir, [dir], { listPath });
+    const { skipped, bytes, count, root } = await collectDataFiles(options.dataDir, excluded, { listPath });
     let databaseBytes = 0;
     for (const suffix of ["", "-wal"]) {
       try { databaseBytes += statSync(`${options.databasePath}${suffix}`).size; } catch { /* no WAL */ }
@@ -92,6 +104,38 @@ export async function runBackup(options: JobOptions): Promise<BackupRun | null> 
     const snapshotPath = join(work, "mynotes.sqlite");
     log(`Snapshotting the database (${databaseBytes} bytes with its WAL)`);
     const snapshot = snapshotDatabase(options.databasePath, snapshotPath);
+    // D687: the objects the snapshot names, listed to a side file, then streamed from the bucket into the archive.
+    let objects: PackObjects | undefined;
+    if (copyObjects && options.storage.backend === "s3") {
+      const objectList = join(work, "objects.ndjson");
+      const listed = await listSnapshotObjects(snapshotPath, objectList);
+      // Profile pictures have no recorded size; 512 KiB each is generous (uploads are resized).
+      const estimate = listed.bytes + listed.unsized * 512 * 1024;
+      const freeNow = await freeBytes(dir);
+      if (freeNow - (databaseBytes + bytes + estimate) < options.minFreeBytes) {
+        throw new Error(`Not enough free disk to copy the bucket's objects (BACKUP_S3_OBJECTS=copy): they add about ${estimate} bytes and the run must leave MIN_FREE_DISK_BYTES (${options.minFreeBytes}) free; ${freeNow} are free`);
+      }
+      log(`Copying ${listed.count} objects from the bucket (about ${mebibytes(estimate)})`);
+      const every = options.progressMs ?? 2000;
+      let last = 0;
+      let logged = 0;
+      objects = {
+        entries: objectsFrom(objectList),
+        open: bucketObjectReader(options.storage) as unknown as PackObjects["open"],
+        progress(done) {
+          const at = Date.now();
+          const finished = done.count === listed.count;
+          if (!finished && at - last < every) return;
+          last = at;
+          const text = `Copying objects from the bucket: ${done.count} of ${listed.count} (${mebibytes(done.bytes)} of about ${mebibytes(estimate)})`;
+          report(text);
+          // The log gets a line every tenth, and the last.
+          const tenth = Math.floor((done.count * 10) / Math.max(1, listed.count));
+          if (finished || tenth > logged) { logged = tenth; log(text); }
+        }
+      };
+      report(`Copying objects from the bucket: 0 of ${listed.count} (about ${mebibytes(estimate)})`);
+    }
     const name = archiveName(started);
     const archivePath = join(work, name);
     const storage: Manifest["storage"] = options.storage.backend === "s3"
@@ -105,17 +149,21 @@ export async function runBackup(options: JobOptions): Promise<BackupRun | null> 
       },
       database: snapshotPath,
       files: dataFilesFrom(listPath, root),
-      skipped
+      skipped,
+      ...(objects ? { objects } : {})
     });
     await rm(snapshotPath, { force: true });
     // Read the whole archive back before it goes anywhere: gzip, tar, and every file's SHA-256.
     const verified = await readArchive(archivePath, { scratchDir: work });
     if (verified.archiveSha256 !== written.sha256) throw new Error("The archive changed between writing and reading it back");
     const vanished = written.manifest.skipped.filter((entry) => entry.reason === "vanished").length;
-    const links = written.manifest.skipped.length - vanished;
+    const links = written.manifest.skipped.filter((entry) => entry.reason === "symlink" || entry.reason === "special").length;
     if (vanished) warnings.push(`${vanished} file(s) were removed while the backup ran (purged from the Bin) and are not in it`);
     if (links) warnings.push(`${links} link(s) or special file(s) under DATA_DIR were left out`);
-    archive = { name, size: written.size, sha256: written.sha256, files: written.manifest.fileCount, databaseBytes: written.manifest.database.bytes, storage: storage.backend };
+    const copied = written.manifest.objects;
+    if (copied?.missing) warnings.push(`${copied.missing} object(s) the database names were not in the bucket (purged since the snapshot, or lost); see storage-admin verify`);
+    if (copied?.mismatched) warnings.push(`${copied.mismatched} object(s) in the bucket differ from the SHA-256 the database records; they were copied as they are (see storage-admin verify --hash)`);
+    archive = { name, size: written.size, sha256: written.sha256, files: written.manifest.fileCount, databaseBytes: written.manifest.database.bytes, storage: storage.backend, ...(copied ? { objects: copied.count, objectBytes: copied.bytes } : {}) };
 
     const stores = options.stores ?? storesFor(settings);
     targets = [];

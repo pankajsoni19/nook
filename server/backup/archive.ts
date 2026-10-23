@@ -55,11 +55,17 @@ export type Manifest = {
   gitSha: string;
   /** Where file bytes lived (D612): with s3 the archive holds the database and DATA_DIR only, not the bucket's objects. */
   storage: { backend: "local" } | { backend: "s3"; bucket: string; prefix: string; endpointHost: string };
+  /**
+   * D687 (BACKUP_S3_OBJECTS=copy): the bucket's objects the snapshot names are in the archive too, under
+   * the local layout (`documents/objects/<id>`, `avatars/<id>`). `missing`: named but not in the bucket;
+   * `mismatched`: in the bucket with another SHA-256 than the database records (kept, and reported).
+   */
+  objects?: { mode: "copy"; count: number; bytes: number; missing: number; mismatched: number };
   database: { path: string; bytes: number; sha256: string; integrity: "ok"; migrations: number[] };
   /** Every entry but the manifest, in archive order (the database first). */
   files: ManifestFile[];
   /** Files under DATA_DIR left out on purpose (links, sockets) or gone before they were read. */
-  skipped: Array<{ path: string; reason: "symlink" | "special" | "vanished" }>;
+  skipped: Array<{ path: string; reason: "symlink" | "special" | "vanished" | "missing" }>;
   counts: Record<string, number>;
 };
 
@@ -182,7 +188,15 @@ export async function* dataFilesFrom(listPath: string, root: string): AsyncItera
   }
 }
 
-type PackInput = { manifest: Omit<Manifest, "files" | "skipped" | "database"> & { database: Omit<Manifest["database"], "sha256" | "bytes"> }; database: string; files: Iterable<DataFile> | AsyncIterable<DataFile>; skipped: Manifest["skipped"] };
+/** D687: objects streamed into the archive after the files (the bucket's, with BACKUP_S3_OBJECTS=copy). */
+export type PackObjects = {
+  entries: AsyncIterable<{ path: string; sha256: string | null }>;
+  open(entry: { path: string }): Promise<{ size: number; mtime: Date; chunks: AsyncIterable<Uint8Array> } | null>;
+  /** After each object (copied or missing): for progress. */
+  progress?(done: { count: number; bytes: number }): void;
+};
+
+type PackInput = { manifest: Omit<Manifest, "files" | "skipped" | "database" | "objects"> & { database: Omit<Manifest["database"], "sha256" | "bytes"> }; database: string; files: Iterable<DataFile> | AsyncIterable<DataFile>; skipped: Manifest["skipped"]; objects?: PackObjects };
 
 /** Appends lines to a file through one 64 KiB buffer (D688: lists that may hold a million records). */
 class LineFile {
@@ -277,6 +291,26 @@ export async function writeArchive(outPath: string, input: PackInput) {
     fileCount += 1;
   };
 
+  /** One entry from a stream of a declared size (D687: an object read from the bucket). */
+  async function addStream(name: string, size: number, mtime: Date, chunks: AsyncIterable<Uint8Array>) {
+    const hash = createHash("sha256");
+    let finished!: (error?: Error | null) => void;
+    const written = new Promise<void>((resolveEntry, reject) => { finished = (error) => error ? reject(error) : resolveEntry(); });
+    const entry = pack.entry({ name, size, mode: 0o600, mtime, type: "file" }, (error) => finished(error));
+    let count = 0;
+    for await (const chunk of chunks) {
+      if (failed) throw failed;
+      count += chunk.byteLength;
+      if (count > size) throw new ArchiveError(`${name} grew while it was copied`);
+      hash.update(chunk);
+      if (!entry.write(Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength))) await new Promise<void>((resolveDrain) => entry.once("drain", () => resolveDrain()));
+    }
+    if (count !== size) throw new ArchiveError(`${name} came back with ${count} bytes instead of ${size}`);
+    (entry as unknown as { end(): void }).end();
+    await written;
+    return { path: name, size, sha256: hash.digest("hex") };
+  }
+
   async function addEntry(name: string, abs: string) {
     let handle;
     try {
@@ -318,8 +352,30 @@ export async function writeArchive(outPath: string, input: PackInput) {
       if (added) await record(added);
       else skipped.push({ path: file.path, reason: "vanished" });
     }
+    let objects: Manifest["objects"];
+    if (input.objects) {
+      objects = { mode: "copy", count: 0, bytes: 0, missing: 0, mismatched: 0 };
+      let done = 0;
+      let doneBytes = 0;
+      for await (const item of input.objects.entries) {
+        const opened = await input.objects.open(item);
+        if (!opened) {
+          skipped.push({ path: item.path, reason: "missing" });
+          objects.missing += 1;
+        } else {
+          const added = await addStream(item.path, opened.size, opened.mtime, opened.chunks);
+          await record(added);
+          objects.count += 1;
+          objects.bytes += added.size;
+          doneBytes += added.size;
+          if (item.sha256 && item.sha256 !== added.sha256) objects.mismatched += 1;
+        }
+        done += 1;
+        input.objects.progress?.({ count: done, bytes: doneBytes });
+      }
+    }
     await list.close();
-    const header = { ...input.manifest, database: { ...input.manifest.database, bytes: database.size, sha256: database.sha256 }, skipped } as Omit<Manifest, "files">;
+    const header = { ...input.manifest, database: { ...input.manifest.database, bytes: database.size, sha256: database.sha256 }, ...(objects ? { objects } : {}), skipped } as Omit<Manifest, "files">;
     await writeManifestEntry(pack, header, listPath, list.bytes);
     pack.finalize();
     await done;
