@@ -19,6 +19,8 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 - [ ] **Provider code per kind** (operator, 2026-10-22; lane LOCALEMB, step 0): one adapter file per provider kind (OpenAI-compatible default, Anthropic, Voyage, local); golden tests pin OpenAI's requests to v0.43.0 so other kinds can't change them.
 
 
+- [ ] **Tasks views work like boards** (operator, 2026-10-23; lane VIEWS, research then build): views' column layout has only To do / In progress / Done, no column collapse, and no drag between columns. Operator's ideas: a single-board view behaves as that board with filters (same columns, collapse, drag); a multi-board view gets as much as can work; maybe saved views inside a board. Research and recommend, then build.
+
 ## Waiting on the operator
 
 - [ ] **Real-model check of chat agents on data sources** (lane AGENTSQL, D592): only the scripted provider has called the data tools. On a host with a working model, give an agent a data source (Settings → Report data sources → Chat agents may use this data source) and check that it searches before it queries, aggregates in SQL rather than paging raw rows, and summarizes instead of repeating the table.
