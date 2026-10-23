@@ -757,6 +757,16 @@ Every image carries immutable numbered migrations under `server/migrations`. The
 
 **Report filters (lane FILT3, D670–D677).** No migration and no new settings. Owners can remove text, number range, and date range filters from the filter itself (a date range's removal is reviewed by hand), Add filter offers number ranges on numeric columns, and a DateTime date range is filtered by its day in the report's zone; when a schedule's time zone changes later, Nook proposes the matching rewrite in Changes and the filter shows a notice until it is applied (never rewritten silently). Number ranges on integer columns bind Int64 or UInt64. MCP keys with `reports:read` gain the read-only `list_report_views` (the key owner's own saved views); chat agents do not get it. To run the new real-ClickHouse test: `CLICKHOUSE_TEST_URL=http://nook:nooktest@127.0.0.1:22200 bun --no-env-file test tests/reportFilterTypesLive.test.ts` (it drops and recreates the `eval_filter_types` database on that server, so point it at a test server only).
 
+**Tasks views (lane VIEWS2, D650–D662).** Lanes by assignee, tag, sprint, due date, or board with drag; swimlanes; Add a card in lanes; views pinned on a board; a board view's own collapse; "Show all levels" per person; and MCP `save_view`. One migration runs once on the first boot, before the HTTP server answers; it is recorded in `schema_migrations` and cannot be undone except by restoring a backup. **Back up first:** `./scripts/backup.sh --force`.
+
+| Migration | What it does | Cost |
+| --- | --- | --- |
+| **078** `task_view_pins` | Lane VIEWS2 (D656–D659): creates the empty table `task_view_pins` (views a board's owner or manager pinned for everyone on the board; it goes with the board or the view) and its index; adds `board_view_prefs.show_all_levels` (NULL until a person chooses) and `collapsed_rows`, and `task_view_prefs.own_collapse`, `collapsed_columns`, and `collapsed_rows` (each list at most 1 KiB by CHECK). Changes no rows. | Quick at any size (`ALTER TABLE … ADD COLUMN` with constant defaults). |
+
+If it fails, the server logs `Migration failed` with its id and does not start; it is transactional, so nothing is half applied. No new environment settings. "Show all levels on the board" moves from each browser to the server: the first time a person opens a board after the upgrade, a choice their browser kept is saved for them and then forgotten there. Keys limited to chosen items are never offered the new `save_view` tool; keys over the whole Tasks module with `tasks:write` get it.
+
+Check: `sqlite3 <data>/mynotes.sqlite "SELECT id, name FROM schema_migrations WHERE id >= 78;"` lists 78 `task_view_pins`.
+
 ### Upgrading to 0.46.0
 
 0.46.0 makes Tasks views work like boards (lane VIEWS, D635–D646): a view on one board opens as that board, multi-board views show merged column lanes or state lanes with drag, and every lane collapses. Its migration runs once on the first boot, before the HTTP server answers; it is recorded in `schema_migrations` and cannot be undone except by restoring a backup. **Back up first:** `./scripts/backup.sh --force`.

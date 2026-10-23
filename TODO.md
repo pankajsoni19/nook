@@ -7,12 +7,11 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 
 **Current state (2026-10-23).**
 - **v0.46.0** is released (2026-10-23): task views work like boards (slice 1), column status icons, archived cards outside the cap.
-- Migrations: **001–077** are released and immutable (045, 054, 067, 070, 071, 072, 075 unused; 054 reserved for Messages). Next free: **078**.
+- Migrations: **001–077** are released and immutable (045, 054, 067, 070, 071, 072, 075 unused; 054 reserved for Messages). **078** (lane VIEWS2) is on `main`, unreleased. Next free: **079**.
 - Development happens directly on `main`, pushed as each change passes its gates.
 
 ## In flight
 
-- [ ] **Views slice 2 and follow-ups** (operator: "complete", 2026-10-23; lane VIEWS2, migration 078 if needed): the "Leftovers (lane VIEWS…)" list below, plus "Show all levels" per person on the server.
 - [ ] **Provider and local-embedding leftovers** (lane PROV): Voyage proxy fields in the editor; a lighter local model option.
 - [ ] **Backup leftovers** (lane BACKUP2): the "Leftovers (lane BACKUP)" items that are code (objects copy, streamed manifest, `--from-dir`, Litestream levels).
 
@@ -36,22 +35,14 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 - [ ] **Show the block** (D674) was checked in headless Chrome (scrolls, focuses the block); try it with a screen reader and in a real phone browser.
 - [ ] D679 only sees a date range written with a zone (`toDate(col, '<zone>')`). One added while the report's and the data source's zones agreed is written `toDate(col)`; if the schedule's zone later differs from the data source's, nothing flags it. Detecting it needs the column's zone (catalog type, or the source's `timezone()`) per condition.
 
-## Leftovers (lane VIEWS, slice 2 and follow-ups; plan in docs/plan/TASK_VIEWS.md)
+## Leftovers (lane VIEWS2; plan in docs/plan/TASK_VIEWS.md)
 
-- [ ] Slice 2: group lanes by assignee, tag, or sprint, with drag that reassigns or replans.
-- [ ] Slice 2: board swimlanes (rows by assignee or epic) on the board and in board views.
-- [ ] Slice 2: **Add a card** in multi-board lanes (pick the board, then the lane's column on it).
-- [ ] Slice 2: a per-view collapse override (a board view now shares the board's collapsed columns, D639).
-- [ ] Slice 2: MCP `save_view` (create or update a view through a key; today views are app-only to write).
-- [ ] Slice 2: team views a board owner pins on the board for everyone (today the picker lists views people shared themselves).
-- [ ] My work's collapsed lanes (`view_key = 'my'`) are trimmed by format only, because My work's filter lives in the URL; saved views also drop lanes that are no longer in their results (D644).
-- [ ] A failed lane move rolls the lanes back to the snapshot taken before it, so another change that landed during the request shows only after a reload.
-- [ ] Lane drag was checked in headless Chrome with synthetic drag events and by unit tests; try a real mouse drag across lanes (and onto a collapsed strip) in a desktop browser.
-- [ ] A board view's filter bar cannot add a `board:` term (the board filter bar has no Board field), so "the filter became multi-board, go back to the cross-board page" only happens when the saved view changes elsewhere (checked on load).
-
-## Leftovers (lane TASKS)
-
-- [ ] "Show all levels on the board" is still per device (localStorage), while collapsed columns and "Show auto-archived cards" are per person on the server (`board_view_prefs`); move it there for one model.
+- [ ] MCP `list_views` lists the key owner's, shared, and everyone views, not the views pinned on boards they read (D658); `query_cards` runs a pinned view by id. Add a `pinned` list (per board) if agents need to find them.
+- [ ] Swimlanes have no **Add a card** per cell (it would start with the row's person or parent), and `Alt` + ↑ / ↓ reorders within the whole column rather than moving a card to the next row; rows change by drag or the card's own fields.
+- [ ] Swimlanes are on the board and in board views only; a cross-board view's lanes cannot also be split into rows.
+- [ ] A drop on a tag lane is refused when the card's board has no tag of that name (D651); creating the tag on the fly (any reader may create tags) would let it land.
+- [ ] Pinned views keep the order they were pinned in; there is no reordering of pins.
+- [ ] The real pointer drags (D662) ran from a scratch script against the QA instance; a `scripts/` headless-Chrome drag smoke (seeded boards, `Input.dispatchMouseEvent`) would keep them checked.
 
 ## Leftovers (lane LOCALEMB)
 

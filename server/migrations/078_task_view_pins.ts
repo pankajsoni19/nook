@@ -1,7 +1,7 @@
 import { addColumn, type Migration } from "./types";
 
 /**
- * Views slice 2 (lane VIEWS2, D655–D659, T445–T447):
+ * Views slice 2 (lane VIEWS2, D655–D659, T448–T450):
  *
  * - `task_view_pins`: a board's owner (or a manager) pins a view they own that is on that board, and
  *   everyone who can open the board then reads the view in the board's picker, listed first (D658).

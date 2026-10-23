@@ -45,24 +45,24 @@ describe("collapsed columns and the per-person view (D602, D606)", () => {
   test("each reader keeps their own collapsed columns and archived choice; it persists, ignores deleted columns, and needs read access", async () => {
     const { owner, member, stranger, boardId, todo, done } = await setup("View");
     let board = (await call(owner, "GET", `/boards/${boardId}`)).body;
-    expect(board.view).toEqual({ collapsedColumnIds: [], showArchived: false });
+    expect(board.view).toMatchObject({ collapsedColumnIds: [], showArchived: false });
     expect(board.board).toMatchObject({ auto_archive_days: 30, archived_count: 0 });
 
     // Stored in board order whatever the order sent, upper-case ids too; unknown ids are dropped.
     const saved = await call(owner, "PUT", `/boards/${boardId}/view`, { collapsedColumnIds: [done.id.toUpperCase(), todo.id, crypto.randomUUID()] });
     expect(saved.status).toBe(200);
-    expect(saved.body.view).toEqual({ collapsedColumnIds: [todo.id, done.id], showArchived: false });
+    expect(saved.body.view).toMatchObject({ collapsedColumnIds: [todo.id, done.id], showArchived: false });
     board = (await call(owner, "GET", `/boards/${boardId}`)).body;
     expect(board.view.collapsedColumnIds).toEqual([todo.id, done.id]);
     // The member's view is their own (a viewer-level reader may keep one too).
-    expect((await call(member, "GET", `/boards/${boardId}`)).body.view).toEqual({ collapsedColumnIds: [], showArchived: false });
+    expect((await call(member, "GET", `/boards/${boardId}`)).body.view).toMatchObject({ collapsedColumnIds: [], showArchived: false });
     const memberAudits = () => (db.query("SELECT COUNT(*) AS count FROM audit_log WHERE actor_id = ?").get(member.userId) as { count: number }).count;
     const auditsBefore = memberAudits();
-    expect((await call(member, "PUT", `/boards/${boardId}/view`, { showArchived: true })).body.view).toEqual({ collapsedColumnIds: [], showArchived: true });
+    expect((await call(member, "PUT", `/boards/${boardId}/view`, { showArchived: true })).body.view).toMatchObject({ collapsedColumnIds: [], showArchived: true });
     // The view is not audited (one person's display choice).
     expect(memberAudits()).toBe(auditsBefore);
     // A field left out keeps its value.
-    expect((await call(owner, "PUT", `/boards/${boardId}/view`, { showArchived: true })).body.view).toEqual({ collapsedColumnIds: [todo.id, done.id], showArchived: true });
+    expect((await call(owner, "PUT", `/boards/${boardId}/view`, { showArchived: true })).body.view).toMatchObject({ collapsedColumnIds: [todo.id, done.id], showArchived: true });
 
     // A deleted column drops out of the stored view.
     const extra = (await call(owner, "POST", `/boards/${boardId}/columns`, { name: "Later" })).body.column as Column;

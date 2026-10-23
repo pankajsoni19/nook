@@ -319,7 +319,7 @@ export function useBoardSavedViews({ boardId, savedViewId, routeFilter, unsaved,
   const canPinThis = Boolean(current && canPin && owner && !isPinned);
   const canUnpinThis = Boolean(current && isPinned && (canPin || current.is_owner === 1));
   const dialogs: ReactNode = <>
-    {dialog?.kind === "menu" && current && <ModalDialog title={current.name} eyebrow={isPinned ? `View · pinned for everyone on this board${current.is_owner === 1 ? "" : ` · ${current.owner_name}’s`}` : current.is_owner === 1 ? `View · ${viewVisibilityLabel(current.visibility)}` : `${current.owner_name}’s view · read only`} onClose={closeDialog}>
+    {dialog?.kind === "menu" && current && <ModalDialog title={current.name} eyebrow={isPinned ? `Pinned for everyone${current.is_owner === 1 ? "" : ` · ${current.owner_name}’s`}` : current.is_owner === 1 ? `View · ${viewVisibilityLabel(current.visibility)}` : `${current.owner_name}’s view · read only`} onClose={closeDialog}>
       <div className="move-list task-menu">
         {owner && actions.withdraw && <button className="move-option" autoFocus onClick={() => { void makePrivate(); }} disabled={busy}><Lock aria-hidden="true" /><span>Make private<small>Your Team role is view only: stop sharing to change this view</small></span></button>}
         {owner && actions.edit && <button className="move-option" autoFocus onClick={() => setDialog({ kind: "rename" })}><Pencil aria-hidden="true" /><span>Rename</span></button>}

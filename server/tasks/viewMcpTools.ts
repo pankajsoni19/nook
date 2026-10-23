@@ -145,7 +145,7 @@ export const taskViewTools: McpToolSpec[] = [
       });
     }
   }),
-  // Lane VIEWS2 (D660, T446): the one view write. Sharing and pinning stay in the app (D180).
+  // Lane VIEWS2 (D660, T449): the one view write. Sharing and pinning stay in the app (D180).
   defineTool({
     name: "save_view",
     title: "Save a task view",
@@ -155,7 +155,7 @@ export const taskViewTools: McpToolSpec[] = [
       "If the view changed since baseRevision the call fails with VIEW_CHANGED and the current revision. Views are private when made here; sharing and pinning are done in the app. Up to 50 views per person."
     ].join(" "),
     scopes: ["tasks:write"],
-    // A view reaches across every board the user can read, so only a key over the whole module may write one (T446).
+    // A view reaches across every board the user can read, so only a key over the whole module may write one (T449).
     access: { mode: "global", related: ["viewId"] },
     write: true,
     dailyBucket: "task_write",

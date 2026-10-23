@@ -8,7 +8,7 @@ const { resetMcpLimits } = await import("../server/mcpRateLimit");
 type Grant = import("../server/keyGrants").Grant;
 
 /**
- * Views slice 2 (lane VIEWS2, docs/plan/TASK_VIEWS.md D650–D660, T445–T447): grouped lanes and their
+ * Views slice 2 (lane VIEWS2, docs/plan/TASK_VIEWS.md D650–D660, T448–T450): grouped lanes and their
  * counts, prefs (grouped-lane trimming, My work's trimming, a board view's own collapse), the board's
  * "Show all levels" and collapsed swimlanes, pinned views, and MCP save_view.
  */
@@ -106,7 +106,7 @@ describe("grouped lanes (D650, D651)", () => {
   }, 30_000);
 });
 
-describe("collapsed lanes and a board view's own collapse (D644, D656, D657)", () => {
+describe("collapsed lanes and a board view's own collapse (D644, D653, D657)", () => {
   test("grouped lanes that are gone are trimmed; My work trims against the filter it sends", async () => {
     const owner = await createUser("Trim owner");
     const a = await board(owner, "Trim A");
@@ -158,7 +158,7 @@ describe("collapsed lanes and a board view's own collapse (D644, D656, D657)", (
   });
 });
 
-describe("views pinned on a board (D658, T445)", () => {
+describe("views pinned on a board (D658, T448)", () => {
   test("the owner or a manager pins a view they own; every reader of the board then reads it, listed first", async () => {
     const owner = await createUser("Pin owner");
     const manager = await createUser("Pin manager");
@@ -219,7 +219,7 @@ describe("views pinned on a board (D658, T445)", () => {
   }, 20_000);
 });
 
-describe("MCP save_view (D660, T446)", () => {
+describe("MCP save_view (D660, T449)", () => {
   const all = (module: Grant["module"], permission: Grant["permission"]): Grant => ({ module, permission, resourceKind: null, resourceId: null });
   const on = (module: Grant["module"], permission: Grant["permission"], kind: NonNullable<Grant["resourceKind"]>, id: string): Grant => ({ module, permission, resourceKind: kind, resourceId: id });
   const key = (session: Session, grants: Grant[]) => createApiKey(session.userId, { name: "Views", surfaces: "both", grants, expiresInDays: 30 }).id;
@@ -255,7 +255,7 @@ describe("MCP save_view (D660, T446)", () => {
     expect((db.query("SELECT COUNT(*) AS count FROM audit_log WHERE actor_id = ? AND event_type IN ('task.view_create', 'task.view_update')").get(owner.userId) as { count: number }).count).toBeGreaterThanOrEqual(2);
   });
 
-  test("a key limited to chosen items is never offered save_view (T446)", async () => {
+  test("a key limited to chosen items is never offered save_view (T449)", async () => {
     const owner = await createUser("Save view scoped");
     const a = await board(owner, "Scoped board");
     const view = (await call(owner, "POST", "/views", { name: "Scoped view", query: `board:${a.id}` })).body.view;

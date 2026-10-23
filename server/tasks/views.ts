@@ -75,7 +75,7 @@ const viewSelect = `SELECT v.id, v.owner_id, u.display_name AS owner_name, v.nam
   FROM task_views v JOIN users u ON u.id = v.owner_id`;
 
 /**
- * Lane VIEWS2 (D658, T445): a view its owner pinned on a board, as that board's owner or manager, is
+ * Lane VIEWS2 (D658, T448): a view its owner pinned on a board, as that board's owner or manager, is
  * read by everyone who can open the board. The view still runs as the viewer (T115), so the pin
  * shares only its name, filter, and layout. Pins exist only while the view is on that one board.
  */
@@ -437,7 +437,7 @@ export function writeViewLanePrefs(userId: string, viewKey: string, input: ViewL
 }
 
 // ---------------------------------------------------------------------------
-// Views pinned on a board for everyone who can open it (lane VIEWS2, D658, T445, migration 078).
+// Views pinned on a board for everyone who can open it (lane VIEWS2, D658, T448, migration 078).
 
 export const MAX_PINNED_VIEWS = 20;
 
@@ -514,7 +514,7 @@ export function unpinView(userId: string, boardId: string, viewId: string) {
 }
 
 // ---------------------------------------------------------------------------
-// MCP save_view (lane VIEWS2, D660, T446).
+// MCP save_view (lane VIEWS2, D660, T449).
 
 export type SaveViewInput = { viewId?: string; name?: string; filter?: string; display?: Partial<ViewDisplay>; baseRevision?: number };
 
