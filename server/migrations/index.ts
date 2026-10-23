@@ -67,6 +67,7 @@ import { reportFilterViewsMigration } from "./069_report_filter_views";
 import { agentDatasourcesMigration } from "./073_agent_datasources";
 import { taskArchiveMigration } from "./074_task_archive";
 import { vaultKeyFlagConfirmMigration } from "./076_vault_key_flag_confirm";
+import { taskViewPrefsMigration } from "./077_task_view_prefs";
 
 const migrations = [initialMigration, folderSharingMigration, totpMigration, totpRecoveryCodesMigration, mcpApiKeysMigration, documentsMigration, binMigration, noteSearchMigration, taskBoardsMigration, mcpKeyScopesMigration, taskDatesMigration, collectionsMigration, calendarMigration, eventNextOccurrenceMigration, taskCardUxMigration, userPreferencesMigration, teamRolesMigration,
   // 018 (Team invites) may reach existing installs after 019 (task hierarchy) and 020 (task views); none depends on another.
@@ -186,7 +187,9 @@ const migrations = [initialMigration, folderSharingMigration, totpMigration, tot
   // 074 (lane TASKS, D602–D609: boards.auto_archive_days, cards.done_at and archived_at, board_view_prefs) needs 009, 011, and 020.
   taskArchiveMigration,
   // 076 (lane VAULTKEY, D625: vault_key_flag_confirmations; api_keys_vault_flags_widen lets a confirmed edit raise a vault key's settings) needs 038. 075 is lane BACKUP's.
-  vaultKeyFlagConfirmMigration
+  vaultKeyFlagConfirmMigration,
+  // 077 (lane VIEWS, D639: task_view_prefs, one person's collapsed lanes per view or My work) needs 020.
+  taskViewPrefsMigration
 ];
 
 /** Every registered migration in order (read-only), for tests that build an older database shape. */

@@ -1,7 +1,8 @@
 import { audit, db, now } from "../db";
 import { withResourceLock } from "../storage";
-import { format, parse } from "../../shared/taskQuery";
-import type { BoardVisibility } from "./access";
+import { format, parse, scopedBoardId } from "../../shared/taskQuery";
+import { LANE_MODES, normalizeCollapsedLanes, type LaneMode } from "../../shared/taskLanes";
+import { readableBoardPredicate, type BoardVisibility } from "./access";
 import { planInsert } from "./boardOrder";
 import { filterError, QUERY_GROUPS, QUERY_SORTS, runQuery, type QueryGroup, type QueryResult, type QuerySort } from "./query";
 import { applyRenumber, limitReached, TaskError } from "./service";
@@ -44,6 +45,8 @@ export type ViewDisplay = {
   layout: typeof VIEW_LAYOUTS[number];
   group: typeof VIEW_GROUPS[number];
   sort: QuerySort;
+  /** The board layout's lanes for a multi-board view (lane VIEWS, D635): merged columns (default) or states. */
+  lanes?: LaneMode;
   fields?: Array<typeof VIEW_FIELDS[number]>;
 };
 export const DEFAULT_VIEW_DISPLAY: ViewDisplay = { layout: "list", group: "none", sort: "due" };
@@ -56,6 +59,11 @@ type ViewRow = {
 export type TaskView = {
   id: string; name: string; owner_id: string; owner_name: string; is_owner: 0 | 1; visibility: BoardVisibility;
   query: string; display: ViewDisplay; position: number; revision: number; created_at: string; updated_at: string;
+  /**
+   * Lane VIEWS (D630): the one board this view is on (exactly one positive `board:` term with one
+   * value) when the viewer can read it, else null. The app opens such a view as that board.
+   */
+  board_id: string | null;
 };
 
 const viewSelect = `SELECT v.id, v.owner_id, u.display_name AS owner_name, v.name, v.query, v.display_json, v.visibility,
@@ -70,7 +78,20 @@ export const readableViewPredicate = `(v.owner_id = $userId OR (u.disabled_at IS
   OR (v.visibility = 'selected' AND (EXISTS (SELECT 1 FROM task_view_members m WHERE m.view_id = v.id AND m.user_id = $userId)
     OR ${groupGrantExists("task_view", "v.id")})))))`;
 
-function toView(row: ViewRow, userId: string): TaskView {
+/** The single board a stored filter is on (D630), or null. */
+export function viewBoardId(query: string) {
+  const parsed = parse(query);
+  return parsed.ok ? scopedBoardId(parsed.query) : null;
+}
+
+/** Which of these boards the viewer can read (one query for a whole list). */
+function readableBoardIds(userId: string, boardIds: readonly string[]) {
+  if (!boardIds.length) return new Set<string>();
+  return new Set((db.query(`SELECT b.id FROM boards b WHERE b.id IN (SELECT value FROM json_each($ids)) AND ${readableBoardPredicate}`)
+    .all({ ids: JSON.stringify([...new Set(boardIds)]), userId }) as Array<{ id: string }>).map((row) => row.id));
+}
+
+function toView(row: ViewRow, userId: string, readable?: ReadonlySet<string>): TaskView {
   const { display_json, ...rest } = row;
   let display: ViewDisplay = DEFAULT_VIEW_DISPLAY;
   try {
@@ -78,7 +99,16 @@ function toView(row: ViewRow, userId: string): TaskView {
   } catch {
     // The CHECK keeps it valid JSON; fall back to defaults if a newer build wrote something unreadable.
   }
-  return { ...rest, is_owner: row.owner_id === userId ? 1 : 0, display };
+  if (display.lanes !== undefined && !(LANE_MODES as readonly string[]).includes(display.lanes)) delete display.lanes;
+  const boardId = viewBoardId(row.query);
+  const onBoard = boardId && (readable ?? readableBoardIds(userId, [boardId])).has(boardId) ? boardId : null;
+  return { ...rest, is_owner: row.owner_id === userId ? 1 : 0, display, board_id: onBoard };
+}
+
+/** Views of one list, with `board_id` resolved in one query. */
+function toViews(rows: ViewRow[], userId: string) {
+  const readable = readableBoardIds(userId, rows.map((row) => viewBoardId(row.query)).filter((id): id is string => id !== null));
+  return rows.map((row) => toView(row, userId, readable));
 }
 
 const viewNotFound = () => new TaskError(404, "View not found");
@@ -131,9 +161,9 @@ export function listViews(userId: string) {
   const everyone = db.query(`${viewSelect} WHERE v.owner_id <> $userId AND (v.visibility = 'all_users' AND ${AUDIENCE_ALL_USERS}) AND ${readableViewPredicate}
     ORDER BY v.name COLLATE NOCASE, v.id LIMIT $limit`).all({ userId, limit: VIEW_LIMITS.listed + 1 }) as ViewRow[];
   return {
-    mine: mine.map((row) => toView(row, userId)),
-    shared: shared.slice(0, VIEW_LIMITS.listed).map((row) => toView(row, userId)),
-    everyone: everyone.slice(0, VIEW_LIMITS.listed).map((row) => toView(row, userId)),
+    mine: toViews(mine, userId),
+    shared: toViews(shared.slice(0, VIEW_LIMITS.listed), userId),
+    everyone: toViews(everyone.slice(0, VIEW_LIMITS.listed), userId),
     truncated: shared.length > VIEW_LIMITS.listed || everyone.length > VIEW_LIMITS.listed
   };
 }
@@ -222,6 +252,8 @@ export function deleteView(userId: string, viewId: string) {
     requireEditableOwnedView(viewId, userId);
     db.transaction(() => {
       db.query("DELETE FROM task_views WHERE id = ?").run(viewId);
+      // Everyone's collapsed lanes go with it (D639).
+      db.query("DELETE FROM task_view_prefs WHERE view_key = ?").run(viewId);
       audit(userId, null, "task.view_delete", { viewId });
     })();
     return { ok: true as const };
@@ -274,11 +306,52 @@ export function putViewSharing(userId: string, viewId: string, visibility: Board
  * Runs a view's stored filter **as the viewer** (T115): the same query path
  * as `POST /api/tasks/query`, with the view's sort and (server-side) group.
  */
-export function viewCards(userId: string, viewId: string, input: { cursor?: string; limit?: number; tz: string; now?: Date }): QueryResult & { view: TaskView } {
+export function viewCards(userId: string, viewId: string, input: { cursor?: string; limit?: number; tz: string; now?: Date; lanes?: LaneMode }): QueryResult & { view: TaskView } {
   const view = toView(requireReadableView(viewId, userId), userId);
   const parsed = parse(view.query);
   if (!parsed.ok) throw filterError(parsed.error);
   const group: QueryGroup = (QUERY_GROUPS as readonly string[]).includes(view.display.group) ? view.display.group as QueryGroup : "none";
   const sort: QuerySort = (QUERY_SORTS as readonly string[]).includes(view.display.sort) ? view.display.sort : "due";
   return { view, ...runQuery(userId, parsed.query, { ...input, sort, group }) };
+}
+
+// ---------------------------------------------------------------------------
+// One person's collapsed lanes (lane VIEWS, D639, migration 077).
+
+export type ViewLanePrefs = { collapsedLanes: string[] };
+
+/** A view the caller reads (404 otherwise), or `my` (My work, anyone). */
+function requirePrefsTarget(userId: string, viewKey: string) {
+  return viewKey === "my" ? null : toView(requireReadableView(viewKey, userId), userId);
+}
+
+export function readViewLanePrefs(userId: string, viewKey: string): ViewLanePrefs {
+  requirePrefsTarget(userId, viewKey);
+  const row = db.query("SELECT collapsed_lanes FROM task_view_prefs WHERE user_id = ? AND view_key = ?").get(userId, viewKey) as { collapsed_lanes: string } | null;
+  let stored: unknown = [];
+  try { stored = row ? JSON.parse(row.collapsed_lanes) : []; } catch { /* the CHECK keeps it valid JSON */ }
+  return { collapsedLanes: Array.isArray(stored) ? normalizeCollapsedLanes(stored) : [] };
+}
+
+/**
+ * `PUT /views/:v/prefs` (a reader of the view; `my` for anyone): replaces the set. Malformed keys are
+ * dropped, at most 40 are kept within 1 KiB, and for a saved view a merged-column lane stays only
+ * while it is a lane of the view's current results, so the row never fills with lanes that are gone.
+ * State lanes always exist. Not audited: it is one person's view, like a sort.
+ */
+export function writeViewLanePrefs(userId: string, viewKey: string, collapsedLanes: readonly string[]): ViewLanePrefs {
+  const view = requirePrefsTarget(userId, viewKey);
+  let kept = normalizeCollapsedLanes(collapsedLanes);
+  if (view && kept.some((key) => key.startsWith("c:"))) {
+    const parsed = parse(view.query);
+    if (parsed.ok) {
+      const { columns = [], lanes } = runQuery(userId, parsed.query, { tz: "UTC", limit: 1, lanes: "columns" });
+      const known = new Set(lanes === "columns" ? columns.map((lane) => lane.key) : []);
+      kept = kept.filter((key) => !key.startsWith("c:") || known.has(key));
+    }
+  }
+  db.query(`INSERT INTO task_view_prefs (user_id, view_key, collapsed_lanes, updated_at) VALUES (?, ?, ?, ?)
+    ON CONFLICT (user_id, view_key) DO UPDATE SET collapsed_lanes = excluded.collapsed_lanes, updated_at = excluded.updated_at`)
+    .run(userId, viewKey, JSON.stringify(kept), now());
+  return { collapsedLanes: kept };
 }

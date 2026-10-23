@@ -4,6 +4,7 @@ import type { AppEnv } from "../auth";
 import { validTimeZone } from "../today/registry";
 import { parseJson, uuid } from "../validation";
 import { TASK_QUERY_LIMITS } from "../../shared/taskQuery";
+import { LANE_MODES, type LaneMode } from "../../shared/taskLanes";
 import { QUERY_GROUPS, QUERY_PAGE, QUERY_SORTS, queryCards, withBoardLevels } from "./query";
 import { TaskError } from "./service";
 import { withAssigneeAvatars } from "../avatars";
@@ -20,7 +21,9 @@ import {
   VIEW_GROUPS,
   VIEW_LAYOUTS,
   VIEW_LIMITS,
-  viewCards
+  viewCards,
+  readViewLanePrefs,
+  writeViewLanePrefs
 } from "./views";
 
 /**
@@ -60,15 +63,19 @@ export function resetTaskQueryRateLimit() {
 export const tzSchema = z.string().max(64).refine((value) => validTimeZone(value) !== null, "tz must be an IANA time zone");
 export const cursorSchema = z.string().min(1).max(1024);
 export const pageLimitSchema = z.number().int().min(1).max(QUERY_PAGE.max);
+/** With `lanes` (the board layout, D638) a page may hold up to 200 cards. */
+const lanesPageLimitSchema = z.number().int().min(1).max(QUERY_PAGE.lanes);
 
 export const taskQuerySchema = z.object({
   q: z.string().max(TASK_QUERY_LIMITS.length).default(""),
   sort: z.enum(QUERY_SORTS).optional(),
   group: z.enum(QUERY_GROUPS).optional(),
   cursor: cursorSchema.optional(),
-  limit: pageLimitSchema.optional(),
-  tz: tzSchema.default("UTC")
-}).strict();
+  limit: lanesPageLimitSchema.optional(),
+  tz: tzSchema.default("UTC"),
+  lanes: z.enum(LANE_MODES).optional()
+}).strict().refine((value) => value.lanes !== undefined || value.limit === undefined || value.limit <= QUERY_PAGE.max,
+  { message: `limit must be at most ${QUERY_PAGE.max} without lanes`, path: ["limit"] });
 
 /** 429 with Retry-After when the caller is over the query limit, else null. */
 export function rateLimitedResponse(c: Context<AppEnv>) {
@@ -85,6 +92,7 @@ export const viewDisplaySchema = z.object({
   layout: z.enum(VIEW_LAYOUTS).optional(),
   group: z.enum(VIEW_GROUPS).optional(),
   sort: z.enum(QUERY_SORTS).optional(),
+  lanes: z.enum(LANE_MODES).optional(),
   fields: z.array(z.enum(VIEW_FIELDS)).max(VIEW_FIELDS.length).refine((values) => new Set(values).size === values.length, "Fields must be unique").optional()
 }).strict();
 export const viewCreateSchema = z.object({
@@ -106,6 +114,9 @@ export const viewSharingSchema = z.object({
 }).strict();
 
 const invalid = (detail: string) => ({ error: "Invalid request", details: [detail] });
+
+/** `PUT /views/:v/prefs` (D639): the lanes this person collapsed; malformed keys are dropped by the service. */
+export const viewPrefsSchema = z.object({ collapsedLanes: z.array(z.string().max(300)).max(100) }).strict();
 
 /** Runs a service call and maps TaskError to its JSON response. */
 async function respond(c: Context<AppEnv>, operation: () => unknown, status: 200 | 201 = 200) {
@@ -166,12 +177,33 @@ export function registerTaskQueryRoutes(app: Hono<AppEnv>) {
     const cursor = c.req.query("cursor");
     const limitParam = c.req.query("limit");
     const tz = c.req.query("tz") ?? "UTC";
+    const lanesParam = c.req.query("lanes");
     if (cursor !== undefined && !cursorSchema.safeParse(cursor).success) return c.json(invalid("cursor is invalid"), 400);
-    if (limitParam !== undefined && (!/^\d+$/.test(limitParam) || !pageLimitSchema.safeParse(Number(limitParam)).success)) {
-      return c.json(invalid(`limit must be an integer from 1 to ${QUERY_PAGE.max}`), 400);
+    if (lanesParam !== undefined && !(LANE_MODES as readonly string[]).includes(lanesParam)) return c.json(invalid("lanes must be columns or state"), 400);
+    const lanes = lanesParam as LaneMode | undefined;
+    if (limitParam !== undefined && (!/^\d+$/.test(limitParam) || !(lanes ? lanesPageLimitSchema : pageLimitSchema).safeParse(Number(limitParam)).success)) {
+      return c.json(invalid(`limit must be an integer from 1 to ${lanes ? QUERY_PAGE.lanes : QUERY_PAGE.max}`), 400);
     }
     if (!tzSchema.safeParse(tz).success) return c.json(invalid("tz must be an IANA time zone"), 400);
-    return respond(c, () => withAssigneeAvatars(withBoardLevels(c.get("user").id, viewCards(c.get("user").id, id, { cursor, limit: limitParam === undefined ? undefined : Number(limitParam), tz }))));
+    return respond(c, () => withAssigneeAvatars(withBoardLevels(c.get("user").id, viewCards(c.get("user").id, id, { cursor, limit: limitParam === undefined ? undefined : Number(limitParam), tz, ...(lanes ? { lanes } : {}) }))));
+  });
+
+  // One person's collapsed lanes for a view, or for My work (`my`), D639. Not audited, like a sort.
+  const prefsKey = (c: Context<AppEnv>) => {
+    const raw = c.req.param("viewKey");
+    return raw === "my" ? "my" : uuid.parse(raw);
+  };
+  app.get("/api/tasks/views/:viewKey/prefs", (c) => {
+    const key = prefsKey(c);
+    return respond(c, () => readViewLanePrefs(c.get("user").id, key));
+  });
+  app.put("/api/tasks/views/:viewKey/prefs", async (c) => {
+    const key = prefsKey(c);
+    // Trimming runs the view's lanes, so it shares the query limit (T117).
+    const limited = rateLimitedResponse(c);
+    if (limited) return limited;
+    const body = await parseJson(c.req.raw, viewPrefsSchema);
+    return respond(c, () => writeViewLanePrefs(c.get("user").id, key, body.collapsedLanes));
   });
 
   app.post("/api/tasks/query", async (c) => {

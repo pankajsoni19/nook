@@ -132,7 +132,8 @@ describe("MCP list_views and query_cards", () => {
     const listed = (await callTool(bobKey, "list_views")).value.views as Array<Record<string, unknown>>;
     expect(listed.find((view) => view.id === w.viewId)).toEqual({
       id: w.viewId, name: "Shared view everything", owner_name: "Shared view Alice", is_owner: 0, visibility: "selected",
-      query: [w.privateBoardId, w.sharedBoardId].sort().reduce((text, id, index) => `${text}${index ? "," : "board:"}${id}`, "")
+      board_id: null, lanes: "columns",
+      query:[w.privateBoardId, w.sharedBoardId].sort().reduce((text, id, index) => `${text}${index ? "," : "board:"}${id}`, "")
     });
     const asBob = await callTool(bobKey, "query_cards", { viewId: w.viewId });
     expect(asBob.isError).toBe(false);

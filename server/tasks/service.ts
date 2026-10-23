@@ -21,6 +21,7 @@ import { dateInZone, validTimeZone } from "../today/registry";
 import { mailShared, shareMembers } from "../mail/triggers";
 import { GUEST_SHARE_DISABLED, legacyGuestShareBlocked, legacyShareLevels, writeDirectShares } from "../access/shares";
 import { groupGrantExists } from "../access/groups";
+import { foldText } from "../../shared/taskQuery";
 
 /**
  * Task Boards services (WAVES_7-9.md §3). Routes are thin adapters over these
@@ -1062,6 +1063,23 @@ export async function moveCard(userId: string, cardId: string, input: { columnId
       ...(plan.renumbered ? { renormalized: true, positions: liveCardsIn(input.columnId) } : {})
     };
   });
+}
+
+/**
+ * The column a lane drop or MCP `move_card { state | columnName }` means on the card's own board
+ * (lane VIEWS, D636, D637, D640): the first column of that state, or the first whose name folds to
+ * the same text (case and accents), by position. Edit level, as the move itself; a board without
+ * one is 400 `NO_SUCH_COLUMN`.
+ */
+export function columnForMove(userId: string, cardId: string, target: { state?: ColumnState; columnName?: string }) {
+  const { board } = requireCardAt(cardId, userId, "edit");
+  const columns = listColumns(board.id);
+  const name = target.columnName === undefined ? null : foldText(target.columnName.trim());
+  const found = target.state ? columns.find((column) => column.state === target.state) : columns.find((column) => foldText(column.name.trim()) === name);
+  if (!found) {
+    throw new TaskError(400, target.state ? `This card's board has no column in the ${target.state} state` : "This card's board has no column with that name", "NO_SUCH_COLUMN");
+  }
+  return found.id;
 }
 
 /**

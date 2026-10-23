@@ -18,7 +18,7 @@ import { QUERY_LIMITS, TASK_FLAGS, type CardFilter } from "../../shared/taskQuer
 import { filterBoardCardIds } from "./cardQuery";
 import { attachmentSchema, cardCreateSchema, cardMoveSchema, cardPatchSchema, columnPatchSchema, commentCreateSchema, isCalendarDate, tagCreateSchema, tagPatchSchema } from "./routes";
 import { archiveCard, unarchiveCard } from "./archive";
-import { ARCHIVED_PAGE, cardDetail, createCard, decodeArchivedCursor, deleteCard, getBoard, getCard, listBoards, moveCard, patchCard, patchColumn, requireOwnedBoard, TaskError, type CardSummary } from "./service";
+import { ARCHIVED_PAGE, cardDetail, columnForMove, createCard, decodeArchivedCursor, deleteCard, getBoard, getCard, listBoards, moveCard, patchCard, patchColumn, requireOwnedBoard, TaskError, type CardSummary } from "./service";
 import { createTag, listBoardTags, TAG_COLORS, updateTag, type BoardTag } from "./tags";
 import { taskViewTools } from "./viewMcpTools";
 import { boardStructure, cardHierarchy } from "./hierarchy";
@@ -515,15 +515,28 @@ export const taskTools: McpToolSpec[] = [
   defineTool({
     name: "move_card",
     title: "Move a card",
-    description: "Move a card to a column on the same board. afterCardId: omit for the bottom, null for the top, or a card in the target column. If the board changed, the call fails with STALE_POSITION and the column's current order. Moving into another column at its WIP limit fails with COLUMN_FULL.",
+    description: [
+      "Move a card to a column on the same board. Name the column with exactly one of columnId, state (the first column in that state on the card's board: todo, doing, or done),",
+      "or columnName (the first column with that name on the card's board, ignoring case and accents), as a cross-board view's lane does; a board without one fails with NO_SUCH_COLUMN.",
+      "afterCardId: omit for the bottom, null for the top, or a card in the target column. If the board changed, the call fails with STALE_POSITION and the column's current order. Moving into another column at its WIP limit fails with COLUMN_FULL."
+    ].join(" "),
     scopes: ["tasks:write"],
+    // `state` and `columnName` resolve on the card's own board, after the card's edit check (D640).
     access: { mode: "items", items: [{ arg: "cardId", kind: "card" }], related: ["columnId", "afterCardId"] },
     write: true,
     dailyBucket: "task_write",
-    inputSchema: z.object({ cardId: uuid, columnId: uuid, afterCardId: uuid.nullable().optional() }),
-    handler: async ({ cardId, columnId, afterCardId }, key) => {
-      const input = afterCardId === undefined ? { columnId } : routeInput(cardMoveSchema, { columnId, afterCardId });
+    inputSchema: z.object({
+      cardId: uuid,
+      columnId: uuid.optional(),
+      state: z.enum(["todo", "doing", "done"]).optional().describe("Instead of columnId: the first column in this state on the card's board"),
+      columnName: z.string().trim().min(1).max(60).optional().describe("Instead of columnId: the first column with this name on the card's board"),
+      afterCardId: uuid.nullable().optional()
+    }),
+    handler: async ({ cardId, columnId, state, columnName, afterCardId }, key) => {
+      if ([columnId, state, columnName].filter((value) => value !== undefined).length !== 1) throw new McpToolError("INVALID", "Give exactly one of columnId, state, or columnName");
       return service(key, async () => {
+        const target = columnId ?? columnForMove(key.userId, cardId, state !== undefined ? { state } : { columnName: columnName! });
+        const input = afterCardId === undefined ? { columnId: target } : routeInput(cardMoveSchema, { columnId: target, afterCardId });
         const { card } = await moveCard(key.userId, cardId, input);
         return { card: { id: card.id, column_id: card.column_id, position: card.position } };
       });

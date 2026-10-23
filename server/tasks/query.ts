@@ -11,6 +11,7 @@ import { TaskError } from "./service";
 import { AUDIENCE_ALL_USERS, audienceAllUsersFor, can } from "../team/roles";
 import { userRole } from "../team/userRole";
 import { groupGrantExists } from "../access/groups";
+import { buildLanes, laneKeyOf, type LaneColumn, type LaneMode, type QueryLane } from "../../shared/taskLanes";
 
 /**
  * The cross-board card query (research 2026-09-26 §10.3–§10.4, D140, D144,
@@ -209,7 +210,8 @@ export type QuerySort = typeof QUERY_SORTS[number];
 /** Server-side groups: single-valued dimensions only, so a group is one contiguous run across pages. Multi-valued ones (assignee, tag) group on the client. */
 export const QUERY_GROUPS = ["none", "board", "state", "due"] as const;
 export type QueryGroup = typeof QUERY_GROUPS[number];
-export const QUERY_PAGE = { default: 50, max: 100 } as const;
+/** `lanes` (D638): the board layout pages up to 200 cards at a time. */
+export const QUERY_PAGE = { default: 50, max: 100, lanes: 200 } as const;
 /** `total` is reported only up to this many matches. */
 export const QUERY_TOTAL_CAP = 1000;
 
@@ -288,9 +290,15 @@ export type QueryInput = {
    * page cut and the total), and `refs` names only these boards and their columns and tags.
    */
   boardIds?: readonly string[];
+  /**
+   * Lane VIEWS (D635–D638): the board layout's lanes. The first page then also carries the lane list
+   * (`columns`), true per-lane counts over the whole match (`laneCounts`), and the mode used.
+   */
+  lanes?: LaneMode;
 };
 
-export type QueryResult = { query: string; cards: QueriedCard[]; nextCursor: string | null; total?: number; refs?: QueryRefs };
+export type QueryLanes = { lanes: LaneMode; lanesFallback?: true; columns: QueryLane[]; laneCounts: Record<string, number> };
+export type QueryResult = { query: string; cards: QueriedCard[]; nextCursor: string | null; total?: number; refs?: QueryRefs } & Partial<QueryLanes>;
 
 const FLAG_ORDER = ["urgent", "blocked", "needs_review", "on_hold"];
 
@@ -370,7 +378,7 @@ export function queryCards(userId: string, input: QueryInput): QueryResult {
 export function runQuery(userId: string, query: TaskQuery, input: Omit<QueryInput, "q">): QueryResult {
   const sort = input.sort ?? "due";
   const group = input.group ?? "none";
-  const limit = Math.min(Math.max(Math.trunc(input.limit ?? QUERY_PAGE.default), 1), QUERY_PAGE.max);
+  const limit = Math.min(Math.max(Math.trunc(input.limit ?? QUERY_PAGE.default), 1), input.lanes ? QUERY_PAGE.lanes : QUERY_PAGE.max);
   const now = input.now ?? new Date();
   const today = dateInZone(now, input.tz);
   const canonical = format(query);
@@ -413,8 +421,33 @@ export function runQuery(userId: string, query: TaskQuery, input: Omit<QueryInpu
     const counted = (db.query(`SELECT COUNT(*) AS count FROM (SELECT 1 ${from} LIMIT $cap)`).get({ ...compiled.params, ...(input.boardIds ? { keyBoards: params.keyBoards! } : {}), cap: QUERY_TOTAL_CAP + 1 }) as { count: number }).count;
     if (counted <= QUERY_TOTAL_CAP) result.total = counted;
     result.refs = resolveRefs(userId, query, result.cards, input.boardIds);
+    if (input.lanes) Object.assign(result, queryLanes(input.lanes, from, { ...compiled.params, ...(input.boardIds ? { keyBoards: params.keyBoards! } : {}) }));
   }
   return result;
+}
+
+/**
+ * The lanes of a query's whole match (D635, D638): the columns of every board with a matching card
+ * (all readable, since the match is), merged by `buildLanes`, and each lane's true count. Each board
+ * column carries its WIP limit and live, unarchived card count, so the client can refuse a drop on a
+ * full column before asking (the server still checks, 409 COLUMN_FULL).
+ */
+function queryLanes(mode: LaneMode, from: string, params: Record<string, Binding>): QueryLanes {
+  const matched = db.query(`SELECT k.column_id AS column_id, k.board_id AS board_id, COUNT(*) AS count ${from} GROUP BY k.column_id`).all(params) as Array<{ column_id: string; board_id: string; count: number }>;
+  const boardIds = [...new Set(matched.map((row) => row.board_id))];
+  const columns = boardIds.length ? db.query(`SELECT c.id, c.board_id, c.name, c.state, c.position, c.wip_limit,
+      (SELECT COUNT(*) FROM cards x WHERE x.column_id = c.id AND x.deleted_at IS NULL AND x.archived_at IS NULL) AS card_count
+    FROM board_columns c WHERE c.board_id IN (SELECT value FROM json_each(?)) ORDER BY c.board_id, c.position, c.id`).all(JSON.stringify(boardIds)) as LaneColumn[] : [];
+  const layout = buildLanes(mode, columns);
+  const byId = new Map(columns.map((column) => [column.id, column]));
+  const laneCounts: Record<string, number> = Object.fromEntries(layout.lanes.map((lane) => [lane.key, 0]));
+  for (const row of matched) {
+    const column = byId.get(row.column_id);
+    if (!column) continue;
+    const key = laneKeyOf(layout.mode, column);
+    laneCounts[key] = (laneCounts[key] ?? 0) + row.count;
+  }
+  return { lanes: layout.mode, ...(layout.fallback ? { lanesFallback: true as const } : {}), columns: layout.lanes, laneCounts };
 }
 
 /**

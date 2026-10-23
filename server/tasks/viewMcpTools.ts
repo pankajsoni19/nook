@@ -78,7 +78,7 @@ export const taskViewTools: McpToolSpec[] = [
   defineTool({
     name: "list_views",
     title: "List saved task views",
-    description: "List the saved cross-board task views the user can open: their own, views shared with them, and views shared with everyone. Each has a filter in the task query language; run one with query_cards.",
+    description: "List the saved cross-board task views the user can open: their own, views shared with them, and views shared with everyone. Each has a filter in the task query language; run one with query_cards. board_id is set when the view is on one board the user can read (it opens as that board with the filter); lanes is how its board layout groups cards across boards (columns: merged by column name and state; state: to do, in progress, done).",
     scopes: ["tasks:read"],
     access: { mode: "list", lists: ["task_view"] },
     write: false,
@@ -90,7 +90,9 @@ export const taskViewTools: McpToolSpec[] = [
       const chosen = keyContainerIds(key, "tasks:read", "task_view");
       return {
         views: [...mine, ...shared, ...everyone].filter((view) => chosen === null || chosen.includes(view.id)).map((view) => ({
-          id: view.id, name: view.name, owner_name: view.owner_name, is_owner: view.is_owner, visibility: view.visibility, query: view.query
+          id: view.id, name: view.name, owner_name: view.owner_name, is_owner: view.is_owner, visibility: view.visibility, query: view.query,
+          // Lane VIEWS (D640): the one board the view is on (null across boards), and its board lanes.
+          board_id: view.board_id, lanes: view.display.lanes ?? "columns"
         }))
       };
     }
