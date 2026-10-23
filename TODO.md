@@ -48,7 +48,6 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 
 ## Leftovers (lane TASKS)
 
-- [ ] Auto-archived cards still count toward the 1,000-card board cap (D605), so a long-lived board fills up with them; decide whether archived cards leave the cap (and the board payload with "Show auto-archived cards" on stays bounded some other way) or get purged after a further period.
 - [ ] "Show all levels on the board" is still per device (localStorage), while collapsed columns and "Show auto-archived cards" are per person on the server (`board_view_prefs`); move it there for one model.
 
 ## Leftovers (lane LOCALEMB)

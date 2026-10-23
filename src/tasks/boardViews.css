@@ -200,3 +200,8 @@ span.task-filter-chip-body { cursor: default; }
 
 /* The filter bar's sprint filter disagrees with the header switcher (QA 0.9.0). */
 .task-sprint-conflict { margin: 0 clamp(16px, 3vw, 32px) 8px; border-radius: 8px; padding: 6px 10px; background: #221d12; color: #f0d591; font-size: .78rem; }
+
+/* D634: the board lists the latest 200 archived cards; "Showing the latest 200 of 1,234 archived cards · Show more". */
+.task-archived-note { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; margin: 0 clamp(16px, 3vw, 32px) 8px; border: 1px dashed rgb(255 255 255 / 14%); border-radius: 8px; padding: 2px 4px 2px 10px; color: #a8a8ae; font-size: .78rem; }
+.task-archived-note span::after { content: " ·"; }
+.task-archived-note .task-column-show-all { padding: 4px 12px; }

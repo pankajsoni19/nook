@@ -101,7 +101,12 @@ export type CardSummary = {
 /** `sprints` (17B): open sprints plus the latest completed ones; older servers omit it. */
 /** `view` (D602, D606): the viewer's own collapsed columns and whether they show archived cards; older servers omit it. */
 export type BoardView = { collapsedColumnIds: string[]; showArchived: boolean };
-export type BoardDetail = { board: BoardSummary; columns: BoardColumn[]; cards: CardSummary[]; tags?: BoardTag[]; sprints?: SprintSummary[]; view?: BoardView };
+/**
+ * `archivedPage` (D634): sent when the viewer shows archived cards. The board carries at most 200 of
+ * them, newest archived first; `next` fetches the following page (null when none are left).
+ */
+export type ArchivedPage = { next: string | null };
+export type BoardDetail = { board: BoardSummary; columns: BoardColumn[]; cards: CardSummary[]; tags?: BoardTag[]; sprints?: SprintSummary[]; view?: BoardView; archivedPage?: ArchivedPage };
 
 /** A sprint (17B, D124). Counts are live work-level cards planned in it, and those in a done column. */
 export type SprintSummary = {
@@ -140,6 +145,12 @@ export function hydrateBoard(payload: BoardPayload): BoardDetail {
 }
 
 export const getBoard = (boardId: string) => api<BoardPayload>(`/tasks/boards/${boardId}`).then(hydrateBoard);
+/** The next page of archived cards (D634), hydrated like the board's. */
+export async function getArchivedCards(boardId: string, before: string) {
+  const page = await api<Pick<BoardPayload, "cards" | "users"> & { archivedPage: ArchivedPage }>(`/tasks/boards/${boardId}/archived?before=${encodeURIComponent(before)}`);
+  const { cards } = hydrateBoard({ board: { id: boardId } as BoardSummary, columns: [], cards: page.cards, users: page.users });
+  return { cards, archivedPage: page.archivedPage };
+}
 export const renameBoard = (boardId: string, name: string) => api<{ board: BoardSummary }>(`/tasks/boards/${boardId}`, json("PATCH", { name }));
 /** Owner or manager (D604): 1–365 days, or null to turn auto-archive off. */
 export const setAutoArchiveDays = (boardId: string, autoArchiveDays: number | null) => api<{ board: BoardSummary }>(`/tasks/boards/${boardId}`, json("PATCH", { autoArchiveDays }));

@@ -5,7 +5,7 @@ import { parseJson, uuid } from "../validation";
 import { MAX_ASSIGNEES } from "./assignees";
 import { isDueTime, isDueTimeZone } from "./dueTime";
 import { attachToCard, detachFromCard, listAttachments } from "./attachments";
-import { boardPayload, listRelations, MAX_RELATIONS_PER_CARD } from "./cardRelations";
+import { archivedCardsPage, boardPayload, listRelations, MAX_RELATIONS_PER_CARD } from "./cardRelations";
 import { RELATION_TYPES, type RelationType } from "./relations";
 import { registerCardRelationRoutes } from "./relationRoutes";
 import { CARD_FLAGS, createTag, deleteTag, MAX_TAGS_PER_CARD, TAG_COLORS, TAG_NAME_MAX, updateTag } from "./tags";
@@ -32,6 +32,7 @@ import {
   createBoard,
   createCard,
   createColumn,
+  decodeArchivedCursor,
   deleteCard,
   getCard,
   moveCard,
@@ -250,6 +251,15 @@ export function registerTaskRoutes(app: Hono<AppEnv>) {
   app.get("/api/tasks/boards/:boardId", (c) => {
     const boardId = id(c, "boardId");
     return respond(c, () => boardPayload(c.get("user").id, boardId));
+  });
+
+  // D634: the next page of archived cards after `before` (the last page's `archivedPage.next`), newest archived first.
+  app.get("/api/tasks/boards/:boardId/archived", async (c) => {
+    const boardId = id(c, "boardId");
+    const raw = c.req.query("before");
+    const before = raw === undefined ? null : decodeArchivedCursor(raw);
+    if (raw !== undefined && !before) return c.json(invalid("before must be a cursor from archivedPage.next"), 400);
+    return respond(c, () => archivedCardsPage(c.get("user").id, boardId, before));
   });
 
   app.patch("/api/tasks/boards/:boardId", async (c) => {

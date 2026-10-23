@@ -1,6 +1,6 @@
 import { audit, db, now } from "../db";
 import { relationTypeFor, storedRelation, type RelationKind, type RelationType, type StoredRelation } from "./relations";
-import { getBoard, limitReached, requireCardAt, requireReadableBoard, requireReadableCard, TaskError, withBoardLock } from "./service";
+import { ARCHIVED_PAGE, encodeArchivedCursor, getBoard, limitReached, requireCardAt, requireReadableBoard, requireReadableCard, TaskError, withBoardLock, type ArchivedCursor } from "./service";
 import { readViewPrefs } from "./archive";
 import { AUDIENCE_ALL_USERS } from "../team/roles";
 import { groupGrantExists } from "../access/groups";
@@ -191,7 +191,7 @@ export function relationCountsForBoard(boardId: string, userId: string) {
 }
 
 /** `GET /boards/:b` (and MCP `list_cards`): the board with each card's relation counts for this viewer. */
-export function getBoardWithRelationCounts(userId: string, boardId: string, options: { includeArchived?: boolean } = {}) {
+export function getBoardWithRelationCounts(userId: string, boardId: string, options: Parameters<typeof getBoard>[2] = {}) {
   const detail = getBoard(userId, boardId, options);
   const counts = relationCountsForBoard(boardId, userId);
   return { ...detail, cards: detail.cards.map((card) => ({ ...card, ...(counts.get(card.id) ?? { relation_count: 0, open_blockers: 0 }) })) };
@@ -208,12 +208,41 @@ export type BoardPayloadUser = { display_name: string; can_read: 0 | 1; avatar_u
  */
 export function boardPayload(userId: string, boardId: string) {
   requireReadableBoard(boardId, userId);
-  // The viewer's own view (D602, D606): collapsed columns, and auto-archived cards only when they show them.
+  // The viewer's own view (D602, D606): collapsed columns, and archived cards only when they show them,
+  // at most ARCHIVED_PAGE of them, newest archived first (D634); live cards are always all sent.
   const view = readViewPrefs(boardId, userId);
-  const detail = getBoardWithRelationCounts(userId, boardId, { includeArchived: view.showArchived });
+  const detail = getBoardWithRelationCounts(userId, boardId, { includeArchived: view.showArchived ? { limit: ARCHIVED_PAGE } : false });
+  const { cards, users } = trimCards(detail.cards);
+  return { ...detail, cards, users, view, ...(view.showArchived ? { archivedPage: archivedPage(detail.cards) } : {}) };
+}
+
+/**
+ * `GET /boards/:b/archived?before=` (any reader, D634): the next ARCHIVED_PAGE archived cards, newest
+ * archived first, after the cursor from the last page's `archivedPage.next`, trimmed like the board.
+ */
+export function archivedCardsPage(userId: string, boardId: string, before: ArchivedCursor | null) {
+  const detail = getBoardWithRelationCounts(userId, boardId, { includeArchived: { limit: ARCHIVED_PAGE, before }, archivedOnly: true });
+  const { cards, users } = trimCards(detail.cards);
+  return { cards, users, archivedPage: archivedPage(detail.cards) };
+}
+
+/** `next`: the cursor after the oldest archived card sent, or null when no more are left (D634). */
+export function archivedPage(cards: Array<{ id: string; archived_at: string | null }>) {
+  let oldest: { id: string; archived_at: string | null } | null = null;
+  let count = 0;
+  for (const card of cards) {
+    if (!card.archived_at) continue;
+    count += 1;
+    if (!oldest || card.archived_at < oldest.archived_at! || (card.archived_at === oldest.archived_at && card.id < oldest.id)) oldest = card;
+  }
+  return { next: count === ARCHIVED_PAGE && oldest ? encodeArchivedCursor(oldest) : null };
+}
+
+/** The D113 trim of a card list and its `users` map. */
+function trimCards(list: ReturnType<typeof getBoardWithRelationCounts>["cards"]) {
   const users: Record<string, BoardPayloadUser> = {};
   // Lane TASKS (D605): `done_at` is left out and `archived_at` sent only when set, so the trim holds.
-  const cards = detail.cards.map(({ board_id: _board, assignees, assignee_id: _id, assignee_name: _name, done_at: _done, archived_at: archivedAt, ...card }) => {
+  const cards = list.map(({ board_id: _board, assignees, assignee_id: _id, assignee_name: _name, done_at: _done, archived_at: archivedAt, ...card }) => {
     for (const assignee of assignees) users[assignee.id] ??= { display_name: assignee.display_name, can_read: assignee.can_read };
     return { ...card, ...(archivedAt ? { archived_at: archivedAt } : {}), assignee_ids: assignees.map((assignee) => assignee.id) };
   });
@@ -224,5 +253,5 @@ export function boardPayload(userId: string, boardId: string) {
     entry.avatar_url = avatars.get(id) ?? null;
     if (integrations.has(id)) entry.is_integration = true;
   }
-  return { ...detail, cards, users, view };
+  return { cards, users };
 }

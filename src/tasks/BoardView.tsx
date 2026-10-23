@@ -56,6 +56,7 @@ import {
   deleteColumn,
   restoreTaskItem,
   getBoard,
+  getArchivedCards,
   saveBoardView,
   archiveCard,
   unarchiveCard,
@@ -471,6 +472,30 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
     }
   }
 
+  /**
+   * D634: the board sends at most 200 archived cards, newest archived first; "Show more" appends the
+   * next page (cards already listed, from a local archive meanwhile, are not repeated).
+   */
+  const [loadingArchived, setLoadingArchived] = useState(false);
+  async function showMoreArchived() {
+    const next = detailRef.current?.archivedPage?.next;
+    if (!next || loadingArchived) return;
+    setLoadingArchived(true);
+    try {
+      const page = await getArchivedCards(boardId, next);
+      setDetail((current) => {
+        if (!current) return current;
+        const listed = new Set(current.cards.map((card) => card.id));
+        return { ...current, cards: [...current.cards, ...page.cards.filter((card) => !listed.has(card.id))], archivedPage: page.archivedPage };
+      });
+      setAnnouncement(`Showing ${page.cards.length} more archived ${page.cards.length === 1 ? "card" : "cards"}`);
+    } catch (reason) {
+      notify.error(taskErrorMessage(reason, "Could not load more archived cards"));
+    } finally {
+      setLoadingArchived(false);
+    }
+  }
+
   /** Board settings → Show auto-archived cards (D606): saved to this viewer's view, then the board reloads with or without them. */
   async function setShowArchived(showArchived: boolean) {
     try {
@@ -675,6 +700,14 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
     {!loadError && !detail && <p className="bin-loading task-board-state" role="status">Loading the board…</p>}
     {detail && (phone ? <div className="task-board-controls">{viewSwitch}{filterBar}</div> : filterBar)}
     {detail && sprintConflict && <p className="task-sprint-conflict" role="status">{sprintConflict}</p>}
+    {detail && showArchived && detail.archivedPage?.next && (() => {
+      const shown = detail.cards.filter((card) => card.archived_at).length;
+      const total = Math.max(shown, board?.archived_count ?? shown);
+      return <p className="task-archived-note">
+        <span>Showing the latest {shown.toLocaleString()} of {total.toLocaleString()} archived cards</span>
+        <button className="task-column-show-all" onClick={() => { void showMoreArchived(); }} disabled={loadingArchived}>{loadingArchived ? "Loading…" : "Show more"}</button>
+      </p>;
+    })()}
     {detail && data && result && view === "table" && <div className="task-view-body">
       <BoardTable board={data} cards={result.cards} sort={query.sort} today={viewContext.today} filtered={filtered}
         onSort={(sort) => onQueryChange(withBoardQuery(query, { sort }))}

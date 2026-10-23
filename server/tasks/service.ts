@@ -42,7 +42,31 @@ export class TaskError extends Error {
   }
 }
 
-export const LIMITS = { boardsPerOwner: 50, columnsPerBoard: 20, liveCardsPerBoard: 1000, commentsPerCard: 500, attachmentsPerCard: 50, attachmentsPerComment: 10 } as const;
+/**
+ * `liveCardsPerBoard` counts live cards that are not archived (D632: archived cards leave the cap);
+ * `cardsPerBoard` is the backstop on every live card, archived ones included (D633).
+ */
+export const LIMITS = { boardsPerOwner: 50, columnsPerBoard: 20, liveCardsPerBoard: 1000, cardsPerBoard: 10000, commentsPerCard: 500, attachmentsPerCard: 50, attachmentsPerComment: 10 } as const;
+/** Archived cards the board payload sends at most, newest archived first (D634); more come by page. */
+export const ARCHIVED_PAGE = 200;
+
+export const boardFullMessage = `A board can have up to ${LIMITS.liveCardsPerBoard} cards, not counting archived ones; archive or bin a card to make room`;
+export const boardStoreFullMessage = `A board can keep up to ${LIMITS.cardsPerBoard} cards, archived ones included; bin archived cards to make room`;
+
+/** The board's live cards: all of them, and those not archived (the ones the cap counts, D632). */
+export function boardCardCounts(boardId: string) {
+  return db.query("SELECT COUNT(*) AS total, COUNT(*) - COUNT(archived_at) AS active FROM cards WHERE board_id = ? AND deleted_at IS NULL").get(boardId) as { total: number; active: number };
+}
+
+/**
+ * 409 LIMIT_REACHED unless the board has room for `active` more cards that are not archived and
+ * `total` more live cards (D632, D633). Unarchiving adds an active card but no live one.
+ */
+export function requireBoardRoom(boardId: string, add: { active: number; total: number }) {
+  const counts = boardCardCounts(boardId);
+  if (add.active > 0 && counts.active + add.active > LIMITS.liveCardsPerBoard) throw limitReached(boardFullMessage);
+  if (add.total > 0 && counts.total + add.total > LIMITS.cardsPerBoard) throw limitReached(boardStoreFullMessage);
+}
 
 const boardNotFound = () => new TaskError(404, "Board not found");
 const columnNotFound = () => new TaskError(404, "Column not found");
@@ -205,10 +229,44 @@ function requireDue(current: Parameters<typeof resolveDue>[0], input: DueInput) 
   return resolved;
 }
 
-/** The board's live cards in order; `includeArchived: false` leaves out auto-archived ones (D605). */
-export function listCards(boardId: string, options: { includeArchived?: boolean } = {}): CardSummary[] {
-  const archived = options.includeArchived === false ? " AND k.archived_at IS NULL" : "";
-  const cards = db.query(`${cardSummarySelect} WHERE k.board_id = ? AND k.deleted_at IS NULL${archived} ORDER BY k.position, k.id`).all(boardId) as SelectedCard[];
+/**
+ * Which archived cards a board read includes (D634): none, all, or at most `limit` of them, newest
+ * archived first, from before the `before` cursor (an archived card's `archived_at` and id).
+ */
+export type ArchivedSelection = { limit: number; before?: ArchivedCursor | null };
+export type ArchivedCursor = { archivedAt: string; id: string };
+
+/** `archived_at|id` of the last card of a page; the next page starts after it (D634). */
+export const encodeArchivedCursor = (card: { archived_at: string | null; id: string }) => `${card.archived_at}|${card.id}`;
+const CURSOR = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z)\|([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+export function decodeArchivedCursor(value: string): ArchivedCursor | null {
+  const match = CURSOR.exec(value);
+  return match ? { archivedAt: match[1]!, id: match[2]!.toLowerCase() } : null;
+}
+
+/** The archived cards of a page, as SQL over `k` (newest archived first, D634). */
+function archivedPageSql(boardId: string, page: ArchivedSelection) {
+  const before = page.before ? " AND (a.archived_at < $beforeAt OR (a.archived_at = $beforeAt AND a.id < $beforeId))" : "";
+  return {
+    sql: `k.id IN (SELECT a.id FROM cards a WHERE a.board_id = $boardId AND a.deleted_at IS NULL AND a.archived_at IS NOT NULL${before}
+      ORDER BY a.archived_at DESC, a.id DESC LIMIT $archivedLimit)`,
+    params: { boardId, archivedLimit: page.limit, ...(page.before ? { beforeAt: page.before.archivedAt, beforeId: page.before.id } : {}) }
+  };
+}
+
+/**
+ * The board's live cards in order. `includeArchived`: true (the default) lists archived cards too,
+ * false leaves them out (D605), and `{ limit, before }` lists one page of them (D634).
+ * `archivedOnly` lists only that page.
+ */
+export function listCards(boardId: string, options: { includeArchived?: boolean | ArchivedSelection; archivedOnly?: boolean } = {}): CardSummary[] {
+  const include = options.includeArchived ?? true;
+  const page = typeof include === "object" ? archivedPageSql(boardId, include) : null;
+  const archived = options.archivedOnly
+    ? page ? ` AND ${page.sql}` : " AND k.archived_at IS NOT NULL"
+    : include === false ? " AND k.archived_at IS NULL" : page ? ` AND (k.archived_at IS NULL OR ${page.sql})` : "";
+  const cards = db.query(`${cardSummarySelect} WHERE k.board_id = $boardId AND k.deleted_at IS NULL${archived} ORDER BY k.position, k.id`)
+    .all({ ...(page?.params ?? {}), boardId }) as SelectedCard[];
   // One grouped query per concern over the board's live cards, never a per-card subquery (§3.1).
   const assignees = assigneesForBoard(boardId);
   const tags = tagIdsForBoard(boardId);
@@ -229,7 +287,7 @@ export function listCards(boardId: string, options: { includeArchived?: boolean 
  * The board, its columns, cards, tags, and sprints. Cards include auto-archived ones unless
  * `includeArchived` is false (the app's board passes the viewer's choice, D606; MCP lists them all).
  */
-export function getBoard(userId: string, boardId: string, options: { includeArchived?: boolean } = {}) {
+export function getBoard(userId: string, boardId: string, options: Parameters<typeof listCards>[1] = {}) {
   requireReadableBoard(boardId, userId);
   // Open sprints and the latest completed ones (17B, §6.1); empty on a board that never had sprints.
   return { board: boardSummary(boardId, userId)!, columns: listColumns(boardId), cards: listCards(boardId, options), tags: listBoardTags(boardId), sprints: boardSprints(boardId) };
@@ -715,8 +773,7 @@ export function createCard(userId: string, boardId: string, input: CardCreateInp
     for (const assigneeId of assignees ?? []) requireAssignableUser(boardId, assigneeId);
     const tagIds = input.tagIds === undefined ? undefined : requireCardTags(boardId, input.tagIds);
     const due = requireDue({ due_on: null, due_time: null, due_tz: null }, input).value;
-    const live = (db.query("SELECT COUNT(*) AS count FROM cards WHERE board_id = ? AND deleted_at IS NULL").get(boardId) as { count: number }).count;
-    if (live >= LIMITS.liveCardsPerBoard) throw limitReached(`A board can have up to ${LIMITS.liveCardsPerBoard} cards`);
+    requireBoardRoom(boardId, { active: 1, total: 1 });
     const attachmentIds = input.attachmentIds === undefined ? [] : [...new Set(input.attachmentIds.map((documentId) => documentId.toLowerCase()))];
     const placement = resolvePlacement(boardId, { parentId: input.parentId ? input.parentId.toLowerCase() : null, level: input.level });
     if (placement.parentId) requireChildRoom(placement.parentId);
@@ -978,6 +1035,8 @@ export async function moveCard(userId: string, cardId: string, input: { columnId
     const { card } = requireCardAt(cardId, userId, "edit");
     const column = requireBoardColumn(board.id, input.columnId);
     if (card.column_id !== column.id) requireColumnRoom(column);
+    // Another column unarchives the card (D605), so it needs room under the cap again (D632).
+    if (card.column_id !== column.id && card.archived_at) requireBoardRoom(board.id, { active: 1, total: 0 });
     if (input.afterCardId === cardId) throw stalePosition(input.columnId);
     const siblings = liveCardsIn(input.columnId).filter((card) => card.id !== cardId);
     const plan = planInsert(siblings, input.afterCardId);

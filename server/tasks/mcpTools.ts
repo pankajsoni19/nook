@@ -8,7 +8,7 @@ import { searchText } from "../search";
 import { attachToCard, linkableCardDocument, listAttachments, needsLinkConfirm, type CardAttachment } from "./attachments";
 import { keyMayLinkAttachment } from "../attachments/keyLinks";
 import { restoreTaskItem } from "./bin";
-import { createRelation, getBoardWithRelationCounts, listRelations, type CardRelation, type RelationCounts } from "./cardRelations";
+import { archivedPage, createRelation, getBoardWithRelationCounts, listRelations, type CardRelation, type RelationCounts } from "./cardRelations";
 import { searchCards } from "./cardSearch";
 import { parseCardSearchQuery, relationCreateSchema } from "./relationRoutes";
 import { RELATION_TYPES, type RelationType } from "./relations";
@@ -18,7 +18,7 @@ import { QUERY_LIMITS, TASK_FLAGS, type CardFilter } from "../../shared/taskQuer
 import { filterBoardCardIds } from "./cardQuery";
 import { attachmentSchema, cardCreateSchema, cardMoveSchema, cardPatchSchema, columnPatchSchema, commentCreateSchema, isCalendarDate, tagCreateSchema, tagPatchSchema } from "./routes";
 import { archiveCard, unarchiveCard } from "./archive";
-import { cardDetail, createCard, deleteCard, getBoard, getCard, listBoards, moveCard, patchCard, patchColumn, requireOwnedBoard, TaskError, type CardSummary } from "./service";
+import { ARCHIVED_PAGE, cardDetail, createCard, decodeArchivedCursor, deleteCard, getBoard, getCard, listBoards, moveCard, patchCard, patchColumn, requireOwnedBoard, TaskError, type CardSummary } from "./service";
 import { createTag, listBoardTags, TAG_COLORS, updateTag, type BoardTag } from "./tags";
 import { taskViewTools } from "./viewMcpTools";
 import { boardStructure, cardHierarchy } from "./hierarchy";
@@ -280,7 +280,7 @@ const listFilters = {
   sprint: z.union([z.enum(["current", "next", "none"]), uuid]).optional()
     .describe("Only cards in this sprint (see list_sprints): current (the active sprint), next (the first planned one), none (the backlog), or a sprint id. Subtasks count in their task's sprint"),
   archived: z.boolean().optional()
-    .describe("true: only auto-archived cards; false: leave them out. Omitted, archived cards are listed too, each with archived: true")
+    .describe("true: only archived cards; false: leave them out. Omitted, archived cards are listed too, each with archived: true. Archived cards come at most 200 at a time, most recently archived first (see archived_page)")
 };
 
 export const taskTools: McpToolSpec[] = [
@@ -302,9 +302,17 @@ export const taskTools: McpToolSpec[] = [
     scopes: ["tasks:read"],
     access: { mode: "items", items: [{ arg: "boardId", kind: "board" }], related: ["columnId", "assigneeIds", "sprint"] },
     write: false,
-    inputSchema: z.object({ boardId: uuid, columnId: uuid.optional().describe("Only cards in this column"), ...listFilters }),
-    handler: async ({ boardId, columnId, assigneeIds, tags, flags, dueBefore, dueAfter, dueNone, text, sprint, archived }, key) => service(key, () => {
-      const { board, columns, cards, tags: boardTags } = getBoardWithRelationCounts(key.userId, boardId);
+    inputSchema: z.object({
+      boardId: uuid, columnId: uuid.optional().describe("Only cards in this column"), ...listFilters,
+      archivedBefore: z.string().max(80).optional()
+        .describe(`Archived cards come ${ARCHIVED_PAGE} at a time, most recently archived first; pass archived_page.next from the last reply (with archived: true) for the next ${ARCHIVED_PAGE}`)
+    }),
+    handler: async ({ boardId, columnId, assigneeIds, tags, flags, dueBefore, dueAfter, dueNone, text, sprint, archived, archivedBefore }, key) => service(key, () => {
+      const before = archivedBefore === undefined ? null : decodeArchivedCursor(archivedBefore);
+      if (archivedBefore !== undefined && !before) throw new McpToolError("INVALID", "archivedBefore is not a cursor from archived_page.next");
+      // At most one page of archived cards, newest archived first (D634); live cards are all listed.
+      const page = { limit: ARCHIVED_PAGE, before };
+      const { board, columns, cards, tags: boardTags } = getBoardWithRelationCounts(key.userId, boardId, archived === false ? { includeArchived: false } : { includeArchived: page, archivedOnly: archived === true });
       if (columnId && !columns.some((column) => column.id === columnId)) throw new McpToolError("NOT_FOUND", "Column not found");
       const filter: CardFilter = {
         columns: columnId ? [columnId] : undefined,
@@ -336,7 +344,9 @@ export const taskTools: McpToolSpec[] = [
         columns: columns.map((column) => ({ id: column.id, name: column.name, position: column.position, wip_limit: column.wip_limit })),
         tags: boardTags.map((tag) => ({ id: tag.id, name: tag.name, color: tag.color })),
         // Cards come from the board just authorized above.
-        cards: cards.filter((card) => matching.has(card.id) && inSprint(card) && archiveMatch(card)).map((card) => listedCard(cardDetail(card.id) ?? card, names.get(card.column_id), tagName, card, structure, sprints))
+        cards: cards.filter((card) => matching.has(card.id) && inSprint(card) && archiveMatch(card)).map((card) => listedCard(cardDetail(card.id) ?? card, names.get(card.column_id), tagName, card, structure, sprints)),
+        // The page of archived cards read (before the filters): how many there are, and the cursor for the next page.
+        ...(archived === false ? {} : { archived_page: { total: board.archived_count, ...archivedPage(cards) } })
       };
     })
   }),
@@ -537,7 +547,7 @@ export const taskTools: McpToolSpec[] = [
   defineTool({
     name: "unarchive_card",
     title: "Unarchive a card",
-    description: "Put an archived card back on its board where it is (edit level). In a done column its auto-archive clock starts again. A card that is not archived is unchanged.",
+    description: "Put an archived card back on its board where it is (edit level). In a done column its auto-archive clock starts again. A card that is not archived is unchanged. Archived cards do not count toward the board's 1000-card limit, so on a board already at it this is LIMIT_REACHED (archive or bin another card first).",
     scopes: ["tasks:write"],
     access: { mode: "items", items: [{ arg: "cardId", kind: "card" }] },
     write: true,

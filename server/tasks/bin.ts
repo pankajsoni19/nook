@@ -2,7 +2,7 @@ import { audit, db, now } from "../db";
 import { binUnlinkedAttachments, cardAttachmentIds, notifyBinnedFiles } from "./attachments";
 import { hostLinksGone } from "../attachments/undoTickets";
 import { planInsert } from "./boardOrder";
-import { applyRenumber, LIMITS, liveCardsIn, withBoardLock } from "./service";
+import { applyRenumber, boardCardCounts, LIMITS, liveCardsIn, withBoardLock } from "./service";
 import { liveChildCount } from "./hierarchy";
 import { HIERARCHY_LIMITS } from "../../shared/boardStructure";
 import { AUDIENCE_ALL_USERS } from "../team/roles";
@@ -141,8 +141,9 @@ export async function restoreTaskItem(type: TaskBinType, id: string, userId: str
     if (!atLeast(boardLevel(liveBoard, userId), "edit")) return { status: "not_found" };
     const members = db.query(`SELECT k.id, k.column_id FROM cards k LEFT JOIN board_columns col ON col.id = k.column_id
       WHERE k.bin_root_id = ? AND k.deleted_at IS NOT NULL ORDER BY col.position, k.position, k.id`).all(id) as Array<{ id: string; column_id: string | null }>;
-    const live = (db.query("SELECT COUNT(*) AS count FROM cards WHERE board_id = ? AND deleted_at IS NULL").get(card.board_id) as { count: number }).count;
-    if (live + 1 + members.length > LIMITS.liveCardsPerBoard) return { status: "limit" };
+    // Every restored card comes back unarchived, so each counts toward the cap (D632) and the backstop (D633).
+    const counts = boardCardCounts(card.board_id);
+    if (counts.active + 1 + members.length > LIMITS.liveCardsPerBoard || counts.total + 1 + members.length > LIMITS.cardsPerBoard) return { status: "limit" };
     // Restore never fails for a missing parent: it comes back detached (D130).
     const parentLive = card.parent_card_id
       ? Boolean(db.query("SELECT 1 FROM cards WHERE id = ? AND board_id = ? AND deleted_at IS NULL").get(card.parent_card_id, card.board_id))

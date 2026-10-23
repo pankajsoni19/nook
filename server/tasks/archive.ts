@@ -1,5 +1,5 @@
 import { audit, db } from "../db";
-import { listColumns, requireCardAt, requireReadableBoard, withBoardLock, cardDetail } from "./service";
+import { listColumns, requireBoardRoom, requireCardAt, requireReadableBoard, withBoardLock, cardDetail } from "./service";
 
 /**
  * Auto-archived cards and each person's view of a board (lane TASKS, migration 074, D602–D609).
@@ -75,12 +75,15 @@ export async function archiveCard(userId: string, cardId: string) {
 /**
  * `POST /cards/:k/unarchive` (edit, D605): puts an archived card back on the board where it is. In a
  * done column its done clock restarts now. A card that is not archived is a no-op (200, unchanged).
+ * Archived cards do not count toward the board's card cap (D632), so a board already at the cap
+ * refuses it with 409 LIMIT_REACHED and the cap's message.
  */
 export async function unarchiveCard(userId: string, cardId: string) {
   const { board } = requireCardAt(cardId, userId, "edit");
   return withBoardLock(board.id, () => {
     const { card } = requireCardAt(cardId, userId, "edit");
     if (card.archived_at) {
+      requireBoardRoom(board.id, { active: 1, total: 0 });
       db.transaction(() => {
         const timestamp = new Date().toISOString();
         db.query(`UPDATE cards SET archived_at = NULL, updated_at = $timestamp,
