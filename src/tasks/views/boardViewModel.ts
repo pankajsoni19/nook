@@ -81,3 +81,17 @@ export function composerStartFor(filter: TaskQuery, board: {
     : sprint ? open.find((item) => item.id === sprint)?.id : undefined;
   return { columnId: column ? column.id : null, prefill, ...(sprintId !== undefined ? { sprintId } : {}) };
 }
+
+/**
+ * A board view's filter after its Board field picked more boards (lane VIEWS2, D661): one `board:`
+ * term with this board and the others, and the rest of the filter; column terms are left out (a
+ * column filter needs exactly one board). Null while the filter stays on this board alone.
+ */
+export function widenToBoards(filter: TaskQuery, boardId: string): { filter: TaskQuery; droppedColumns: boolean } | null {
+  const isBoard = (term: FilterTerm) => term.key === "board" && !term.negate;
+  const picked = filter.terms.filter(isBoard).flatMap((term) => term.values);
+  const boards = [...new Set([boardId, ...picked])];
+  if (!picked.length || boards.length === 1) return null;
+  const rest = filter.terms.filter((term) => !isBoard(term));
+  return { filter: { terms: [{ key: "board", negate: false, values: boards }, ...rest.filter((term) => term.key !== "column")] }, droppedColumns: rest.some((term) => term.key === "column") };
+}

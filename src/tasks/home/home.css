@@ -57,6 +57,10 @@
 .task-query-lanes .task-card[draggable="false"] { cursor: pointer; }
 .task-lanes-notice { margin: 0 0 8px; color: #a8a8ae; font-size: .78rem; }
 .task-lane-moves .move-option.current { opacity: 1; }
+/* Grouped lanes (lane VIEWS2, D650): a person, sprint, date, or board mark, or the tag's colour, where a column has its status icon. */
+.task-query-lanes svg.task-lane-mark { flex: none; width: 14px; height: 14px; color: #a8a8ae; }
+.task-lane-swatch { flex: none; width: 10px; height: 10px; border-radius: 999px; background: var(--tag-fg, #8d8d94); box-shadow: inset 0 0 0 1px rgb(255 255 255 / 12%); }
+.task-lane-swatch.none { background: transparent; box-shadow: inset 0 0 0 1.5px #6b6b72; }
 
 /* The view page */
 .task-home-view { padding-top: 16px; }

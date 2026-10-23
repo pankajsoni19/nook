@@ -97,7 +97,8 @@ export const viewDisplaySchema = z.object({
   group: z.enum(VIEW_GROUPS).optional(),
   sort: z.enum(QUERY_SORTS).optional(),
   lanes: z.enum(LANE_MODES).optional(),
-  swimlanes: z.enum(SWIMLANE_MODES).optional(),
+  /** Lane VIEWS2 (D655): a board view's swimlanes; null clears them. */
+  swimlanes: z.enum(SWIMLANE_MODES).nullable().optional(),
   fields: z.array(z.enum(VIEW_FIELDS)).max(VIEW_FIELDS.length).refine((values) => new Set(values).size === values.length, "Fields must be unique").optional()
 }).strict();
 export const viewCreateSchema = z.object({
@@ -127,7 +128,7 @@ export const viewPrefsSchema = z.object({
   ownCollapse: z.boolean().optional(),
   collapsedColumnIds: z.array(uuid).max(40).optional(),
   collapsedRows: z.array(z.string().max(64)).max(100).optional(),
-  /** My work only (D656): its filter, so grouped lanes that are gone can be trimmed. */
+  /** My work only (D653): its filter, so grouped lanes that are gone can be trimmed. */
   q: z.string().max(TASK_QUERY_LIMITS.length).optional()
 }).strict().refine((value) => value.collapsedLanes !== undefined || value.ownCollapse !== undefined || value.collapsedColumnIds !== undefined || value.collapsedRows !== undefined,
   "Provide collapsedLanes, ownCollapse, collapsedColumnIds, or collapsedRows");

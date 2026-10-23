@@ -100,7 +100,14 @@ export type CardSummary = {
 /** `tags` (Wave 13) are by name. */
 /** `sprints` (17B): open sprints plus the latest completed ones; older servers omit it. */
 /** `view` (D602, D606): the viewer's own collapsed columns and whether they show archived cards; older servers omit it. */
-export type BoardView = { collapsedColumnIds: string[]; showArchived: boolean };
+export type BoardView = {
+  collapsedColumnIds: string[];
+  showArchived: boolean;
+  /** Lane VIEWS2 (D659): "Show all levels on the board", per person; null until chosen (older servers omit it). */
+  showAllLevels?: boolean | null;
+  /** Lane VIEWS2 (D656): the swimlanes this person collapsed. */
+  collapsedRows?: string[];
+};
 /**
  * `archivedPage` (D634): sent when the viewer shows archived cards. The board carries at most 200 of
  * them, newest archived first; `next` fetches the following page (null when none are left).

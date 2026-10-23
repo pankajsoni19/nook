@@ -1,10 +1,10 @@
-import { useCallback, useMemo, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 import { aLevel, childName, levelName, parentRequired, type BoardStructure } from "../../shared/boardStructure";
 import { columnCards } from "./boardOrder";
 import { applyCardDetail } from "./cardTags";
 import { canNest, checklistColumn, childrenOf, hasLevels, hiddenAboveNote, hiddenColumnHint, hiddenLevels, levelOf, newChildColumn, parentCandidates, rollupMap, structureOf, visibleOnBoard, type Rollup } from "./hierarchyModel";
 import type { TaskNotify } from "./taskActions";
-import { createCard, taskErrorCode, taskErrorMessage, updateCard, type BoardDetail, type CardDetail, type CardSummary } from "./tasksApi";
+import { createCard, saveBoardView, taskErrorCode, taskErrorMessage, updateCard, type BoardDetail, type CardDetail, type CardSummary } from "./tasksApi";
 
 /** What the lane cards need for chips and nesting by drag (§7.3, D128). */
 export type ColumnNesting = {
@@ -46,19 +46,62 @@ type Options = {
   openComposer: (options: { parentId: string; level: number }) => void;
 };
 
+/** The per-device choice older builds kept (lane TASKS); carried to the server once, then removed (D659). */
 const storageKey = (boardId: string) => `nook.tasks.showAllLevels.${boardId}`;
-function readShowAll(boardId: string | undefined) {
-  if (!boardId) return false;
+export function readLocalShowAll(boardId: string | undefined): boolean | null {
+  if (!boardId) return null;
   try {
-    return window.localStorage.getItem(storageKey(boardId)) === "1";
+    const value = window.localStorage.getItem(storageKey(boardId));
+    return value === "1" ? true : value === "0" ? false : null;
   } catch {
-    return false;
+    return null;
+  }
+}
+function forgetLocalShowAll(boardId: string) {
+  try {
+    window.localStorage.removeItem(storageKey(boardId));
+  } catch {
+    // Storage blocked: nothing was kept there either.
   }
 }
 
 /**
+ * "Show all levels on the board" (D126), per person on the server (lane VIEWS2, D659): the board's
+ * `view.showAllLevels`, changed at once on screen and saved; a failed save puts it back. A choice an
+ * older build kept on this device is sent once (when the server has none) and then removed.
+ */
+function useShowAllLevels(detail: BoardDetail | null, setDetail: Dispatch<SetStateAction<BoardDetail | null>>, notify: TaskNotify) {
+  const boardId = detail?.board.id;
+  const stored = detail?.view?.showAllLevels;
+  const showAll = stored ?? readLocalShowAll(boardId) ?? false;
+  const setLocal = useCallback((value: boolean | null) => setDetail((current) => current
+    ? { ...current, view: { collapsedColumnIds: [], showArchived: false, ...current.view, showAllLevels: value } } : current), [setDetail]);
+  const setShowAll = useCallback((value: boolean) => {
+    if (!boardId) return;
+    const before = stored ?? null;
+    setLocal(value);
+    saveBoardView(boardId, { showAllLevels: value }).then(() => forgetLocalShowAll(boardId), (reason) => {
+      setLocal(before);
+      notify.error(taskErrorMessage(reason, "Could not change Show all levels"));
+    });
+  }, [boardId, notify, setLocal, stored]);
+  // Once per board: carry the device's older choice over, or drop it when the server already has one.
+  const carried = useRef<string | null>(null);
+  useEffect(() => {
+    if (!boardId || !detail?.view || carried.current === boardId) return;
+    carried.current = boardId;
+    const local = readLocalShowAll(boardId);
+    if (local === null) return;
+    if (detail.view.showAllLevels === null) {
+      saveBoardView(boardId, { showAllLevels: local }).then(() => { forgetLocalShowAll(boardId); setLocal(local); }, () => undefined);
+    } else if (detail.view.showAllLevels !== undefined) forgetLocalShowAll(boardId);
+  }, [boardId, detail?.view, setLocal]);
+  return { showAll, setShowAll };
+}
+
+/**
  * The board's hierarchy state and actions (research 2026-09-26 §7.2–§7.3), kept out of BoardView:
- * which cards the columns show (with the per-viewer "Show all levels", D126), roll-ups from the
+ * which cards the columns show (with the per-viewer "Show all levels", D126, D659), roll-ups from the
  * loaded cards, reparenting by drag or menu (D128), and the card dialog's checklist.
  */
 export function useBoardHierarchy({ detail, detailRef, setDetail, move, notify, load, onOpenCard, openComposer }: Options) {
@@ -67,20 +110,10 @@ export function useBoardHierarchy({ detail, detailRef, setDetail, move, notify, 
   const cards = useMemo(() => detail?.cards ?? [], [detail]);
   const columns = useMemo(() => detail?.columns ?? [], [detail]);
   const rollups = useMemo(() => rollupMap(cards, columns), [cards, columns]);
-  const [showAllState, setShowAllState] = useState<{ boardId?: string; value: boolean }>({ boardId, value: readShowAll(boardId) });
-  const showAll = showAllState.boardId === boardId ? showAllState.value : readShowAll(boardId);
+  const { showAll, setShowAll } = useShowAllLevels(detail, setDetail, notify);
   const [nestTarget, setNestTarget] = useState<string | null>(null);
   const moveRef = useRef(move);
   moveRef.current = move;
-
-  const setShowAll = useCallback((value: boolean) => {
-    setShowAllState({ boardId, value });
-    try {
-      if (boardId) window.localStorage.setItem(storageKey(boardId), value ? "1" : "0");
-    } catch {
-      // Private mode: the choice lasts for this visit only.
-    }
-  }, [boardId]);
 
   const replaceCard = useCallback((card: CardDetail) => setDetail((current) => current ? applyCardDetail(current, card) : current), [setDetail]);
 
@@ -194,6 +227,8 @@ export function useBoardHierarchy({ detail, detailRef, setDetail, move, notify, 
     nesting,
     dialog,
     parentPicker,
-    clearNest: () => setNestTarget(null)
+    clearNest: () => setNestTarget(null),
+    /** Lane VIEWS2 (D656): a drag across parent swimlanes sets the parent ("No parent" detaches). */
+    reparent
   };
 }

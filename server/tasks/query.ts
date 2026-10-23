@@ -515,7 +515,7 @@ function queryLanes(mode: LaneMode, from: string, params: Record<string, Binding
   return { lanes: layout.mode, ...(layout.fallback ? { lanesFallback: true as const } : {}), columns: layout.lanes, laneCounts, laneBoards };
 }
 
-/** The lane keys of a query's lanes in one mode (prefs trimming, D644, D656); null when the mode fell back. */
+/** The lane keys of a query's lanes in one mode (prefs trimming, D644, D653); null when the mode fell back. */
 export function laneKeysOf(userId: string, query: TaskQuery, mode: LaneMode): Set<string> | null {
   const result = runQuery(userId, query, { tz: "UTC", limit: 1, lanes: mode });
   if (result.lanes !== mode) return null;

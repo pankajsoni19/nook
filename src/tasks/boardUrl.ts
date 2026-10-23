@@ -2,12 +2,13 @@
 // Pure: no DOM access. Filters are the one task grammar of shared/taskQuery.ts, carried as a
 // canonical `q=` by its URL codec (`decodeFilterParams` / `encodeFilterParams`, which still read
 // the older per-key parameters). This module only adds the presentation keys the grammar leaves
-// to its callers: `view`, `group`, `sort`, `cal`, `month`, and `sprint` (17B).
+// to its callers: `view`, `group`, `sort`, `cal`, `month`, `sprint` (17B), and `swim` (lane VIEWS2).
 //
 // Decoding never throws: unknown keys and invalid values are dropped (the grammar decodes
 // leniently, within its limits). Encoding is canonical (fixed key order, defaults left out,
 // canonical filter text), so `sameRoute` is stable and a shared link reads the same everywhere.
 import { decodeFilterParams, encodeFilterParams, FILTER_PARAM_KEYS, type TaskQuery } from "../../shared/taskQuery";
+import { isSwimlaneMode, type SwimlaneMode } from "../../shared/swimlanes";
 
 export const BOARD_VIEWS = ["board", "table", "list", "calendar"] as const;
 export type BoardViewId = typeof BOARD_VIEWS[number];
@@ -42,10 +43,15 @@ export type BoardQuery = {
    * current sprint: the active one, else the backlog. Only boards with sprints on read it.
    */
   sprint?: string | null;
+  /**
+   * Lane VIEWS2 (D655): the board layout's swimlanes, rows by `assignee` or `parent`, or `none`. Null (or
+   * absent) is the default: none on the board, the saved view's own in a board view.
+   */
+  swim?: SwimlaneMode | "none" | null;
 };
 
 const emptyFilter = (): TaskQuery => ({ terms: [] });
-export const DEFAULT_BOARD_QUERY: BoardQuery = Object.freeze({ view: "board", group: null, sort: null, cal: "month", month: null, sprint: null, filter: Object.freeze({ terms: Object.freeze([]) }) }) as unknown as BoardQuery;
+export const DEFAULT_BOARD_QUERY: BoardQuery = Object.freeze({ view: "board", group: null, sort: null, cal: "month", month: null, sprint: null, swim: null, filter: Object.freeze({ terms: Object.freeze([]) }) }) as unknown as BoardQuery;
 
 /** The same rule as `isRouteMonth` in src/router.ts (kept here so the codec has no import cycle). */
 const monthPattern = /^(\d{4})-(0[1-9]|1[0-2])$/;
@@ -90,6 +96,7 @@ export function parseBoardSearch(search: string): BoardQuery {
     cal: oneOf(["month", "agenda"] as const, params.get("cal")) ?? "month",
     month: month && isBoardMonth(month) ? month : null,
     sprint: parseBoardSprint(params.get("sprint")),
+    swim: isSwimlaneMode(params.get("swim")) || params.get("swim") === "none" ? params.get("swim") as SwimlaneMode | "none" : null,
     filter: decodeFilterParams(params, { boardScoped: true })
   };
 }
@@ -104,6 +111,7 @@ export function formatBoardSearch(query: BoardQuery): string {
   if (query.month && isBoardMonth(query.month)) params.set("month", query.month);
   const sprint = parseBoardSprint(query.sprint);
   if (sprint) params.set("sprint", sprint);
+  if (isSwimlaneMode(query.swim) || query.swim === "none") params.set("swim", query.swim);
   encodeFilterParams(query.filter, params);
   // `:` and `,` are legal in a query; keeping them readable makes shared links easier to read
   // ("sort=due:asc&q=assignee:me+flag:blocked,urgent").

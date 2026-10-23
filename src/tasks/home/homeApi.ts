@@ -72,7 +72,7 @@ const json = (method: string, body: unknown): RequestInit => ({ method, body: JS
 export const queryTaskCards = (body: QueryRequest, signal?: AbortSignal) =>
   api<QueryPage>("/tasks/query", { ...json("POST", body), ...(signal ? { signal } : {}) });
 
-export type ViewDisplay = { layout: HomeLayout; group: HomeGroup; sort: HomeSort; lanes?: LaneMode; /** A board view's swimlanes (D655). */ swimlanes?: SwimlaneMode };
+export type ViewDisplay = { layout: HomeLayout; group: HomeGroup; sort: HomeSort; lanes?: LaneMode; /** A board view's swimlanes (D655); null clears them. */ swimlanes?: SwimlaneMode | null };
 
 export type TaskView = {
   id: string;
@@ -126,7 +126,7 @@ export const updateColumnState = (columnId: string, state: TaskState) =>
  */
 export type ViewPrefs = { collapsedLanes: string[]; ownCollapse?: boolean; collapsedColumnIds?: string[]; collapsedRows?: string[] };
 export const getViewLanePrefs = (viewKey: string) => api<ViewPrefs>(`/tasks/views/${viewKey}/prefs`);
-/** `q`: My work's filter, so lanes that are gone are trimmed (D656). */
+/** `q`: My work's filter, so lanes that are gone are trimmed (D653). */
 export const saveViewLanePrefs = (viewKey: string, collapsedLanes: string[], q?: string) =>
   api<ViewPrefs>(`/tasks/views/${viewKey}/prefs`, json("PUT", { collapsedLanes, ...(q !== undefined ? { q } : {}) }));
 export const saveViewPrefs = (viewKey: string, change: Omit<Partial<ViewPrefs>, "collapsedLanes">) => api<ViewPrefs>(`/tasks/views/${viewKey}/prefs`, json("PUT", change));

@@ -11,10 +11,10 @@ import { boardSprintsRoute, cardCloseAction, createTasksEntryLog, fullPageAction
 import { TasksHome } from "./home/TasksHome";
 import type { TasksHome as TasksHomeRoute } from "./home/homeUrl";
 import { BoardView } from "./BoardView";
-import { DEFAULT_BOARD_QUERY, withBoardQuery, type BoardQuery } from "./boardUrl";
+import { DEFAULT_BOARD_QUERY, withBoardQuery, type BoardQuery, type BoardViewId } from "./boardUrl";
 import type { TaskQuery } from "../../shared/taskQuery";
 import type { TaskView } from "./home/homeApi";
-import { boardLayoutOf, boardViewFilter } from "./views/boardViewModel";
+import { boardLayoutOf, boardViewFilter, displayLayoutOf } from "./views/boardViewModel";
 import "../bin/bin.css";
 import "../files/files.css";
 import "./tasks.css";
@@ -141,13 +141,21 @@ export function TasksApp({ userId, displayName, navigate, onHome, onSettings, on
     const current = routeRef.current;
     if (!current.boardId) return;
     const presentation = withBoardQuery(current.query ?? DEFAULT_BOARD_QUERY, { filter: { terms: [] } });
-    const query = view && !options.replace ? withBoardQuery(DEFAULT_BOARD_QUERY, { view: boardLayoutOf(view.display) }) : view ? presentation : withBoardQuery(presentation, { sprint: null });
+    const query = view && !options.replace ? withBoardQuery(DEFAULT_BOARD_QUERY, { view: boardLayoutOf(view.display), swim: null }) : view ? presentation : withBoardQuery(presentation, { sprint: null });
     go(tasksRoute(current.boardId, null, false, query, view ? { viewId: view.id } : null), options.replace === true);
   }, [go]);
-  const leaveSavedView = useCallback((viewId: string) => go(tasksHomeRoute({ section: "view", viewId }), true), [go]);
+  /**
+   * The view is not on this board any more (D636), or its Board field widened it to more boards
+   * (lane VIEWS2, D661): its cross-board page, carrying the change as unsaved; this entry is replaced,
+   * as a filter edit replaces.
+   */
+  const leaveSavedView = useCallback((viewId: string, change?: { filter: TaskQuery; layout: BoardViewId }) => {
+    const query = change ? { layout: displayLayoutOf(change.layout, undefined), group: "none" as const, sort: "due" as const, filter: change.filter } : undefined;
+    go(tasksHomeRoute({ section: "view", viewId, ...(query ? { query } : {}) }), true);
+  }, [go]);
   /** A view on one board opens as that board (D635, D636), with an unsaved filter carried over when it has one. */
   const openBoardView = useCallback((view: TaskView & { board_id: string }, options: { replace?: boolean; filter?: TaskQuery } = {}) => {
-    const layout = withBoardQuery(DEFAULT_BOARD_QUERY, { view: boardLayoutOf(view.display) });
+    const layout = withBoardQuery(DEFAULT_BOARD_QUERY, { view: boardLayoutOf(view.display), swim: null });
     const query = options.filter ? withBoardQuery(layout, { filter: boardViewFilter(options.filter, view.board_id) }) : layout;
     go(tasksRoute(view.board_id, null, false, query, { viewId: view.id, unsaved: options.filter !== undefined }), options.replace === true);
   }, [go]);

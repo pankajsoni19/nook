@@ -39,9 +39,14 @@ import { BoardGroupedList } from "./BoardGroupedList";
 import { BoardTable } from "./BoardTable";
 import { BoardViewSwitch } from "./BoardViewSwitch";
 import { applyBoardQuery, boardData, filterBoardCards, type BoardContext } from "./boardQuery";
-import { hasBoardFilter, withBoardQuery, type BoardQuery } from "./boardUrl";
+import { hasBoardFilter, withBoardQuery, type BoardQuery, type BoardViewId } from "./boardUrl";
+import type { TaskQuery } from "../../shared/taskQuery";
+import { isSwimlaneMode, type Swimlane, type SwimlaneMode, swimlaneChange } from "../../shared/swimlanes";
+import { BoardSwimlanes } from "./BoardSwimlanes";
+import { Select } from "../ui/Select";
+import type { FilterField } from "./boardQuery";
 import { useBoardSavedViews } from "./views/BoardSavedViews";
-import { composerStartFor, sameFilter } from "./views/boardViewModel";
+import { composerStartFor, sameFilter, widenToBoards } from "./views/boardViewModel";
 import type { TaskView } from "./home/homeApi";
 import { localDateString, viewerTimeZone } from "./taskActions";
 import { FilterBar } from "./FilterBar";
@@ -54,6 +59,7 @@ import "./boardViews.css";
 import { applyCardDetail, applyTagChange, recountTags } from "./cardTags";
 import {
   createColumn,
+  listBoards,
   deleteBoard,
   deleteCard,
   deleteColumn,
@@ -111,8 +117,8 @@ type BoardViewProps = {
   viewUnsaved?: boolean;
   /** Shows a saved view on this board, or All cards (null); `replace` after a save or delete. */
   onSavedView?: (view: TaskView | null, options?: { replace?: boolean }) => void;
-  /** The saved view is no longer on this board: its cross-board page. */
-  onLeaveSavedView?: (viewId: string) => void;
+  /** The saved view is no longer on this board: its cross-board page, with an unsaved filter that spans more boards (D661). */
+  onLeaveSavedView?: (viewId: string, change?: { filter: TaskQuery; layout: BoardViewId }) => void;
   /** The viewer's name, for a view's "assignee:me" on a new card. */
   displayName?: string;
 };
@@ -137,7 +143,9 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
   const savedViews = useBoardSavedViews({
     boardId, savedViewId, routeFilter: routeQuery.filter, unsaved: viewUnsaved, layout: routeQuery.view, notify,
     onSelect: (view, options) => onSavedView?.(view, options),
-    onLeave: (viewId) => onLeaveSavedView?.(viewId)
+    onLeave: (viewId) => onLeaveSavedView?.(viewId),
+    swim: routeQuery.swim === "none" ? null : routeQuery.swim ?? undefined,
+    boardCollapse: { columns: boardDetail?.view?.collapsedColumnIds ?? [], rows: boardDetail?.view?.collapsedRows ?? [] }
   });
   const savedFilterRef = useRef(savedViews.savedFilter);
   savedFilterRef.current = savedViews.savedFilter;
@@ -147,12 +155,30 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
       routeQueryChange(next, options);
       return;
     }
+    // Lane VIEWS2 (D661): a Board filter widens the view to more boards; it goes on as the
+    // cross-board view, with this board and the change (column filters stay on one board).
+    const widened = widenToBoards(next.filter, boardId);
+    if (widened) {
+      if (widened.droppedColumns) notify("Column filters apply to one board, so they were left out");
+      onLeaveSavedView?.(savedViewId, { filter: widened.filter, layout: next.view });
+      return;
+    }
+    // Only this board picked: nothing to widen (the board engine has no board to match on, D635).
+    next = { ...next, filter: { terms: next.filter.terms.filter((term) => !(term.key === "board" && !term.negate)) } };
     const saved = savedFilterRef.current;
     const unsaved = !saved || !sameFilter(next.filter, saved);
     routeQueryChange(unsaved ? next : { ...next, filter: { terms: [] } }, { ...options, unsaved });
-  }, [routeQueryChange, savedViewId]);
+  }, [boardId, notify, onLeaveSavedView, routeQueryChange, savedViewId]);
   const detail = savedViews.pending ? null : boardDetail;
   const [loadError, setLoadError] = useState<string | null>(null);
+  // A saved view's Board field (D661) offers the other boards the viewer can open.
+  const [otherBoards, setOtherBoards] = useState<Array<{ id: string; name: string }>>([]);
+  useEffect(() => {
+    if (!savedViewId) return;
+    let active = true;
+    listBoards().then(({ boards }) => { if (active) setOtherBoards(boards.map((item) => ({ id: item.id, name: item.name }))); }, () => undefined);
+    return () => { active = false; };
+  }, [savedViewId]);
   const [dialog, setDialog] = useState<BoardDialog | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -316,10 +342,15 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
   const laneCards: CardSummary[] = (filtered || sprintScoped) && result ? result.cards : cards;
   const laneCardsRef = useRef(laneCards);
   laneCardsRef.current = laneCards;
-  // The viewer's collapsed columns (D602), from their own saved view of the board.
-  const collapsed = useMemo(() => new Set(detail?.view?.collapsedColumnIds ?? []), [detail?.view?.collapsedColumnIds]);
+  // The viewer's collapsed columns (D602), from their own saved view of the board, or a saved view's
+  // own while it keeps them (lane VIEWS2, D657); and the swimlanes they collapsed (D656).
+  const ownCollapse = savedViews.ownCollapse;
+  const collapsedIds = ownCollapse ? ownCollapse.columns : detail?.view?.collapsedColumnIds;
+  const collapsed = useMemo(() => new Set(collapsedIds ?? []), [collapsedIds]);
   const collapsedRef = useRef(collapsed);
   collapsedRef.current = collapsed;
+  const collapsedRowKeys = ownCollapse ? ownCollapse.rows : detail?.view?.collapsedRows;
+  const collapsedRows = useMemo(() => new Set(collapsedRowKeys ?? []), [collapsedRowKeys]);
   const showArchived = detail?.view?.showArchived ?? false;
   // Hierarchy (17A): which levels the lanes show, chips, nesting by drag, and the card dialog's checklist.
   const hierarchy = useBoardHierarchy({
@@ -453,27 +484,91 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
 
   /**
    * Collapse or expand a column for this viewer (D602): at once on screen, then saved to their own
-   * view of the board; a failed save puts it back and says so.
+   * view of the board (or, in a saved view that keeps its own, to the view's, D657); a failed save
+   * puts it back and says so.
    */
   async function toggleCollapsed(columnId: string) {
     const current = detailRef.current;
     if (!current) return;
-    const before = current.view?.collapsedColumnIds ?? [];
+    const own = savedViews.ownCollapse;
+    const before = own ? own.columns : current.view?.collapsedColumnIds ?? [];
     const collapsing = !before.includes(columnId);
     const next = collapsing ? [...before, columnId] : before.filter((id) => id !== columnId);
     const name = current.columns.find((column) => column.id === columnId)?.name ?? "Column";
-    setDetail((value) => value ? { ...value, view: { collapsedColumnIds: next, showArchived: value.view?.showArchived ?? false } } : value);
     setAnnouncement(`${name} ${collapsing ? "collapsed" : "expanded"}`);
     if (!collapsing) window.setTimeout(() => document.querySelector<HTMLElement>(`[data-column-id="${columnId}"] .task-column-collapse`)?.focus(), 0);
-    else if (!phone) window.setTimeout(() => document.querySelector<HTMLElement>(`[data-column-id="${columnId}"] .task-column-strip`)?.focus(), 0);
+    else if (!phone) window.setTimeout(() => document.querySelector<HTMLElement>(`[data-column-id="${columnId}"] .task-column-strip, [data-column-id="${columnId}"] .task-column-collapse`)?.focus(), 0);
+    if (own) {
+      savedViews.saveOwnColumns(next);
+      return;
+    }
+    setBoardPrefs({ collapsedColumnIds: next });
     try {
       await saveBoardView(boardId, { collapsedColumnIds: next });
     } catch (reason) {
-      setDetail((value) => value ? { ...value, view: { collapsedColumnIds: before, showArchived: value.view?.showArchived ?? false } } : value);
+      setBoardPrefs({ collapsedColumnIds: before });
       notify.error(taskErrorMessage(reason, `Could not ${collapsing ? "collapse" : "expand"} ${name}`));
     }
   }
 
+  /** Changes this viewer's board prefs on screen, keeping the fields not named. */
+  function setBoardPrefs(change: Partial<NonNullable<BoardDetail["view"]>>) {
+    setDetail((value) => value ? { ...value, view: { collapsedColumnIds: [], showArchived: false, ...value.view, ...change } } : value);
+  }
+
+  /** Collapse or expand a swimlane (D656): the board's prefs, or a saved view's own (D657). */
+  async function toggleRow(row: Swimlane) {
+    const own = savedViews.ownCollapse;
+    const before = own ? own.rows : detailRef.current?.view?.collapsedRows ?? [];
+    const collapsing = !before.includes(row.key);
+    const next = collapsing ? [...before, row.key] : before.filter((key) => key !== row.key);
+    setAnnouncement(`${row.label} ${collapsing ? "collapsed" : "expanded"}`);
+    if (own) {
+      savedViews.saveOwnRows(next);
+      return;
+    }
+    setBoardPrefs({ collapsedRows: next });
+    try {
+      await saveBoardView(boardId, { collapsedRows: next });
+    } catch (reason) {
+      setBoardPrefs({ collapsedRows: before });
+      notify.error(taskErrorMessage(reason, `Could not ${collapsing ? "collapse" : "expand"} ${row.label}`));
+    }
+  }
+
+  /**
+   * A drop in a swimlane (D656): the row's change first (the source row's person replaced by the
+   * target's, or the new parent), then the move to its place in the column. Each is refused or rolled
+   * back on its own terms (a parent one level up, the column's WIP limit, the card's revision).
+   */
+  async function dropInSwimlane(mode: SwimlaneMode, cardId: string, fromRow: string, row: Swimlane, columnId: string, cellCardIds: string[], index: number) {
+    const current = detailRef.current;
+    const card = current?.cards.find((item) => item.id === cardId);
+    if (!current || !card) return;
+    if (columnId !== card.column_id && refuseFull(cardId, columnId)) return;
+    const change = swimlaneChange(mode, fromRow, row, card);
+    if (change && "parentId" in change) {
+      if (change.parentId && !hierarchy.nesting?.canNest(cardId, change.parentId)) {
+        notify.warning(`“${card.title}” can't go under “${row.label}”: a parent is one level up`);
+        return;
+      }
+      await hierarchy.reparent(cardId, change.parentId);
+    } else if (change) {
+      try {
+        const { card: saved } = await updateCard(cardId, { assigneeIds: change.assigneeIds, revision: card.revision });
+        setDetail((value) => value ? applyCardDetail(value, saved) : value);
+        notify.success(change.assigneeIds.length ? `Assigned “${card.title}” to ${row.label}` : `Took everyone off “${card.title}”`);
+      } catch (reason) {
+        notify.error(taskErrorCode(reason) === "CARD_CHANGED" ? "Someone else changed that card. Showing the latest board." : taskErrorMessage(reason, "Could not change the assignees"));
+        void load();
+        return;
+      }
+    }
+    // Its place in the column: after the cell's card above the drop, else just above the cell's first card.
+    const ordered = columnCards(detailRef.current?.cards ?? [], columnId).filter((item) => item.id !== cardId);
+    const after = index > 0 ? cellCardIds[index - 1]! : cellCardIds.length ? ordered[ordered.findIndex((item) => item.id === cellCardIds[0]) - 1]?.id ?? null : ordered.at(-1)?.id ?? null;
+    await move(cardId, columnId, after);
+  }
   /**
    * Archive or unarchive a card by hand (D610), from its ⋯ menu or its dialog. Archived, it leaves
    * the board (or stays marked when archived cards are shown) and the toast offers Undo.
@@ -711,8 +806,22 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
   // Phones (v0.31 follow-up): the view switch leads the filter row, which scrolls sideways, so the
   // board's header is two rows (title and actions; views and filters), not three.
   const viewSwitch = <BoardViewSwitch value={view} onChange={(next) => onQueryChange(withBoardQuery(query, { view: next }), { push: true })} />;
+  // Swimlanes (lane VIEWS2, D655): rows by assignee, or by parent on a board with levels.
+  const parentLevel = hierarchy.structure.levels.length > 1 ? hierarchy.structure.levels[Math.max(0, hierarchy.structure.workLevel - 1)] : undefined;
+  // The URL's choice, else (in a saved view) the view's own, else none.
+  const swimChoice = query.swim === "none" ? null : isSwimlaneMode(query.swim) ? query.swim : savedViewId ? savedViews.view?.display.swimlanes ?? null : null;
+  const swimMode: SwimlaneMode | null = swimChoice && (swimChoice === "assignee" || parentLevel) ? swimChoice : null;
+  const swimSelect = view === "board" ? <Select<string> variant="chip" label="Swimlanes" value={swimMode ?? "none"} searchable={false} className="task-swim-select"
+    options={[{ value: "none", label: "Swimlanes: None" }, { value: "assignee", label: "Swimlanes: Assignee" }, ...(parentLevel ? [{ value: "parent", label: `Swimlanes: ${parentLevel.name}` }] : [])]}
+    onChange={(value) => onQueryChange(withBoardQuery(query, { swim: isSwimlaneMode(value) ? value : savedViewId ? "none" : null }))} /> : null;
+  // A saved view's Board field (D661): more boards make it a cross-board view.
+  const boardField: Record<string, FilterField> | undefined = savedViewId && otherBoards.length ? { board: {
+    label: "Board", key: "board",
+    optionsFor: () => otherBoards.filter((item) => item.id !== boardId).map((item) => ({ value: item.id, label: item.name })),
+    labelFor: (value) => otherBoards.find((item) => item.id === value)?.name ?? "Board"
+  } } : undefined;
   const filterBar = data && result ? <FilterBar board={data} context={viewContext} filter={query.filter} shown={result.cards.length} total={scopedTotal}
-    onChange={(filter) => onQueryChange(withBoardQuery(query, { filter }))} actions={savedViews.filterActions} /> : null;
+    onChange={(filter) => onQueryChange(withBoardQuery(query, { filter }))} actions={savedViews.filterActions} extraFields={boardField} /> : null;
   const savedViewPicker = savedViews.showPicker ? savedViews.picker : null;
   // New card in a saved view starts where the view looks (D637).
   const composerStart = savedViewId && detail ? composerStartFor(query.filter, {
@@ -731,6 +840,7 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
       {board && <span className="task-board-count">{cardCountLabel(showArchived ? board.card_count : board.card_count - (board.archived_count ?? 0))}</span>}
       {detail && !readOnly && <button className="primary-button task-new-card" onClick={() => setComposer({ columnId: null })} aria-haspopup="dialog" aria-label="New card" title="New card"><Plus /><span>New card</span></button>}
       {detail && !phone && viewSwitch}
+      {detail && !phone && swimSelect}
       {detail && !phone && savedViewPicker}
       {board && <span className="task-board-actions">
         <button className="icon-button" onClick={(event) => openDialog({ kind: "settings" }, event.currentTarget)} aria-haspopup="dialog" aria-label="Board settings" title="Board settings"><Settings2 /></button>
@@ -751,7 +861,7 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
       <button className="primary-button" onClick={() => { void load(); }}><RotateCcw />Try again</button>
     </div>}
     {!loadError && !detail && <p className="bin-loading task-board-state" role="status">Loading the board…</p>}
-    {detail && (phone ? <div className="task-board-controls">{viewSwitch}{savedViewPicker}{filterBar}</div> : filterBar)}
+    {detail && (phone ? <div className="task-board-controls">{viewSwitch}{swimSelect}{savedViewPicker}{filterBar}</div> : filterBar)}
     {detail && sprintConflict && <p className="task-sprint-conflict" role="status">{sprintConflict}</p>}
     {detail && showArchived && detail.archivedPage?.next && (() => {
       const shown = detail.cards.filter((card) => card.archived_at).length;
@@ -790,7 +900,14 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
       })}
       {canManage && columns.length < MAX_COLUMNS && <button className="task-tab-add" onClick={(event) => openDialog({ kind: "addColumn" }, event.currentTarget)} aria-haspopup="dialog" aria-label="Add column"><Plus /></button>}
     </nav>}
-    {detail && view === "board" && <div className="task-columns" ref={trackRef} onScroll={onTrackScroll}>
+    {detail && view === "board" && swimMode && <BoardSwimlanes mode={swimMode} columns={columns} statuses={statuses} cards={shownLane} allCards={cards} tags={detail.tags ?? []}
+      today={viewContext.today} noneLabel={swimMode === "parent" ? `No ${(parentLevel?.name ?? "parent").toLowerCase()}` : "No assignee"}
+      collapsedColumns={collapsed} onToggleColumn={(columnId) => { void toggleCollapsed(columnId); }} collapsedRows={collapsedRows} onToggleRow={(row) => { void toggleRow(row); }}
+      readOnly={readOnly} phone={phone} trackRef={trackRef} onTrackScroll={onTrackScroll}
+      canEnter={(cardId, columnId) => { const column = columns.find((item) => item.id === columnId); return !column || canEnterColumn(cards, column, cardId); }}
+      onDrop={(cardId, fromRow, row, columnId, cellCardIds, index) => { void dropInSwimlane(swimMode, cardId, fromRow, row, columnId, cellCardIds, index); }}
+      onKeyMove={keyMove} onOpenCard={(card) => onOpenCard(card.id)} onCardMenu={(card, trigger) => openDialog({ kind: "moveCard", cardId: card.id }, trigger)} />}
+    {detail && view === "board" && !swimMode && <div className="task-columns" ref={trackRef} onScroll={onTrackScroll}>
       {columns.map((column, index) => {
         const lane = columnCards(laneCards, column.id);
         const shown = columnCards(shownLane, column.id);

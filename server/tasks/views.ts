@@ -50,7 +50,7 @@ export type ViewDisplay = {
   /** The board layout's lanes for a multi-board view (lane VIEWS, D640): merged columns (default) or states. */
   lanes?: LaneMode;
   /** A board view's swimlanes (lane VIEWS2, D655): rows by assignee or by parent. */
-  swimlanes?: SwimlaneMode;
+  swimlanes?: SwimlaneMode | null;
   fields?: Array<typeof VIEW_FIELDS[number]>;
 };
 export const DEFAULT_VIEW_DISPLAY: ViewDisplay = { layout: "list", group: "none", sort: "due" };
@@ -375,7 +375,7 @@ export function readViewLanePrefs(userId: string, viewKey: string): ViewLanePref
   return { ...stored, collapsedColumnIds: view?.board_id ? boardColumnIds(view.board_id, stored.collapsedColumnIds) : [] };
 }
 
-/** My work always carries a positive `assignee:me` (Q11); only such a filter is run to trim its lanes (D656). */
+/** My work always carries a positive `assignee:me` (Q11); only such a filter is run to trim its lanes (D653). */
 function myWorkFilter(q: string | undefined) {
   if (q === undefined) return null;
   const parsed = parse(q);
@@ -384,7 +384,7 @@ function myWorkFilter(q: string | undefined) {
 }
 
 /**
- * Lane keys that are no longer lanes of these results (D644, D656): for each grouped kind present
+ * Lane keys that are no longer lanes of these results (D644, D653): for each grouped kind present
  * (merged columns, people, tags, sprints, boards), the query's lanes in that mode are run once and
  * keys outside them are dropped. State and due lanes, and the "none" lanes, always exist.
  */

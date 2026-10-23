@@ -73,7 +73,7 @@ function useCollapsedLanes(prefsKey: string | null, enabled: boolean, notify: Ta
     if (collapsing) next.add(key); else next.delete(key);
     setCollapsed(next);
     if (!prefsKey) return;
-    // My work sends its filter, so the server can drop lanes that are gone (D656).
+    // My work sends its filter, so the server can drop lanes that are gone (D653).
     saveViewLanePrefs(prefsKey, [...next], prefsKey === "my" ? filterRef.current : undefined).catch((reason) => {
       setCollapsed(before);
       notify.error(taskErrorMessage(reason, `Could not ${collapsing ? "collapse" : "expand"} ${label}`));

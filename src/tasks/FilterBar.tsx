@@ -4,7 +4,7 @@ import type { FilterKey, TaskQuery } from "../../shared/taskQuery";
 import { useModuleEnabled } from "../modules";
 import { Combobox } from "../ui/Combobox";
 import { Select } from "../ui/Select";
-import { FILTER_FIELDS, termFieldLabel, termValueLabel, termValues, textTerm, withoutTerm, withTermValues, withText, type BoardContext, type BoardData } from "./boardQuery";
+import { FILTER_FIELDS, termFieldLabel, termValueLabel, termValues, textTerm, withoutTerm, withTermValues, withText, type BoardContext, type BoardData, type FilterField } from "./boardQuery";
 import { focusWhenRendered } from "./cardFocus";
 import { committableDueDate } from "./taskActions";
 
@@ -19,6 +19,8 @@ type FilterBarProps = {
   total: number;
   /** After the count: a saved view's Save view… / Save / Discard (lane VIEWS, D638). */
   actions?: ReactNode;
+  /** More fields than the board's own: a board view's Board field (lane VIEWS2, D661), which widens it to more boards. */
+  extraFields?: Record<string, FilterField>;
 };
 
 export const TEXT_DEBOUNCE_MS = 300;
@@ -55,7 +57,8 @@ export function termSwatches(values: readonly string[], board: BoardData) {
  * fields AND. The filters live in the URL query as the one task grammar (`q=`); with the Search
  * module off, the text box is hidden (§4.8) and a text filter from a link shows as a chip.
  */
-export function FilterBar({ board, context, filter, onChange, shown, total, actions }: FilterBarProps) {
+export function FilterBar({ board, context, filter, onChange, shown, total, actions, extraFields }: FilterBarProps) {
+  const fields = extraFields ? { ...extraFields, ...FILTER_FIELDS } : FILTER_FIELDS;
   const searchEnabled = useModuleEnabled("search");
   const [editing, setEditing] = useState<FilterKey | null>(null);
   const [text, setText] = useState(() => textTerm(filter));
@@ -83,7 +86,7 @@ export function FilterBar({ board, context, filter, onChange, shown, total, acti
     return () => window.clearTimeout(timer);
   }, [text]);
 
-  const field = editing ? FILTER_FIELDS[editing] : null;
+  const field = editing ? fields[editing] : null;
   const values = editing ? termValues(filter, editing) : [];
   const setValues = (next: string[]) => { if (editing) onChange(withTermValues(filter, editing, next)); };
   const options = field ? field.optionsFor(board, context) : [];
@@ -110,7 +113,7 @@ export function FilterBar({ board, context, filter, onChange, shown, total, acti
     {/* The order never changes (operator, 2026-10-22, D608): "+ Filter" and the text box first, so
         they stay put; the applied filters after them, then the one being edited, Clear, and the count. */}
     <Select<string> variant="chip" className="task-filter-add" label="Add filter" placeholder="+ Filter" value={null} searchable={false}
-      options={Object.entries(FILTER_FIELDS).filter(([, item]) => !item.available || item.available(board)).map(([key, item]) => ({ value: key, label: item.label, icon: <ListFilter /> }))}
+      options={Object.entries(fields).filter(([, item]) => !item.available || item.available(board)).map(([key, item]) => ({ value: key, label: item.label, icon: <ListFilter /> }))}
       onChange={(key) => setEditing(key as FilterKey)} />
     {searchEnabled && <label className="task-filter-text">
       <Search aria-hidden="true" />
@@ -120,7 +123,7 @@ export function FilterBar({ board, context, filter, onChange, shown, total, acti
     </label>}
     {chips.map(({ term, index }) => {
       const label = chipLabel(term, board, context);
-      const editable = !term.negate && term.key in FILTER_FIELDS;
+      const editable = !term.negate && term.key in fields;
       const swatches = term.key === "tag" ? termSwatches(term.values, board) : null;
       return <span key={`${term.key}:${term.negate}:${index}`} className={`task-filter-chip${term.negate ? " negated" : ""}`}>
         {editable
