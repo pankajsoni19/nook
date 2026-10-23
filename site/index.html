@@ -66,6 +66,7 @@
           <tr><td><code>/tasks</code>, <code>/tasks/my</code>, <code>/tasks/views</code></td><td>Tasks home: Boards, My work, and Views</td></tr>
           <tr><td><code>/tasks/&lt;board-id&gt;</code></td><td>One board; the view, filters, and sprint ride along in the query</td></tr>
           <tr><td><code>/tasks/&lt;board-id&gt;/card/&lt;card-id&gt;</code> (<code>/full</code>)</td><td>One card over its board (or as a full page)</td></tr>
+          <tr><td><code>/tasks/&lt;board-id&gt;/views/&lt;view-id&gt;</code></td><td>A saved view on its board: the board with the view's filters</td></tr>
           <tr><td><code>/collections</code>, <code>/collections/&lt;id&gt;</code></td><td>Collections, and one collection's table</td></tr>
           <tr><td><code>/collections/&lt;id&gt;/view/&lt;view-id&gt;</code>, <code>/collections/&lt;id&gt;/row/&lt;row-id&gt;</code></td><td>A saved view, or one row</td></tr>
           <tr><td><code>/calendar</code>, <code>/calendar/month/&lt;yyyy-mm&gt;</code>, <code>/calendar/event/&lt;event-id&gt;</code></td><td>Agenda, a month, or one event</td></tr>
@@ -133,9 +134,10 @@
         <figure class="doc-shot"><img src="./images/tasks-table-dark.png" alt="A sprint board in table view with subtasks nested under their task" loading="lazy" /></figure>
       </section>
 
-      <section id="tasks-home" class="doc-section searchable" data-search="tasks home my work assigned to me views saved views cross board query share duplicate load more state open done">
+      <section id="tasks-home" class="doc-section searchable" data-search="tasks home my work assigned to me views saved views cross board query share duplicate load more state open done lanes columns drag collapse board view save view">
         <span class="eyebrow">Using Nook</span><h2>My work and saved views</h2><p class="lead">The top of Tasks has three segments with their own addresses: <b>Boards</b>, <b>My work</b>, and <b>Views</b>.</p>
         <div class="split"><article><h3>My work</h3><p>Every card assigned to you on any board you can open, grouped by Overdue, Today, This week, Later, and No due date. Pick Open, To do, In progress, Done, or All; add filters; switch between a list, a table, and columns; and <b>Save as view</b>.</p></article><article><h3>Views</h3><p>A view is a saved cross-board filter and layout. Share it privately, with selected people, or with everyone; recipients read it and can <b>Duplicate</b> it. A view never widens access: each person sees only cards on boards they can open.</p></article></div>
+        <div class="split"><article><h3>A view on one board is the board</h3><p>When a view names exactly one board, it opens as that board with the view's filters: the same columns, collapse, drag, WIP limits, New card (started with what the view asks for), and sprints. On any board, <b>View: All cards ▾</b> lists the views on it, and <b>Save view…</b> keeps the filters on screen as one.</p></article><article><h3>Lanes across boards</h3><p>The columns layout of a view or My work merges the boards' columns by name (<b>Lanes: Columns</b>) or shows <b>To do</b>, <b>In progress</b>, and <b>Done</b> (<b>Lanes: State</b>), with true counts. Drag a card to another lane to move it to that column on its own board; a lane that can't take it says why. Collapse any lane; on a phone the lanes are pages with tabs.</p></article></div>
         <figure class="doc-shot"><img src="./images/tasks-my-work-dark.png" alt="My work grouped by due date across boards" loading="lazy" /></figure>
       </section>
 

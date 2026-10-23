@@ -746,6 +746,20 @@ curl http://localhost:2026/api/health
 
 Every image carries immutable numbered migrations under `server/migrations`. They run transactionally and are recorded in SQLite's `schema_migrations` table before the HTTP server accepts requests. New schema changes are always added as a new migration; released migrations are never edited.
 
+### Upgrading to 0.46.0
+
+0.46.0 makes Tasks views work like boards (lane VIEWS, D635–D646): a view on one board opens as that board, multi-board views show merged column lanes or state lanes with drag, and every lane collapses. Its migration runs once on the first boot, before the HTTP server answers; it is recorded in `schema_migrations` and cannot be undone except by restoring a backup. **Back up first:** `./scripts/backup.sh --force`.
+
+| Migration | What it does | Cost |
+| --- | --- | --- |
+| **077** `task_view_prefs` | Lane VIEWS (D644): creates the empty table `task_view_prefs` (each person's collapsed lanes per saved view, or `my` for My work; at most 1 KiB each by CHECK; it goes with the person, and the app deletes a view's rows with the view) and its index. Changes no rows. | Quick at any size. |
+
+If it fails, the server logs `Migration failed` with its id and does not start; it is transactional, so nothing is half applied. No new environment settings.
+
+Check: `sqlite3 <data>/mynotes.sqlite "SELECT id, name FROM schema_migrations WHERE id >= 77;"` lists 77 `task_view_prefs`.
+
+What people notice: a saved view whose filter names one board now opens at `/tasks/<board>/views/<view>` (old `/tasks/views/<view>` links redirect there); boards gain **View: All cards ▾** and **Save view…**; the columns layout of views and My work loads 200 cards at a time. The web API's `POST /api/tasks/query` and `GET /api/tasks/views/:v/cards` take `lanes`, views gain `board_id` and `display.lanes`, and MCP `move_card` also takes `state` or `columnName` (see API_CONTRACTS).
+
 ### Upgrading to 0.45.0
 
 0.45.0 lets each person collapse a task board's columns, keeps the filter bar's **+ Filter** and search box first, and auto-archives cards that sit in a done column (lane TASKS, D602–D609). Its migrations (074, and 076 from lane VAULTKEY) run once on the first boot, in order, before the HTTP server answers; they are recorded in `schema_migrations` and cannot be undone except by restoring a backup. **Back up first:** `./scripts/backup.sh --force`.

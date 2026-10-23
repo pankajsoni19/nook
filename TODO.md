@@ -7,7 +7,7 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 
 **Current state (2026-10-23).**
 - **v0.45.0** is released (2026-10-23): online S3 backups, Litestream and restore drills; Tasks collapse, filter order and archive; vault key Edit adds access; docs site restructure.
-- Migrations: **001–076** are released and immutable (045, 054, 067, 070, 071, 072, 075 unused; 054 reserved for Messages). Next free: **077**.
+- Migrations: **001–076** are released and immutable (045, 054, 067, 070, 071, 072, 075 unused; 054 reserved for Messages); **077** (`task_view_prefs`, lane VIEWS) is on `main`, unreleased. Next free: **078**.
 - Development happens directly on `main`, pushed as each change passes its gates.
 
 ## In flight
@@ -19,7 +19,6 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 - [ ] **Provider code per kind** (operator, 2026-10-22; lane LOCALEMB, step 0): one adapter file per provider kind (OpenAI-compatible default, Anthropic, Voyage, local); golden tests pin OpenAI's requests to v0.43.0 so other kinds can't change them.
 
 
-- [ ] **Tasks views work like boards** (operator, 2026-10-23; lane VIEWS, research then build): views' column layout has only To do / In progress / Done, no column collapse, and no drag between columns. Operator's ideas: a single-board view behaves as that board with filters (same columns, collapse, drag); a multi-board view gets as much as can work; maybe saved views inside a board. Research and recommend, then build.
 
 ## Waiting on the operator
 
@@ -45,6 +44,19 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 - [ ] Save as report default (D566) is a manual edit, so the design rules run on every block that reads a changed default and can refuse it (e.g. a KPI without a unit); the sheet shows the refusal, but the owner has to fix the block first.
 - [ ] The new filter types (D567–D569) and linked lists (D560) are proven against the fake ClickHouse and by hand on the QA ClickHouse 26.6; add a `CLICKHOUSE_TEST_URL` variant (`-inf`/`inf` Float64 ends, the `_not` flag, `positionCaseInsensitive` on LowCardinality).
 - [ ] Saved views are app-only (D565). A read-only MCP `list_report_views` would be safe (the key owner's own views) if an agent needs them.
+
+## Leftovers (lane VIEWS, slice 2 and follow-ups; plan in docs/plan/TASK_VIEWS.md)
+
+- [ ] Slice 2: group lanes by assignee, tag, or sprint, with drag that reassigns or replans.
+- [ ] Slice 2: board swimlanes (rows by assignee or epic) on the board and in board views.
+- [ ] Slice 2: **Add a card** in multi-board lanes (pick the board, then the lane's column on it).
+- [ ] Slice 2: a per-view collapse override (a board view now shares the board's collapsed columns, D639).
+- [ ] Slice 2: MCP `save_view` (create or update a view through a key; today views are app-only to write).
+- [ ] Slice 2: team views a board owner pins on the board for everyone (today the picker lists views people shared themselves).
+- [ ] My work's collapsed lanes (`view_key = 'my'`) are trimmed by format only, because My work's filter lives in the URL; saved views also drop lanes that are no longer in their results (D644).
+- [ ] A failed lane move rolls the lanes back to the snapshot taken before it, so another change that landed during the request shows only after a reload.
+- [ ] Lane drag was checked in headless Chrome with synthetic drag events and by unit tests; try a real mouse drag across lanes (and onto a collapsed strip) in a desktop browser.
+- [ ] A board view's filter bar cannot add a `board:` term (the board filter bar has no Board field), so "the filter became multi-board, go back to the cross-board page" only happens when the saved view changes elsewhere (checked on load).
 
 ## Leftovers (lane TASKS)
 
