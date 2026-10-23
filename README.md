@@ -102,7 +102,7 @@ You need Git, Docker Engine, and Docker Compose.
 git clone https://github.com/pankajsoni19/nook.git && cd nook
 cp .env.example .env            # set ALLOWED_EMAILS, TOTP_POLICY, APP_ORIGINS as needed
 sudo mkdir -p /srv/mynotes && sudo chown 1000:1000 /srv/mynotes   # or set MYNOTES_DATA_DIR
-APP_VERSION=0.46.0 GIT_SHA=$(git rev-parse --short HEAD) docker compose up -d --build
+APP_VERSION=0.47.0 GIT_SHA=$(git rev-parse --short HEAD) docker compose up -d --build
 curl http://localhost:2026/api/health   # then open http://localhost:2026 and create the first account (the admin)
 ```
 
@@ -114,11 +114,11 @@ Back up first (`./scripts/backup.sh --force`), pull, rebuild, and let migrations
 
 ## What's new
 
-Release notes for every version are in [CHANGELOG.md](CHANGELOG.md) and on the [docs site](https://pankajsoni19.github.io/nook/releases.html). Latest (v0.46.0):
+Release notes for every version are in [CHANGELOG.md](CHANGELOG.md) and on the [docs site](https://pankajsoni19.github.io/nook/releases.html). Latest (v0.47.0):
 
-- **Task views work like boards**: a one-board view is that board (columns, collapse, drag), with saved views inside each board.
-- **Views across boards** show real columns merged by name, with drag; collapse lanes everywhere.
-- Column status icons, and archived cards no longer count toward the card cap. Migration 077; back up first.
+- **Task views**: group lanes by assignee, tag or sprint with drag; swimlanes; pinned views for everyone on a board.
+- **Report filters**: remove any filter type, number ranges in Add filter, time-zone-aware date filters.
+- **A lighter local embedding model**, S3 files inside backups, and one-command restore from a folder. Migration 078; back up first.
 
 ## Documentation
 

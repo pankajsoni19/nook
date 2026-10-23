@@ -2,6 +2,31 @@
 
 Release notes for Nook, newest first. Upgrade steps for each release are in [docs/OPERATIONS.md](docs/OPERATIONS.md#upgrades).
 
+## v0.47.0 — 2026-10-24
+
+**Task views**
+
+- **Group lanes by assignee, tag, sprint, due date or board**; dragging reassigns, retags or replans (a missing tag can be created on drop). Lanes say why they can't take a card.
+- **Swimlanes** (rows by assignee or epic on boards; by assignee or board across boards), with drag across rows, a + per cell, and Alt+arrows.
+- **Pinned views**: a board's owner or manager pins views for everyone and orders them. Board views can keep their own collapsed columns; "Show all levels" is saved per person. Add a card from a lane.
+- MCP: `save_view`; `list_views` includes pinned views. `scripts/dragSmoke.ts` checks real drags before a release.
+
+**Report filters**
+
+- Remove filter for text, number-range and date-range filters; Add filter offers number ranges (exact for large integers); DateTime filters count days in the report's zone, and a zone change proposes the fix.
+- Narrow by works with simple expressions; Save as report default offers a one-click fix when a design rule blocks it. MCP `list_report_views`.
+- Fixed: older KPI tiles no longer block every filter add or removal.
+
+**Providers and backups**
+
+- Provider kind (OpenAI-compatible, Anthropic, Voyage AI) for any address, e.g. a proxy.
+- `LOCAL_EMBEDDINGS_VARIANT=english`: a lighter local model (~255 MB instead of ~780 MB; image `LOCAL_EMBEDDINGS_MODEL=english` is 100 MB smaller).
+- `BACKUP_S3_OBJECTS=copy` puts the bucket's files in each archive; backups stream their manifest (27 MB peak at 200,000 files); `restore --from-dir`; Litestream compaction levels.
+
+**Upgrading**
+
+- Migration **078** (`task_view_pins`) runs once on the first boot; quick. **Back up first** (`./scripts/backup.sh --force`). See [Upgrading to 0.47.0](docs/OPERATIONS.md#upgrades).
+
 ## v0.46.0 — 2026-10-23
 
 **Task views work like boards**
