@@ -15,6 +15,7 @@ const { syncSchema } = await import("../server/reports/schemaCatalog");
 const { filterChType, optionsQueryFor, suggestedFilter } = await import("../server/reports/filterRequest");
 const { filterPatchErrors, resultFingerprint } = await import("../server/reports/filterChecks");
 const { checkSpecShape } = await import("../server/reports/specValidate");
+const { instanceTimeZone } = await import("../server/reports/paramZone");
 
 /**
  * Add filter and Remove filter (lane FILTERS, D534–D536; docs/plan/REPORT_FILTERS.md F3): the column
@@ -42,7 +43,13 @@ const TABLES: FakeTable[] = [{
 /** The eval's requests, by route: served (status < 500) and failed (≥ 500). Health checks are the largest raw route. */
 const TRAFFIC: Record<string, { ok: number; failed: number }> = { healthz: { ok: 9000, failed: 0 }, digest: { ok: 3904, failed: 96 }, search: { ok: 1800, failed: 700 }, orders: { ok: 1500, failed: 100 } };
 
+/** D672: the data source's zone, as `SELECT timezone()` answers (a test sets another). */
+let sourceZone = "UTC";
+
 function answer(sql: string, req: FakeRequest): FakeAnswer {
+  if (sql.includes("timezone()")) return { meta: [{ name: "zone", type: "String" }], data: [[sourceZone]] };
+  // D671: a numeric column's count, lowest, highest, and median (the number range's preview).
+  if (sql.includes("median(")) return { meta: [{ name: "n", type: "UInt64" }, { name: "low", type: "Float64" }, { name: "high", type: "Float64" }, { name: "middle", type: "Float64" }], data: [["9000", 3, 1200.5, 48]] };
   if (sql.includes("uniq(`route`)")) return { meta: [{ name: "distinct_values", type: "UInt64" }], data: [[String(Object.keys(TRAFFIC).length)]] };
   if (sql.includes("uniq(`status`)")) return { meta: [{ name: "distinct_values", type: "UInt64" }], data: [["250000"]] };
   if (sql.includes("toString(`route`) AS value")) return { meta: [{ name: "value", type: "String" }], data: Object.entries(TRAFFIC).sort((a, b) => (b[1].ok + b[1].failed) - (a[1].ok + a[1].failed)).map(([route]) => [route]) };
@@ -193,9 +200,9 @@ describe("Add filter: the eval case top_routes, \"add a filter on requests.route
     expect(columns.body.queries).toBe(2);
     expect(columns.body.slotsLeft).toBe(8);
     const byName = Object.fromEntries(columns.body.columns.map((column: Json) => [column.column, column]));
-    expect(Object.keys(byName).sort()).toEqual(["api_token_hash", "route", "status", "ts", "user_email"]);
-    // D569, D570: text also as "contains", whole numbers as a list, a time as a date range.
-    expect([byName.route.kinds, byName.status.kinds, byName.ts.kinds, byName.ts.chType]).toEqual([["multi_select", "text"], ["multi_select"], ["date_range"], "Date"]);
+    expect(Object.keys(byName).sort()).toEqual(["api_token_hash", "latency_ms", "route", "status", "ts", "user_email"]);
+    // D569, D570, D671: text also as "contains", whole numbers as a list or a range, a time as a date range, a float as a range.
+    expect([byName.route.kinds, byName.status.kinds, byName.ts.kinds, byName.ts.chType, byName.latency_ms.kinds, byName.latency_ms.chType]).toEqual([["multi_select", "text"], ["multi_select", "number_range"], ["date_range"], "Date", ["number_range"], "Float64"]);
     expect(byName.route).toMatchObject({ table: "eval_top_routes.requests", type: "LowCardinality(String)", chType: "Array(String)", readBy: ["routes", "errors"], sensitive: false });
     expect(byName.user_email.sensitive).toBe(true);
     expect(byName.api_token_hash.sensitive).toBe(true);
@@ -209,7 +216,7 @@ describe("Add filter: the eval case top_routes, \"add a filter on requests.route
     expect(preview.body.preview).toMatchObject({ sample: ["healthz", "digest", "search", "orders"], optionCount: 4, distinct: 4, suggested: { id: "route", label: "Route" }, optionsQuery: optionsQueryFor("eval_top_routes.requests", "route") });
     // A column with too many values, or one the report's tables do not have, is refused.
     expect((await send(owner, "POST", `/reports/${reportId}/filters/preview`, { table: "eval_top_routes.requests", column: "status" })).body.error).toContain("different values");
-    expect((await send(owner, "POST", `/reports/${reportId}/filters/preview`, { table: "eval_top_routes.requests", column: "latency_ms" })).status).toBe(400);
+    expect((await send(owner, "POST", `/reports/${reportId}/filters/preview`, { table: "eval_top_routes.requests", column: "latency_ms", kind: "multi_select" })).status).toBe(400);
     expect((await send(owner, "POST", `/reports/${reportId}/filters/preview`, { table: "system.users", column: "name" })).status).toBe(400);
 
     // Auto-apply is on: a filter proposal still waits for review.
@@ -377,6 +384,119 @@ describe("D568–D570: Add filter as exclude, text contains, and a date range", 
     expect(proposal.filter.checked.map((item: Json) => item.otherValue)).toEqual(proposal.filter.checked.map(() => "30d"));
     await send(owner, "POST", `/reports/${reportId}/instructions/${asked.body.instruction.id}/apply`, {});
     expect(specOf(reportId).parameters).toEqual([{ id: "ts", label: "Period", type: "date_range", chType: "Date", default: { preset: "7d" } }]);
+  });
+});
+
+describe("D670–D672: Remove any filter type, Add filter's number range, and DateTime days in the report's zone", () => {
+  const apply = (reportId: string, id: string) => send(owner, "POST", `/reports/${reportId}/instructions/${id}/apply`, {});
+  const proposalOf = async (reportId: string, id: string) => (await send(owner, "GET", `/reports/${reportId}/instructions/${id}/proposal`)).body.proposal;
+
+  test("D671: a number range on a Float column starts at Any, passes the identity check, and runs from the median up", async () => {
+    const reportId = await seededReport();
+    const preview = await send(owner, "POST", `/reports/${reportId}/filters/preview`, { table: "eval_top_routes.requests", column: "latency_ms" });
+    expect(preview.body.preview).toMatchObject({ kind: "number_range", sample: [], optionsQuery: "", numbers: { min: 3, max: 1200.5, median: 48 } });
+    expect(fake.requests.some((item) => item.sql.includes("median(toFloat64(`latency_ms`))") && item.sql.includes("isFinite("))).toBe(true);
+    // An integer column offers a list and a range; text never a range.
+    expect((await send(owner, "POST", `/reports/${reportId}/filters/preview`, { table: "eval_top_routes.requests", column: "status", kind: "number_range" })).body.preview).toMatchObject({ kind: "number_range" });
+    expect((await send(owner, "POST", `/reports/${reportId}/filters/preview`, { table: "eval_top_routes.requests", column: "route", kind: "number_range" })).body.error).toContain("cannot be filtered as a number range");
+    const asked = await send(owner, "POST", `/reports/${reportId}/filters`, { table: "eval_top_routes.requests", column: "latency_ms", kind: "number_range", label: "Latency" });
+    expect(asked.status).toBe(201);
+    expect(asked.body.instruction).toMatchObject({ text: "Add a filter: Latency (eval_top_routes.requests.latency_ms), a number range", request: {
+      type: "number_range", chType: "Float64", numbers: { min: 3, max: 1200.5, median: 48 },
+      condition: "(({latency_ms_min:Float64} = -inf AND {latency_ms_max:Float64} = inf) OR latency_ms BETWEEN {latency_ms_min:Float64} AND {latency_ms_max:Float64})"
+    } });
+    expect(await waitStatus(asked.body.instruction.id, ["proposed", "failed"])).toEqual({ status: "proposed", error: null });
+    const proposal = await proposalOf(reportId, asked.body.instruction.id);
+    expect(proposal.filter.reviewByHand).toBeUndefined();
+    expect(proposal.filter.checked.map((item: Json) => item.otherValue)).toEqual(proposal.filter.checked.map(() => "48"));
+    // The open ends bind as Float64's infinities (Any), the check's other run from the median up.
+    expect(fake.requests.some((item) => item.params.param_latency_ms_min === "-inf" && item.params.param_latency_ms_max === "inf")).toBe(true);
+    expect(fake.requests.some((item) => item.params.param_latency_ms_min === "48" && item.params.param_latency_ms_max === "inf")).toBe(true);
+    await apply(reportId, asked.body.instruction.id);
+    expect(specOf(reportId).parameters).toEqual([{ id: "latency_ms", label: "Latency", type: "number_range", chType: "Float64", default: { min: null, max: null } }]);
+
+    // D670: and it is removed again, checked at Any.
+    const removal = await send(owner, "DELETE", `/reports/${reportId}/filters/latency_ms`);
+    expect(removal.status).toBe(200);
+    expect(removal.body.instruction.request).toEqual({ kind: "remove_filter", id: "latency_ms", label: "Latency", type: "number_range" });
+    expect(await waitStatus(removal.body.instruction.id, ["proposed", "failed"])).toEqual({ status: "proposed", error: null });
+    const removed = await proposalOf(reportId, removal.body.instruction.id);
+    expect(removed.filter.reviewByHand).toBeUndefined();
+    expect(removed.filter.checked.length).toBeGreaterThan(0);
+    await apply(reportId, removal.body.instruction.id);
+    const after = specOf(reportId);
+    expect(after.parameters).toEqual([]);
+    expect(after.queries.map((query) => query.sql)).toEqual(goldenSpec().queries.map((query) => query.sql));
+  });
+
+  test("D670: a text filter is removed and checked at empty text; a single select is not removed this way", async () => {
+    const reportId = await seededReport();
+    const asked = await send(owner, "POST", `/reports/${reportId}/filters`, { table: "eval_top_routes.requests", column: "route", kind: "text", label: "Route contains" });
+    expect(await waitStatus(asked.body.instruction.id, ["proposed", "failed"])).toEqual({ status: "proposed", error: null });
+    await apply(reportId, asked.body.instruction.id);
+    const removal = await send(owner, "DELETE", `/reports/${reportId}/filters/route`);
+    expect(removal.body.instruction).toMatchObject({ text: "Remove the filter Route contains", request: { kind: "remove_filter", id: "route", type: "text" } });
+    expect(await waitStatus(removal.body.instruction.id, ["proposed", "failed"])).toEqual({ status: "proposed", error: null });
+    await apply(reportId, removal.body.instruction.id);
+    expect(specOf(reportId).queries.map((query) => query.sql)).toEqual(goldenSpec().queries.map((query) => query.sql));
+
+    const spec = goldenSpec();
+    db.query("UPDATE reports SET spec_json = ? WHERE id = ?").run(JSON.stringify({ ...spec, parameters: [{ id: "plan", label: "Plan", type: "select", chType: "String", default: "pro", optionsQuery: "SELECT 'pro' AS value" }] }), reportId);
+    const refused = await send(owner, "DELETE", `/reports/${reportId}/filters/plan`);
+    expect(refused.status).toBe(400);
+    expect(refused.body.error).toContain("no value that filters nothing");
+  });
+
+  test("D672: a DateTime in another zone than the report's is filtered by its day in the report's zone; D670: its removal is reviewed by hand", async () => {
+    const reportZone = instanceTimeZone();
+    sourceZone = reportZone === "Asia/Kolkata" ? "UTC" : "Asia/Kolkata";
+    try {
+      const reportId = await seededReport();
+      const preview = await send(owner, "POST", `/reports/${reportId}/filters/preview`, { table: "eval_top_routes.requests", column: "ts" });
+      expect(preview.body.preview).toMatchObject({ kind: "date_range", dayZone: reportZone });
+      expect(fake.requests.some((item) => item.sql.includes(`min(toDate(\`ts\`, '${reportZone}'))`))).toBe(true);
+      const asked = await send(owner, "POST", `/reports/${reportId}/filters`, { table: "eval_top_routes.requests", column: "ts", label: "Period", preset: "7d" });
+      expect(asked.body.instruction).toMatchObject({ text: `Add a filter: Period (eval_top_routes.requests.ts), a date range starting at Last 7 days (days in ${reportZone})`, request: { zone: reportZone, condition: `toDate(ts, '${reportZone}') BETWEEN {ts_from:Date} AND {ts_to:Date}` } });
+      expect(await waitStatus(asked.body.instruction.id, ["proposed", "failed"])).toEqual({ status: "proposed", error: null });
+      await apply(reportId, asked.body.instruction.id);
+      expect(specOf(reportId).queries.find((query) => query.key === "errors")!.sql).toContain(`toDate(ts, '${reportZone}') BETWEEN {ts_from:Date} AND {ts_to:Date}`);
+
+      const removal = await send(owner, "DELETE", `/reports/${reportId}/filters/ts`);
+      expect(removal.body.instruction.request).toEqual({ kind: "remove_filter", id: "ts", label: "Period", type: "date_range" });
+      expect(await waitStatus(removal.body.instruction.id, ["proposed", "failed"])).toEqual({ status: "proposed", error: null });
+      const removed = await proposalOf(reportId, removal.body.instruction.id);
+      expect(removed.filter.reviewByHand).toBe(true);
+      expect(removed.filter.checked.every((item: Json) => item.otherValue === null)).toBe(true);
+      await apply(reportId, removal.body.instruction.id);
+      expect(specOf(reportId).queries.map((query) => query.sql)).toEqual(goldenSpec().queries.map((query) => query.sql));
+    } finally {
+      sourceZone = "UTC";
+    }
+  });
+
+  test("D677: an old block that predates a design rule does not refuse a filter request (the request changes no block)", async () => {
+    const reportId = await seededReport();
+    const spec = specOf(reportId);
+    // A KPI saved before rule 8: its measure has neither a format nor a unit.
+    const legacy = { ...spec, blocks: spec.blocks.map((block) => block.type === "kpi" ? (({ format: _f, unit: _u, ...rest }) => rest)(block as typeof block & { format?: string; unit?: string }) : block) } as ReportSpec;
+    expect(legacy.blocks.some((block) => block.type === "kpi")).toBe(true);
+    db.query("UPDATE reports SET spec_json = ? WHERE id = ?").run(JSON.stringify(legacy), reportId);
+    const asked = await send(owner, "POST", `/reports/${reportId}/filters`, { table: "eval_top_routes.requests", column: "route", kind: "text" });
+    expect(await waitStatus(asked.body.instruction.id, ["proposed", "failed"])).toEqual({ status: "proposed", error: null });
+    await apply(reportId, asked.body.instruction.id);
+    const removal = await send(owner, "DELETE", `/reports/${reportId}/filters/route`);
+    expect(await waitStatus(removal.body.instruction.id, ["proposed", "failed"])).toEqual({ status: "proposed", error: null });
+  });
+
+  test("D672: a DateTime whose type names the report's zone, and a Date, need no zone", async () => {
+    const { dateTimeZoneOf, filterCondition } = await import("../server/reports/filterRequest");
+    expect(dateTimeZoneOf("DateTime('Europe/Berlin')")).toBe("Europe/Berlin");
+    expect(dateTimeZoneOf("Nullable(DateTime64(3, 'UTC'))")).toBe("UTC");
+    expect(dateTimeZoneOf("DateTime64(6)")).toBeNull();
+    expect(dateTimeZoneOf("DateTime")).toBeNull();
+    expect(dateTimeZoneOf("Date32")).toBeUndefined();
+    expect(filterCondition("date_range", "p", "ts", "Date", false, "Asia/Kolkata")).toBe("toDate(ts, 'Asia/Kolkata') BETWEEN {p_from:Date} AND {p_to:Date}");
+    expect(filterCondition("date_range", "p", "ts", "Date", false, "O'Hare/X")).toContain("toDate(ts, 'O\\'Hare/X')");
   });
 });
 

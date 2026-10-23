@@ -25,6 +25,7 @@ import { queryResults, reportRun, startRefresh } from "./refresh";
 import { OPTION_SEARCH, paramResults, runParamSet, searchParamOptions } from "./params";
 import { DATE_PRESETS, excludableIds, optionParentsOf, reachOf } from "../../shared/reportParams";
 import { requestAddFilter } from "./filterRequest";
+import { listViews } from "./views";
 import { saveSchedule } from "./scheduler";
 import { listReportsPage, parseSpec as parseStoredSpec, setFavorite } from "./service";
 import { createFolder, listFolders, moveReportToFolder, updateFolder } from "./folders";
@@ -44,7 +45,7 @@ const parseSpec = (json: string): ReportSpec => knownSpec(parseStoredSpec(json))
  *
  * - `reports:read`: list_reports, list_report_datasources (names only), get_report (the spec: blocks
  *   and saved SQL), get_report_block (what the inspect sheet shows: SQL, SQL as sent, mapping, the
- *   latest rows capped at 50), search_report_options (D507: a select parameter's choices past the first
+ *   latest rows capped at 50), list_report_views (D676: the key owner's own saved views, read-only), search_report_options (D507: a select parameter's choices past the first
  *   200, D491's guarded search), get_report_run, get_report_instruction (an instruction's status and
  *   its proposal's changes), list_report_versions (redacted for all but the owner), and
  *   get_report_version_diff (the owner's).
@@ -290,6 +291,21 @@ export const reportTools: McpToolSpec[] = [
       return { parameterId, query: found.query ?? null, options: found.options, truncated: found.truncated, error: found.error, ...(found.parents ? { parents: found.parents } : {}) };
     })
   }),
+  // D676: the key owner's own saved views of a report (D565), read-only. Saving, renaming, starring, and
+  // removing views stay in the app; nobody else's views are ever listed.
+  defineTool({
+    name: "list_report_views",
+    title: "List my saved views of a report",
+    description: "The key owner's own saved views of one report (named sets of its filter values, D565): each view's id, name, the values that differ from the report's defaults, whether it is the owner's default view (the one the report opens with), and when it was saved. Pass a view's values as the parameters of get_report, get_report_block, or refresh_report (a value that no longer fits the report reads as its default). Only the key owner's views; read-only (views are saved and removed in the app).",
+    scopes: ["reports:read"],
+    access: { mode: "items", items: reportItem },
+    write: false,
+    inputSchema: z.object({ reportId }),
+    handler: ({ reportId: id }, key) => asOwner(key, (role) => {
+      const listed = listViews(id, key.userId, role);
+      return { views: listed.views.map((view) => ({ id: view.id, name: view.name, values: view.values, isDefault: view.isDefault, createdAt: view.createdAt, updatedAt: view.updatedAt })) };
+    })
+  }),
   defineTool({
     name: "get_report_run",
     title: "Get a report run",
@@ -446,7 +462,7 @@ export const reportTools: McpToolSpec[] = [
   defineTool({
     name: "add_report_filter",
     title: "Add a filter to a report",
-    description: "The report owner's Add filter (D534): a multi-select filter (default All) over one text or whole-number column of a table the report's queries read (`table` as db.table, from get_report's SQL). Nook writes its options query from the catalog, runs it first, and queues a change for the edit agent, which puts the filter into the queries that read the table; Nook then checks that every changed query's result with All is identical to today's before the proposal waits in Changes (never auto-applied; apply with apply_report_proposal). Readers will see the column's values. Returns the instruction; follow it with get_report_instruction. Uses the key owner's AI budget.",
+    description: "The report owner's Add filter (D534): a multi-select filter (default All) over one text or whole-number column (or, with kind, text contains, a date range, or a number range) of a table the report's queries read (`table` as db.table, from get_report's SQL). Nook writes its options query from the catalog, runs it first, and queues a change for the edit agent, which puts the filter into the queries that read the table; Nook then checks that every changed query's result with All is identical to today's before the proposal waits in Changes (never auto-applied; apply with apply_report_proposal). Readers will see the column's values. Returns the instruction; follow it with get_report_instruction. Uses the key owner's AI budget.",
     scopes: ["reports:write"],
     access: { mode: "items", items: reportItem, related: ["parameterId"] },
     write: true,
@@ -458,7 +474,7 @@ export const reportTools: McpToolSpec[] = [
       label: z.string().min(1).max(60).optional().describe("The filter's label (default: from the column name)"),
       parameterId: z.string().regex(/^[a-z][a-z0-9_]{0,29}$/).optional().describe("The parameter id (default: from the column name)"),
       narrowBy: z.array(z.string().regex(/^[a-z][a-z0-9_]{0,29}$/)).max(8).optional().describe("Linked filter (D562): ids of existing select or multi-select filters on the same table whose picks narrow this filter's choices (e.g. routes of the picked countries)"),
-      kind: z.enum(FILTER_KINDS).optional().describe("multi_select (default for text and whole numbers): pick values from a list; text: a text column whose rows contain what a reader types (D569); date_range: a Date or DateTime column filtered by day (D570, the only kind for dates)"),
+      kind: z.enum(FILTER_KINDS).optional().describe("multi_select (default for text and whole numbers): pick values from a list; text: a text column whose rows contain what a reader types (D569); date_range: a Date or DateTime column filtered by day (D570, the only kind for dates; a DateTime by its day in the report's zone, D672); number_range: a numeric column (float, decimal, or integer) between two numbers, starting at Any (D671, the only kind for floats and decimals)"),
       exclude: z.boolean().optional().describe("multi_select: readers may also leave the picked values out (D568)"),
       preset: z.enum(DATE_PRESETS.filter((preset) => preset !== "custom") as [string, ...string[]]).optional().describe("date_range: the default window (default 30d). The default results change, so Nook compares nothing: review the proposal by hand")
     }),

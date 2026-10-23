@@ -498,8 +498,13 @@ async function executeEdit(run: Execution) {
     // the instruction leaves alone never fails the edit.
     const metricOf = (block: { id: string; queryKey?: string }) => planner.plan?.todos.find((todo) => todo.blockId === block.id)?.metric
       ?? planner.plan?.todos.find((todo) => todo.queryKey && todo.queryKey === block.queryKey && todo.metric)?.metric ?? null;
-    // D535: a filter request is checked by identity below, not by the sanity hints.
-    const check = await validateSpec(datasource, forValidation(applied.spec), { userId, runId, signal: controller.signal, changedBlockIds: changedBlockIds(touched), ...(run.filter ? {} : { sanity: { metricOf, changedQueryKeys: changedQueryKeys(touched) } }) });
+    // D535: a filter request is checked by identity below, not by the sanity hints. D677: nor by the
+    // per-block design rules on blocks it leaves as they are (it changes no block; their default results
+    // stay identical, or a date range's are reviewed by hand), so an old block that predates a rule
+    // never refuses a filter the agent cannot fix it for. A block it gives a clickFilter is checked.
+    const ownChanged = (id: string) => JSON.stringify(run.spec.blocks.find((block) => block.id === id) ?? null) !== JSON.stringify(applied.spec.blocks.find((block) => block.id === id) ?? null);
+    const designBlocks = run.filter ? changedBlockIds(touched).filter(ownChanged) : changedBlockIds(touched);
+    const check = await validateSpec(datasource, forValidation(applied.spec), { userId, runId, signal: controller.signal, changedBlockIds: designBlocks, ...(run.filter ? {} : { sanity: { metricOf, changedQueryKeys: changedQueryKeys(touched) } }) });
     if (!check.ok) return refuse(check.errors);
     let filterView: ProposalFilterView | undefined;
     if (run.filter) {

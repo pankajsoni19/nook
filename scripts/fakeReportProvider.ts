@@ -301,7 +301,36 @@ export function withCondition(sql: string, condition: string): string {
 /** Takes a filter's condition out of a query again (Remove filter), with the AND or WHERE that joined it. */
 export function withoutCondition(sql: string, id: string): string {
   const term = String.raw`\(empty\(\{${id}:[^}]+\}\) OR [^()]+? IN \{${id}:[^}]+\}\)`;
-  return sql.replace(new RegExp(String.raw`\bWHERE ${term} AND `), "WHERE ").replace(new RegExp(String.raw` AND ${term}`), "").replace(new RegExp(String.raw`\n?WHERE ${term}`), "");
+  const listed = sql.replace(new RegExp(String.raw`\bWHERE ${term} AND `), "WHERE ").replace(new RegExp(String.raw` AND ${term}`), "").replace(new RegExp(String.raw`\n?WHERE ${term}`), "");
+  return readsFilter(listed, id) ? withoutConjuncts(listed, id) : listed;
+}
+
+/** Whether SQL still reads one of a filter's placeholders (`{id:…}`, `{id_from:…}`, `{id_min:…}`, …). */
+const readsFilter = (sql: string, id: string) => new RegExp(String.raw`\{${id}(?:_from|_to|_min|_max|_not)?:`).test(sql);
+
+/**
+ * D670: the other filter shapes (text contains, a date or number range): the WHERE's top-level AND terms
+ * that read the filter go (a BETWEEN's own AND splits it into two terms, both of which read it).
+ */
+function withoutConjuncts(sql: string, id: string): string {
+  const where = /\bWHERE\b/i.exec(sql);
+  if (!where) return sql;
+  const start = where.index + where[0].length;
+  const rest = sql.slice(start);
+  const tail = /\n?\s*\b(GROUP BY|ORDER BY|LIMIT|HAVING|SETTINGS)\b/i.exec(rest);
+  const body = tail ? rest.slice(0, tail.index) : rest;
+  const terms: string[] = [];
+  let depth = 0;
+  let from = 0;
+  for (let at = 0; at < body.length; at += 1) {
+    if (body[at] === "(") depth += 1;
+    else if (body[at] === ")") depth -= 1;
+    else if (depth === 0 && /^\sAND\s/i.test(body.slice(at, at + 5))) { terms.push(body.slice(from, at)); from = at + 5; at += 4; }
+  }
+  terms.push(body.slice(from));
+  const kept = terms.map((term) => term.trim()).filter((term) => term && !readsFilter(term, id));
+  const after = tail ? rest.slice(tail.index) : "";
+  return kept.length ? `${sql.slice(0, start)} ${kept.join(" AND ")}${after}` : `${sql.slice(0, where.index).replace(/\s+$/, "")}${after}`;
 }
 
 /**
@@ -319,7 +348,7 @@ export function filterRequestPatch(system: string) {
   if (request.kind === "remove_filter") {
     const ops = [
       { op: "remove_parameter", id: request.id },
-      ...spec.queries.filter((query) => query.sql.includes(`{${request.id}:`)).map((query) => ({ op: "update_query", key: query.key, sql: withoutCondition(query.sql, request.id) }))
+      ...spec.queries.filter((query) => readsFilter(query.sql, request.id)).map((query) => ({ op: "update_query", key: query.key, sql: withoutCondition(query.sql, request.id) }))
     ];
     return { summary: `Remove the filter ${request.label}`, ops };
   }

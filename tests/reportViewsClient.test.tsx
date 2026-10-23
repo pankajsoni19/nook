@@ -82,3 +82,41 @@ describe("D565: views", () => {
     expect(changes).toEqual([]);
   });
 });
+
+describe("D674: Save as report default names the refused blocks and fixes the obvious ones", () => {
+  test("a KPI without a format or unit: the refusal names it with Show the block; picking a format sends it with the defaults", async () => {
+    const { ViewsSheet } = await import("../src/reports/ReportViews");
+    const { ApiError } = await import("../src/api");
+    const sent: unknown[] = [];
+    const shown: string[] = [];
+    const onSaveDefault = async (fixes?: unknown[]) => {
+      sent.push(fixes ?? null);
+      if (sent.length === 1) throw new ApiError("block kpi: rule 8: the measure orders needs a format (number, percent, duration, currency:<ISO>) or a unit", 400, {
+        error: "…", code: "INVALID", details: ["block kpi: rule 8: the measure orders needs a format (number, percent, duration, currency:<ISO>) or a unit", "block chart: rule 10: the query returned no rows; a chart needs data (filter less, or use a table or markdown note)"]
+      });
+    };
+    const blocks = [{ id: "kpi", type: "kpi", title: "Orders" }, { id: "chart", type: "chart", title: "By day" }] as never;
+    const view = await render(<ViewsSheet reportId={REPORT_ID} parameters={spec.parameters} values={{ period: { preset: "7d" }, country: [] }} views={[]} canSaveDefault
+      onApply={() => undefined} onChanged={() => undefined} onSaveDefault={onSaveDefault as never} blocks={blocks} onShowBlock={(id) => shown.push(id)} onClose={() => undefined} reopen={() => undefined} />);
+    await view.click(view.button("Save as report default")!);
+    await view.waitFor(() => document.querySelectorAll(".report-views-refusal").length === 2);
+    expect(document.querySelector(".report-views-refused > p")?.textContent).toBe("The design rules refuse these 2 blocks with the new defaults:");
+    const rows = [...document.querySelectorAll(".report-views-refusal")];
+    expect(rows.map((row) => `${row.querySelector("b")?.textContent}|${row.querySelector("small")?.textContent}`)).toEqual([
+      "Orders|The measure orders needs a format (number, percent, duration, currency:<ISO>) or a unit.",
+      "By day|The query returned no rows; a chart needs data (filter less, or use a table or markdown note)."
+    ]);
+    // Only the rule with an obvious fix offers one; both link to their block.
+    expect(rows.map((row) => row.querySelector(".report-views-fix") !== null)).toEqual([true, false]);
+    expect(document.querySelector(".form-error")).toBeNull();
+    await view.click(view.button("Show the block", rows[1])!);
+    expect(shown).toEqual(["chart"]);
+    await view.click(rows[0]!.querySelector("button[role=\"combobox\"]")!);
+    const percent = await view.waitFor(() => [...document.querySelectorAll("[role=\"option\"]")].find((item) => item.textContent?.trim() === "Percent"));
+    await view.click(percent);
+    await view.click(await view.waitFor(() => view.button("Fix the block and save as default")));
+    await view.waitFor(() => sent.length === 2);
+    expect(sent).toEqual([null, [{ op: "update_block", id: "kpi", set: { format: "percent" } }]]);
+    await view.waitFor(() => document.querySelector(".report-views-refused") === null);
+  });
+});

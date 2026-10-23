@@ -86,11 +86,20 @@ export type AddFilterRequest = {
   exclude?: boolean;
   /** D570: a date range's default preset (the default results change: the owner reviews by hand). */
   preset?: string;
+  /** D672: a DateTime column's days are taken in this zone (the report's), when the data source's differs. */
+  zone?: string;
+  /** D671: a number range's column as Nook read it (the check's other run starts at the median). */
+  numbers?: FilterNumbers | null;
 };
-/** D569, D570: what Add filter can make of a column. */
-export const FILTER_KINDS = ["multi_select", "text", "date_range"] as const;
+/** D569, D570, D671: what Add filter can make of a column. */
+export const FILTER_KINDS = ["multi_select", "text", "date_range", "number_range"] as const;
 export type FilterKind = typeof FILTER_KINDS[number];
-export type RemoveFilterRequest = { kind: "remove_filter"; id: string; label: string };
+/** D671: a numeric column's lowest, highest, and median value. */
+export type FilterNumbers = { min: number; max: number; median: number };
+/** D670: the filter types Remove filter takes (each has a value that filters nothing: All, empty text, Any; a date range's window is reviewed by hand). */
+export const REMOVABLE_FILTER_TYPES = ["multi_select", "text", "date_range", "number_range"] as const;
+export type RemovableFilterType = typeof REMOVABLE_FILTER_TYPES[number];
+export type RemoveFilterRequest = { kind: "remove_filter"; id: string; label: string; /** D670: the removed parameter's type (absent: a multi-select, as slice 1 asked). */ type?: RemovableFilterType };
 export type FilterRequest = AddFilterRequest | RemoveFilterRequest;
 
 /** D535: what Nook checked on each changed query before a filter proposal was stored. */
@@ -103,7 +112,7 @@ export type ProposalFilterView = {
   untouched: PatchUntouched[];
   /** Blocks the filter reaches after the change, of the chart, KPI, and table blocks. */
   reach: { blocks: number; total: number };
-  /** D570: a date range filter changes the default results, so nothing was compared: the owner reviews it by hand. */
+  /** D570, D670: a date range filter (added or removed) changes the default results, so nothing was compared: the owner reviews it by hand. */
   reviewByHand?: boolean;
 };
 
@@ -255,17 +264,25 @@ export type FilterColumn = {
   readBy: string[];
   /** Named or commented like an email, phone, token, password, or secret (T409): hidden unless asked for. */
   sensitive: boolean;
-  /** D569, D570: what Add filter can make of it (text: a list or "contains"; whole numbers: a list; dates: a date range). */
+  /** D569, D570, D671: what Add filter can make of it (text: a list or "contains"; whole numbers: a list or a range; other numbers: a range; dates: a date range). */
   kinds: FilterKind[];
 };
 export type FilterColumnsView = { columns: FilterColumn[]; /** The report's used queries. */ queries: number; /** Parameters left before the limit of 8. */ slotsLeft: number };
 /** D534: the options Nook would give the filter (POST /api/reports/:id/filters/preview). */
 /** D562: an existing filter on the same table whose picks a new filter's choices may follow ("Narrow by Country"). */
-export type FilterNarrowChoice = { paramId: string; label: string; column: string; picked: boolean };
+export type FilterNarrowChoice = { paramId: string; label: string; column: string; picked: boolean; /** D673: the parent lists an expression of the column (`lower(country)`), as its options query writes it. */ expression?: string };
+/** D673: a select or multi-select of the report the new filter cannot follow, and why. */
+export type FilterNarrowSkipped = { paramId: string; label: string; reason: string };
 export type FilterPreview = {
   column: FilterColumn; optionsQuery: string; sample: string[]; optionCount: number; truncated: boolean; distinct: number; suggested: { id: string; label: string }; narrowBy: FilterNarrowChoice[];
   /** D569, D570: the kind previewed, and a date column's first and last day. */
   kind: FilterKind; range?: { from: string; to: string } | null;
+  /** D672: a DateTime column's days are counted in this zone (the report's) instead of the data source's; null when they agree. */
+  dayZone?: string | null;
+  /** D671: a number range's lowest, highest, and median value (null: no numbers yet). */
+  numbers?: FilterNumbers | null;
+  /** D673: the report's selects and multi-selects a list filter cannot narrow by, each with the reason. */
+  narrowSkipped?: FilterNarrowSkipped[];
 };
 
 export const FILTER_LIMITS = {

@@ -227,3 +227,13 @@
 .report-proposal-filter-review svg { width: 16px; height: 16px; flex: none; margin-top: 2px; color: var(--yellow); }
 .report-proposal-filter-note { color: var(--report-muted); }
 .report-proposal-filter-sub { margin: 4px 0 0; color: var(--report-soft); font-size: .8rem; font-weight: 600; }
+/* D673 (lane FILT3): the filters a new list cannot narrow by, and why. */
+.report-add-filter-skipped { min-width: 0; color: var(--muted); font-size: .8rem; }
+.report-add-filter-skipped summary { min-height: 32px; display: flex; align-items: center; gap: 6px; cursor: pointer; list-style: none; }
+.report-add-filter-skipped summary::-webkit-details-marker { display: none; }
+.report-add-filter-skipped summary::before { content: ""; width: 0; height: 0; border-block: 4px solid transparent; border-left: 6px solid currentColor; transition: transform .12s; }
+.report-add-filter-skipped[open] summary::before { transform: rotate(90deg); }
+.report-add-filter-skipped summary:focus-visible { outline: 2px solid var(--yellow); outline-offset: 2px; }
+.report-add-filter-skipped ul { margin: 2px 0 0; padding-left: 18px; display: grid; gap: 2px; overflow-wrap: anywhere; }
+.report-add-filter-skipped b { font-weight: 600; }
+@media (max-width: 760px) { .report-add-filter-skipped summary { min-height: 44px; } }

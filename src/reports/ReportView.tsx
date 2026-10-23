@@ -35,6 +35,7 @@ import { scheduleBadge, ScheduleSheet } from "./ScheduleSheet";
 import { CommentOnBlockButton } from "./reportComment";
 import { blockLabel, useHeaderRemoval, useReportEditing } from "./reportBlockEdit";
 import { useHeaderActions, useRegisterReportCommands } from "./reportCommands";
+import type { PatchOp } from "../../shared/reportsEdit";
 import "./reportView.css";
 
 /** "Updated 3 min ago", kept current (every 30 s) without re-rendering the report. */
@@ -361,8 +362,20 @@ export function ReportView({ report, canWrite, generating = false, initial, read
   }, [views.loaded, views.views, withParams, paramsContext?.search, parameters, pushValues]);
   const excludable = useMemo(() => excludableIds(parameters, report.spec.queries), [parameters, report.spec.queries]);
   const shownView = views.views.length ? activeView(parameters, values, views.views) : null;
-  const saveAsDefault = async () => {
-    await editSpec(report.id, defaultOps(parameters, values), report.revision);
+  // D674: a refused block, shown from the Views sheet (it closes first): scrolled to the middle and focused.
+  const showBlock = (blockId: string) => {
+    setViewsOpen(false);
+    window.setTimeout(() => {
+      const target = document.querySelector<HTMLElement>(`[data-block-id="${CSS.escape(blockId)}"]`);
+      if (!target) return;
+      target.scrollIntoView({ block: "center", behavior: "smooth" });
+      if (!target.hasAttribute("tabindex")) target.setAttribute("tabindex", "-1");
+      target.focus({ preventScroll: true });
+    }, 60);
+  };
+  // D674: with the one-step fixes the owner picked for blocks the design rules refused.
+  const saveAsDefault = async (fixes?: PatchOp[]) => {
+    await editSpec(report.id, [...defaultOps(parameters, values), ...(fixes ?? [])], report.revision);
     notify.success("Saved as the report's defaults (a new version)");
     // The values on show are now the defaults: the URL keeps only the tables' state.
     paramsContext?.onChange(Object.keys(tableEntries(paramsContext.search)).length ? tableEntries(paramsContext.search) : undefined, { replace: true });
@@ -430,7 +443,7 @@ export function ReportView({ report, canWrite, generating = false, initial, read
       reach={blockReach} onAddFilter={canAddFilter ? editing?.addFilter : undefined} onRemoveFilter={canAddFilter && editing?.removeFilter ? (param) => editing.removeFilter!(param.id) : undefined}
       onViews={withParams ? () => setViewsOpen(true) : undefined} viewName={shownView?.name ?? null} excludable={excludable} />}
     {viewsOpen && withParams && <ViewsSheet reportId={report.id} parameters={parameters} values={values} views={views.views} canSaveDefault={views.canSaveDefault && Boolean(editing?.canEdit)}
-      onApply={(next) => pushValues(next)} onChanged={views.reload} onSaveDefault={saveAsDefault} onClose={() => setViewsOpen(false)} reopen={() => setViewsOpen(true)} />}
+      onApply={(next) => pushValues(next)} onChanged={views.reload} onSaveDefault={saveAsDefault} blocks={blocks} onShowBlock={showBlock} onClose={() => setViewsOpen(false)} reopen={() => setViewsOpen(true)} />}
     {!readOnly && <div className="report-view-toolbar">
       <p className="report-view-status" role="status">
         {busy ? <span className="report-view-running"><LoaderCircle className="spin" aria-hidden="true" />{!running || running.kind === "generate" ? "Generating…" : previewVersionOf(running.queryKeys) !== null ? `Running v${previewVersionOf(running.queryKeys)} on today's data…` : running.queryKeys?.[0] === PAGE_METRICS_RUN_MARKER ? "Re-reading metrics…" : running.queryKeys?.length ? `Re-running ${running.queryKeys.join(", ")}…` : "Refreshing…"}</span>
@@ -469,7 +482,7 @@ export function ReportView({ report, canWrite, generating = false, initial, read
       {section.summary && <p className="report-section-summary">{section.summary}</p>}
       <div className="report-grid">
         {section.blocks.map((block) => block.type === "markdown"
-          ? <article key={block.id} className={`report-block report-block-markdown ${widthClass(block)}`}>
+          ? <article key={block.id} data-block-id={block.id} className={`report-block report-block-markdown ${widthClass(block)}`}>
             {/* D525: a titled text block gets a header row like a chart's; an untitled one, the trash floated in its text. */}
             {block.title && (canRemove
               ? <header className="report-block-head"><h3 className="report-block-title">{block.title}</h3><span className="report-block-buttons">{removeButton(block)}</span></header>
@@ -541,7 +554,7 @@ export function DataBlockCard({ block, view, hasQuery, palette, running, loaded,
   const failed = view?.failed ?? null;
   const rerunning = pending || Boolean(running && (!running.queryKeys || running.queryKeys.includes(block.queryKey)));
   const title = block.title ?? (block.type === "kpi" ? block.label ?? block.column : block.queryKey);
-  return <article className={`report-block report-block-${block.type} ${widthClass(block)}${block.type === "kpi" && block.hero ? " report-block-hero" : ""}${pending ? " report-block-pending" : ""}`} aria-label={title} aria-busy={pending || undefined}>
+  return <article data-block-id={block.id} className={`report-block report-block-${block.type} ${widthClass(block)}${block.type === "kpi" && block.hero ? " report-block-hero" : ""}${pending ? " report-block-pending" : ""}`} aria-label={title} aria-busy={pending || undefined}>
     <header className="report-block-head">
       {/* A KPI title wraps between words only; a word too long for its line ends in an ellipsis (the tooltip has it all). */}
       <h3 className="report-block-title" title={title}>{block.type === "kpi" ? titleWords(title) : title}</h3>

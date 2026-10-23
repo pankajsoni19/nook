@@ -162,6 +162,82 @@ describe("D534: Add filter", () => {
     expect(text).toContain("Not filteredroutesShows every route; clicking it sets the filter");
   });
 
+  test("D671: a float column offers a number range: its lowest, highest, and median value, no list, and the request asks for it", async () => {
+    const amount = { table: "eval_top_routes.requests", column: "latency_ms", type: "Float64", chType: "Float64", comment: "", readBy: ["errors"], sensitive: false, kinds: ["number_range"] };
+    const api = mockApi({
+      [`GET /reports/${REPORT_ID}/filters/columns`]: () => ({ columns: [amount], queries: 2, slotsLeft: 8 }),
+      [`POST /reports/${REPORT_ID}/filters/preview`]: () => ({ preview: { column: amount, optionsQuery: "", sample: [], optionCount: 0, truncated: false, distinct: 0, suggested: { id: "latency_ms", label: "Latency ms" }, narrowBy: [], kind: "number_range", numbers: { min: 3, max: 1200.5, median: 48.25 } } }),
+      [`POST /reports/${REPORT_ID}/filters`]: () => ({ instruction: { id: "i1", text: "Add a filter" } })
+    });
+    let requested = 0;
+    const view = await render(<AddFilterSheet reportId={REPORT_ID} onClose={() => undefined} onRequested={() => { requested += 1; }} />);
+    await view.waitFor(() => document.querySelector(".report-add-filter-column"));
+    await view.click(document.querySelector(".report-add-filter-column")!);
+    await view.waitFor(() => document.querySelector(".report-add-filter-values-head"));
+    expect(document.querySelector(".report-add-filter-values-head")?.textContent).toBe("Values from 3 to 1,200.5; half are below 48.25");
+    expect(document.querySelector(".report-add-filter-values")).toBeNull();
+    expect(document.querySelector(".report-add-filter-exposure")?.textContent).toContain("Readers type at least and at most");
+    expect(document.querySelector(".file-dialog-hint")?.textContent).toContain("starts at Any (every row)");
+    await view.click(view.button("Ask for the filter")!);
+    await view.waitFor(() => requested === 1);
+    expect(api.calls.find((call) => call.method === "POST" && call.path.endsWith("/filters"))?.body).toEqual({ table: "eval_top_routes.requests", column: "latency_ms", label: "Latency ms", kind: "number_range" });
+  });
+
+  test("D673: Narrow by names a parent's expression, and says why the others cannot narrow", async () => {
+    mockApi({
+      [`GET /reports/${REPORT_ID}/filters/columns`]: () => ({ ...COLUMNS, columns: COLUMNS.columns.map((column) => ({ ...column, kinds: ["multi_select"] })) }),
+      [`POST /reports/${REPORT_ID}/filters/preview`]: () => ({ preview: { ...PREVIEW.preview, kind: "multi_select", narrowBy: [{ paramId: "lc", label: "Country", column: "country", picked: false, expression: "lower(country)" }], narrowSkipped: [{ paramId: "plan", label: "Plan", reason: "its choices come from db.plans, not eval_top_routes.requests" }] } })
+    });
+    const view = await render(<AddFilterSheet reportId={REPORT_ID} onClose={() => undefined} onRequested={() => undefined} />);
+    await view.waitFor(() => document.querySelector(".report-add-filter-column"));
+    await view.click(document.querySelector(".report-add-filter-column")!);
+    await view.waitFor(() => document.querySelector(".report-add-filter-narrow"));
+    expect(document.querySelector(".report-add-filter-narrow small")?.textContent).toBe("Only the route values of the picked country are offered (it lists lower(country))");
+    expect(document.querySelector(".report-add-filter-skipped summary")?.textContent).toBe("1 filter cannot narrow this one");
+    expect(document.querySelector(".report-add-filter-skipped li")?.textContent).toBe("Plan: its choices come from db.plans, not eval_top_routes.requests");
+  });
+
+  test("D670, D671: a number range's proposal and a date range's removal (reviewed by hand)", async () => {
+    await render(<FilterFacts filter={{
+      request: { kind: "add_filter", type: "number_range", id: "latency", label: "Latency", table: "eval_top_routes.requests", column: "latency_ms", chType: "Float64", optionsQuery: "" },
+      checked: [{ key: "errors", rows: 1, otherValue: "48", otherRows: 1 }], untouched: [], reach: { blocks: 1, total: 2 }
+    }} />);
+    let text = document.querySelector(".report-proposal-filter")?.textContent ?? "";
+    expect(text).toContain("Filters 1 of 2 blocks; it starts at Any (every row).");
+    expect(text).toContain("errorsDefault results unchangedRan with Latency ≥ 48: 1 row");
+    document.querySelector(".report-proposal-filter")!.parentElement!.remove();
+    await render(<FilterFacts filter={{ request: { kind: "remove_filter", id: "period", label: "Period", type: "date_range" }, checked: [{ key: "errors", rows: 7, otherValue: null, otherRows: null }], untouched: [], reach: { blocks: 1, total: 2 }, reviewByHand: true }} />);
+    text = document.querySelector(".report-proposal-filter")?.textContent ?? "";
+    expect(text).toContain("Filter removedPeriod");
+    expect(text).toContain("Without the date range every block it reached shows all its days again. Nook compared nothing");
+    expect(text).toContain("errorsRuns: 7 rows without the filter");
+  });
+
+  test("D670: Remove filter sits in the date range menu, a text filter's trash button, and a number range's sheet (the owner only)", async () => {
+    const { ReportParamsBar } = await import("../src/reports/ReportParamsBar");
+    const params = [
+      { id: "period", label: "Period", type: "date_range", chType: "Date", default: { preset: "30d" } },
+      { id: "q", label: "Route contains", type: "text", chType: "String", default: "" },
+      { id: "amount", label: "Amount", type: "number_range", chType: "Float64", default: { min: null, max: null } }
+    ] as ReportSpec["parameters"];
+    const values = { period: { preset: "30d" }, q: "", amount: { min: null, max: null } } as never;
+    const removed: string[] = [];
+    const view = await render(<ReportParamsBar reportId={REPORT_ID} parameters={params} values={values} busy={false} onChange={() => undefined} onRemoveFilter={(param) => removed.push(param.id)} />);
+    await view.click(document.querySelector(".report-params-chips button[aria-label=\"Remove the filter Route contains\"]")!);
+    expect(removed).toEqual(["q"]);
+    await view.click(document.querySelector<HTMLButtonElement>(".report-params-chips .report-param button[role=\"combobox\"]")!);
+    const remove = await view.waitFor(() => [...document.querySelectorAll("[role=\"option\"]")].find((item) => item.textContent?.trim() === "Remove filter…"));
+    await view.click(remove);
+    expect(removed).toEqual(["q", "period"]);
+    await view.click(document.querySelector(".report-params-chips button[aria-label=\"Amount: Any\"]")!);
+    await view.click(await view.waitFor(() => view.button("Remove filter")));
+    expect(removed).toEqual(["q", "period", "amount"]);
+    view.container.remove();
+    // A reader sees none of them.
+    const reader = await render(<ReportParamsBar reportId={REPORT_ID} parameters={params} values={values} busy={false} onChange={() => undefined} />);
+    expect(reader.container.querySelector(".report-param-remove-icon")).toBeNull();
+  });
+
   test("Remove filter's request carries a JSON body (the server refuses a bare DELETE)", async () => {
     const { requestFilterRemoval } = await import("../src/reports/reportEditApi");
     const api = mockApi({ [`DELETE /reports/${REPORT_ID}/filters/country`]: () => ({ instruction: { id: "i2" } }) });

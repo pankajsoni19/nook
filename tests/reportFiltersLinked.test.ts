@@ -13,7 +13,7 @@ const { syncSchema } = await import("../server/reports/schemaCatalog");
 const refresh = await import("../server/reports/refresh");
 const params = await import("../server/reports/params");
 const { checkSpecShape } = await import("../server/reports/specValidate");
-const { optionColumnOf, optionsQueryFor } = await import("../server/reports/filterRequest");
+const { narrowChoices, optionColumnOf, optionSourceOf, optionsQueryFor } = await import("../server/reports/filterRequest");
 
 /**
  * Linked filters (lane FILT2, D560–D562; docs/plan/REPORT_FILTERS.md "Later" 1): an options query may
@@ -89,12 +89,55 @@ describe("D560: an options query reads only earlier parameters", () => {
   });
 
   test("D562: a narrowed options query reads its parents; the listed column of an options query", () => {
-    expect(optionsQueryFor("db.t", "route", [{ paramId: "country", label: "Country", column: "country", type: "multi_select", chType: "Array(String)" }, { paramId: "plan", label: "Plan", column: "plan", type: "select", chType: "String" }]))
+    expect(optionsQueryFor("db.t", "route", [{ paramId: "country", label: "Country", column: "country", type: "multi_select", chType: "Array(String)", operand: "`country`" }, { paramId: "plan", label: "Plan", column: "plan", type: "select", chType: "String", operand: "`plan`" }]))
       .toBe("SELECT toString(`route`) AS value FROM `db`.`t` WHERE (empty({country:Array(String)}) OR (`country` IN {country:Array(String)}) != {country_not:UInt8}) AND `plan` = {plan:String} GROUP BY value ORDER BY count() DESC LIMIT 200");
     expect(optionColumnOf(optionsQueryFor("db.t", "we`ird"))).toBe("we`ird");
     expect(optionColumnOf("SELECT DISTINCT country FROM analytics.orders ORDER BY country")).toBe("country");
     expect(optionColumnOf("SELECT toString(status) AS value FROM db.t")).toBe("status");
     expect(optionColumnOf("SELECT concat(a, b) FROM db.t")).toBeNull();
+  });
+
+  test("D673: an options query's expression of one column is recognized; anything else says why", () => {
+    expect(optionSourceOf("SELECT lower(country) AS value FROM db.t GROUP BY value")).toEqual({ column: "country", expression: "lower(country)" });
+    expect(optionSourceOf("SELECT DISTINCT toString(t.user_id) FROM db.t AS t")).toEqual({ column: "user_id", expression: "toString(t.user_id)" });
+    expect(optionSourceOf("SELECT if(`plan tier` = '', 'none', `plan tier`) AS value FROM db.t")).toEqual({ column: "plan tier", expression: "if(`plan tier` = '', 'none', `plan tier`)" });
+    expect(optionSourceOf("SELECT CAST(status AS String) AS value, count() AS n FROM db.t")).toEqual({ column: "status", expression: "CAST(status AS String)" });
+    expect(optionSourceOf("SELECT country FROM db.t")).toEqual({ column: "country", expression: null });
+    expect(optionSourceOf("SELECT toString(`country`) AS value FROM db.t")).toEqual({ column: "country", expression: null });
+    expect(optionSourceOf("SELECT concat(a, '-', b) FROM db.t")).toEqual({ reason: "its choices read 2 columns (a, b)" });
+    expect(optionSourceOf("SELECT 'x' AS value FROM db.t")).toEqual({ reason: "its choices are not read from a column" });
+    expect(optionSourceOf("SELECT (SELECT max(a) FROM db.u) AS value FROM db.t")).toEqual({ reason: "its choices column holds a subquery" });
+    expect(optionSourceOf("SELECT lower(a) FROM db.t WHERE x = {p:String}")).toEqual({ column: "a", expression: "lower(a)" });
+    expect(optionSourceOf("SELECT concat(a, {p:String}) FROM db.t")).toEqual({ reason: "its choices column reads other filters" });
+    expect(optionSourceOf("WITH x AS (SELECT 1) SELECT a FROM x")).toEqual({ reason: "its choices query is not a plain SELECT … FROM" });
+
+    const catalog = new Map([["country", "LowCardinality(String)"], ["route", "String"], ["user_id", "UInt64"], ["amount", "Float64"]]);
+    const columns = [
+      { table: "db.t", column: "country", type: "LowCardinality(String)", chType: "Array(String)", comment: "", readBy: [], sensitive: false, kinds: ["multi_select", "text"] as never },
+      { table: "db.t", column: "route", type: "String", chType: "Array(String)", comment: "", readBy: [], sensitive: false, kinds: ["multi_select", "text"] as never },
+      { table: "db.t", column: "user_id", type: "UInt64", chType: "Array(UInt64)", comment: "", readBy: [], sensitive: false, kinds: ["multi_select", "number_range"] as never }
+    ];
+    const multi = (id: string, chType: string, optionsQuery: string): ReportParameter => ({ id, label: id.toUpperCase(), type: "multi_select", chType, default: [], optionsQuery });
+    const spec = { parameters: [
+      multi("lc", "Array(String)", "SELECT lower(country) AS value FROM db.t GROUP BY value"),
+      multi("uid", "Array(String)", "SELECT toString(user_id) AS value FROM db.t GROUP BY value"),
+      multi("uidn", "Array(UInt64)", "SELECT user_id + 1 AS value FROM db.t"),
+      multi("other", "Array(String)", "SELECT country FROM db.u"),
+      multi("two", "Array(String)", "SELECT concat(country, route) FROM db.t"),
+      multi("gone", "Array(String)", "SELECT nope FROM db.t")
+    ] };
+    const { offered, skipped } = narrowChoices(spec, "db.t", columns, catalog, "db", "route");
+    expect(offered).toEqual([
+      { paramId: "lc", label: "LC", column: "country", type: "multi_select", chType: "Array(String)", operand: "toString(lower(country))", expression: "lower(country)" },
+      { paramId: "uid", label: "UID", column: "user_id", type: "multi_select", chType: "Array(String)", operand: "toString(`user_id`)" }
+    ]);
+    expect(skipped).toEqual([
+      { paramId: "uidn", label: "UIDN", reason: "its choices are numbers worked out by an expression, which only a text filter can follow" },
+      { paramId: "other", label: "OTHER", reason: "its choices come from db.u, not db.t" },
+      { paramId: "two", label: "TWO", reason: "its choices read 2 columns (country, route)" },
+      { paramId: "gone", label: "GONE", reason: "its choices read nope, which db.t does not have" }
+    ]);
+    expect(optionsQueryFor("db.t", "route", offered.slice(0, 1))).toBe("SELECT toString(`route`) AS value FROM `db`.`t` WHERE (empty({lc:Array(String)}) OR (toString(lower(country)) IN {lc:Array(String)}) != {lc_not:UInt8}) GROUP BY value ORDER BY count() DESC LIMIT 200");
   });
 });
 

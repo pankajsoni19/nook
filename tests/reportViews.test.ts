@@ -5,6 +5,7 @@ import { startFakeClickhouse } from "./support/fakeClickhouse";
 import type { ReportSpec } from "../shared/reports";
 import { VIEW_LIMITS } from "../shared/reportsView";
 import type { ReportParameter } from "../shared/reportParams";
+import { designRefusals, refusalSentence } from "../shared/designRefusals";
 
 const { reportTools } = await import("../server/mcpTools").then(() => import("../server/reports/mcpTools"));
 const refresh = await import("../server/reports/refresh");
@@ -15,7 +16,7 @@ const params = await import("../server/reports/params");
  * sets and "my default view" (migration 069); anyone who can read keeps their own and sees no one
  * else's; values are checked when saved and stored as what differs from the defaults; only the owner's
  * "Save as report default" changes the spec, through the manual edit (a version that re-runs what reads
- * the changed defaults). App only: no MCP tool reads or changes views.
+ * the changed defaults). App only to change: D676's MCP list_report_views only reads the key owner's own.
  */
 
 retireUsersAfterFile();
@@ -101,10 +102,16 @@ describe("D565: personal views", () => {
     expect((await send(owner, "POST", `/reports/${plain.body.report.id}/views`, { name: "x", values: {} })).status).toBe(400);
   });
 
-  test("views go with the report; MCP has no view tool (D180, app only)", async () => {
+  test("views go with the report; D676: MCP only lists the key owner's own views (read-only), nothing changes them", async () => {
     const reportId = await seeded();
-    await send(viewer, "POST", `/reports/${reportId}/views`, { name: "Germany", values: { country: ["DE"] } });
-    expect(reportTools.some((tool) => /view/.test(tool.name))).toBe(false);
+    const saved = await send(viewer, "POST", `/reports/${reportId}/views`, { name: "Germany", values: { country: ["DE"] }, isDefault: true });
+    expect(reportTools.filter((tool) => /view/.test(tool.name)).map((tool) => [tool.name, tool.write, tool.scopes])).toEqual([["list_report_views", false, ["reports:read"]]]);
+    const tool = reportTools.find((item) => item.name === "list_report_views")!;
+    const keyOf = (session: Session) => ({ keyId: "k-views", userId: session.userId, name: "k", scopes: ["reports:read"] as never });
+    expect(await tool.handler({ reportId }, keyOf(viewer) as never)).toEqual({ views: [{ id: saved.body.view.id, name: "Germany", values: { country: ["DE"] }, isDefault: true, createdAt: saved.body.view.createdAt, updatedAt: saved.body.view.updatedAt }] });
+    // The owner's key lists the owner's views (none), never the viewer's; a stranger's key finds no report.
+    expect(await tool.handler({ reportId }, keyOf(owner) as never)).toEqual({ views: [] });
+    await expect(Promise.resolve().then(() => tool.handler({ reportId }, keyOf(stranger) as never))).rejects.toThrow();
     db.query("DELETE FROM reports WHERE id = ?").run(reportId);
     expect((db.query("SELECT count(*) AS n FROM report_param_views WHERE report_id = ?").get(reportId) as { n: number }).n).toBe(0);
   });
@@ -122,5 +129,30 @@ describe("D566: Save as report default (the owner, a version)", () => {
     expect(results.body.results[0].result.params.country).toBe("['DE','FR']");
     // A reader cannot.
     expect((await send(viewer, "POST", `/reports/${reportId}/spec/edit`, { ops: [{ op: "update_parameter", id: "country", set: { default: [] } }], expectedRevision: edit.body.revision })).status).toBe(404);
+  });
+
+  test("D674: a block the design rules refuse is named per block; the one-step fix goes with the defaults in the same edit", async () => {
+    const reportId = await seeded();
+    // A KPI saved before the rule (no format or unit) reads the changed default, so the rules check it.
+    const bare = { ...spec, blocks: [{ id: "kpi", type: "kpi", title: "Orders", intent: "headline", queryKey: "orders", column: "orders" }] };
+    db.query("UPDATE reports SET spec_json = ? WHERE id = ?").run(JSON.stringify(bare), reportId);
+    const revision = (db.query("SELECT revision FROM reports WHERE id = ?").get(reportId) as { revision: number }).revision;
+    const defaults = { op: "update_parameter", id: "country", set: { default: ["DE"] } };
+    const refused = await send(owner, "POST", `/reports/${reportId}/spec/edit`, { ops: [defaults], expectedRevision: revision });
+    expect(refused.status).toBe(400);
+    const read = designRefusals(refused.body.details);
+    expect(read.blocks).toEqual([{ blockId: "kpi", rule: 8, text: "the measure orders needs a format (number, percent, duration, currency:<ISO>) or a unit", fix: "format" }]);
+    expect(refusalSentence(read.blocks[0]!.text)).toBe("The measure orders needs a format (number, percent, duration, currency:<ISO>) or a unit.");
+    const fixed = await send(owner, "POST", `/reports/${reportId}/spec/edit`, { ops: [defaults, { op: "update_block", id: "kpi", set: { unit: "orders" } }], expectedRevision: revision });
+    expect(fixed.status, JSON.stringify(fixed.body)).toBe(200);
+    const stored = JSON.parse((db.query("SELECT spec_json FROM reports WHERE id = ?").get(reportId) as { spec_json: string }).spec_json) as ReportSpec;
+    expect([stored.parameters.find((param) => param.id === "country")!.default, (stored.blocks[0] as { unit?: string }).unit]).toEqual([["DE"], "orders"]);
+  });
+
+  test("D674: refusal lines are read per block; a title is the other one-step fix; lines that name no block stay as they are", () => {
+    expect(designRefusals(["block b1: rule 8: give the block a title", "block b2: rule 10: the query returned no rows; a chart needs data (filter less, or use a table or markdown note)", "query orders: Code: 60", 3])).toEqual({
+      blocks: [{ blockId: "b1", rule: 8, text: "give the block a title", fix: "title" }, { blockId: "b2", rule: 10, text: "the query returned no rows; a chart needs data (filter less, or use a table or markdown note)", fix: null }],
+      other: ["query orders: Code: 60"]
+    });
   });
 });

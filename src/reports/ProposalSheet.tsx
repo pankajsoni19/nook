@@ -75,9 +75,19 @@ const blocksText = (reach: ProposalFilterView["reach"]) => reach.blocks === reac
 function startsAt(request: Extract<ProposalFilterView["request"], { kind: "add_filter" }>): string {
   if (request.type === "date_range") return `it starts at ${DATE_PRESET_LABELS[(request.preset ?? "30d") as DatePreset] ?? request.preset}`;
   if (request.type === "text") return "it starts empty (every row)";
+  if (request.type === "number_range") return "it starts at Any (every row)";
   return request.exclude ? "it starts at All; readers may also leave values out" : "it starts at All";
 }
-const otherText = (request: ProposalFilterView["request"], value: string) => request.kind === "add_filter" && request.type === "date_range" ? DATE_PRESET_LABELS[value as DatePreset] ?? value : value || "(blank)";
+function otherText(request: ProposalFilterView["request"], value: string): string {
+  if (request.kind === "add_filter" && request.type === "date_range") return DATE_PRESET_LABELS[value as DatePreset] ?? value;
+  // D671: the check's other run of a number range starts at the column's median.
+  if (request.kind === "add_filter" && request.type === "number_range") return `≥ ${Number(value).toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+  return value || "(blank)";
+}
+/** D570, D670: why a proposal is reviewed by hand. */
+const byHandText = (request: ProposalFilterView["request"]) => request.kind === "remove_filter"
+  ? "Without the date range every block it reached shows all its days again. Nook compared nothing: check each changed query in the SQL below before you apply."
+  : "The default results change to this window. Nook compared nothing: check each changed query in the SQL below before you apply.";
 
 /**
  * D534, D535: what a filter request's proposal did and what Nook checked: the filter (its column),
@@ -90,13 +100,13 @@ export function FilterFacts({ filter }: { filter: ProposalFilterView }) {
     <h3><span className="reports-status">{request.kind === "add_filter" ? "New filter" : "Filter removed"}</span>{request.label}{request.kind === "add_filter" && <code>{request.table}.{request.column}</code>}</h3>
     {request.kind === "add_filter" && <p className="report-proposal-filter-reach">{blocksText(filter.reach)}; {startsAt(request)}.</p>}
     {/* D570: a date range changes the default results, so nothing was compared. */}
-    {filter.reviewByHand && <p className="report-proposal-filter-review" role="note"><TriangleAlert aria-hidden="true" />The default results change to this window. Nook compared nothing: check each changed query in the SQL below before you apply.</p>}
+    {filter.reviewByHand && <p className="report-proposal-filter-review" role="note"><TriangleAlert aria-hidden="true" />{byHandText(request)}</p>}
     <p className="report-proposal-filter-sub">{request.kind === "add_filter" ? "Queries that take the filter" : "Queries it is taken out of"}</p>
     <ul>{filter.checked.map((item) => <li key={item.key}>
       <code>{item.key}</code>
-      {filter.reviewByHand ? <span className="report-proposal-filter-note">{`Runs: ${countText(item.rows, "row")} with the default`}</span>
+      {filter.reviewByHand ? <span className="report-proposal-filter-note">{`Runs: ${countText(item.rows, "row")} ${request.kind === "remove_filter" ? "without the filter" : "with the default"}`}</span>
         : <span className="report-proposal-filter-ok"><CircleCheck aria-hidden="true" />Default results unchanged</span>}
-      {item.otherValue !== null && <span className="report-proposal-filter-note">{`Ran with ${request.label} = ${otherText(request, item.otherValue)}: ${countText(item.otherRows ?? 0, "row")}`}</span>}
+      {item.otherValue !== null && <span className="report-proposal-filter-note">{`Ran with ${request.label}${request.kind === "add_filter" && request.type === "number_range" ? " " : " = "}${otherText(request, item.otherValue)}: ${countText(item.otherRows ?? 0, "row")}`}</span>}
     </li>)}</ul>
     {filter.untouched.length > 0 && <>
       <p className="report-proposal-filter-sub">Not filtered</p>

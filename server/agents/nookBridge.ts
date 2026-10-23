@@ -85,6 +85,8 @@ export const NOOK_NEVER_TOOLS: ReadonlySet<string> = new Set([
   "star_report", "unstar_report",
   // Phase 3 (D557): a person's report lists are their organisation of the Reports home, not an agent's.
   "list_report_lists", "get_report_list", "add_report_to_list",
+  // D676: a person's saved views of a report are their own convenience, not an agent's.
+  "list_report_views",
   // D575: a copy of a report is a person's own new report, not an agent's.
   "duplicate_report",
   // D627: hiding a card from a board (and back) is for people and their own keys, not chat agents.

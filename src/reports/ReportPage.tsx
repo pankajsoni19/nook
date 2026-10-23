@@ -152,8 +152,12 @@ export function ReportPage({ reportId, displayName, flash, onBack, onSettings, o
   // Lane EDIT (D525–D529): Remove from a header and Edit SQL (the owner); Suggest an edit (the comment level).
   // D534: Remove filter asks first, then queues the request and opens Changes on it.
   const removeFilter = useCallback(async (paramId: string) => {
-    const label = report?.spec.parameters.find((param) => param.id === paramId)?.label ?? paramId;
-    if (!await confirm.ask({ title: `Remove the filter ${label}?`, message: "Nook's edit agent takes it out of the queries that read it and checks every block shows what it shows with All. You review the change in Changes before anything is removed.", confirmLabel: "Ask to remove it" })) return;
+    const param = report?.spec.parameters.find((item) => item.id === paramId);
+    const label = param?.label ?? paramId;
+    // D670: a date range has no value that filters nothing, so its removal is reviewed by hand.
+    const check = param?.type === "date_range" ? "Without it every block it reaches shows all its days, so Nook cannot compare the results: you review them by hand"
+      : `Nook checks every block shows what it shows ${param?.type === "text" ? "while the text is empty" : param?.type === "number_range" ? "with the range at Any" : "with All"}`;
+    if (!await confirm.ask({ title: `Remove the filter ${label}?`, message: `Nook's edit agent takes it out of the queries that read it. ${check}. You review the change in Changes before anything is removed.`, confirmLabel: "Ask to remove it" })) return;
     try {
       await requestFilterRemoval(reportId, paramId);
       notify.success("Removal requested; Nook proposes it in Changes");

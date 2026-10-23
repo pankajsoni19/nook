@@ -7,6 +7,11 @@ import { canonicalValues, defaultValues, isDefaultSet, resolveValues, valueLabel
 import { VIEW_LIMITS, type ParamView } from "../../shared/reportsView";
 import { listViews, removeView, saveView, updateView } from "./reportViewApi";
 import { messageOf } from "./reportsApi";
+import { ApiError } from "../api";
+import { Select } from "../ui/Select";
+import { DESIGN_FIX_FORMATS, designRefusals, refusalSentence, type DesignRefusal } from "../../shared/designRefusals";
+import type { ReportBlock } from "../../shared/reports";
+import type { PatchOp } from "../../shared/reportsEdit";
 
 /**
  * Saved views (lane FILT2, D565, D566): a reader's named filter values for one report and "my default
@@ -53,18 +58,32 @@ type SheetProps = {
   canSaveDefault: boolean;
   onApply: (values: ParamValues) => void;
   onChanged: () => Promise<void> | void;
-  /** The owner: the values on show become the report's defaults (a new version). */
-  onSaveDefault?: () => Promise<void>;
+  /** The owner: the values on show become the report's defaults (a new version); D674: with the fixes picked for refused blocks. */
+  onSaveDefault?: (fixes?: PatchOp[]) => Promise<void>;
+  /** D674: the report's blocks (a refusal names its block by title) and how to show one (the sheet closes first). */
+  blocks?: ReadonlyArray<Pick<ReportBlock, "id" | "type" | "title">>;
+  onShowBlock?: (blockId: string) => void;
   onClose: () => void;
   reopen: () => void;
 };
 
-export function ViewsSheet({ reportId, parameters, values, views, canSaveDefault, onApply, onChanged, onSaveDefault, onClose, reopen }: SheetProps) {
+/** D674: the one-step fix picked for a refused block. */
+type PickedFix = { format?: string; unit?: string; title?: string };
+const fixOp = (blockId: string, fix: PickedFix): PatchOp | null => {
+  if (fix.title?.trim()) return { op: "update_block", id: blockId, set: { title: fix.title.trim() } };
+  if (fix.format === "unit") return fix.unit?.trim() ? { op: "update_block", id: blockId, set: { unit: fix.unit.trim() } } : null;
+  return fix.format ? { op: "update_block", id: blockId, set: { format: fix.format } } : null;
+};
+
+export function ViewsSheet({ reportId, parameters, values, views, canSaveDefault, onApply, onChanged, onSaveDefault, blocks = [], onShowBlock, onClose, reopen }: SheetProps) {
   const active = activeView(parameters, values, views);
   const [name, setName] = useState("");
   const [asDefault, setAsDefault] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // D674: the blocks the design rules refused for the new defaults, and the fixes picked for them.
+  const [refused, setRefused] = useState<DesignRefusal[]>([]);
+  const [fixes, setFixes] = useState<Record<string, PickedFix>>({});
   const nameId = useId();
   useHistoryDialogGuard(true, onClose, { blocked: busy !== null, reopen, layerKey: "reports.views" });
   const atDefaults = isDefaultSet(parameters, values);
@@ -76,12 +95,25 @@ export function ViewsSheet({ reportId, parameters, values, views, canSaveDefault
       await work();
       await onChanged();
       if (done) notify.success(done);
+      if (key === "defaults") { setRefused([]); setFixes({}); }
     } catch (reason) {
-      setError(messageOf(reason, "That did not work"));
+      // D674: a refusal by the design rules names its blocks; say which, and offer the fixes that are one step.
+      const details = reason instanceof ApiError && reason.payload && typeof reason.payload === "object" ? (reason.payload as { details?: unknown }).details : undefined;
+      const read = key === "defaults" && Array.isArray(details) ? designRefusals(details) : null;
+      if (read?.blocks.length) {
+        setRefused(read.blocks);
+        setError(read.other.length ? read.other.slice(0, 2).join("; ") : null);
+      } else setError(messageOf(reason, "That did not work"));
     } finally {
       setBusy(null);
     }
   }
+  const saveDefaults = () => {
+    const ops = refused.map((item) => fixes[item.blockId] ? fixOp(item.blockId, fixes[item.blockId]!) : null).filter((op): op is PatchOp => op !== null);
+    return run("defaults", () => onSaveDefault!(ops.length ? ops : undefined));
+  };
+  const setFix = (blockId: string, next: PickedFix) => setFixes((current) => ({ ...current, [blockId]: { ...current[blockId], ...next } }));
+  const fixed = refused.filter((item) => item.fix && fixes[item.blockId] && fixOp(item.blockId, fixes[item.blockId]!)).length;
 
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -123,8 +155,30 @@ export function ViewsSheet({ reportId, parameters, values, views, canSaveDefault
       </form>
       {canSaveDefault && onSaveDefault && <section className="report-views-owner" aria-label="The report's defaults">
         <p>Everyone who opens the report sees its defaults first. As the owner you can make the filters on show the defaults; that saves a new version.</p>
-        <button type="button" className="secondary-button" disabled={atDefaults || busy !== null} onClick={() => void run("defaults", onSaveDefault)}>
-          {busy === "defaults" ? <LoaderCircle className="spin" aria-hidden="true" /> : <Check aria-hidden="true" />}Save as report default
+        {refused.length > 0 && <div className="report-views-refused" role="alert">
+          <p>{refused.length === 1 ? "The design rules refuse this block with the new defaults:" : `The design rules refuse these ${refused.length} blocks with the new defaults:`}</p>
+          <ul>{refused.map((item) => {
+            const block = blocks.find((candidate) => candidate.id === item.blockId);
+            const fix = fixes[item.blockId] ?? {};
+            return <li key={`${item.blockId}:${item.rule}:${item.text}`} className="report-views-refusal">
+              <div className="report-views-refusal-head">
+                <b>{block?.title?.trim() || item.blockId}</b>
+                {onShowBlock && block && <button type="button" className="report-views-show" onClick={() => onShowBlock(item.blockId)}>Show the block</button>}
+              </div>
+              <small>{refusalSentence(item.text)}</small>
+              {item.fix === "format" && <div className="report-views-fix">
+                <Select<string> variant="field" label={`Format of ${block?.title?.trim() || item.blockId}`} value={fix.format ?? ""} placeholder="Pick a format or unit" searchable={false}
+                  options={[...DESIGN_FIX_FORMATS.map((option) => ({ value: option.value, label: option.label })), { value: "unit", label: "A unit word…" }]} onChange={(format) => setFix(item.blockId, { format })} />
+                {fix.format === "unit" && <input aria-label="Unit" placeholder="Unit, e.g. orders" maxLength={24} value={fix.unit ?? ""} onChange={(event) => setFix(item.blockId, { unit: event.target.value })} />}
+              </div>}
+              {item.fix === "title" && <div className="report-views-fix">
+                <input aria-label="Title" placeholder="A title for the block" maxLength={120} value={fix.title ?? ""} onChange={(event) => setFix(item.blockId, { title: event.target.value })} />
+              </div>}
+            </li>;
+          })}</ul>
+        </div>}
+        <button type="button" className={fixed ? "primary-button" : "secondary-button"} disabled={atDefaults || busy !== null} onClick={() => void saveDefaults()}>
+          {busy === "defaults" ? <LoaderCircle className="spin" aria-hidden="true" /> : <Check aria-hidden="true" />}{fixed ? `Fix ${fixed === 1 ? "the block" : `${fixed} blocks`} and save as default` : "Save as report default"}
         </button>
       </section>}
       {error && <p className="form-error" role="alert">{error}</p>}

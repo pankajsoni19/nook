@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from "react";
-import { Eye, ListFilter, LoaderCircle, TriangleAlert } from "lucide-react";
+import { Clock3, Eye, ListFilter, LoaderCircle, TriangleAlert } from "lucide-react";
 import { ModalDialog } from "../files/Dialog";
 import { notify } from "../ui/notify";
 import { useHistoryDialogGuard } from "../ui/useHistoryDialogGuard";
@@ -18,8 +18,10 @@ import "./reportEdit.css";
  * sheet on a phone) with its own history layer (`reports.add-filter`): Back closes it, Forward reopens it.
  */
 
-/** D569, D570: the filter types a column offers. */
-const KIND_LABELS: Record<FilterKind, string> = { multi_select: "Pick from a list", text: "Text contains", date_range: "Date range" };
+/** D569, D570, D671: the filter types a column offers. */
+const KIND_LABELS: Record<FilterKind, string> = { multi_select: "Pick from a list", text: "Text contains", date_range: "Date range", number_range: "Number range" };
+/** D671: a column's lowest, highest, or median value, as the sheet shows it. */
+export const numberText = (value: number) => value.toLocaleString("en-US", { maximumFractionDigits: 2 });
 const columnKey = (column: Pick<FilterColumn, "table" | "column">) => `${column.table}\u0000${column.column}`;
 /** "read by 3 of 5 queries" */
 export const readByText = (readBy: number, total: number) => total <= 1 ? (readBy ? "read by the report's query" : "not read") : readBy === total ? `read by all ${total} queries` : `read by ${readBy} of ${total} queries`;
@@ -109,7 +111,7 @@ export function AddFilterSheet({ reportId, onClose, reopen, onRequested }: { rep
                 <span className="report-add-filter-meta">{column.table} · {column.type} · {readByText(column.readBy.length, view.queries)}</span>
               </button>;
             })}
-            {!shown.length && <p className="report-add-filter-empty">{view.columns.length ? "No column matches." : "The report's tables have no text, whole-number, or date columns to filter by."}</p>}
+            {!shown.length && <p className="report-add-filter-empty">{view.columns.length ? "No column matches." : "The report's tables have no text, number, or date columns to filter by."}</p>}
           </div>
           {hidden > 0 && <label className="report-add-filter-toggle"><input type="checkbox" checked={showSensitive} onChange={(event) => setShowSensitive(event.target.checked)} />
             Show {hidden} {hidden === 1 ? "column that looks" : "columns that look"} personal (email, phone, token, secret)</label>}
@@ -128,7 +130,11 @@ export function AddFilterSheet({ reportId, onClose, reopen, onRequested }: { rep
               <span className="report-add-filter-values-head">Starts at</span>
               <Select<string> variant="field" label="Starts at" value={preset} searchable={false} onChange={setPreset}
                 options={DATE_PRESETS.filter((item) => item !== "custom").map((item) => ({ value: item, label: DATE_PRESET_LABELS[item] }))} />
+              {ready.dayZone && <p className="report-add-filter-exposure" role="note"><Clock3 aria-hidden="true" /><span>Days are counted in {ready.dayZone}, the report's time zone, not the data source's.</span></p>}
               <p className="report-add-filter-review" role="note"><TriangleAlert aria-hidden="true" /><span>A date range changes what every block it reaches shows by default ({DATE_PRESET_LABELS[preset as DatePreset].toLowerCase()}), so Nook cannot check the results stay the same: review the proposal by hand before you apply it.</span></p>
+            </> : ready.kind === "number_range" ? <>
+              <p className="report-add-filter-values-head">{ready.numbers ? `Values from ${numberText(ready.numbers.min)} to ${numberText(ready.numbers.max)}; half are below ${numberText(ready.numbers.median)}` : "No numbers in this column yet"}</p>
+              <p className="report-add-filter-exposure" role="note"><Eye aria-hidden="true" /><span>Readers type <b>at least</b> and <b>at most</b>; rows whose <code>{picked.column}</code> is between them stay. They see no list of values.</span></p>
             </> : <>
               <p className="report-add-filter-values-head">{ready.truncated ? `${ready.optionCount}+ values` : `${ready.optionCount} ${ready.optionCount === 1 ? "value" : "values"}`}, the most common first</p>
               <ul className="report-add-filter-values" aria-label="Sample values">{ready.sample.map((value) => <li key={value}>{value || "(blank)"}</li>)}{ready.optionCount > ready.sample.length && <li className="report-add-filter-more">and {ready.truncated ? "more" : ready.optionCount - ready.sample.length} more</li>}</ul>
@@ -143,12 +149,16 @@ export function AddFilterSheet({ reportId, onClose, reopen, onRequested }: { rep
               {ready.narrowBy.map((choice) => <label key={choice.paramId} className="report-add-filter-toggle">
                 <input type="checkbox" checked={narrowBy.includes(choice.paramId)} disabled={narrowing}
                   onChange={(event) => { const on = event.target.checked; setNarrowBy((current) => on ? [...current, choice.paramId] : current.filter((item) => item !== choice.paramId)); }} />
-                <span>Narrow by {choice.label}<small>Only the {picked.column} values of the picked {choice.label.toLowerCase()} are offered</small></span>
+                <span>Narrow by {choice.label}<small>Only the {picked.column} values of the picked {choice.label.toLowerCase()} are offered{choice.expression ? <> (it lists <code>{choice.expression}</code>)</> : null}</small></span>
               </label>)}
             </div>}
+            {ready.kind === "multi_select" && (ready.narrowSkipped ?? []).length > 0 && <details className="report-add-filter-skipped">
+              <summary>{ready.narrowSkipped!.length === 1 ? "1 filter cannot narrow this one" : `${ready.narrowSkipped!.length} filters cannot narrow this one`}</summary>
+              <ul>{ready.narrowSkipped!.map((item) => <li key={item.paramId}><b>{item.label}</b>: {item.reason}</li>)}</ul>
+            </details>}
           </>}
         </section>}
-        {kind !== "date_range" && <p className="file-dialog-hint">Nook's edit agent adds it to the queries that read the table, as a filter that starts at {kind === "text" ? "empty (every row)" : "All"}. Nook checks that every block shows the same as now before the change waits for you in Changes.</p>}
+        {kind !== "date_range" && <p className="file-dialog-hint">Nook's edit agent adds it to the queries that read the table, as a filter that starts at {kind === "text" ? "empty (every row)" : kind === "number_range" ? "Any (every row)" : "All"}. Nook checks that every block shows the same as now before the change waits for you in Changes.</p>}
         {error && <p className="form-error" role="alert">{error}</p>}
       </div>
       <footer className="file-dialog-actions">

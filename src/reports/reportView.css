@@ -317,6 +317,14 @@ ul.report-block-problem { display: block; padding-left: 18px; }
 .report-params-add:focus-visible { outline: 2px solid var(--report-accent); outline-offset: 1px; }
 .report-params-add-narrow { margin-left: auto; min-height: 44px; }
 .report-param-remove { margin-right: auto; }
+/* D670: a text filter's Remove (the owner): a 36 px trash after the field (44 px on a phone's sheet). */
+.report-param-text { display: inline-flex; align-items: center; gap: 2px; min-width: 0; max-width: 100%; }
+.report-param-field .report-param-text { display: flex; }
+.report-param-text .report-param-input { min-width: 0; }
+.report-param-remove-icon { color: var(--report-muted); }
+.report-param-remove-icon:hover { color: var(--report-text); background: var(--report-accent-bg); }
+.report-param-remove-icon:focus-visible { outline: 2px solid var(--report-accent); outline-offset: 1px; }
+.report-param-field .report-param-remove-icon { width: 44px; height: 44px; }
 /* D533: a block its queries do not let a changed filter reach says so, in secondary text under its title. */
 .report-block-unfiltered { margin: -4px 0 6px; color: var(--report-muted); font-size: .76rem; }
 /* D536: click to filter. A clickable chart shows the pointer; a table's rows are focusable and the picked ones wear the accent;
@@ -374,6 +382,19 @@ ul.report-block-problem { display: block; padding-left: 18px; }
 .report-views-check input { width: 18px; height: 18px; min-height: 0; flex: none; accent-color: var(--yellow); }
 .report-views-owner { display: grid; gap: 8px; justify-items: start; border-top: 1px solid var(--border); padding-top: 12px; }
 .report-views-owner p { margin: 0; color: var(--muted); font-size: .84rem; }
+/* D674 (lane FILT3): the blocks the design rules refuse for new defaults, each with "Show the block" and, where a rule has one, its one-step fix. */
+.report-views-refused { display: grid; gap: 8px; width: 100%; min-width: 0; border: 1px solid color-mix(in srgb, var(--yellow) 40%, var(--border)); border-radius: 8px; padding: 10px 12px; background: color-mix(in srgb, var(--yellow) 6%, transparent); }
+.report-views-refused ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.report-views-refusal { display: grid; gap: 4px; min-width: 0; }
+.report-views-refusal small { color: var(--muted); font-size: .8rem; overflow-wrap: anywhere; }
+.report-views-refusal-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.report-views-refusal-head b { min-width: 0; overflow-wrap: anywhere; font-size: .88rem; }
+.report-views-show { flex: none; min-height: 32px; margin-right: -12px; border: 0; padding: 0 12px; background: transparent; color: var(--yellow); font: inherit; font-size: .82rem; font-weight: 600; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.report-views-show:focus-visible { outline: 2px solid var(--yellow); outline-offset: 2px; }
+.report-views-fix { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px; min-width: 0; }
+.report-views-fix input { min-height: 40px; min-width: 0; }
+.report-views-fix > :only-child { grid-column: 1 / -1; }
+@media (max-width: 760px) { .report-views-fix { grid-template-columns: minmax(0, 1fr); } .report-views-fix input, .report-views-show { min-height: 44px; } }
 @media (max-width: 560px) {
   .report-views-save-row { flex-direction: column; }
   .report-views-save-row .primary-button { min-height: 44px; }
