@@ -12,13 +12,10 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 
 ## In flight
 
-- [ ] **API keys, after lane KEYS (D585–D601)** (general keys' Edit adds rows with the password and a security notice, and no row has a dead dropdown):
-  - [ ] Vault keys' Edit (`/settings/keys/vault`, `VaultGrantBuilder` `ceiling`) is still narrowing only, with the same pattern: the Vault dropdown is always disabled and Permission collapses to the held level plus Read. Decide whether vault keys may add access on Edit with re-authentication (vault grants have their own checks, `validateVaultGrants`, and protected environments), then apply D585/D587 there.
-
-
-- [ ] **Provider code per kind** (operator, 2026-10-22; lane LOCALEMB, step 0): one adapter file per provider kind (OpenAI-compatible default, Anthropic, Voyage, local); golden tests pin OpenAI's requests to v0.43.0 so other kinds can't change them.
-
-
+- [ ] **Views slice 2 and follow-ups** (operator: "complete", 2026-10-23; lane VIEWS2, migration 078 if needed): the "Leftovers (lane VIEWS…)" list below, plus "Show all levels" per person on the server.
+- [ ] **Report filter leftovers** (lane FILT3): the "Leftovers (lane FILT2)" list below.
+- [ ] **Provider and local-embedding leftovers** (lane PROV): Voyage proxy fields in the editor; a lighter local model option.
+- [ ] **Backup leftovers** (lane BACKUP2): the "Leftovers (lane BACKUP)" items that are code (objects copy, streamed manifest, `--from-dir`, Litestream levels).
 
 ## Waiting on the operator
 
