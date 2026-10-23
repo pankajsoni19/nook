@@ -39,7 +39,8 @@ RUN bun install --frozen-lockfile --production \
 # D545: the local embedding model, fetched from its pinned commit and checked (size and sha256) at build
 # time, so a running Nook never downloads it. Root-owned in the image: the app can read it, not change it.
 # D548: LOCAL_EMBEDDINGS_MODEL=skip builds without it (135 MB less); the Local kind is then offered only
-# when LOCAL_EMBEDDINGS_DIR holds the verified files.
+# when LOCAL_EMBEDDINGS_DIR holds the verified files. D686: include (the default) is multilingual-e5-small,
+# english bge-small-en-v1.5 alone (35 MB, for LOCAL_EMBEDDINGS_VARIANT=english), all both (170 MB).
 FROM oven/bun:1.4.2-alpine@sha256:d888c0ae6c86d7866ff10c5aafdd9077b36aee6455b33dd270fb93c0dd5cef6f AS local-model
 ARG LOCAL_EMBEDDINGS_MODEL=include
 WORKDIR /app
@@ -47,8 +48,10 @@ COPY shared/localEmbedding.ts ./shared/localEmbedding.ts
 COPY scripts/fetchLocalModel.ts ./scripts/fetchLocalModel.ts
 RUN case "$LOCAL_EMBEDDINGS_MODEL" in \
       include) bun scripts/fetchLocalModel.ts /app/models/multilingual-e5-small ;; \
+      english) bun scripts/fetchLocalModel.ts /app/models/bge-small-en-v1.5 --variant english ;; \
+      all) bun scripts/fetchLocalModel.ts /app/models/multilingual-e5-small && bun scripts/fetchLocalModel.ts /app/models/bge-small-en-v1.5 --variant english ;; \
       skip) mkdir -p /app/models ;; \
-      *) echo "LOCAL_EMBEDDINGS_MODEL must be include or skip" >&2; exit 1 ;; \
+      *) echo "LOCAL_EMBEDDINGS_MODEL must be include, english, all, or skip" >&2; exit 1 ;; \
     esac
 
 # Lane BACKUP (D615): Litestream, a pinned release (a static Go binary, so it runs on Alpine's musl), checked

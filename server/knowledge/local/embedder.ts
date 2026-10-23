@@ -1,7 +1,7 @@
 import { config } from "../../config";
 import { logger } from "../../log";
 import { ProviderError } from "../../agents/loop";
-import { LOCAL_MODEL, LOCAL_MODEL_BYTES, type LocalEmbeddingStatus } from "../../../shared/localEmbedding";
+import { LOCAL_MODELS, localModelBytes, type LocalEmbeddingStatus } from "../../../shared/localEmbedding";
 import { filesProblem, verifiedProblem } from "./model";
 import type { WorkerReply } from "./worker";
 
@@ -26,6 +26,8 @@ const log = logger("knowledge");
 type Task = { text: string; inputType: "document" | "query"; resolve: (value: { vector: Float32Array; tokens: number }) => void; reject: (error: Error) => void; signal?: AbortSignal; onAbort?: () => void };
 
 let worker: Worker | null = null;
+/** D686: the variant the running worker loaded; a worker of another variant is let go before the next text. */
+let workerVariant: string | null = null;
 let ready: Promise<void> | null = null;
 let current: { id: number; task: Task; timer: ReturnType<typeof setTimeout> } | null = null;
 const queries: Task[] = [];
@@ -38,19 +40,23 @@ export const localEmbedStats = { embedded: 0, started: 0, loadMs: null as number
 
 const fail = (message: string) => new ProviderError("PROVIDER_ERROR", message);
 
+/** D686: the model this server runs (LOCAL_EMBEDDINGS_VARIANT; tests switch it in process). */
+export const localModel = () => LOCAL_MODELS[config.localEmbeddings.variant];
+
 /**
  * Whether this server allows the local model, and whether its files are in place and verified (sizes
  * and sha256, each file hashed once per change; the worker checks sha256 again on every load).
  */
 export async function localEmbeddingStatus(added: boolean): Promise<LocalEmbeddingStatus> {
-  const base = { model: LOCAL_MODEL.id, dims: LOCAL_MODEL.dims, bytes: LOCAL_MODEL_BYTES, added };
+  const model = localModel();
+  const base = { model: model.id, dims: model.dims, bytes: localModelBytes(model), variant: model.variant, languages: model.languages, memoryGb: model.memoryGb, added };
   if (!config.localEmbeddings.enabled) return { ...base, allowed: false, available: false, reason: "Turned off on this server (LOCAL_EMBEDDINGS=off)." };
-  const problem = config.localEmbeddings.stub ? null : await verifiedProblem(config.localEmbeddings.dir);
+  const problem = config.localEmbeddings.stub ? null : await verifiedProblem(config.localEmbeddings.dir, model);
   return { ...base, allowed: true, available: problem === null, reason: problem };
 }
 
 /** The cheap check a new local provider must pass (the files in place at their sizes); null when it may be added. */
-export const localFilesProblem = () => config.localEmbeddings.stub ? null : filesProblem(config.localEmbeddings.dir);
+export const localFilesProblem = () => config.localEmbeddings.stub ? null : filesProblem(config.localEmbeddings.dir, localModel());
 
 function stopWorker(reason: string) {
   if (idleTimer) clearTimeout(idleTimer);
@@ -69,6 +75,7 @@ function startWorker(): Promise<void> {
   if (ready) return ready;
   const started = new Worker(new URL("./worker.ts", import.meta.url).href, { smol: true } as WorkerOptions);
   worker = started;
+  workerVariant = config.localEmbeddings.variant;
   localEmbedStats.started += 1;
   ready = new Promise<void>((resolve, reject) => { readyWaiters = { resolve, reject }; });
   const loadTimer = setTimeout(() => { if (readyWaiters) { readyWaiters.reject(fail("The local embedding model took too long to load")); readyWaiters = null; stopWorker("load timeout"); } }, LOCAL_EMBED_BOUNDS.loadMs);
@@ -110,7 +117,7 @@ function startWorker(): Promise<void> {
     stopWorker("error");
     pump();
   };
-  started.postMessage({ type: "init", dir: config.localEmbeddings.dir, stub: config.localEmbeddings.stub });
+  started.postMessage({ type: "init", dir: config.localEmbeddings.dir, variant: config.localEmbeddings.variant, stub: config.localEmbeddings.stub });
   return ready;
 }
 
@@ -122,6 +129,7 @@ function pump() {
     return;
   }
   if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+  if (worker && workerVariant !== config.localEmbeddings.variant) stopWorker("variant changed");
   if (task.signal && task.onAbort) task.signal.removeEventListener("abort", task.onAbort);
   if (task.signal?.aborted) { task.reject(fail("Stopped")); pump(); return; }
   const id = nextId++;

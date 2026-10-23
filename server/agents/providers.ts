@@ -141,8 +141,15 @@ export function knowledgePolicyOf(providerId: string | null): ProviderKnowledgeP
   return row ? parseKnowledgePolicy(row.compat_json) : null;
 }
 
+/** D686: the model a kind with its own models offers when the row's stored one is not among them (else null). */
+function ownModel(row: Pick<ProviderRow, "base_url" | "embedding_model">) {
+  const offered = adapterOfProvider(row.base_url).embeddingModels;
+  return offered && !offered.includes(row.embedding_model ?? "") ? offered[0]! : null;
+}
+
 export const providerSummary = (row: ProviderRow): ProviderSummary => ({
-  id: row.id, name: row.name, baseUrl: row.base_url, defaultModel: row.default_model, embeddingModel: row.embedding_model, embeddingDims: row.embedding_dims,
+  // D686: a kind with its own models (the local one) shows the model the server runs, as new bases get it.
+  id: row.id, name: row.name, baseUrl: row.base_url, defaultModel: row.default_model, embeddingModel: ownModel(row) ?? row.embedding_model, embeddingDims: row.embedding_dims,
   compat: rowCompat(row), isDefault: row.is_default === 1, hasSecret: row.api_key_ct !== null, hint: shownHint(row.api_key_ct, row.api_key_hint),
   revision: row.revision, createdAt: row.created_at, updatedAt: row.updated_at, knowledge: parseKnowledgePolicy(row.compat_json), vision: parseVisionPolicy(row.compat_json)
 });
@@ -405,9 +412,13 @@ export function firstEmbeddingProvider(): ProviderRow | null {
  * inside its knowledge policy: the provider's own defaults, else the first allowed model and at most
  * the largest allowed size (2026-10-08: adjusted to the policy the admin set, never refused for it).
  * D542: a provider with a fixed list of sizes (Voyage AI) gets the largest listed size not over that.
+ * D686: a kind with its own models (the local one) whose stored model it no longer runs (the server's
+ * LOCAL_EMBEDDINGS_VARIANT changed) starts new bases on the model it runs.
  */
-export function embeddingDefaults(row: { embedding_model: string | null; embedding_dims: number | null }, policy: ProviderKnowledgePolicy, compat?: Pick<ProviderCompat, "embeddingSizes">): { model: string; dims: number } {
-  const own = row.embedding_model?.trim() || DEFAULT_EMBEDDING_MODEL;
+export function embeddingDefaults(row: { embedding_model: string | null; embedding_dims: number | null; base_url?: string }, policy: ProviderKnowledgePolicy, compat?: Pick<ProviderCompat, "embeddingSizes">): { model: string; dims: number } {
+  const stored = row.embedding_model?.trim() || DEFAULT_EMBEDDING_MODEL;
+  const offered = row.base_url !== undefined ? adapterOfProvider(row.base_url, compat as ProviderCompat | undefined).embeddingModels : undefined;
+  const own = offered && !offered.includes(stored) ? offered[0]! : stored;
   const model = policyAllowsModel(policy, own) || !policy.models ? own : policy.models[0]!;
   const dims = Math.min(row.embedding_dims && row.embedding_dims >= 64 && row.embedding_dims <= 3072 ? row.embedding_dims : DEFAULT_EMBEDDING_DIMS, policyMaxDims(policy));
   const sizes = compat ? allowedSizes(compat, policy) : null;

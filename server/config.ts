@@ -3,6 +3,7 @@ import { readFileSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseEntry } from "./ipRanges";
 import { parseBackupSettings, parseLitestreamSettings } from "./backup/settings";
+import { LOCAL_MODELS, LOCAL_VARIANTS, type LocalVariant } from "../shared/localEmbedding";
 
 function integerEnv(name: string, fallback: number, min: number, max: number) {
   const raw = process.env[name]?.trim();
@@ -266,18 +267,22 @@ if (agentMcpStdioFile && !agentMcpStdioFile.startsWith("/")) throw new Error("AG
  * The embedding model built into Nook (D544, D545). `LOCAL_EMBEDDINGS=off` forbids it: no local
  * provider can be added, and one added before only fails ("turned off on this server"). On (the
  * default), an admin still has to add it in Settings → AI. `LOCAL_EMBEDDINGS_DIR` holds its files
- * (the Docker image carries them in /app/models/multilingual-e5-small); never inside DATA_DIR, which
- * backups archive.
+ * (the Docker image carries them in /app/models/<model id>); never inside DATA_DIR, which backups
+ * archive. D686: `LOCAL_EMBEDDINGS_VARIANT` (multilingual, the default, or english) picks the model, and
+ * the default folder is that model's.
  */
 export function parseLocalEmbeddings(env: Record<string, string | undefined>, dataRoot: string) {
   const raw = (env.LOCAL_EMBEDDINGS ?? "on").trim().toLowerCase();
   if (!["on", "off"].includes(raw)) throw new Error("LOCAL_EMBEDDINGS must be on or off");
   const dirValue = env.LOCAL_EMBEDDINGS_DIR?.trim();
   if (dirValue && !dirValue.startsWith("/")) throw new Error("LOCAL_EMBEDDINGS_DIR must be an absolute path");
-  const dir = resolve(dirValue || resolve(import.meta.dir, "..", "models", "multilingual-e5-small"));
+  const variantRaw = (env.LOCAL_EMBEDDINGS_VARIANT ?? "").trim().toLowerCase() || "multilingual";
+  if (!(LOCAL_VARIANTS as readonly string[]).includes(variantRaw)) throw new Error("LOCAL_EMBEDDINGS_VARIANT must be multilingual or english");
+  const variant = variantRaw as LocalVariant;
+  const dir = resolve(dirValue || resolve(import.meta.dir, "..", "models", LOCAL_MODELS[variant].id));
   const real = (path: string) => { try { return realpathSync(path); } catch { return resolve(path); } };
   if (`${real(dir)}/`.startsWith(`${real(dataRoot)}/`)) throw new Error("LOCAL_EMBEDDINGS_DIR must be outside DATA_DIR: backups archive the data directory");
-  return { enabled: raw === "on", dir };
+  return { enabled: raw === "on", dir, variant };
 }
 const localEmbeddings = parseLocalEmbeddings(process.env, dataDir);
 
@@ -459,7 +464,7 @@ export const config = {
    */
   agents: { key: agentSecretsKey.key, source: agentSecretsKey.source, allowedPrivateHosts: agentAllowedPrivateHosts, imageProxyTestHosts: agentImageProxyTestHosts, maxConcurrentRuns: agentMaxConcurrentRuns, runTimeoutS: agentRunTimeoutS, stdio: agentMcpStdioRaw === "on", stdioFile: agentMcpStdioFile, auditRetentionDays: agentAuditRetentionDays },
   /** The local embedding model (D544): allowed by `LOCAL_EMBEDDINGS`, its files in `dir`; `stub` (tests only) swaps the model for a hash embedding. Tests switch these in process. */
-  localEmbeddings: { enabled: localEmbeddings.enabled, dir: localEmbeddings.dir, stub: null as { delayMs: number } | null },
+  localEmbeddings: { enabled: localEmbeddings.enabled, dir: localEmbeddings.dir, variant: localEmbeddings.variant as LocalVariant, stub: null as { delayMs: number } | null },
   signupRole,
   sessionDays: Math.max(1, Number(process.env.SESSION_DAYS ?? 14)),
   maxMarkdownBytes: Math.max(1024, Number(process.env.MAX_MARKDOWN_BYTES ?? 2_000_000)),

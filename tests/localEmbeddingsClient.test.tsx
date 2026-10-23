@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { breakable, capabilitiesHint, endpointLabel, isLocal, localOptionText, LOCAL_PROVIDER_TEXT, testText } from "../src/chat/AiSettings";
+import { breakable, capabilitiesHint, endpointLabel, isLocal, localOptionText, localProviderText, LOCAL_PROVIDER_TEXT, testText } from "../src/chat/AiSettings";
 import { claudeTemperatureWarning } from "../src/chat/AgentsSettings";
 import { changeEffect } from "../src/chat/KnowledgeModel";
 import { KNOWLEDGE_INTRO } from "../src/chat/KnowledgeSettings";
@@ -17,7 +17,7 @@ import type { KnowledgeSummary } from "../shared/knowledge";
  * editor's warning about Claude 4.7+ and a temperature below 1.
  */
 
-const status = (patch: Partial<LocalEmbeddingStatus>): LocalEmbeddingStatus => ({ allowed: true, available: true, reason: null, model: LOCAL_MODEL.id, dims: 384, bytes: 135_391_358, added: false, ...patch });
+const status = (patch: Partial<LocalEmbeddingStatus>): LocalEmbeddingStatus => ({ allowed: true, available: true, reason: null, model: LOCAL_MODEL.id, dims: 384, bytes: 135_391_358, variant: "multilingual", languages: "multilingual", memoryGb: 0.8, added: false, ...patch });
 
 describe("the local provider in Settings → AI", () => {
   test("its card names it and its address is never shown as a URL", () => {
@@ -32,7 +32,12 @@ describe("the local provider in Settings → AI", () => {
     expect(localOptionText(status({ added: true }))).toBe("Already added");
     expect(localOptionText(status({ available: false, reason: "missing" }))).toBe("Its model files are not in place on this server (see below)");
     expect(LOCAL_PROVIDER_TEXT).toContain("nothing leaves the server");
-    expect(LOCAL_PROVIDER_TEXT).toContain("384 dimensions, about 135 MB");
+    expect(LOCAL_PROVIDER_TEXT).toContain("384 dimensions, about 135 MB, multilingual");
+    expect(LOCAL_PROVIDER_TEXT).toContain("about 0.8 GB of memory");
+    // D686: the English variant's line names its model, size, language, and memory.
+    const english = localProviderText(status({ model: "bge-small-en-v1.5", bytes: 34_726_188, variant: "english", languages: "English only", memoryGb: 0.3 }));
+    expect(english).toContain("Runs bge-small-en-v1.5 (384 dimensions, about 35 MB, English only)");
+    expect(english).toContain("about 0.3 GB of memory");
   });
 
   test("Test reads as one embedded sentence; Anthropic's hint names the local model", () => {

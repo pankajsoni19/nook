@@ -1,6 +1,6 @@
 import { config } from "../../config";
-import { LOCAL_BASE_URL, LOCAL_MODEL } from "../../../shared/localEmbedding";
-import { LOCAL_EMBED_BOUNDS, localEmbed, localEmbeddingStatus, localFilesProblem } from "../../knowledge/local/embedder";
+import { LOCAL_BASE_URL, LOCAL_MODELS, localVariantOf } from "../../../shared/localEmbedding";
+import { LOCAL_EMBED_BOUNDS, localEmbed, localEmbeddingStatus, localFilesProblem, localModel } from "../../knowledge/local/embedder";
 import { db } from "../../db";
 import { ProviderError } from "../loop";
 import { AgentError } from "../status";
@@ -9,14 +9,16 @@ import { bearerHeaders, type ProviderAdapter } from "./types";
 /**
  * The embedding model built into Nook (D544): "Local (built into Nook)". Embeddings only (Chat:
  * none), no API key, no network: its base URL is `local://nook`, never fetched, so no egress check
- * applies and nothing leaves the server. multilingual-e5-small, 384 dimensions (no size choice),
- * run on a worker thread one text at a time (knowledge/local/embedder.ts). Off by default: an admin
+ * applies and nothing leaves the server. multilingual-e5-small, 384 dimensions (no size choice), or
+ * bge-small-en-v1.5 with LOCAL_EMBEDDINGS_VARIANT=english (D686: the provider offers only the model the
+ * server runs; a base still on the other one is moved with Change embedding model), run on a worker thread one text at a time (knowledge/local/embedder.ts). Off by default: an admin
  * adds it; `LOCAL_EMBEDDINGS=off` forbids it. It costs no provider tokens, so it is not metered
  * against the daily token budgets (its CPU is bounded by the worker instead).
  */
 export const localAdapter: ProviderAdapter = {
   kind: "local",
-  newProvider: { compat: { chat: false, supportsTools: false }, defaultModel: LOCAL_MODEL.id, embeddingModel: LOCAL_MODEL.id, embeddingDims: LOCAL_MODEL.dims },
+  // Getters (D686): the model is the server's variant, read when a provider is added.
+  get newProvider() { const model = localModel(); return { compat: { chat: false, supportsTools: false }, defaultModel: model.id, embeddingModel: model.id, embeddingDims: model.dims }; },
   capabilities: { chat: false, embeddings: true },
   impliedCompat: () => ({}),
   normalizeBaseUrl: () => LOCAL_BASE_URL,
@@ -30,11 +32,18 @@ export const localAdapter: ProviderAdapter = {
   takesApiKey: false,
   fixedCapabilities: true,
   metered: false,
-  embeddingModels: [LOCAL_MODEL.id],
+  get embeddingModels() { return [localModel().id]; },
   // A getter: the embedder may still be loading when this module is (an import cycle through loop.ts).
   get batchSize() { return LOCAL_EMBED_BOUNDS.batch; },
   async embed(model, _dims, inputs, options) {
-    if (model !== LOCAL_MODEL.id) throw new ProviderError("PROVIDER_ERROR", `The local provider has only ${LOCAL_MODEL.id}`);
+    const running = localModel();
+    if (model !== running.id) {
+      // D686: a base embedded with the other variant's model: its vectors cannot be compared with this model's.
+      const other = localVariantOf(model);
+      throw new ProviderError("PROVIDER_ERROR", other
+        ? `This knowledge base uses ${model}, but this server runs ${running.id} (LOCAL_EMBEDDINGS_VARIANT=${running.variant}). Its owner moves it with Change embedding model (every source is embedded again), or an admin sets LOCAL_EMBEDDINGS_VARIANT=${LOCAL_MODELS[other].variant} again.`
+        : `The local provider has only ${running.id}`);
+    }
     const result = await localEmbed(inputs, options.inputType ?? "document", options.signal);
     // No provider tokens are spent, so none are charged (D544).
     return { vectors: result.vectors, tokens: 0, estimated: false };

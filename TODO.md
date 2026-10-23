@@ -61,7 +61,7 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 ## Leftovers (lane LOCALEMB)
 
 - [ ] Local embeddings (D544–D546) are checked against the real model only by the opt-in `LOCAL_EMBEDDINGS_MODEL_TEST=1 bun --no-env-file test tests/localEmbeddingsModel.test.ts` (and once in the image, by hand); the Docker verify stage has no model files. Run it on the VM after the 0.44.0 image lands, and index a real base there to see the CPU per passage on its cores.
-- [ ] The local model holds about 0.8 GB while loaded (the WASM heap about 0.55 GB, the tokenizer's 250,000-piece vocabulary about 0.22 GB in @huggingface/tokenizers' JS objects); it is let go after 10 idle minutes. A smaller tokenizer representation, or an English-only model (all-MiniLM-L6-v2, 23 MB, about twice as fast) as a second choice, would cut it; ONNX Runtime Web's own threads gave nothing on Bun 1.4.2, so it stays on one core.
+- [ ] The English variant (bge-small-en-v1.5, D686) is checked against the real model by the same opt-in test (its English block, `LOCAL_EMBEDDINGS_ENGLISH_DIR`) for ranking, determinism, and windows, but against no independent reference vectors (no transformers.js or Python ONNX Runtime on the lane host); on the VM, build with `LOCAL_EMBEDDINGS_MODEL=all`, run the opt-in test in the image, and compare a few vectors with sentence-transformers' `BAAI/bge-small-en-v1.5` (CLS, normalized) to four decimals.
 
 
 ## Leftovers (lane BACKUP)

@@ -346,7 +346,7 @@ function ProviderDialog({ provider, local, onCancel, onSaved }: { provider: Prov
       <label htmlFor={ids.name}>Name</label>
       <input id={ids.name} value={name} maxLength={AGENT_BOUNDS.providerName} autoFocus autoComplete="off" placeholder={kind === "local" ? "Local embeddings" : "OpenAI"} onChange={(event) => setName(event.target.value)} />
       {kind === "local" ? <>
-        <p className="file-dialog-hint">{LOCAL_PROVIDER_TEXT}</p>
+        <p className="file-dialog-hint">{localProviderText(local)}</p>
         {local && !local.available && <p className="settings-warning" role="note">{local.reason}</p>}
         <ProviderKnowledgeFields providerId={provider?.id ?? null} draft={knowledge} onChange={setKnowledge} disabled={busy} fixedModel />
       </> : <>
@@ -453,8 +453,13 @@ export const REASONING_EFFORT_OPTIONS: Array<{ value: ReasoningEffort; label: st
 /** D544: whether a provider is the model built into Nook. */
 export const isLocal = (provider: Pick<ProviderSummary, "baseUrl">) => providerFlavor(provider.baseUrl) === "local";
 
-/** What the Add provider dialog says about the local model (D544, D546). */
-export const LOCAL_PROVIDER_TEXT = `Runs ${LOCAL_MODEL.id} (${LOCAL_MODEL.dims} dimensions, about ${Math.round(LOCAL_MODEL_BYTES / 1_000_000)} MB, multilingual) inside Nook: knowledge bases only, no API key, and nothing leaves the server. It uses one CPU core, one passage at a time (about 1 to 2 seconds each; searches go first), and about 0.8 GB of memory while in use; it costs no tokens.`;
+/** What the Add provider dialog says about the local model (D544, D546; D686: the model this server runs, LOCAL_EMBEDDINGS_VARIANT). */
+export function localProviderText(local: Pick<LocalEmbeddingStatus, "model" | "dims" | "bytes" | "languages" | "memoryGb"> | null): string {
+  const model = local ?? { model: LOCAL_MODEL.id, dims: LOCAL_MODEL.dims, bytes: LOCAL_MODEL_BYTES, languages: LOCAL_MODEL.languages, memoryGb: LOCAL_MODEL.memoryGb };
+  return `Runs ${model.model} (${model.dims} dimensions, about ${Math.round(model.bytes / 1_000_000)} MB, ${model.languages}) inside Nook: knowledge bases only, no API key, and nothing leaves the server. It uses one CPU core, one passage at a time (about 1 to 2 seconds each; searches go first), and about ${model.memoryGb} GB of memory while in use; it costs no tokens.`;
+}
+/** The default model's line (multilingual-e5-small). */
+export const LOCAL_PROVIDER_TEXT = localProviderText(null);
 
 /** The Kind choice's line for the local model: why it cannot be added, when it cannot. */
 export function localOptionText(local: LocalEmbeddingStatus | null): string {

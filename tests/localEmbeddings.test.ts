@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { createUser, db, request, type Session } from "./support/harness";
 import { retireUsersAfterFile } from "./support/retireUsers";
 import { startScriptedProvider } from "../scripts/fakeReportProvider";
-import { LOCAL_BASE_URL, LOCAL_MODEL } from "../shared/localEmbedding";
+import { LOCAL_BASE_URL, LOCAL_MODEL, LOCAL_MODELS } from "../shared/localEmbedding";
 import { NO_EMBEDDINGS_PROVIDER } from "../shared/knowledge";
 import { providerFlavor } from "../shared/agents";
 
@@ -90,6 +90,22 @@ describe("the LOCAL_EMBEDDINGS switch (D544)", () => {
     expect(() => parseLocalEmbeddings({ LOCAL_EMBEDDINGS: "maybe" }, "/data")).toThrow("LOCAL_EMBEDDINGS must be on or off");
     expect(() => parseLocalEmbeddings({ LOCAL_EMBEDDINGS_DIR: "models" }, "/data")).toThrow("absolute");
     expect(() => parseLocalEmbeddings({ LOCAL_EMBEDDINGS_DIR: "/data/models" }, "/data")).toThrow("outside DATA_DIR");
+  });
+
+  test("D686: LOCAL_EMBEDDINGS_VARIANT picks the model and its default folder", () => {
+    expect(parseLocalEmbeddings({}, "/data")).toMatchObject({ variant: "multilingual" });
+    expect(parseLocalEmbeddings({}, "/data").dir.endsWith("/models/multilingual-e5-small")).toBe(true);
+    expect(parseLocalEmbeddings({ LOCAL_EMBEDDINGS_VARIANT: " English " }, "/data")).toMatchObject({ variant: "english" });
+    expect(parseLocalEmbeddings({ LOCAL_EMBEDDINGS_VARIANT: "english" }, "/data").dir.endsWith("/models/bge-small-en-v1.5")).toBe(true);
+    expect(parseLocalEmbeddings({ LOCAL_EMBEDDINGS_VARIANT: "english", LOCAL_EMBEDDINGS_DIR: "/opt/bge" }, "/data").dir).toBe("/opt/bge");
+    expect(() => parseLocalEmbeddings({ LOCAL_EMBEDDINGS_VARIANT: "tiny" }, "/data")).toThrow("LOCAL_EMBEDDINGS_VARIANT must be multilingual or english");
+    // Both models are pinned like D545 (a commit, and each file's size and sha256), and both are 384 wide.
+    for (const model of Object.values(LOCAL_MODELS)) {
+      expect(model.revision).toMatch(/^[0-9a-f]{40}$/);
+      expect(model.files.map((file) => file.path)).toEqual(["onnx/model_quantized.onnx", "tokenizer.json", "tokenizer_config.json"]);
+      for (const file of model.files) expect(file.sha256).toMatch(/^[0-9a-f]{64}$/);
+      expect(model.dims).toBe(384);
+    }
   });
 
   test("off: Settings → AI says so, and no local provider can be added", async () => {
@@ -366,6 +382,45 @@ describe("knowledge bases on the local model (D541, D547)", () => {
       expect(added.error).toContain("LOCAL_EMBEDDINGS=off");
     } finally {
       config.localEmbeddings.enabled = true;
+    }
+  });
+
+  test("D686: the English variant: old bases search by keywords and say why, Change embedding model moves them, new bases start on it", async () => {
+    const english = LOCAL_MODELS.english;
+    config.localEmbeddings.variant = "english";
+    try {
+      // The provider and the options offer only the model the server runs (its stored default is the old one).
+      expect((await send(admin, "GET", "/agents/admin/providers")).body.local).toMatchObject({ model: english.id, variant: "english", languages: "English only", dims: 384 });
+      expect((await send(admin, "GET", "/agents/admin/providers")).body.providers.find((item: Json) => item.id === localId).embeddingModel).toBe(english.id);
+      const options = await send(owner, "GET", "/knowledge/embedding-options");
+      expect(options.body.providers).toEqual([expect.objectContaining({ id: localId, embeddingModel: english.id, models: [english.id] })]);
+      // A base on multilingual-e5-small: keyword search, and a new source names the way out.
+      expect((await send(owner, "POST", `/knowledge/${kbId}/search`, { query: "morning classes" })).body.mode).toBe("keyword");
+      expect((await send(owner, "POST", `/knowledge/${kbId}/sources`, { kind: "text", title: "Later", text: "# Studio\n\nThe studio closes at nine." })).status).toBe(201);
+      await settle();
+      const later = (await send(owner, "GET", `/knowledge/${kbId}`)).body.knowledgeBase.sources.find((source: Json) => source.title === "Later");
+      expect(later.status).toBe("error");
+      expect(later.error).toContain("this server runs bge-small-en-v1.5 (LOCAL_EMBEDDINGS_VARIANT=english)");
+      expect(later.error).toContain("Change embedding model");
+      // Its own old model is no longer offered; the running one is, and every source is embedded again.
+      resetKnowledgeTimersForTests();
+      const stale = await send(owner, "POST", `/knowledge/${kbId}/model`, { providerId: localId, model: LOCAL_MODEL.id });
+      expect(stale.status).toBe(400);
+      expect(stale.body.code).toBe("MODEL_NOT_OFFERED");
+      const moved = await send(owner, "POST", `/knowledge/${kbId}/model`, { providerId: localId, model: english.id });
+      expect(moved.status).toBe(200);
+      await settle();
+      expect(kbRow(kbId)).toMatchObject({ provider_id: localId, embedding_model: english.id, dims: 384 });
+      expect(chunkVectors(kbId).every((bytes) => bytes === 384 * 4)).toBe(true);
+      const detail = (await send(owner, "GET", `/knowledge/${kbId}`)).body.knowledgeBase;
+      expect(detail.sources.every((source: Json) => source.status === "ready")).toBe(true);
+      expect((await send(owner, "POST", `/knowledge/${kbId}/search`, { query: "morning classes" })).body.mode).toBe("hybrid");
+      // A new base starts on the running model.
+      const fresh = await send(owner, "POST", "/knowledge", { name: "English base" });
+      expect(fresh.status).toBe(201);
+      expect(kbRow(fresh.body.knowledgeBase.id)).toMatchObject({ provider_id: localId, embedding_model: english.id, dims: 384 });
+    } finally {
+      config.localEmbeddings.variant = "multilingual";
     }
   });
 });

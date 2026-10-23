@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import "./support/harness";
-import { LOCAL_MODEL } from "../shared/localEmbedding";
+import { LOCAL_MODEL, LOCAL_MODELS } from "../shared/localEmbedding";
 
 const { config } = await import("../server/config");
 const { localEmbed, localEmbedStats, resetLocalEmbedderForTests } = await import("../server/knowledge/local/embedder");
@@ -19,6 +19,11 @@ const { verifiedProblem } = await import("../server/knowledge/local/model");
  * model (mean pooling, normalized), that the same text always gives the same vector, that meaning
  * (also across languages) ranks the right passage first, long texts in windows, and that a changed
  * file is refused before it is loaded. It prints the load time and the CPU time per chunk.
+ *
+ * D686: the English variant (bge-small-en-v1.5) runs too when its files are in
+ * LOCAL_EMBEDDINGS_ENGLISH_DIR (default ./models/bge-small-en-v1.5; `scripts/fetchLocalModel.ts --variant
+ * english`): CLS pooling, its query instruction, deterministic unit vectors, meaning ranks first, long
+ * texts in windows, and its worker's resident memory.
  */
 
 const enabled = process.env.LOCAL_EMBEDDINGS_MODEL_TEST === "1";
@@ -88,6 +93,41 @@ describe.skipIf(!enabled)("the real local model (opt-in)", () => {
       config.localEmbeddings.dir = dir;
       resetLocalEmbedderForTests();
       rmSync(copy, { recursive: true, force: true });
+    }
+  }, 120_000);
+});
+
+const englishDir = process.env.LOCAL_EMBEDDINGS_ENGLISH_DIR ?? join(import.meta.dir, "..", "models", LOCAL_MODELS.english.id);
+
+describe.skipIf(!enabled)("the real English model (opt-in, D686)", () => {
+  test("loads, deterministic, unit length, 384 wide; meaning ranks first; long texts in windows", async () => {
+    resetLocalEmbedderForTests();
+    config.localEmbeddings.stub = null;
+    config.localEmbeddings.variant = "english";
+    config.localEmbeddings.dir = englishDir;
+    try {
+      expect(await verifiedProblem(englishDir, LOCAL_MODELS.english)).toBeNull();
+      const first = await localEmbed(["how do I reset my password"], "query");
+      const again = await localEmbed(["how do I reset my password"], "query");
+      const query = first.vectors[0]!;
+      expect(query.length).toBe(LOCAL_MODELS.english.dims);
+      expect(Math.abs(Math.sqrt(dot(query, query)) - 1)).toBeLessThan(1e-5);
+      expect(Array.from(again.vectors[0]!)).toEqual(Array.from(query));
+      const passages = (await localEmbed(["To reset your password, open Settings and choose Security.", "Our yoga classes start at 7am every weekday.", "The kanban board has three columns."], "document")).vectors;
+      const [right, ...others] = passages.map((passage) => dot(query, passage));
+      for (const other of others) expect(right!).toBeGreaterThan(other! + 0.1);
+      const chunk = "Breathing practice slows the heart and settles the mind before a class begins. ".repeat(40).slice(0, 3200);
+      const cpu = process.cpuUsage();
+      const long = await localEmbed([chunk], "document");
+      const used = process.cpuUsage(cpu);
+      expect(long.tokens).toBeGreaterThan(LOCAL_MODELS.english.maxTokens);
+      const short = await localEmbed([chunk.slice(0, 1000)], "document");
+      expect(dot(long.vectors[0]!, short.vectors[0]!)).toBeGreaterThan(0.8);
+      console.log(`English model: loaded in ${localEmbedStats.loadMs} ms; a 3,200-character chunk (${long.tokens} tokens) in process CPU ${Math.round((used.user + used.system) / 1000)} ms`);
+    } finally {
+      config.localEmbeddings.variant = "multilingual";
+      config.localEmbeddings.dir = dir;
+      resetLocalEmbedderForTests();
     }
   }, 120_000);
 });
