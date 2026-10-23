@@ -51,10 +51,25 @@ export type DrillOptions = {
   strict?: boolean;
   /** Keep the scratch copy (its path is in the report). */
   keepScratch?: boolean;
+  /** D689: look for the archive in this folder only. */
+  fromDir?: string | null;
   stores?: ArchiveStore[];
   litestreamBin?: string | null;
   log?: (line: string) => void;
 };
+
+/**
+ * D689: `--from-dir <folder>`: archives are looked up in that folder only (online and offline names;
+ * no bucket), for a fresh container whose BACKUP_DIR is the empty folder being restored. The folder
+ * must exist and be a directory; it is only read.
+ */
+export function folderStores(dir: string): ArchiveStore[] {
+  const folder = resolve(dir);
+  let info;
+  try { info = statSync(folder); } catch { throw new Error(`--from-dir ${folder} does not exist (mount the backup folder into the container, such as -v /srv/mynotes/backup:/backups:ro)`); }
+  if (!info.isDirectory()) throw new Error(`--from-dir ${folder} is not a folder`);
+  return [createLocalStore(folder)];
+}
 
 /** Every store an archive may be read from: the local folder (with offline archives) and the bucket, when configured. */
 export function readableStores(settings: BackupSettings): ArchiveStore[] {
@@ -82,9 +97,9 @@ export async function locateArchive(stores: ArchiveStore[], name: string | null)
   return found[0]!;
 }
 
-/** Copies the archive somewhere readable: a local store's file is read in place; an S3 one is downloaded into `scratch`. */
-async function archiveFile(located: Located, scratch: string, localDir: string) {
-  if (located.store.kind === "local") return join(localDir, located.archive.name);
+/** Copies the archive somewhere readable: a local store's file is read in place (in its own folder); an S3 one is downloaded into `scratch`. */
+async function archiveFile(located: Located, scratch: string) {
+  if (located.store.kind === "local") return join(located.store.location, located.archive.name);
   const path = join(scratch, located.archive.name);
   await located.store.fetch(located.archive.name, path);
   return path;
@@ -247,10 +262,10 @@ export async function runDrill(options: DrillOptions): Promise<DrillReport | nul
         path = parsed.path;
         source = `file ${path}`;
       } else {
-        const located = await locateArchive(options.stores ?? readableStores(options.settings), parsed.name);
+        const located = await locateArchive(options.stores ?? (options.fromDir ? folderStores(options.fromDir) : readableStores(options.settings)), parsed.name);
         source = `archive ${located.archive.name} (${located.store.kind})`;
         log(`Reading ${source}`);
-        path = await archiveFile(located, scratch, options.settings.localDir);
+        path = await archiveFile(located, scratch);
       }
       const read = await readArchive(path, { extractTo: data, legacy: true, scratchDir: scratch });
       manifest = read.manifest;
@@ -287,6 +302,8 @@ export type RestoreOptions = {
   filesFrom?: string | null;
   /** For a Litestream restore: the database alone, without files. */
   databaseOnly?: boolean;
+  /** D689: look for archives (`--from` and `--files-from`) in this folder only, not BACKUP_DIR or the bucket. */
+  fromDir?: string | null;
   settings: BackupSettings;
   litestream: LitestreamSettings;
   databasePath: string;
@@ -309,7 +326,7 @@ export async function restoreInto(options: RestoreOptions) {
   const log = options.log ?? (() => undefined);
   const checks: DrillCheck[] = [];
   const parsed = parseSource(options.from);
-  const stores = options.stores ?? readableStores(options.settings);
+  const stores = options.stores ?? (options.fromDir ? folderStores(options.fromDir) : readableStores(options.settings));
   let manifest: ManifestSummary | null = null;
 
   /** Extracts an archive (by source) into the target; a download is staged in the target and removed after. */
@@ -321,7 +338,7 @@ export async function restoreInto(options: RestoreOptions) {
     if (!path) {
       const located = await locateArchive(stores, source.name);
       log(`Using archive ${located.archive.name} (${located.store.kind})`);
-      if (located.store.kind === "local") path = join(options.settings.localDir, located.archive.name);
+      if (located.store.kind === "local") path = join(located.store.location, located.archive.name);
       else {
         download = join(target, `.restore-download-${crypto.randomUUID().slice(0, 8)}.tar.gz`);
         await located.store.fetch(located.archive.name, download);

@@ -2943,7 +2943,7 @@ No migration. Wire types: `shared/backups.ts` (`BackupsView`, `BackupRun`, `Dril
 
 **Notices and mail.** Bell kinds `backup_failed` (`count`: failures in a row) and `backup_drill_failed`, to every active admin, opening `/settings/backups`; mail `security.backup_failed` (`{ kind: "backup" \| "drill", failures, error, lastSuccessAt, at }`, skipped when the recipient is no longer an admin).
 
-**CLI** (`server/backup-admin.ts`): `backup`, `list`, `status`, `restore-drill [--from latest|<name>|<path>|litestream[@<RFC 3339>]] [--strict] [--keep]`, `restore --from … --to <empty folder> [--files-from …] [--db-only]`. `server/litestream.ts prepare <file>` (exit 0 written, 3 off or no bucket, 1 refused) and `config`.
+**CLI** (`server/backup-admin.ts`): `backup`, `list`, `status`, `restore-drill [--from latest|<name>|<path>|litestream[@<RFC 3339>]] [--strict] [--keep]`, `restore --from … --to <empty folder> [--files-from …] [--db-only]`; since 0.47.0 (D689) `--from-dir <folder>` on `restore` and `restore-drill` looks for archives (`--from`, `--files-from`) in that folder only, never BACKUP_DIR or the bucket, with `--from` defaulting to `latest` on `restore` (exit 1 when the folder is missing or not a folder). `server/litestream.ts prepare <file>` (exit 0 written, 3 off or no bucket, 1 refused) and `config`.
 
 ## Changes to existing note endpoints (Wave 4)
 

@@ -312,6 +312,38 @@ describe("the restore drill and restore", () => {
     expect(readFileSync(join(target, "notes", made.noteId, "versions", "000001.md"), "utf8")).toBe("# A note\n");
     await expect(restoreInto({ ...options, from: "litestream", to: join(made.root, "ls") })).rejects.toThrow(/Litestream is not configured/);
   });
+
+  test("D689: --from-dir restores the newest archive of a mounted folder into a fresh data directory, in one command", async () => {
+    const made = fixture("from-dir");
+    const first = await runBackup(jobOptions(made, { now: () => new Date(Date.UTC(2026, 9, 22, 1)) }));
+    writeFileSync(join(made.dataDir, "notes", made.noteId, "versions", "000001.md"), "# A note, later\n");
+    const second = await runBackup(jobOptions(made, { now: () => new Date(Date.UTC(2026, 9, 22, 2)) }));
+    // The backup folder as a fresh container sees it: mounted somewhere else, with an offline archive and other files beside.
+    const mounted = join(made.root, "mounted-backups");
+    mkdirSync(mounted);
+    for (const run of [first, second]) writeFileSync(join(mounted, run!.archive!.name), readFileSync(join(made.backupDir, run!.archive!.name)));
+    writeFileSync(join(mounted, "status.json"), "{}");
+    // The fresh container's data directory is the empty target, and its BACKUP_DIR (inside it) holds nothing.
+    const fresh = join(made.root, "fresh-data");
+    const env = { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: made.root, DATA_DIR: fresh, NODE_ENV: "test", LOG_LEVEL: "silent", BACKUP_ENABLED: "false" };
+    const cli = (args: string[]) => Bun.spawnSync([process.execPath, "--no-env-file", join(import.meta.dir, "..", "server", "backup-admin.ts"), ...args], { env, stdout: "pipe", stderr: "pipe" });
+    const missingDir = cli(["restore", "--from-dir", join(made.root, "nowhere"), "--to", fresh]);
+    expect(missingDir.exitCode).toBe(1);
+    expect(missingDir.stderr.toString()).toContain("does not exist (mount the backup folder");
+    const restored = cli(["restore", "--from-dir", mounted, "--to", fresh]);
+    expect(restored.stderr.toString()).toBe("");
+    expect(restored.exitCode).toBe(0);
+    expect(restored.stdout.toString()).toContain(`Using archive ${second!.archive!.name} (local)`);
+    expect(readFileSync(join(fresh, "notes", made.noteId, "versions", "000001.md"), "utf8")).toBe("# A note, later\n");
+    // A name picks an older one; the drill reads from the folder too; the mounted folder is only read.
+    const older = join(made.root, "older-data");
+    expect((await restoreInto({ from: first!.archive!.name, fromDir: mounted, to: older, settings: backupSettings(made), litestream: noLitestream, databasePath: made.databasePath, storage: { backend: "local" } })).ok).toBe(true);
+    expect(readFileSync(join(older, "notes", made.noteId, "versions", "000001.md"), "utf8")).toBe("# A note\n");
+    const drill = await runDrill({ from: "latest", fromDir: mounted, settings: backupSettings(made, { localDir: join(made.root, "elsewhere") }), litestream: noLitestream, databasePath: made.databasePath, storage: { backend: "local" }, trigger: "cli" });
+    expect(drill?.ok).toBe(true);
+    expect(drill?.source).toBe(`archive ${second!.archive!.name} (local)`);
+    expect(readdirSync(mounted).sort()).toEqual([first!.archive!.name, second!.archive!.name, "status.json"].sort());
+  }, 60_000);
 });
 
 describe("S3 targets (fake S3)", () => {

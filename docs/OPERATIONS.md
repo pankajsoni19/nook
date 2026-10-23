@@ -673,6 +673,7 @@ bun server/backup-admin.ts list                      # the archives in each plac
 bun server/backup-admin.ts status                    # the last runs and the last drill
 bun server/backup-admin.ts restore-drill [--from latest|<archive name>|<path>|litestream[@<time>]] [--strict] [--keep]
 bun server/backup-admin.ts restore --from <source> --to <empty folder> [--files-from latest|<archive>] [--db-only]
+bun server/backup-admin.ts restore --from-dir <folder> [--from latest|<archive name>] --to <empty folder>
 ```
 
 Exit codes: 0 done, 1 failed, 2 usage or settings, 75 another backup or drill is running.
@@ -698,7 +699,14 @@ MYNOTES_DATA_DIR=/srv/mynotes-restored docker compose run --rm app \
 MYNOTES_DATA_DIR=/srv/mynotes-restored docker compose up -d
 ```
 
-Inside that container `/data` is the empty folder being restored, so `--from latest` finds archives in S3 only. For a local archive, pass its path from a folder the container can read (mount the old backup folder, or set `BACKUP_DIR` to it), or extract it by hand: an archive is a plain `tar.gz` of a data directory, so `tar -xzf /srv/mynotes/backup/nook-backup-….tar.gz -C /srv/mynotes-restored` works too (it leaves `nook-backup.json` beside the data, which Nook ignores), as does an offline `mynotes-*.tar.gz`. Then run `restore-drill --from <that archive>` to check it.
+Inside that container `/data` is the empty folder being restored, so `--from latest` finds archives in S3 only. **For a local archive folder, one command** (0.47.0, D689): mount the old backup folder read-only and name it with `--from-dir`; the newest archive in it is restored (or `--from <archive name>`), checked against its manifest, and checked like a drill:
+
+```sh
+MYNOTES_DATA_DIR=/srv/mynotes-restored docker compose run --rm -v /srv/mynotes/backup:/backups:ro app \
+  bun server/backup-admin.ts restore --from-dir /backups --to /data
+```
+
+`--from-dir` looks in that folder only (online `nook-backup-*` and offline `mynotes-*` archives; never the bucket), only reads it, and works for `restore-drill` too (`restore-drill --from-dir /backups`). `--files-from` of a Litestream restore looks there as well. Or pass an archive's path, or extract it by hand: an archive is a plain `tar.gz` of a data directory, so `tar -xzf /srv/mynotes/backup/nook-backup-….tar.gz -C /srv/mynotes-restored` works too (it leaves `nook-backup.json` beside the data, which Nook ignores), as does an offline `mynotes-*.tar.gz`. Then run `restore-drill --from <that archive>` to check it.
 
 Keep the same `.env` (the TOTP, vault, and agent keys). Start only one Nook on a data directory.
 
@@ -755,6 +763,7 @@ Every image carries immutable numbered migrations under `server/migrations`. The
 
 **Providers and backups (lane PROV+BACKUP2, D685–D699).** No migration from this lane, and nothing changes until you choose it:
 
+- `backup-admin.ts restore --from-dir <folder> --to /data` (D689) restores from a mounted backup folder in one command (see Backup and restore → Restore).
 - `BACKUP_S3_OBJECTS=copy` (D687, off by default) makes archives with S3 storage self-contained: each also carries the bucket's files (archives grow by the bucket's size). Add it to `.env` to use it; `compose.yaml` passes it.
 - Backups keep their file lists on disk (D688): the manifest inside new archives lists one file a line with its list last (still plain JSON); older archives read as before. Nothing to set.
 - `LOCAL_EMBEDDINGS_VARIANT=english` (D686) runs a lighter, English-only local model (bge-small-en-v1.5, about a third of the memory); build with `LOCAL_EMBEDDINGS_MODEL=english` or `all` to carry it. The default (`multilingual`, `include`) and the image are unchanged. After switching, owners move their local bases with Change embedding model.

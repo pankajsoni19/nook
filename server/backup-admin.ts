@@ -17,13 +17,15 @@ import { logger } from "./log";
  *   status                         the last runs and the last drill
  *   restore-drill [--from latest|<archive name>|<path>|litestream[@<RFC 3339 time>]] [--strict] [--keep]
  *                                  restores into a scratch folder under BACKUP_DIR, checks it, removes it
- *   restore --from <same> --to <empty folder> [--files-from latest|<archive>|<path>] [--db-only]
- *                                  a real restore into an empty folder (refuses a used one)
+ *   restore --from <same> --to <empty folder> [--files-from latest|<archive>|<path>] [--db-only] [--from-dir <folder>]
+ *                                  a real restore into an empty folder (refuses a used one); --from-dir looks for
+ *                                  archives in that folder only (D689: a mounted backup folder in a fresh container;
+ *                                  --from then defaults to latest)
  *
  * Exit codes: 0 done (or the drill passed), 1 failed, 2 usage or settings, 75 another backup or drill is running.
  */
 
-const usage = "Usage: bun server/backup-admin.ts backup | list | status | restore-drill [--from latest|<archive>|<path>|litestream[@<time>]] [--strict] [--keep] | restore --from <source> --to <empty folder> [--files-from <archive>] [--db-only]";
+const usage = "Usage: bun server/backup-admin.ts backup | list | status | restore-drill [--from latest|<archive>|<path>|litestream[@<time>]] [--from-dir <folder>] [--strict] [--keep] | restore --from <source> --to <empty folder> [--files-from <archive>] [--db-only] | restore --from-dir <folder> [--from latest|<archive>] --to <empty folder>";
 const BUSY = 75;
 const log = logger("backup");
 const args = process.argv.slice(2);
@@ -116,7 +118,7 @@ switch (command) {
     break;
   }
   case "restore-drill": {
-    const report = await runDrill({ ...common, from: option("from") ?? "latest", trigger: trigger(), strict: flag("strict"), keepScratch: flag("keep"), log: (line) => log.info(line) });
+    const report = await runDrill({ ...common, from: option("from") ?? "latest", fromDir: option("from-dir"), trigger: trigger(), strict: flag("strict"), keepScratch: flag("keep"), log: (line) => log.info(line) });
     if (!report) fail("Another backup or restore drill is running; try again when it has finished.", BUSY);
     printDrill(report);
     if (report.ok) log.info("Restore drill passed", { source: report.source, ms: report.ms });
@@ -125,11 +127,13 @@ switch (command) {
     break;
   }
   case "restore": {
-    const from = option("from");
+    const fromDir = option("from-dir");
+    // D689: with --from-dir, --from defaults to the newest archive in that folder.
+    const from = option("from") ?? (fromDir ? "latest" : null);
     const to = option("to");
     if (!from || !to) fail(usage, 2);
     try {
-      const result = await restoreInto({ ...common, from, to, filesFrom: option("files-from"), databaseOnly: flag("db-only"), log: (line) => console.log(line) });
+      const result = await restoreInto({ ...common, from, to, fromDir, filesFrom: option("files-from"), databaseOnly: flag("db-only"), log: (line) => console.log(line) });
       console.log(`Restore into ${result.target} ${result.ok ? "checked" : "has problems"}:`);
       printChecks(result.checks);
       if (result.ok) {
