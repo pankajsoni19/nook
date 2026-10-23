@@ -12,9 +12,6 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 
 ## In flight
 
-- [ ] **Provider and local-embedding leftovers** (lane PROV): Voyage proxy fields in the editor; a lighter local model option.
-- [ ] **Backup leftovers** (lane BACKUP2): the "Leftovers (lane BACKUP)" items that are code (objects copy, streamed manifest, `--from-dir`, Litestream levels).
-
 ## Waiting on the operator
 
 - [ ] **Real-model check of chat agents on data sources** (lane AGENTSQL, D592): only the scripted provider has called the data tools. On a host with a working model, give an agent a data source (Settings → Report data sources → Chat agents may use this data source) and check that it searches before it queries, aggregates in SQL rather than paging raw rows, and summarizes instead of repeating the table.
@@ -54,7 +51,6 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 
 - [ ] Litestream and the S3 archive path are proven against the fake S3 only (tests/litestream.test.ts runs the real 0.5.17 binary when `LITESTREAM_TEST_BIN` is set). On the VM after the 0.45.0 image: set `BACKUP_TARGET`, `LITESTREAM_ENABLED=true`, check Settings → Backups reads "Replicating" with no sync errors, and run `restore-drill` and `restore-drill --from litestream` against the real bucket (R2/AWS: path-style, region `auto`, multipart, and `BACKUP_S3_SSE=required`).
 - [ ] `BACKUP_S3_OBJECTS=copy` (D687) is proven against the fake S3 only (objects of a few MiB); on the VM, with a copy of the real bucket's size, time one run and the drill, and check the disk estimate against the archive's size.
-- [ ] Litestream's compaction levels and L0 retention are its defaults (only the snapshot retention is a setting); expose them if point-in-time granularity matters.
 
 ## Watch (no work unless it shows up)
 - Reports "Runs panel" client test failed once under full-suite load after lane CAP's rebase (passed alone, 40/40). If it recurs, give it a clock or CPU-time budget.

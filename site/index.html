@@ -354,6 +354,8 @@ docker compose ps</code></pre></div></article></div>
           <tr><td><code>LITESTREAM_ENABLED</code></td><td><code>false</code></td><td><code>true</code>: continuous replication of the database to the backup bucket (Litestream).</td></tr>
           <tr><td><code>LITESTREAM_S3_PREFIX</code></td><td><code>litestream/</code></td><td>Litestream's prefix, after <code>S3_PREFIX</code>.</td></tr>
           <tr><td><code>LITESTREAM_RETENTION</code></td><td><code>7d</code></td><td>How far back a point-in-time restore can go.</td></tr>
+          <tr><td><code>LITESTREAM_LEVELS</code></td><td>empty</td><td>Litestream's compaction levels, such as <code>30s,5m,1h</code> (L1 first, each longer, at most 8). Empty: Litestream's own.</td></tr>
+          <tr><td><code>LITESTREAM_L0_RETENTION</code></td><td>empty</td><td>How long Litestream keeps raw transactions after compacting them. Empty: Litestream's own (5m).</td></tr>
           <tr><td><code>LITESTREAM_METRICS_ADDR</code></td><td><code>127.0.0.1:9090</code></td><td>Litestream's metrics inside the container (loopback); empty turns it off.</td></tr>
           <tr><td><code>LITESTREAM</code></td><td><code>include</code></td><td>Build time: <code>skip</code> leaves Litestream out of the image (39 MB).</td></tr>
           <tr><td><code>PUSH_ENABLED</code></td><td><code>auto</code></td><td>Web Push for reminders: <code>auto</code> (on only when <code>APP_ORIGIN</code> is <code>https:</code>), <code>true</code>, or <code>false</code>. Browsers allow push only on a secure origin.</td></tr>

@@ -53,4 +53,4 @@ export function backupSettings(fixture: Pick<Fixture, "backupDir">, overrides: P
   return { enabled: true, intervalMs: 86_400_000, keep: 14, target: "local", localDir: fixture.backupDir, s3: null, alertAfter: 2, drillIntervalMs: null, objects: "off", ...overrides };
 }
 
-export const noLitestream: LitestreamSettings = { enabled: false, s3: null, retentionMs: 7 * 86_400_000, metricsAddr: null };
+export const noLitestream: LitestreamSettings = { enabled: false, s3: null, retentionMs: 7 * 86_400_000, metricsAddr: null, levelsMs: null, l0RetentionMs: null };

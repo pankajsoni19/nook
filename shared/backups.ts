@@ -53,6 +53,9 @@ export type LitestreamStatusView = {
   active: boolean;
   location: string | null;
   retention: string | null;
+  /** D690: LITESTREAM_LEVELS ("30s", "5m", …, L1 first) and LITESTREAM_L0_RETENTION, or null for Litestream's own. */
+  levels: string[] | null;
+  l0Retention: string | null;
   metrics: { txid: number; syncErrors: number; walBytes: number; databaseBytes: number } | null;
   replica: { txid: number; uploadedAt: string; snapshotAt: string | null } | null;
   error: string | null;

@@ -22,7 +22,7 @@ function view(overrides: Partial<BackupsView> = {}): BackupsView {
     drill: { last: { id: "d1", trigger: "manual", startedAt: at(60), finishedAt: at(59), ok: true, ms: 3000, source: "archive nook-backup-20261022T030000Z-abcdef.tar.gz (s3)", checks: [{ name: "Integrity check", ok: true, detail: "PRAGMA integrity_check: ok" }, { name: "Objects in the bucket", ok: true, detail: "All 40 documents the backup names are in the bucket" }], counts: { users: 3 } }, recent: [] },
     archives: [{ name: "nook-backup-20261022T030000Z-abcdef.tar.gz", size: 12_582_912, createdAt: at(120), locations: ["s3"], offline: false }],
     archivesError: null,
-    litestream: { enabled: true, configured: true, active: true, location: "s3://nook/nook/litestream/mynotes at s3.eu-west-1.amazonaws.com", retention: "7d", metrics: { txid: 120, syncErrors: 0, walBytes: 4096, databaseBytes: 8_000_000 }, replica: { txid: 118, uploadedAt: at(1), snapshotAt: at(300) }, error: null },
+    litestream: { enabled: true, configured: true, active: true, location: "s3://nook/nook/litestream/mynotes at s3.eu-west-1.amazonaws.com", retention: "7d", levels: null, l0Retention: null, metrics: { txid: 120, syncErrors: 0, walBytes: 4096, databaseBytes: 8_000_000 }, replica: { txid: 118, uploadedAt: at(1), snapshotAt: at(300) }, error: null },
     ...overrides
   };
 }
@@ -55,6 +55,14 @@ describe("Settings → Backups", () => {
     expect(text).toContain("more in every backup");
     expect(text).toContain("Copying objects from the bucket: 600 of 1234");
     expect(text).not.toContain("Files stay in the S3 bucket and are not copied");
+  });
+
+  test("D690: Litestream's levels and L0 retention show only when set", async () => {
+    const base = view();
+    mockApi({ "GET /admin/backups": () => view({ litestream: { ...base.litestream, levels: ["10s", "2m", "1h"], l0Retention: "1h" } }) });
+    const page = await render(<Backups />);
+    await page.waitFor(() => document.querySelector(".backups-settings .report-source-list"));
+    expect(document.body.textContent).toContain("Compactionlevels every 10s, 2m, 1h; raw transactions kept 1h after compaction");
   });
 
   test("Back up now starts a job and the page follows it until it ends", async () => {

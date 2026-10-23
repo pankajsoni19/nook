@@ -50,9 +50,34 @@ export type LitestreamSettings = {
   retentionMs: number;
   /** Litestream's Prometheus endpoint inside the container (LITESTREAM_METRICS_ADDR, default 127.0.0.1:9090; empty = off). */
   metricsAddr: string | null;
+  /**
+   * D690: Litestream's compaction levels (LITESTREAM_LEVELS, each level's interval in ms, L1 first), or
+   * null for Litestream's own (30s, 5m, 1h in 0.5.17). Point-in-time restores are as fine as the level
+   * that still holds the moment: L0 for the last LITESTREAM_L0_RETENTION, then each level's interval.
+   */
+  levelsMs: number[] | null;
+  /** D690: how long Litestream keeps L0 (the raw transactions) after compaction (LITESTREAM_L0_RETENTION), or null for its own (5m). */
+  l0RetentionMs: number | null;
 };
 
 const UNITS: Record<string, number> = { m: 60_000, h: 3_600_000, d: 86_400_000, w: 604_800_000 };
+
+const SHORT_UNITS: Record<string, number> = { s: 1000, m: 60_000, h: 3_600_000 };
+
+/** D690: a Go-style duration with one unit, `30s`, `5m`, `1h`, within [min, max] (Litestream reads these). */
+export function parseShortDuration(raw: string, name: string, minMs: number, maxMs: number) {
+  const match = /^(\d{1,5})\s*([smh])$/i.exec(raw.trim());
+  const ms = match ? Number(match[1]) * SHORT_UNITS[match[2]!.toLowerCase()]! : Number.NaN;
+  if (!(ms >= minMs && ms <= maxMs)) throw new Error(`${name} must be a number and a unit (s, m, or h), such as 30s, 5m, or 1h, from ${goDuration(minMs)} to ${goDuration(maxMs)}`);
+  return ms;
+}
+
+/** A duration as Go (and Litestream's YAML) reads it, in the largest whole unit: "1h", "5m", "30s". */
+export function goDuration(ms: number) {
+  if (ms % 3_600_000 === 0) return `${ms / 3_600_000}h`;
+  if (ms % 60_000 === 0) return `${ms / 60_000}m`;
+  return `${Math.max(1, Math.round(ms / 1000))}s`;
+}
 
 /** `30m`, `6h`, `1d`, `2w` (one number and one unit), within [min, max]. */
 export function parseDuration(raw: string, name: string, minMs: number, maxMs: number) {
@@ -159,6 +184,16 @@ export function parseLitestreamSettings(env: Record<string, string | undefined>,
   const metricsRaw = env.LITESTREAM_METRICS_ADDR === undefined ? "127.0.0.1:9090" : env.LITESTREAM_METRICS_ADDR.trim();
   if (metricsRaw && !/^(127\.0\.0\.1|localhost|\[::1\]):\d{2,5}$/.test(metricsRaw)) throw new Error("LITESTREAM_METRICS_ADDR must be a loopback address and port, such as 127.0.0.1:9090 (or empty to turn it off)");
   const prefix = keyPrefix(env, "LITESTREAM_S3_PREFIX", "litestream/");
+  // D690: compaction levels (1 to 8, Litestream's maximum below its snapshot level), each longer than the one before.
+  const levelsRaw = env.LITESTREAM_LEVELS?.trim();
+  let levelsMs: number[] | null = null;
+  if (levelsRaw) {
+    levelsMs = levelsRaw.split(",").map((part) => parseShortDuration(part, "LITESTREAM_LEVELS", 1000, 86_400_000));
+    if (levelsMs.length > 8) throw new Error("LITESTREAM_LEVELS holds at most 8 levels (Litestream's L1 to L8)");
+    if (levelsMs.some((ms, index) => index > 0 && ms <= levelsMs![index - 1]!)) throw new Error("LITESTREAM_LEVELS must grow from each level to the next, such as 30s,5m,1h");
+  }
+  const l0Raw = env.LITESTREAM_L0_RETENTION?.trim();
+  const l0RetentionMs = l0Raw ? parseShortDuration(l0Raw, "LITESTREAM_L0_RETENTION", 1000, 86_400_000) : null;
   const bucket = enabled ? parseBackupBucket(env, options.storage, options.dataDir, options.parseS3) : null;
-  return { enabled, s3: bucket ? { ...bucket, path: `${bucket.basePrefix}${prefix}mynotes` } : null, retentionMs, metricsAddr: metricsRaw || null };
+  return { enabled, s3: bucket ? { ...bucket, path: `${bucket.basePrefix}${prefix}mynotes` } : null, retentionMs, metricsAddr: metricsRaw || null, levelsMs, l0RetentionMs };
 }

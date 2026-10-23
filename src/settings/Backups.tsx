@@ -15,6 +15,14 @@ const TRIGGER_WORDS = { schedule: "Scheduled", manual: "Back up now", cli: "Comm
 const messageOf = (reason: unknown, fallback: string) => reason instanceof ApiError || reason instanceof Error ? reason.message || fallback : fallback;
 
 /** "2 h ago · 12.4 MB · S3 and this server's disk" for a run. */
+/** D690: Litestream's levels and L0 retention as LITESTREAM_LEVELS and LITESTREAM_L0_RETENTION set them (Litestream's own otherwise). */
+export function compactionText(litestream: Pick<BackupsView["litestream"], "levels" | "l0Retention">) {
+  return [
+    litestream.levels ? `levels every ${litestream.levels.join(", ")}` : "Litestream's own levels (30s, 5m, 1h)",
+    `raw transactions kept ${litestream.l0Retention ?? "5m"} after compaction`
+  ].join("; ");
+}
+
 /** What an archive holds (D612, D687: BACKUP_S3_OBJECTS=copy adds the bucket's files, with their size from the database). */
 export function holdsText(settings: Pick<BackupsView["settings"], "storage" | "objects" | "objectsEstimate">) {
   if (settings.storage !== "s3") return "The database, note Markdown, files, and pictures.";
@@ -145,6 +153,7 @@ export function Backups() {
           <div><dt>Last upload</dt><dd>{litestream.replica ? `${relativeTime(litestream.replica.uploadedAt)}${litestream.metrics ? litestream.replica.txid >= litestream.metrics.txid ? ", up to date" : `, ${litestream.metrics.txid - litestream.replica.txid} transaction${litestream.metrics.txid - litestream.replica.txid === 1 ? "" : "s"} behind` : ""}` : "Nothing uploaded yet"}</dd></div>
           {litestream.replica?.snapshotAt && <div><dt>Snapshot</dt><dd>{relativeTime(litestream.replica.snapshotAt)}</dd></div>}
           {litestream.retention && <div><dt>Restores</dt><dd>To any time in the last {durationWords(litestream.retention)}</dd></div>}
+          {(litestream.levels || litestream.l0Retention) && <div><dt>Compaction</dt><dd>{compactionText(litestream)}</dd></div>}
           {litestream.metrics && litestream.metrics.syncErrors > 0 && <div><dt>Errors</dt><dd className="form-error">{litestream.metrics.syncErrors} sync errors since Litestream started</dd></div>}
           {!litestream.active && <div><dt>Note</dt><dd>This server was not started by the image's start script under Litestream (restart the container after setting LITESTREAM_ENABLED).</dd></div>}
           {litestream.error && <div><dt>Check</dt><dd className="form-error">{litestream.error}</dd></div>}

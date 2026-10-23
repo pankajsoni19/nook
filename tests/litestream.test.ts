@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import "./support/harness";
@@ -62,7 +62,7 @@ describe("backup settings", () => {
   });
 
   test("Litestream: off by default; on with a bucket, its own prefix beside the backups", () => {
-    expect(parseLs({})).toEqual({ enabled: false, s3: null, retentionMs: 604_800_000, metricsAddr: "127.0.0.1:9090" });
+    expect(parseLs({})).toEqual({ enabled: false, s3: null, retentionMs: 604_800_000, metricsAddr: "127.0.0.1:9090", levelsMs: null, l0RetentionMs: null });
     expect(parseLs({ LITESTREAM_ENABLED: "true" }).s3).toBeNull();
     const on = parseLs({ ...S3_ENV, LITESTREAM_ENABLED: "true", LITESTREAM_RETENTION: "72h", LITESTREAM_METRICS_ADDR: "" });
     expect(on).toMatchObject({ enabled: true, retentionMs: 259_200_000, metricsAddr: null, s3: { bucket: "nook-files", path: "nook/litestream/mynotes" } });
@@ -86,6 +86,20 @@ describe("the Litestream config", () => {
     expect(minio).toContain('      endpoint: "http://127.0.0.1:9000"\n      force-path-style: true');
     expect(minio).toContain('      region: "us-east-1"');
     expect(minio).toContain("  interval: 12h\n  retention: 12h");
+  });
+
+  test("D690: compaction levels and L0 retention only when set, as Go durations; the defaults write neither", () => {
+    const plain = litestreamYaml(parseLs({ ...S3_ENV, LITESTREAM_ENABLED: "true" }), "/data/mynotes.sqlite");
+    expect(plain).not.toContain("levels:");
+    expect(plain).not.toContain("l0-retention");
+    const tuned = parseLs({ ...S3_ENV, LITESTREAM_ENABLED: "true", LITESTREAM_LEVELS: "10s, 2m,1h,24h", LITESTREAM_L0_RETENTION: "90s" });
+    expect(tuned).toMatchObject({ levelsMs: [10_000, 120_000, 3_600_000, 86_400_000], l0RetentionMs: 90_000 });
+    const yaml = litestreamYaml(tuned, "/data/mynotes.sqlite");
+    expect(yaml).toContain("levels:\n  - interval: 10s\n  - interval: 2m\n  - interval: 1h\n  - interval: 24h\nl0-retention: 90s\nsnapshot:");
+    for (const [env, message] of [
+      [{ LITESTREAM_LEVELS: "5m,30s" }, /must grow/], [{ LITESTREAM_LEVELS: "0s" }, /LITESTREAM_LEVELS must be/], [{ LITESTREAM_LEVELS: "1d" }, /s, m, or h/],
+      [{ LITESTREAM_LEVELS: "1s,2s,3s,4s,5s,6s,7s,8s,9s" }, /at most 8/], [{ LITESTREAM_L0_RETENTION: "forever" }, /LITESTREAM_L0_RETENTION/], [{ LITESTREAM_LEVELS: "30s,,5m" }, /LITESTREAM_LEVELS/]
+    ] as const) expect(() => parseLs({ ...env })).toThrow(message);
   });
 
   test("credentials leave only as quoted exports for Litestream's environment", () => {
@@ -139,6 +153,22 @@ describe.skipIf(!existsSync(startScript))("the image's start script", () => {
 const litestreamBin = process.env.LITESTREAM_TEST_BIN || Bun.which("litestream");
 
 describe.skipIf(!litestreamBin)("Litestream against the fake S3 (needs the binary)", () => {
+  test("D690: the real binary accepts the levels and L0 retention Nook writes, and refuses what Nook refuses too", () => {
+    const dir = mkdtempSync(join(tmpdir(), "nook-ls-levels-"));
+    try {
+      const yml = join(dir, "litestream.yml");
+      writeFileSync(yml, litestreamYaml(parseLs({ ...S3_ENV, S3_ENDPOINT: "http://127.0.0.1:9", LITESTREAM_ENABLED: "true", LITESTREAM_LEVELS: "10s,2m,1h", LITESTREAM_L0_RETENTION: "90s" }), join(dir, "mynotes.sqlite")));
+      const ok = Bun.spawnSync([litestreamBin!, "databases", "-config", yml, "-no-expand-env"], { stdout: "pipe", stderr: "pipe" });
+      expect(ok.stderr.toString()).toBe("");
+      expect(ok.exitCode).toBe(0);
+      writeFileSync(yml, "levels:\n  - interval: 0s\ndbs:\n  - path: \"/tmp/x.db\"\n");
+      const bad = Bun.spawnSync([litestreamBin!, "databases", "-config", yml, "-no-expand-env"], { stdout: "pipe", stderr: "pipe" });
+      expect(bad.exitCode).not.toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("replicates while Nook writes; the drill restores the latest and a point in time", async () => {
     const fake = startFakeS3({ bucket: "nook-ls" });
     const made = makeFixture("litestream");

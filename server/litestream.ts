@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import type { LitestreamSettings } from "./backup/settings";
-import { formatDuration } from "./backup/settings";
+import { formatDuration, goDuration } from "./backup/settings";
 import { s3Client } from "./backup/stores";
 import type { LitestreamStatusView } from "../shared/backups";
 
@@ -37,6 +37,9 @@ export function litestreamYaml(settings: LitestreamSettings, databasePath: strin
     "# Written by Nook at start (server/litestream.ts). Credentials come from LITESTREAM_ACCESS_KEY_ID and",
     "# LITESTREAM_SECRET_ACCESS_KEY in Litestream's environment, never from this file.",
     ...(settings.metricsAddr ? [`addr: ${quote(settings.metricsAddr)}`] : []),
+    // D690: only when set; otherwise Litestream's own levels (30s, 5m, 1h) and L0 retention (5m).
+    ...(settings.levelsMs ? ["levels:", ...settings.levelsMs.map((ms) => `  - interval: ${goDuration(ms)}`)] : []),
+    ...(settings.l0RetentionMs != null ? [`l0-retention: ${goDuration(settings.l0RetentionMs)}`] : []),
     "snapshot:",
     `  interval: ${hours(interval)}`,
     `  retention: ${hours(settings.retentionMs)}`,
@@ -120,7 +123,9 @@ export async function litestreamStatus(settings: LitestreamSettings): Promise<Li
   const status: LitestreamStatus = {
     enabled: settings.enabled, configured: settings.enabled && s3 !== null, active: supervisedByLitestream(),
     location: s3 ? `s3://${s3.bucket}/${s3.path} at ${new URL(s3.endpoint).host}` : null,
-    retention: settings.enabled ? formatDuration(settings.retentionMs) : null, metrics: null, replica: null, error: null
+    retention: settings.enabled ? formatDuration(settings.retentionMs) : null,
+    levels: settings.levelsMs ? settings.levelsMs.map(goDuration) : null, l0Retention: settings.l0RetentionMs != null ? goDuration(settings.l0RetentionMs) : null,
+    metrics: null, replica: null, error: null
   };
   if (!status.configured || !s3) return status;
   if (status.active && settings.metricsAddr) {
