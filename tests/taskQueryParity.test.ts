@@ -227,3 +227,21 @@ describe("sprint key (17B): the board's in-memory matcher and the cross-board qu
     expect(across.find((card) => card.title === "Its subtask")).toMatchObject({ sprint_id: first, sprint_name: "Sprint 1" });
   });
 });
+
+describe("board views (lane VIEWS, D635): the view's filter on its board matches the cross-board query", () => {
+  test("a saved view's terms minus its board term select the same cards in memory as on the server", async () => {
+    const { boardData, filterBoardCards } = await import("../src/tasks/boardQuery");
+    const { boardViewFilter } = await import("../src/tasks/views/boardViewModel");
+    const board = hydrateBoard((await call(owner, "GET", `/boards/${boardId}`)).body as BoardPayload);
+    const data = boardData(board);
+    const context = { userId: owner.userId, today: "2026-10-03", now: Date.parse("2026-10-03T12:00:00Z"), timeZone: "UTC" };
+    for (const text of ["state:todo", "-state:done assignee:me", "tag:Backend", "-flag:urgent", "flag:urgent,blocked", "due:<2026-10-02,none", "creator:me", "has:blocked",
+      '"invoice"', `column:${columns[1]!.id}`, "-assignee:none tag:none", "assignee:me,none -tag:Design"]) {
+      const parsed = parse(`board:${boardId} ${text}`);
+      if (!parsed.ok) throw new Error(`${text}: ${parsed.error.message}`);
+      const server = runQuery(owner.userId, parsed.query, { tz: "UTC", limit: 100, now: new Date(context.now) }).cards.map((card) => card.id).sort();
+      const client = filterBoardCards(data, boardViewFilter(parsed.query, boardId), context).map((card) => card.id).sort();
+      expect({ text, client }).toEqual({ text, client: server });
+    }
+  });
+});

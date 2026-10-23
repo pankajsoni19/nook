@@ -7,7 +7,7 @@
 // Decoding never throws: unknown keys and invalid values are dropped (the grammar decodes
 // leniently, within its limits). Encoding is canonical (fixed key order, defaults left out,
 // canonical filter text), so `sameRoute` is stable and a shared link reads the same everywhere.
-import { decodeFilterParams, encodeFilterParams, type TaskQuery } from "../../shared/taskQuery";
+import { decodeFilterParams, encodeFilterParams, FILTER_PARAM_KEYS, type TaskQuery } from "../../shared/taskQuery";
 
 export const BOARD_VIEWS = ["board", "table", "list", "calendar"] as const;
 export type BoardViewId = typeof BOARD_VIEWS[number];
@@ -109,6 +109,28 @@ export function formatBoardSearch(query: BoardQuery): string {
   // ("sort=due:asc&q=assignee:me+flag:blocked,urgent").
   const text = params.toString().replace(/%3A/gi, ":").replace(/%2C/gi, ",");
   return text ? `?${text}` : "";
+}
+
+
+/** Whether a search string carries a filter at all (`q`, even empty, or an older per-key one): a saved view's unsaved change (D636). */
+export function hasFilterParam(search: string) {
+  if (!search || search.length > 4096) return false;
+  try {
+    const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+    return FILTER_PARAM_KEYS.some((key) => params.has(key));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A saved view's search on its board (D636): the board's presentation keys, and the filter only when
+ * it is an unsaved change, written as `q=` even when empty (an emptied filter is still a change).
+ */
+export function formatBoardViewSearch(query: BoardQuery | undefined, unsaved: boolean) {
+  const base = formatBoardSearch({ ...(query ?? DEFAULT_BOARD_QUERY), filter: unsaved && query ? query.filter : emptyFilter() });
+  if (!unsaved || /(^\?|&)q=/.test(base)) return base;
+  return `${base}${base ? "&" : "?"}q=`;
 }
 
 /** Whether a query is the default one (no query string at all). */

@@ -99,10 +99,16 @@ async function visitScreens(origin: string, screens: readonly Screen[], expressi
   const login = await fetch(`http://127.0.0.1:${url.port || 80}/api/auth/login`, { method: "POST", headers: { "Content-Type": "application/json", Origin: url.origin, Host: url.host }, body: JSON.stringify({ email, password }) });
   const cookie = login.headers.get("set-cookie")?.split(";")[0];
   if (!login.ok || !cookie) throw new Error(`Sign-in failed: HTTP ${login.status}`);
-  const port = 9300 + Math.floor(Math.random() * 90);
   const profile = mkdtempSync(join(tmpdir(), "nook-metrics-"));
-  const chrome = Bun.spawn([process.env.CHROME_BIN ?? "google-chrome", "--headless=new", `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, "--no-first-run", "--hide-scrollbars", "--disable-gpu", "about:blank"], { stdout: "ignore", stderr: "ignore" });
+  // The OS picks the debugging port (Chrome writes it to DevToolsActivePort), so parallel runs never collide.
+  const chrome = Bun.spawn([process.env.CHROME_BIN ?? "google-chrome", "--headless=new", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "--no-first-run", "--hide-scrollbars", "--disable-gpu", "about:blank"], { stdout: "ignore", stderr: "ignore" });
   try {
+    let port = 0;
+    for (let i = 0; i < 100 && !port; i++) {
+      await Bun.sleep(100);
+      if (existsSync(join(profile, "DevToolsActivePort"))) port = Number(readFileSync(join(profile, "DevToolsActivePort"), "utf8").split("\n")[0]) || 0;
+    }
+    if (!port) throw new Error("Chrome did not report its debugging port");
     let wsUrl = "";
     for (let i = 0; i < 60 && !wsUrl; i++) {
       await Bun.sleep(200);

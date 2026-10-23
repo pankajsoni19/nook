@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Check, ListFilter, Search, X } from "lucide-react";
 import type { FilterKey, TaskQuery } from "../../shared/taskQuery";
 import { useModuleEnabled } from "../modules";
@@ -17,6 +17,8 @@ type FilterBarProps = {
   /** Cards shown and on the board, for the live count. */
   shown: number;
   total: number;
+  /** After the count: a saved view's Save view… / Save / Discard (lane VIEWS, D638). */
+  actions?: ReactNode;
 };
 
 export const TEXT_DEBOUNCE_MS = 300;
@@ -53,7 +55,7 @@ export function termSwatches(values: readonly string[], board: BoardData) {
  * fields AND. The filters live in the URL query as the one task grammar (`q=`); with the Search
  * module off, the text box is hidden (§4.8) and a text filter from a link shows as a chip.
  */
-export function FilterBar({ board, context, filter, onChange, shown, total }: FilterBarProps) {
+export function FilterBar({ board, context, filter, onChange, shown, total, actions }: FilterBarProps) {
   const searchEnabled = useModuleEnabled("search");
   const [editing, setEditing] = useState<FilterKey | null>(null);
   const [text, setText] = useState(() => textTerm(filter));
@@ -144,5 +146,6 @@ export function FilterBar({ board, context, filter, onChange, shown, total }: Fi
     </span>}
     {hasFilter && <button type="button" className="task-filter-clear" onClick={() => { typedRef.current = false; setText(""); setEditing(null); onChange({ terms: [] }); }}>Clear</button>}
     <span className="task-filter-count" role="status" aria-live="polite">{hasFilter ? `${shown} of ${total} ${total === 1 ? "card" : "cards"}` : ""}</span>
+    {actions}
   </div>;
 }

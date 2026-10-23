@@ -45,6 +45,19 @@
 .task-home-lane h3 b { min-width: 22px; border-radius: 999px; padding: 1px 7px; background: rgb(255 255 255 / 7%); color: #a8a8ae; font-size: .7rem; text-align: center; }
 .task-home-table .task-table-title { min-width: 220px; }
 
+/* Board lanes across boards (lane VIEWS, D640–D646): the board's columns, inside the page. Each lane
+   scrolls its own cards past a screen's height, so the headers stay side by side. */
+.task-query-lanes { min-width: 0; }
+/* Lanes take the page's width, as a board does, instead of the home's 920 px reading column. */
+.tasks-content.task-home:has(.task-query-lanes) { padding-left: clamp(16px, 3vw, 32px); padding-right: clamp(16px, 3vw, 32px); }
+.task-query-lanes .task-columns { padding: 2px 0 10px; }
+.task-query-lanes .task-card-list { max-height: max(320px, calc(100dvh - 300px)); }
+.task-query-lanes .task-column-strip-name { max-height: 220px; }
+.task-lane-board { overflow: hidden; color: #8d8d94; font-size: .72rem; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.task-query-lanes .task-card[draggable="false"] { cursor: pointer; }
+.task-lanes-notice { margin: 0 0 8px; color: #a8a8ae; font-size: .78rem; }
+.task-lane-moves .move-option.current { opacity: 1; }
+
 /* The view page */
 .task-home-view { padding-top: 16px; }
 .task-view-header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
@@ -77,6 +90,10 @@
   .task-home-toolbar .task-view-switch { order: 0; }
   .task-home-lanes { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: 86%; overflow-x: auto; scroll-snap-type: x mandatory; overscroll-behavior-x: contain; padding-bottom: 4px; }
   .task-home-lane { scroll-snap-align: start; }
+  /* The board's pager (D646): one lane a page, the tabs above, edge to edge like a board. */
+  .task-query-lanes { margin: 0 -16px; }
+  .task-query-lanes .task-column-tabs { position: static; background: transparent; }
+  .task-query-lanes .task-card-list { max-height: none; }
   .task-home-view { padding-top: 8px; }
   .task-view-header .task-board-heading { flex: 1 1 60%; }
   .task-view-header .task-board-heading h2 { font-size: 1.1rem; }

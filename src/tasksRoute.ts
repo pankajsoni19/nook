@@ -4,19 +4,27 @@ import type { TasksHome } from "./tasks/home/homeUrl";
 
 export type TasksRoute = Extract<Route, { app: "tasks" }>;
 
+/** A saved view on its board (lane VIEWS, D636); `unsaved`: the route's filter is a change to the view's. */
+export type SavedViewRef = { viewId: string; unsaved?: boolean };
+
+/** The saved view a board route is in, or null. */
+export const savedViewOf = (route: TasksRoute): SavedViewRef | null => route.boardId && route.viewId ? { viewId: route.viewId, ...(route.unsaved ? { unsaved: true } : {}) } : null;
+
 /**
  * A Tasks route. `full` opens the card as a page (13D); `query` (the board's view and filters,
- * D112) is kept only with a board and when it is not the default.
+ * D112) is kept only with a board and when it is not the default. `savedView` puts the board route
+ * under a saved view (/tasks/:b/views/:v, D636).
  */
-export function tasksRoute(boardId: string | null = null, cardId: string | null = null, full = false, query?: BoardQuery | null): TasksRoute {
+export function tasksRoute(boardId: string | null = null, cardId: string | null = null, full = false, query?: BoardQuery | null, savedView?: SavedViewRef | null): TasksRoute {
   const card = boardId ? cardId : null;
-  const route: TasksRoute = card && full ? { app: "tasks", boardId, cardId: card, full: true } : { app: "tasks", boardId, cardId: card };
+  const base: TasksRoute = card && full ? { app: "tasks", boardId, cardId: card, full: true } : { app: "tasks", boardId, cardId: card };
+  const route: TasksRoute = boardId && savedView ? { ...base, viewId: savedView.viewId, ...(savedView.unsaved ? { unsaved: true as const } : {}) } : base;
   return boardId && query && !isDefaultBoardQuery(query) ? { ...route, query } : route;
 }
 
 /** The board's Sprints sheet (/tasks/:b/sprints), keeping the board's view and filters under it. */
-export function boardSprintsRoute(boardId: string, query?: BoardQuery | null): TasksRoute {
-  return { ...tasksRoute(boardId, null, false, query), sprints: true };
+export function boardSprintsRoute(boardId: string, query?: BoardQuery | null, savedView?: SavedViewRef | null): TasksRoute {
+  return { ...tasksRoute(boardId, null, false, query, savedView), sprints: true };
 }
 
 /** A Tasks home segment (17C): My work, the views list, or one view, with its query. */
@@ -31,8 +39,11 @@ export function tasksHomeRoute(home: TasksHome): TasksRoute {
  */
 export function parentTasksRoute(route: TasksRoute): TasksRoute | null {
   if (!route.boardId && route.home) return route.home.section === "view" ? tasksHomeRoute({ section: "views" }) : tasksRoute();
-  if (route.cardId && route.full) return tasksRoute(route.boardId, route.cardId, false, route.query);
-  if (route.cardId || (route.boardId && route.sprints)) return tasksRoute(route.boardId, null, false, route.query);
+  const view = savedViewOf(route);
+  if (route.cardId && route.full) return tasksRoute(route.boardId, route.cardId, false, route.query, view);
+  if (route.cardId || (route.boardId && route.sprints)) return tasksRoute(route.boardId, null, false, route.query, view);
+  // A saved view on its board steps up to the views list, as the view page does (D636).
+  if (route.boardId && view) return tasksHomeRoute({ section: "views" });
   if (route.boardId) return tasksRoute();
   return null;
 }
@@ -69,8 +80,8 @@ export function hasFromDialogHint(state: unknown) {
  */
 export function fullPageAction(action: "collapse" | "close", route: TasksRoute, state: unknown, depth: number): { kind: "history"; delta: number } | { kind: "replace"; route: TasksRoute } {
   const hint = hasFromDialogHint(state);
-  if (action === "collapse") return hint && depth > 0 ? { kind: "history", delta: -1 } : { kind: "replace", route: tasksRoute(route.boardId, route.cardId, false, route.query) };
-  return hint && depth >= 2 ? { kind: "history", delta: -2 } : { kind: "replace", route: tasksRoute(route.boardId, null, false, route.query) };
+  if (action === "collapse") return hint && depth > 0 ? { kind: "history", delta: -1 } : { kind: "replace", route: tasksRoute(route.boardId, route.cardId, false, route.query, savedViewOf(route)) };
+  return hint && depth >= 2 ? { kind: "history", delta: -2 } : { kind: "replace", route: tasksRoute(route.boardId, null, false, route.query, savedViewOf(route)) };
 }
 
 /**
@@ -99,7 +110,7 @@ export function createTasksEntryLog(): TasksEntryLog {
  * entry with the card's board, which never leaves Tasks and keeps its Undo toast.
  */
 export function cardCloseAction(route: TasksRoute, depth: number, log: Pick<TasksEntryLog, "urlAt">): { kind: "history" } | { kind: "replace"; route: TasksRoute } {
-  return depth > 0 && log.urlAt(depth - 1) !== undefined ? { kind: "history" } : { kind: "replace", route: tasksRoute(route.boardId, null, false, route.query) };
+  return depth > 0 && log.urlAt(depth - 1) !== undefined ? { kind: "history" } : { kind: "replace", route: tasksRoute(route.boardId, null, false, route.query, savedViewOf(route)) };
 }
 
 /**

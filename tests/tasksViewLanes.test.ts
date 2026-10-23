@@ -6,7 +6,7 @@ const { createMcpApiKey } = await import("../server/mcp");
 const { resetMcpLimits } = await import("../server/mcpRateLimit");
 
 /**
- * Views that work like boards (lane VIEWS, docs/plan/TASK_VIEWS.md D630–D640, T442–T444):
+ * Views that work like boards (lane VIEWS, docs/plan/TASK_VIEWS.md D635–D645, T442–T444):
  * board views (`board_id`), lanes and their true counts, collapsed-lane prefs (migration 077),
  * and MCP `list_views` / `move_card` by state or column name.
  */
@@ -36,7 +36,7 @@ async function addColumn(owner: Session, boardId: string, name: string, state?: 
 
 beforeEach(() => { resetTaskQueryRateLimit(); resetMcpLimits(); });
 
-describe("board views (D630)", () => {
+describe("board views (D635)", () => {
   test("a view on exactly one readable board carries board_id; anything else is null", async () => {
     const owner = await createUser("Board view owner");
     const reader = await createUser("Board view reader");
@@ -64,7 +64,7 @@ describe("board views (D630)", () => {
   });
 });
 
-describe("lanes (D635–D638)", () => {
+describe("lanes (D640–D643)", () => {
   test("columns merge by name and state across the boards with matches, with true counts over the whole match", async () => {
     const owner = await createUser("Lanes owner");
     const a = await board(owner, "Lanes A");
@@ -134,7 +134,7 @@ describe("lanes (D635–D638)", () => {
   });
 });
 
-describe("collapsed lanes (D639, migration 077)", () => {
+describe("collapsed lanes (D644, migration 077)", () => {
   test("a reader keeps their own; malformed and unknown lanes are trimmed; rows go with the view", async () => {
     const owner = await createUser("Prefs owner");
     const reader = await createUser("Prefs reader");
@@ -159,7 +159,7 @@ describe("collapsed lanes (D639, migration 077)", () => {
     expect((await call(stranger, "PUT", "/views/my/prefs", { collapsedLanes: ["s:done", "c:done:anything"] })).body).toEqual({ collapsedLanes: ["s:done", "c:done:anything"] });
     expect((await call(stranger, "GET", "/views/my/prefs")).body).toEqual({ collapsedLanes: ["s:done", "c:done:anything"] });
     // Not audited.
-    expect((db.query("SELECT COUNT(*) AS count FROM audit_log WHERE event_type LIKE '%prefs%'").get() as { count: number }).count).toBe(0);
+    expect((db.query("SELECT COUNT(*) AS count FROM audit_log WHERE actor_id = ?").get(stranger.userId) as { count: number }).count).toBe(0);
     // Deleted with the view, for everyone.
     expect((db.query("SELECT COUNT(*) AS count FROM task_view_prefs WHERE view_key = ?").get(view.id) as { count: number }).count).toBe(2);
     await call(owner, "DELETE", `/views/${view.id}`);
@@ -170,7 +170,7 @@ describe("collapsed lanes (D639, migration 077)", () => {
   });
 });
 
-describe("moves across boards keep the board's rules (D636)", () => {
+describe("moves across boards keep the board's rules (D641)", () => {
   test("view-level readers cannot move; a full column is 409; the done clock follows the move", async () => {
     const owner = await createUser("Drop owner");
     const viewer = await createUser("Drop viewer");
@@ -190,7 +190,7 @@ describe("moves across boards keep the board's rules (D636)", () => {
   });
 });
 
-describe("MCP (D640)", () => {
+describe("MCP (D645)", () => {
   type Key = { token: string };
   let rpcId = 0;
   async function tool(key: Key, name: string, args: Record<string, unknown>) {

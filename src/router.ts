@@ -1,5 +1,5 @@
 // Pure URL routing for the SPA. No DOM access, so it can be unit tested directly.
-import { formatBoardSearch, isDefaultBoardQuery, parseBoardSearch, type BoardQuery } from "./tasks/boardUrl";
+import { formatBoardSearch, formatBoardViewSearch, hasFilterParam, isDefaultBoardQuery, parseBoardSearch, type BoardQuery } from "./tasks/boardUrl";
 import { formatHomeSearch, NEW_VIEW, parseMyWorkSearch, parseViewSearch, type TasksHome } from "./tasks/home/homeUrl";
 import { appName } from "./appName";
 
@@ -96,7 +96,9 @@ export type Route =
   // left out when it is the default, and never set without a board. `full` (13D): the card as a page.
   // `home` (17C): without a board, the My work and Views segments of the Tasks home (/tasks is Boards).
   // `sprints`: the board's Sprints sheet (/tasks/:boardId/sprints), over the board in its view.
-  | { app: "tasks"; boardId: string | null; cardId: string | null; full?: true; query?: BoardQuery; home?: TasksHome; sprints?: true }
+  // `viewId` (lane VIEWS, D636): a saved view on its board (/tasks/:b/views/:v), the board engine with
+  // the view's filter; `unsaved`: the URL's `q` is an unsaved change to that filter (even when empty).
+  | { app: "tasks"; boardId: string | null; cardId: string | null; full?: true; query?: BoardQuery; home?: TasksHome; sprints?: true; viewId?: string; unsaved?: true }
   | { app: "collections"; collectionId: string | null; viewId: string | null; rowId: string | null }
   | { app: "calendar"; view: "agenda" | "month"; month: string | null; eventId: string | null }
   | { app: "notifications" }
@@ -197,17 +199,22 @@ function parseCollection(segments: string[]): { folder: string; itemId: string |
 // and /tasks/:boardId/card/:cardId/full (the card as a page, 13D). Anything malformed after a valid board id still opens that board; a
 // malformed board id opens the board list. The query (view, filters) belongs to the board: it is
 // kept on its cards' URLs too, so closing a card returns to the same view (D112).
-function parseTasks(segments: string[], search: string): Route {
-  const [board, kind, card, view] = segments;
-  const home = parseTasksHome(segments, search);
+function parseTasks(allSegments: string[], search: string): Route {
+  const home = parseTasksHome(allSegments, search);
   if (home) return { app: "tasks", boardId: null, cardId: null, home };
+  // /tasks/:b/views/:v[/card/:k[/full] | /sprints] (D636): the same board routes under a saved view.
+  const savedView = allSegments[1] === "views" && allSegments[2] !== undefined && isRouteId(allSegments[2]) && allSegments[0] !== undefined && isRouteId(allSegments[0])
+    ? allSegments[2].toLowerCase() : null;
+  const segments = savedView ? [allSegments[0]!, ...allSegments.slice(3)] : allSegments;
+  const [board, kind, card, view] = segments;
   if (board === undefined || !isRouteId(board)) return { app: "tasks", boardId: null, cardId: null };
   const boardId = board.toLowerCase();
   const full = segments.length === 4 && view === "full";
   const cardId = (segments.length === 3 || full) && kind === "card" && card !== undefined && isRouteId(card) ? card.toLowerCase() : null;
   const query = parseBoardSearch(search);
   const sprints = segments.length === 2 && kind === "sprints";
-  const route: Route = cardId && full ? { app: "tasks", boardId, cardId, full: true } : sprints ? { app: "tasks", boardId, cardId: null, sprints: true } : { app: "tasks", boardId, cardId };
+  const base: Route = cardId && full ? { app: "tasks", boardId, cardId, full: true } : sprints ? { app: "tasks", boardId, cardId: null, sprints: true } : { app: "tasks", boardId, cardId };
+  const route: Route = savedView ? { ...base, viewId: savedView, ...(hasFilterParam(search) ? { unsaved: true as const } : {}) } : base;
   return isDefaultBoardQuery(query) ? route : { ...route, query };
 }
 
@@ -413,8 +420,8 @@ export function formatRoute(route: Route): string {
   if (route.app === "tasks") {
     if (!route.boardId && route.home) return formatTasksHome(route.home);
     if (!route.boardId || !isRouteId(route.boardId)) return "/tasks";
-    const board = `/tasks/${route.boardId.toLowerCase()}`;
-    const search = route.query ? formatBoardSearch(route.query) : "";
+    const board = `/tasks/${route.boardId.toLowerCase()}${route.viewId && isRouteId(route.viewId) ? `/views/${route.viewId.toLowerCase()}` : ""}`;
+    const search = route.viewId ? formatBoardViewSearch(route.query, route.unsaved === true) : route.query ? formatBoardSearch(route.query) : "";
     if (!route.cardId || !isRouteId(route.cardId)) return `${board}${route.sprints ? "/sprints" : ""}${search}`;
     return `${board}/card/${route.cardId.toLowerCase()}${route.full ? "/full" : ""}${search}`;
   }

@@ -521,7 +521,7 @@ export const taskTools: McpToolSpec[] = [
       "afterCardId: omit for the bottom, null for the top, or a card in the target column. If the board changed, the call fails with STALE_POSITION and the column's current order. Moving into another column at its WIP limit fails with COLUMN_FULL."
     ].join(" "),
     scopes: ["tasks:write"],
-    // `state` and `columnName` resolve on the card's own board, after the card's edit check (D640).
+    // `state` and `columnName` resolve on the card's own board, after the card's edit check (D645).
     access: { mode: "items", items: [{ arg: "cardId", kind: "card" }], related: ["columnId", "afterCardId"] },
     write: true,
     dailyBucket: "task_write",

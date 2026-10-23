@@ -7,11 +7,14 @@ import { ReadOnlyBanner, useRole } from "../team/roleAccess";
 import { readHistoryDepth } from "../appShellNavigation";
 import { popStateClosedDialog } from "../historyDialogs";
 import { formatRoute, locationUrl, routeFromLocation, type Route } from "../router";
-import { boardSprintsRoute, cardCloseAction, createTasksEntryLog, fullPageAction, savedViewStep, tasksBackAction, tasksHomeRoute, tasksRoute, withFromDialogHint, type TasksRoute } from "../tasksRoute";
+import { boardSprintsRoute, cardCloseAction, createTasksEntryLog, fullPageAction, savedViewOf, savedViewStep, tasksBackAction, tasksHomeRoute, tasksRoute, withFromDialogHint, type TasksRoute } from "../tasksRoute";
 import { TasksHome } from "./home/TasksHome";
 import type { TasksHome as TasksHomeRoute } from "./home/homeUrl";
 import { BoardView } from "./BoardView";
-import { DEFAULT_BOARD_QUERY, type BoardQuery } from "./boardUrl";
+import { DEFAULT_BOARD_QUERY, withBoardQuery, type BoardQuery } from "./boardUrl";
+import type { TaskQuery } from "../../shared/taskQuery";
+import type { TaskView } from "./home/homeApi";
+import { boardLayoutOf, boardViewFilter } from "./views/boardViewModel";
 import "../bin/bin.css";
 import "../files/files.css";
 import "./tasks.css";
@@ -89,15 +92,15 @@ export function TasksApp({ userId, displayName, navigate, onHome, onSettings, on
   // link, a reload, or a card opened from Notifications or another app, review L6). The card's URL carries the board's
   // query, so closing it returns to the same view and filters (D112).
   const openCard = useCallback((cardId: string) => {
-    const { boardId, query } = routeRef.current;
-    if (boardId) go(tasksRoute(boardId, cardId, false, query));
+    const current = routeRef.current;
+    if (current.boardId) go(tasksRoute(current.boardId, cardId, false, current.query, savedViewOf(current)));
   }, [go]);
   // Expand pushes the card as a full page with a hint that the dialog is the entry below (§4.7);
   // Collapse and Close step back through those entries, or replace a deep-linked one.
   const expandCard = useCallback(() => {
     const current = routeRef.current;
     if (!current.boardId || !current.cardId || current.full) return;
-    go(tasksRoute(current.boardId, current.cardId, true, current.query));
+    go(tasksRoute(current.boardId, current.cardId, true, current.query, savedViewOf(current)));
     window.history.replaceState(withFromDialogHint(window.history.state), "", `${window.location.pathname}${window.location.search}`);
   }, [go]);
   const leaveFullPage = useCallback((action: "collapse" | "close") => {
@@ -123,18 +126,37 @@ export function TasksApp({ userId, displayName, navigate, onHome, onSettings, on
 
   // The board's view and filters live in the URL query (D112): switching the view pushes an
   // entry, and filter, sort, and group edits replace it, so Back steps through views, not chips.
-  const changeQuery = useCallback((query: BoardQuery, options: { push?: boolean } = {}) => {
+  const changeQuery = useCallback((query: BoardQuery, options: { push?: boolean; unsaved?: boolean } = {}) => {
     const current = routeRef.current;
     if (!current.boardId) return;
+    // Under a saved view (D636) the filter is in the URL only while it differs from the view's.
+    const view = current.viewId ? { viewId: current.viewId, unsaved: options.unsaved === true } : null;
     // A change made from the Sprints sheet (starting a sprint) keeps the sheet open.
-    go(current.sprints ? boardSprintsRoute(current.boardId, query) : tasksRoute(current.boardId, current.cardId, current.full === true, query), !options.push);
+    go(current.sprints ? boardSprintsRoute(current.boardId, query, view) : tasksRoute(current.boardId, current.cardId, current.full === true, query, view), !options.push);
+  }, [go]);
+
+  // Saved views on a board (D635–D638). Picking a view pushes it in its saved layout; after a save
+  // or a delete the entry is replaced, keeping the layout on screen. All cards keeps the layout.
+  const showSavedView = useCallback((view: TaskView | null, options: { replace?: boolean } = {}) => {
+    const current = routeRef.current;
+    if (!current.boardId) return;
+    const presentation = withBoardQuery(current.query ?? DEFAULT_BOARD_QUERY, { filter: { terms: [] } });
+    const query = view && !options.replace ? withBoardQuery(DEFAULT_BOARD_QUERY, { view: boardLayoutOf(view.display) }) : view ? presentation : withBoardQuery(presentation, { sprint: null });
+    go(tasksRoute(current.boardId, null, false, query, view ? { viewId: view.id } : null), options.replace === true);
+  }, [go]);
+  const leaveSavedView = useCallback((viewId: string) => go(tasksHomeRoute({ section: "view", viewId }), true), [go]);
+  /** A view on one board opens as that board (D635, D636), with an unsaved filter carried over when it has one. */
+  const openBoardView = useCallback((view: TaskView & { board_id: string }, options: { replace?: boolean; filter?: TaskQuery } = {}) => {
+    const layout = withBoardQuery(DEFAULT_BOARD_QUERY, { view: boardLayoutOf(view.display) });
+    const query = options.filter ? withBoardQuery(layout, { filter: boardViewFilter(options.filter, view.board_id) }) : layout;
+    go(tasksRoute(view.board_id, null, false, query, { viewId: view.id, unsaved: options.filter !== undefined }), options.replace === true);
   }, [go]);
 
   // The Sprints sheet is a route (/tasks/:b/sprints): opening pushes it over the board's view, and
   // closing steps back to the board, or replaces a deep-linked entry with it.
   const openSprints = useCallback(() => {
-    const { boardId, query } = routeRef.current;
-    if (boardId) go(boardSprintsRoute(boardId, query));
+    const current = routeRef.current;
+    if (current.boardId) go(boardSprintsRoute(current.boardId, current.query, savedViewOf(current)));
   }, [go]);
   const closeSprints = useCallback(() => {
     const current = routeRef.current;
@@ -174,9 +196,10 @@ export function TasksApp({ userId, displayName, navigate, onHome, onSettings, on
     <ReadOnlyBanner />
     {route.boardId
       ? <BoardView key={route.boardId} userId={userId} boardId={route.boardId} openCardId={route.cardId} openCardFull={route.full === true} onExpandCard={expandCard} onCollapseCard={collapseCard} onOpenCard={openCard} onCloseCard={closeCard} onBack={back} onMissing={onMissing} notify={notify} onBoardDeleted={() => go(tasksRoute(), true)} onOpenBoard={(boardId) => go(tasksRoute(boardId))}
-        onOpenCardRoute={(boardId, cardId) => go(tasksRoute(boardId, cardId, false, boardId === routeRef.current.boardId ? routeRef.current.query : null))}
-        query={route.query ?? DEFAULT_BOARD_QUERY} onQueryChange={changeQuery} sprintsOpen={route.sprints === true} onOpenSprints={openSprints} onCloseSprints={closeSprints} />
+        onOpenCardRoute={(boardId, cardId) => go(boardId === routeRef.current.boardId ? tasksRoute(boardId, cardId, false, routeRef.current.query, savedViewOf(routeRef.current)) : tasksRoute(boardId, cardId))}
+        query={route.query ?? DEFAULT_BOARD_QUERY} onQueryChange={changeQuery} sprintsOpen={route.sprints === true} onOpenSprints={openSprints} onCloseSprints={closeSprints}
+        savedViewId={route.viewId ?? null} viewUnsaved={route.unsaved === true} onSavedView={showSavedView} onLeaveSavedView={leaveSavedView} displayName={displayName} />
       : <TasksHome userId={userId} home={route.home} onHome={goHome} onOpenBoard={(board) => go(tasksRoute(board.id))} onOpenBoardId={(boardId) => go(tasksRoute(boardId))}
-        onOpenCard={openResultCard} onBack={back} notify={notify} />}
+        onOpenCard={openResultCard} onOpenBoardView={openBoardView} onBack={back} notify={notify} />}
   </main>;
 }

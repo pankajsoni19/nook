@@ -40,6 +40,9 @@ import { BoardTable } from "./BoardTable";
 import { BoardViewSwitch } from "./BoardViewSwitch";
 import { applyBoardQuery, boardData, filterBoardCards, type BoardContext } from "./boardQuery";
 import { hasBoardFilter, withBoardQuery, type BoardQuery } from "./boardUrl";
+import { useBoardSavedViews } from "./views/BoardSavedViews";
+import { composerStartFor, sameFilter } from "./views/boardViewModel";
+import type { TaskView } from "./home/homeApi";
 import { localDateString, viewerTimeZone } from "./taskActions";
 import { FilterBar } from "./FilterBar";
 import { KeyboardMoveHint } from "./boardViewParts";
@@ -98,8 +101,20 @@ type BoardViewProps = {
   onCloseSprints?: () => void;
   /** The view, grouping, sort, and filters from the URL query (D112). */
   query: BoardQuery;
-  /** `push` for a view switch; filter, sort, and group edits replace the entry (§4.7). */
-  onQueryChange: (query: BoardQuery, options?: { push?: boolean }) => void;
+  /**
+   * `push` for a view switch; filter, sort, and group edits replace the entry (§4.7). Under a saved
+   * view, `unsaved` says the filter differs from the view's (the URL then carries it).
+   */
+  onQueryChange: (query: BoardQuery, options?: { push?: boolean; unsaved?: boolean }) => void;
+  /** Lane VIEWS (D635–D638): the saved view the route names on this board, and whether its filter has an unsaved change. */
+  savedViewId?: string | null;
+  viewUnsaved?: boolean;
+  /** Shows a saved view on this board, or All cards (null); `replace` after a save or delete. */
+  onSavedView?: (view: TaskView | null, options?: { replace?: boolean }) => void;
+  /** The saved view is no longer on this board: its cross-board page. */
+  onLeaveSavedView?: (viewId: string) => void;
+  /** The viewer's name, for a view's "assignee:me" on a new card. */
+  displayName?: string;
 };
 
 type BoardDialog =
@@ -113,9 +128,30 @@ type BoardDialog =
 
 export const MAX_COLUMNS = 20;
 
-export function BoardView({ userId, boardId, openCardId, openCardFull = false, onExpandCard, onCollapseCard, onOpenCard, onCloseCard, onBack, onMissing, notify, onBoardDeleted, onOpenBoard, onOpenCardRoute, query, onQueryChange, sprintsOpen = false, onOpenSprints, onCloseSprints }: BoardViewProps) {
+export function BoardView({ userId, boardId, openCardId, openCardFull = false, onExpandCard, onCollapseCard, onOpenCard, onCloseCard, onBack, onMissing, notify, onBoardDeleted, onOpenBoard, onOpenCardRoute, query: routeQuery, onQueryChange: routeQueryChange, sprintsOpen = false, onOpenSprints, onCloseSprints,
+  savedViewId = null, viewUnsaved = false, onSavedView, onLeaveSavedView, displayName = "Me" }: BoardViewProps) {
   const focusCardId = openCardId;
-  const [detail, setDetail] = useState<BoardDetail | null>(null);
+  const [boardDetail, setDetail] = useState<BoardDetail | null>(null);
+  // A saved view on this board (D635–D638): the board engine runs the view's filter (or the URL's
+  // unsaved change to it); the board waits until the view has loaded.
+  const savedViews = useBoardSavedViews({
+    boardId, savedViewId, routeFilter: routeQuery.filter, unsaved: viewUnsaved, layout: routeQuery.view, notify,
+    onSelect: (view, options) => onSavedView?.(view, options),
+    onLeave: (viewId) => onLeaveSavedView?.(viewId)
+  });
+  const savedFilterRef = useRef(savedViews.savedFilter);
+  savedFilterRef.current = savedViews.savedFilter;
+  const query: BoardQuery = savedViewId ? { ...routeQuery, filter: savedViews.filter } : routeQuery;
+  const onQueryChange = useCallback((next: BoardQuery, options: { push?: boolean } = {}) => {
+    if (!savedViewId) {
+      routeQueryChange(next, options);
+      return;
+    }
+    const saved = savedFilterRef.current;
+    const unsaved = !saved || !sameFilter(next.filter, saved);
+    routeQueryChange(unsaved ? next : { ...next, filter: { terms: [] } }, { ...options, unsaved });
+  }, [routeQueryChange, savedViewId]);
+  const detail = savedViews.pending ? null : boardDetail;
   const [loadError, setLoadError] = useState<string | null>(null);
   const [dialog, setDialog] = useState<BoardDialog | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -127,8 +163,8 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
   // Read-only Team roles never get the composer (the card dialog hides its Add controls too), and
   // neither do members below `edit` on this board (Wave 32, D272: viewers and commenters).
   const { readOnly: roleReadOnly } = useRole();
-  const detailRef = useRef(detail);
-  detailRef.current = detail;
+  const detailRef = useRef(boardDetail);
+  detailRef.current = boardDetail;
   // The control that opened the current dialog, so focus can return to it.
   const returnFocusRef = useRef<HTMLElement | null>(null);
   // Phones show one column at a time on a scroll-snap track; the index lives in the entry's hint.
@@ -248,7 +284,7 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
   const canManage = !roleReadOnly && (owner || board?.level === "manage");
   // The tab names the board, and the open card before it (QA 0.9.0).
   const openCardTitle = openCardId ? detail?.cards.find((card) => card.id === openCardId)?.title ?? null : null;
-  useTasksTitle(board ? `${openCardTitle ? `${openCardTitle} · ` : ""}${board.name} · Tasks` : null);
+  useTasksTitle(board ? `${openCardTitle ? `${openCardTitle} · ` : ""}${savedViews.view ? `${savedViews.view.name} · ` : ""}${board.name} · Tasks` : null);
   const cardPage = Boolean(openCardId && openCardFull && board);
   // Back on the board from the full page: the phone track shows the column this entry was on.
   useEffect(() => {
@@ -268,7 +304,7 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
   const viewContext: BoardContext = { userId, today: localDateString(), now: Date.now(), timeZone: viewerTimeZone() };
   // Sprints (17B): the sprint on screen (`?sprint=`, the active one by default) scopes every view
   // through one more grammar term; the filter bar keeps only the viewer's own terms.
-  const sprints = useBoardSprints({ detail, setDetail, query, onQueryChange, notify, load });
+  const sprints = useBoardSprints({ detail, setDetail, query, onQueryChange, notify, load, defaultAll: savedViewId !== null });
   const sprintScoped = sprints.term !== null;
   const scopedQuery = sprints.term ? { ...query, filter: { terms: [...query.filter.terms, sprints.term] } } : query;
   const result = data ? applyBoardQuery(data, scopedQuery, viewContext) : null;
@@ -308,7 +344,7 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
     hintTimerRef.current = window.setTimeout(() => {
       hintTimerRef.current = null;
       // Only on this board's own entry (not a card's); the URL, query included, stays as it is.
-      if (window.location.pathname !== formatRoute(tasksRoute(boardId))) return;
+      if (window.location.pathname !== formatRoute(tasksRoute(boardId, null, false, null, savedViewId ? { viewId: savedViewId } : null)).split("?")[0]) return;
       window.history.replaceState(createTasksHistoryState(userId, { boardId, column: index }, window.history.state), "", `${window.location.pathname}${window.location.search}`);
     }, 150);
   }
@@ -546,10 +582,20 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
     } : current);
     // Relation counts for the lane come with the board.
     if (options.hadRelations) void load();
-    if (mode === "another") return;
+    // A saved view's filter may hide the new card (D637): say so rather than let it vanish.
+    const current = detailRef.current;
+    const hidden = savedViewId !== null && current !== null && !filterBoardCards(boardData({ ...current, cards: [...current.cards.filter((item) => item.id !== card.id), card] }), scopedQuery.filter, viewContext).some((item) => item.id === card.id);
+    if (mode === "another") {
+      if (hidden) notify("Added — hidden by this view's filters");
+      return;
+    }
     setComposer(null);
     if (mode === "open") {
       onOpenCard(card.id);
+      return;
+    }
+    if (hidden) {
+      notify.success(`Added “${card.title}” — hidden by this view's filters`);
       return;
     }
     notify.success(`Added “${card.title}”`);
@@ -666,7 +712,13 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
   // board's header is two rows (title and actions; views and filters), not three.
   const viewSwitch = <BoardViewSwitch value={view} onChange={(next) => onQueryChange(withBoardQuery(query, { view: next }), { push: true })} />;
   const filterBar = data && result ? <FilterBar board={data} context={viewContext} filter={query.filter} shown={result.cards.length} total={scopedTotal}
-    onChange={(filter) => onQueryChange(withBoardQuery(query, { filter }))} /> : null;
+    onChange={(filter) => onQueryChange(withBoardQuery(query, { filter }))} actions={savedViews.filterActions} /> : null;
+  const savedViewPicker = savedViews.showPicker ? savedViews.picker : null;
+  // New card in a saved view starts where the view looks (D637).
+  const composerStart = savedViewId && detail ? composerStartFor(query.filter, {
+    columns, tags: detail.tags ?? [], sprints: detail.sprints ?? [], userId, userName: displayName,
+    people: cards.flatMap((card) => card.assignees ?? [])
+  }) : null;
 
   return <section className="task-board" data-read-only={readOnly && !roleReadOnly ? "true" : undefined} aria-labelledby={cardPage ? undefined : "task-board-title"}>
     {!cardPage && <>
@@ -679,6 +731,7 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
       {board && <span className="task-board-count">{cardCountLabel(showArchived ? board.card_count : board.card_count - (board.archived_count ?? 0))}</span>}
       {detail && !readOnly && <button className="primary-button task-new-card" onClick={() => setComposer({ columnId: null })} aria-haspopup="dialog" aria-label="New card" title="New card"><Plus /><span>New card</span></button>}
       {detail && !phone && viewSwitch}
+      {detail && !phone && savedViewPicker}
       {board && <span className="task-board-actions">
         <button className="icon-button" onClick={(event) => openDialog({ kind: "settings" }, event.currentTarget)} aria-haspopup="dialog" aria-label="Board settings" title="Board settings"><Settings2 /></button>
       </span>}
@@ -698,7 +751,7 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
       <button className="primary-button" onClick={() => { void load(); }}><RotateCcw />Try again</button>
     </div>}
     {!loadError && !detail && <p className="bin-loading task-board-state" role="status">Loading the board…</p>}
-    {detail && (phone ? <div className="task-board-controls">{viewSwitch}{filterBar}</div> : filterBar)}
+    {detail && (phone ? <div className="task-board-controls">{viewSwitch}{savedViewPicker}{filterBar}</div> : filterBar)}
     {detail && sprintConflict && <p className="task-sprint-conflict" role="status">{sprintConflict}</p>}
     {detail && showArchived && detail.archivedPage?.next && (() => {
       const shown = detail.cards.filter((card) => card.archived_at).length;
@@ -819,7 +872,7 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
       userId={userId}
       columns={columns}
       cards={cards}
-      initialColumnId={composer.columnId}
+      initialColumnId={composer.columnId ?? composerStart?.columnId ?? null}
       onClose={() => setComposer(null)}
       onCreated={cardCreated}
       notify={notify}
@@ -830,8 +883,10 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
       parentCards={cards}
       initialParentId={composer.parentId}
       sprints={sprints.enabled ? sprints.sprints : undefined}
-      initialSprintId={sprints.composerSprintId}
+      initialSprintId={composerStart && composerStart.sprintId !== undefined ? composerStart.sprintId : sprints.composerSprintId}
+      prefill={composerStart?.prefill}
     />}
+    {savedViews.dialogs}
     {(dialog?.kind === "settings" || overSettings) && board && <BoardSettingsSheet board={board} owner={canManage} isOwner={owner} showAllLevels={hierarchy.showAll} onShowAllLevels={hierarchy.setShowAll}
       showArchived={showArchived} onShowArchived={(value) => { void setShowArchived(value); }}
       onBoardSaved={(saved) => setDetail((current) => current ? { ...current, board: saved } : current)}

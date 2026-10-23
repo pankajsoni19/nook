@@ -45,7 +45,7 @@ export type ViewDisplay = {
   layout: typeof VIEW_LAYOUTS[number];
   group: typeof VIEW_GROUPS[number];
   sort: QuerySort;
-  /** The board layout's lanes for a multi-board view (lane VIEWS, D635): merged columns (default) or states. */
+  /** The board layout's lanes for a multi-board view (lane VIEWS, D640): merged columns (default) or states. */
   lanes?: LaneMode;
   fields?: Array<typeof VIEW_FIELDS[number]>;
 };
@@ -60,7 +60,7 @@ export type TaskView = {
   id: string; name: string; owner_id: string; owner_name: string; is_owner: 0 | 1; visibility: BoardVisibility;
   query: string; display: ViewDisplay; position: number; revision: number; created_at: string; updated_at: string;
   /**
-   * Lane VIEWS (D630): the one board this view is on (exactly one positive `board:` term with one
+   * Lane VIEWS (D635): the one board this view is on (exactly one positive `board:` term with one
    * value) when the viewer can read it, else null. The app opens such a view as that board.
    */
   board_id: string | null;
@@ -78,7 +78,7 @@ export const readableViewPredicate = `(v.owner_id = $userId OR (u.disabled_at IS
   OR (v.visibility = 'selected' AND (EXISTS (SELECT 1 FROM task_view_members m WHERE m.view_id = v.id AND m.user_id = $userId)
     OR ${groupGrantExists("task_view", "v.id")})))))`;
 
-/** The single board a stored filter is on (D630), or null. */
+/** The single board a stored filter is on (D635), or null. */
 export function viewBoardId(query: string) {
   const parsed = parse(query);
   return parsed.ok ? scopedBoardId(parsed.query) : null;
@@ -252,7 +252,7 @@ export function deleteView(userId: string, viewId: string) {
     requireEditableOwnedView(viewId, userId);
     db.transaction(() => {
       db.query("DELETE FROM task_views WHERE id = ?").run(viewId);
-      // Everyone's collapsed lanes go with it (D639).
+      // Everyone's collapsed lanes go with it (D644).
       db.query("DELETE FROM task_view_prefs WHERE view_key = ?").run(viewId);
       audit(userId, null, "task.view_delete", { viewId });
     })();
@@ -316,7 +316,7 @@ export function viewCards(userId: string, viewId: string, input: { cursor?: stri
 }
 
 // ---------------------------------------------------------------------------
-// One person's collapsed lanes (lane VIEWS, D639, migration 077).
+// One person's collapsed lanes (lane VIEWS, D644, migration 077).
 
 export type ViewLanePrefs = { collapsedLanes: string[] };
 

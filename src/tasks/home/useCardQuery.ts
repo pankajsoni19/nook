@@ -1,14 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError } from "../../api";
 import { taskErrorCode, taskErrorMessage } from "../tasksApi";
-import { queryTaskCards, viewCards, type QueriedCard, type QueryPage, type QueryRefs, type QueryRequest } from "./homeApi";
+import type { LaneMode } from "../../../shared/taskLanes";
+import { queryTaskCards, viewCards, type QueriedCard, type QueryLanes, type QueryPage, type QueryRefs, type QueryRequest } from "./homeApi";
 
 /** Where results come from: an ad hoc grammar query, or a saved view run as the viewer. */
 export type CardSource =
   | { kind: "query"; request: Omit<QueryRequest, "cursor" | "limit"> }
-  | { kind: "view"; viewId: string; tz: string };
+  | { kind: "view"; viewId: string; tz: string; lanes?: LaneMode };
 
 export const PAGE_SIZE = 50;
+/** The board layout (lanes, D643) loads 200 cards a page. */
+export const LANES_PAGE_SIZE = 200;
+
+const pageSize = (source: CardSource) => (source.kind === "view" ? source.lanes : source.request.lanes) ? LANES_PAGE_SIZE : PAGE_SIZE;
 
 export type CardQueryState = {
   cards: QueriedCard[];
@@ -20,6 +25,8 @@ export type CardQueryState = {
   error: string | null;
   /** The server's code for a refused query (FILTER_INVALID, RATE_LIMITED, …). */
   errorCode?: string;
+  /** With lanes: the lanes of the whole match and their true counts (first page). */
+  lanes?: QueryLanes;
 };
 
 const idle: CardQueryState = { cards: [], nextCursor: null, status: "idle", loadingMore: false, error: null };
@@ -51,8 +58,8 @@ export function clearCardQueryCache() {
 }
 
 function fetchPage(source: CardSource, cursor: string | undefined, signal: AbortSignal): Promise<QueryPage> {
-  if (source.kind === "view") return viewCards(source.viewId, { cursor, limit: PAGE_SIZE, tz: source.tz }, signal);
-  return queryTaskCards({ ...source.request, limit: PAGE_SIZE, ...(cursor ? { cursor } : {}) }, signal);
+  if (source.kind === "view") return viewCards(source.viewId, { cursor, limit: pageSize(source), tz: source.tz, ...(source.lanes ? { lanes: source.lanes } : {}) }, signal);
+  return queryTaskCards({ ...source.request, limit: pageSize(source), ...(cursor ? { cursor } : {}) }, signal);
 }
 
 function failure(reason: unknown): Pick<CardQueryState, "error" | "errorCode"> {
@@ -87,13 +94,14 @@ export function useCardQuery(source: CardSource | null) {
     // pages Load more fetched are kept); a single page is refreshed quietly behind it.
     if (hit) {
       setState(hit);
-      if (hit.cards.length > PAGE_SIZE) return;
+      if (hit.cards.length > pageSize(current)) return;
     }
     const controller = new AbortController();
     if (!hit) setState({ ...idle, status: "loading" });
     fetchPage(current, undefined, controller.signal).then((page) => {
       if (controller.signal.aborted) return;
-      const next: CardQueryState = { cards: page.cards, nextCursor: page.nextCursor, total: page.total, refs: page.refs, status: "ready", loadingMore: false, error: null };
+      const lanes = page.columns && page.laneCounts && page.lanes ? { lanes: page.lanes, columns: page.columns, laneCounts: page.laneCounts, ...(page.lanesFallback ? { lanesFallback: true as const } : {}) } : undefined;
+      const next: CardQueryState = { cards: page.cards, nextCursor: page.nextCursor, total: page.total, refs: page.refs, status: "ready", loadingMore: false, error: null, ...(lanes ? { lanes } : {}) };
       remember(key, next);
       setState(next);
     }, (reason) => {
@@ -134,7 +142,16 @@ export function useCardQuery(source: CardSource | null) {
     });
   }, []);
 
+  /** Replaces the whole loaded state (a lane move: the card, the lane counts, and the columns' counts). */
+  const update = useCallback((change: (state: CardQueryState) => CardQueryState) => {
+    setState((previous) => {
+      const next = change(previous);
+      remember(keyRef.current, next);
+      return next;
+    });
+  }, []);
+
   const retry = useCallback(() => setReload((value) => value + 1), []);
 
-  return { ...state, loadMore, patchCard, retry };
+  return { ...state, loadMore, patchCard, update, retry };
 }

@@ -1,5 +1,5 @@
 /**
- * Lanes for cross-board results (lane VIEWS, docs/plan/TASK_VIEWS.md D635–D639). Pure and shared:
+ * Lanes for cross-board results (lane VIEWS, docs/plan/TASK_VIEWS.md D640–D644). Pure and shared:
  * the server builds the lane list for `POST /api/tasks/query { lanes }`, and the client puts each
  * loaded card in its lane and resolves a drop on the card's own board with the same rules.
  *
@@ -15,7 +15,7 @@ import { foldText, TASK_STATES, type TaskState } from "./taskQuery";
 export const LANE_MODES = ["columns", "state"] as const;
 export type LaneMode = typeof LANE_MODES[number];
 export const MAX_COLUMN_LANES = 20;
-/** Collapsed lanes kept per person and view (task_view_prefs, D639). */
+/** Collapsed lanes kept per person and view (task_view_prefs, D644). */
 export const MAX_COLLAPSED_LANES = 40;
 export const COLLAPSED_LANES_BYTES = 1024;
 
@@ -45,7 +45,7 @@ export function laneKeyOf(mode: LaneMode, column: { name: string; state: TaskSta
   return mode === "state" ? stateLaneKey(column.state) : columnLaneKey(column.name, column.state);
 }
 
-/** Whether a stored collapsed-lane key is well formed (D639). */
+/** Whether a stored collapsed-lane key is well formed (D644). */
 export function isLaneKey(value: unknown): value is string {
   if (typeof value !== "string" || value.length > 4 + 5 + COLUMN_NAME_MAX * 4) return false;
   if (/^s:(todo|doing|done)$/.test(value)) return true;
@@ -72,7 +72,7 @@ const median = (values: number[]) => {
 };
 
 /**
- * The lanes for the columns of the boards with matches (D635, D637). `columns` lists every column of
+ * The lanes for the columns of the boards with matches (D640, D642). `columns` lists every column of
  * those boards (any order); with more than `MAX_COLUMN_LANES` merged lanes the layout falls back to
  * state lanes (`fallback: true`).
  */
@@ -131,7 +131,7 @@ function stateLanesOf(ordered: readonly LaneColumn[]): QueryLane[] {
 export type DropRefusal = "NO_COLUMN" | "COLUMN_FULL" | "READ_ONLY" | "SAME_LANE";
 
 /**
- * Where a card dropped on `lane` goes on its own board (D636, D637): the lane's column on that
+ * Where a card dropped on `lane` goes on its own board (D641, D642): the lane's column on that
  * board, or a refusal. `canEdit` is the viewer's level on the card's board.
  */
 export function resolveLaneDrop(lane: QueryLane, card: { board_id: string; column_id: string; column_name: string; column_state: TaskState }, canEdit: boolean): { columnId: string } | { refusal: DropRefusal } {

@@ -1,4 +1,5 @@
 import { useCallback } from "react";
+import type { TaskQuery } from "../../../shared/taskQuery";
 import { BoardList } from "../BoardList";
 import type { TaskNotify } from "../taskActions";
 import type { BoardSummary } from "../tasksApi";
@@ -22,6 +23,8 @@ type TasksHomeProps = {
   onOpenBoardId: (boardId: string) => void;
   /** Opens a card from cross-board results: pushes /tasks/:b/card/:k, so Back returns here (§9.5). */
   onOpenCard: (card: QueriedCard) => void;
+  /** A view on one board opens as that board (lane VIEWS, D635, D636); `filter`: an unsaved change to carry. */
+  onOpenBoardView?: (view: TaskView & { board_id: string }, options?: { replace?: boolean; filter?: TaskQuery }) => void;
   onBack: () => void;
   notify: TaskNotify;
 };
@@ -32,7 +35,7 @@ const TITLES: Record<HomeSegment, string> = { boards: "Tasks", my: "My work · T
  * The Tasks home (§9.4, §10): Boards · My work · Views segments, each a route. Boards is the board
  * list; My work is `assignee:me` across boards; Views lists saved views and opens one.
  */
-export function TasksHome({ userId, home, onHome, onOpenBoard, onOpenBoardId, onOpenCard, onBack, notify }: TasksHomeProps) {
+export function TasksHome({ userId, home, onHome, onOpenBoard, onOpenBoardId, onOpenCard, onOpenBoardView, onBack, notify }: TasksHomeProps) {
   const directory = useHomeDirectory();
   const segment: HomeSegment = !home ? "boards" : home.section === "my" ? "my" : "views";
   const viewPage = home?.section === "view";
@@ -40,7 +43,10 @@ export function TasksHome({ userId, home, onHome, onOpenBoard, onOpenBoardId, on
   useTasksTitle(viewPage ? null : TITLES[segment]);
   const select = useCallback((next: HomeSegment) => onHome(next === "boards" ? undefined : next === "my" ? { section: "my" } : { section: "views" }), [onHome]);
   const segments = <HomeSegments active={segment} onSelect={select} />;
-  const openView = useCallback((view: TaskView, options?: { replace?: boolean }) => onHome({ section: "view", viewId: view.id }, options), [onHome]);
+  const openView = useCallback((view: TaskView, options?: { replace?: boolean }) => {
+    if (view.board_id && onOpenBoardView) onOpenBoardView({ ...view, board_id: view.board_id }, options);
+    else onHome({ section: "view", viewId: view.id }, options);
+  }, [onHome, onOpenBoardView]);
   const onMissing = useCallback(() => {
     notify.warning("That view was deleted or is not shared with you");
     onHome({ section: "views" }, { replace: true });
@@ -64,7 +70,7 @@ export function TasksHome({ userId, home, onHome, onOpenBoard, onOpenBoardId, on
     {home.section === "views" && <ViewsList onOpen={openView} onNew={() => onHome({ section: "view", viewId: NEW_VIEW })} />}
     {home.section === "view" && <ViewPage key={home.viewId} userId={userId} viewId={home.viewId} query={home.query} directory={directory} notify={notify} onOpenCard={onOpenCard}
       onQuery={(query, options) => onHome(query ? { section: "view", viewId: home.viewId, query } : { section: "view", viewId: home.viewId }, { replace: !options.push, saved: options.saved === true })}
-      onOpenView={openView} onBack={onBack} onMissing={onMissing}
+      onOpenView={openView} onBack={onBack} onMissing={onMissing} onBoardView={onOpenBoardView}
       onDeleted={() => onHome({ section: "views" }, { replace: true })} />}
   </section>;
 }

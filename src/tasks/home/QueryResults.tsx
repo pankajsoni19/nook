@@ -5,7 +5,9 @@ import type { BoardCard } from "../boardQuery";
 import { ArchivedChip } from "../CardFace";
 import { cardCountLabel, dueStatus } from "../taskActions";
 import { useRole } from "../../team/roleAccess";
-import { canChangeCard, type QueriedCard } from "./homeApi";
+import type { QueryLane } from "../../../shared/taskLanes";
+import { canChangeCard, type QueriedCard, type QueryLanes as QueryLaneLayout } from "./homeApi";
+import { QueryLanes } from "./QueryLanes";
 import { groupResults, STATE_LABELS, stateLanes } from "./homeResults";
 import type { HomeGroup, HomeLayout } from "./homeUrl";
 
@@ -20,9 +22,21 @@ type QueryResultsProps = {
   loadingMore: boolean;
   onLoadMore: () => void;
   onOpenCard: (card: QueriedCard) => void;
-  /** "Move to…" (Q9): there is no drag between state lanes or across boards. */
+  /** "Move to…": in the list and table, and on a lane card (with the lanes first, D646). */
   onMoveCard: (card: QueriedCard, trigger: HTMLElement) => void;
   emptyText: string;
+  /**
+   * The board layout's lanes (lane VIEWS, D640–D646): merged columns or states with drag and
+   * collapse. Without them (an older server) the layout falls back to the three state lanes.
+   */
+  lanes?: {
+    layout: QueryLaneLayout;
+    collapsed: ReadonlySet<string>;
+    onToggleCollapsed: (key: string) => void;
+    onDropCard: (card: QueriedCard, lane: QueryLane) => void;
+    onRefused: (message: string) => void;
+    phone: boolean;
+  };
 };
 
 function Due({ card, today }: { card: QueriedCard; today: string }) {
@@ -129,7 +143,7 @@ function ResultTable({ cards, today, onOpenCard, onMoveCard }: Pick<QueryResults
   </div>;
 }
 
-/** The board layout: three state lanes, To do, In progress, Done; each card moves with "Move to…". */
+/** The board layout without lane data (an older server): three state lanes; each card moves with "Move to…". */
 function StateLanes({ cards, today, onOpenCard, onMoveCard }: Pick<QueryResultsProps, "cards" | "today" | "onOpenCard" | "onMoveCard">) {
   return <div className="task-home-lanes">
     {stateLanes(cards).map((lane) => <section key={lane.state} className="task-home-lane" aria-labelledby={`task-home-lane-${lane.state}`}>
@@ -149,7 +163,9 @@ export function QueryResults(props: QueryResultsProps) {
   const { cards, layout, total, nextCursor, loadingMore, onLoadMore, emptyText } = props;
   if (!cards.length) return <div className="bin-state task-home-empty"><span className="bin-state-icon"><KanbanSquare /></span><p>{emptyText}</p></div>;
   return <>
-    {layout === "table" ? <ResultTable {...props} /> : layout === "board" ? <StateLanes {...props} /> : <GroupedList {...props} />}
+    {layout === "table" ? <ResultTable {...props} /> : layout === "board"
+      ? props.lanes ? <QueryLanes cards={cards} today={props.today} onOpenCard={props.onOpenCard} onMoveCard={props.onMoveCard} {...props.lanes} /> : <StateLanes {...props} />
+      : <GroupedList {...props} />}
     <footer className="task-home-more">
       <span role="status">{total !== undefined ? `${cards.length} of ${cardCountLabel(total)}` : nextCursor ? `${cardCountLabel(cards.length)} so far` : cardCountLabel(cards.length)}</span>
       {nextCursor && <button type="button" className="secondary-button" onClick={onLoadMore} disabled={loadingMore}>{loadingMore ? "Loading…" : "Load more"}</button>}

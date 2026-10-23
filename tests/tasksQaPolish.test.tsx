@@ -100,7 +100,8 @@ test("polish: Move-to toast, tree toggle counts, action toasts, titles, and the 
   expect(source("../src/tasks/BoardTable.tsx")).toContain("the ${descendantCount} ${descendantCount === 1 ? \"card\" : \"cards\"} under");
   // Toasts with an action (Undo, Move, Open, View) are the shared toasts, which stay long enough to reach it.
   expect(source("../src/tasks/TasksApp.tsx")).toContain("const notify: TaskNotify = notifier;");
-  expect(source("../src/tasks/BoardView.tsx")).toContain("useTasksTitle(board ? `${openCardTitle ? `${openCardTitle} · ` : \"\"}${board.name} · Tasks` : null);");
+  // Lane VIEWS (D635): a saved view on the board names itself between the card and the board.
+  expect(source("../src/tasks/BoardView.tsx")).toContain("useTasksTitle(board ? `${openCardTitle ? `${openCardTitle} · ` : \"\"}${savedViews.view ? `${savedViews.view.name} · ` : \"\"}${board.name} · Tasks` : null);");
   expect(source("../src/tasks/MoveCardSheet.tsx")).toContain("useHistoryDialogGuard(picking, () => setPicking(false));");
   expect(source("../src/tasks/home/home.css")).toContain(".task-view-actions .primary-button:disabled {");
 });

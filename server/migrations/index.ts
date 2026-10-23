@@ -188,7 +188,7 @@ const migrations = [initialMigration, folderSharingMigration, totpMigration, tot
   taskArchiveMigration,
   // 076 (lane VAULTKEY, D625: vault_key_flag_confirmations; api_keys_vault_flags_widen lets a confirmed edit raise a vault key's settings) needs 038. 075 is lane BACKUP's.
   vaultKeyFlagConfirmMigration,
-  // 077 (lane VIEWS, D639: task_view_prefs, one person's collapsed lanes per view or My work) needs 020.
+  // 077 (lane VIEWS, D644: task_view_prefs, one person's collapsed lanes per view or My work) needs 020.
   taskViewPrefsMigration
 ];
 

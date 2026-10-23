@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronLeft, Copy, Ellipsis, Filter, Lock, Pencil, RotateCcw, Save, Share2, Trash2, TriangleAlert, Undo2 } from "lucide-react";
-import { format } from "../../../shared/taskQuery";
+import { format, scopedBoardId, type TaskQuery } from "../../../shared/taskQuery";
 import { ApiError } from "../../api";
 import { ConfirmDialog, ModalDialog } from "../../files/Dialog";
 import { NameDialog } from "../../files/RenameDialog";
@@ -35,11 +35,16 @@ type ViewPageProps = {
   /** After a delete: the views list, replacing this entry. */
   onDeleted: () => void;
   onMissing: () => void;
+  /**
+   * A view on one board opens as that board (lane VIEWS, D636): the page replaces itself with it,
+   * carrying an unsaved change when that change is still on the same board.
+   */
+  onBoardView?: (view: TaskView & { board_id: string }, options: { replace: boolean; filter?: TaskQuery }) => void;
 };
 
 type ViewDialog = { kind: "menu" | "saveAs" | "rename" | "share" | "delete" } | { kind: "conflict"; latest: TaskView };
 
-const displayOf = (query: HomeQuery) => ({ layout: query.layout, group: query.group, sort: query.sort });
+const displayOf = (query: HomeQuery) => ({ layout: query.layout, group: query.group, sort: query.sort, lanes: query.lanes ?? "columns" as const });
 
 /**
  * One saved view (§10.2): its filter bar, layouts, and Save / Save as / Duplicate / Share / Delete.
@@ -47,7 +52,7 @@ const displayOf = (query: HomeQuery) => ({ layout: query.layout, group: query.gr
  * read-only with Duplicate. `new` is an unsaved view. Nothing runs until the filter has a key
  * other than text (Q11).
  */
-export function ViewPage({ userId, viewId, query, onQuery, directory, notify, onOpenCard, onOpenView, onBack, onDeleted, onMissing }: ViewPageProps) {
+export function ViewPage({ userId, viewId, query, onQuery, directory, notify, onOpenCard, onOpenView, onBack, onDeleted, onMissing, onBoardView }: ViewPageProps) {
   const isNew = viewId === NEW_VIEW;
   // The empty state names the control on screen: "Filters" folds "+ Filter" away on phones (QA v0.13.0 B10).
   const phone = useIsPhone();
@@ -85,6 +90,15 @@ export function ViewPage({ userId, viewId, query, onQuery, directory, notify, on
 
   useTasksTitle(isNew ? "New view · Tasks" : view ? `${view.name} · Views · Tasks` : "Views · Tasks");
 
+  // A board view (D635) lives on its board: go there, unless the URL's change spans more boards.
+  const boardViewTarget = view?.board_id && onBoardView && (!query || scopedBoardId(query.filter) === view.board_id) ? view.board_id : null;
+  useEffect(() => {
+    if (!view || !boardViewTarget || !onBoardView) return;
+    onBoardView({ ...view, board_id: boardViewTarget }, { replace: true, ...(query ? { filter: query.filter } : {}) });
+    // Once per loaded view.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, boardViewTarget]);
+
   const saved = view ? viewHomeQuery(view) : newViewDefault();
   const effective = query ?? saved;
   const { canCreate, canShare } = viewRoleAccess(useRole());
@@ -96,7 +110,7 @@ export function ViewPage({ userId, viewId, query, onQuery, directory, notify, on
   const dirty = isNew ? isSelectiveQuery(effective.filter) : Boolean(view && query && !sameHomeQuery(query, saved));
   const selective = isSelectiveQuery(effective.filter);
   const tz = viewerTimeZone();
-  const source = !selective || (!isNew && !view) ? null
+  const source = !selective || (!isNew && !view) || boardViewTarget ? null
     : !isNew && !query ? { kind: "view" as const, viewId, tz }
     : { kind: "query" as const, request: { q: format(effective.filter), sort: effective.sort, group: serverGroup(effective.group), tz } };
 
@@ -222,7 +236,7 @@ export function ViewPage({ userId, viewId, query, onQuery, directory, notify, on
       <p>{loadError}</p>
       <button className="primary-button" onClick={() => { void load(); }}><RotateCcw />Try again</button>
     </div>}
-    {(isNew || view) && <HomeResultsPane userId={userId} query={effective} directory={directory} notify={notify} onOpenCard={onOpenCard} readOnly={readOnly}
+    {(isNew || view) && !boardViewTarget && <HomeResultsPane userId={userId} query={effective} directory={directory} notify={notify} onOpenCard={onOpenCard} readOnly={readOnly} prefsKey={isNew ? null : viewId}
       onQuery={(next, options) => onQuery(!isNew && sameHomeQuery(next, saved) ? undefined : next, options)}
       source={source}
       idle={<div className="bin-state task-home-empty">

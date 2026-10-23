@@ -63,7 +63,7 @@ export function resetTaskQueryRateLimit() {
 export const tzSchema = z.string().max(64).refine((value) => validTimeZone(value) !== null, "tz must be an IANA time zone");
 export const cursorSchema = z.string().min(1).max(1024);
 export const pageLimitSchema = z.number().int().min(1).max(QUERY_PAGE.max);
-/** With `lanes` (the board layout, D638) a page may hold up to 200 cards. */
+/** With `lanes` (the board layout, D643) a page may hold up to 200 cards. */
 const lanesPageLimitSchema = z.number().int().min(1).max(QUERY_PAGE.lanes);
 
 export const taskQuerySchema = z.object({
@@ -115,7 +115,7 @@ export const viewSharingSchema = z.object({
 
 const invalid = (detail: string) => ({ error: "Invalid request", details: [detail] });
 
-/** `PUT /views/:v/prefs` (D639): the lanes this person collapsed; malformed keys are dropped by the service. */
+/** `PUT /views/:v/prefs` (D644): the lanes this person collapsed; malformed keys are dropped by the service. */
 export const viewPrefsSchema = z.object({ collapsedLanes: z.array(z.string().max(300)).max(100) }).strict();
 
 /** Runs a service call and maps TaskError to its JSON response. */
@@ -188,7 +188,7 @@ export function registerTaskQueryRoutes(app: Hono<AppEnv>) {
     return respond(c, () => withAssigneeAvatars(withBoardLevels(c.get("user").id, viewCards(c.get("user").id, id, { cursor, limit: limitParam === undefined ? undefined : Number(limitParam), tz, ...(lanes ? { lanes } : {}) }))));
   });
 
-  // One person's collapsed lanes for a view, or for My work (`my`), D639. Not audited, like a sort.
+  // One person's collapsed lanes for a view, or for My work (`my`), D644. Not audited, like a sort.
   const prefsKey = (c: Context<AppEnv>) => {
     const raw = c.req.param("viewKey");
     return raw === "my" ? "my" : uuid.parse(raw);

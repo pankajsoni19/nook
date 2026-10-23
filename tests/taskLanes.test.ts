@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { buildLanes, isLaneKey, laneKeyOf, MAX_COLUMN_LANES, normalizeCollapsedLanes, resolveLaneDrop, type LaneColumn } from "../shared/taskLanes";
 
-/** Lanes across boards (lane VIEWS, D635–D639): merge, order, fallback, and where a drop goes. */
+/** Lanes across boards (lane VIEWS, D640–D644): merge, order, fallback, and where a drop goes. */
 
 const col = (board: string, id: string, name: string, state: LaneColumn["state"], position: number, extra: Partial<LaneColumn> = {}): LaneColumn =>
   ({ id, board_id: board, name, state, position, wip_limit: null, card_count: 0, ...extra });

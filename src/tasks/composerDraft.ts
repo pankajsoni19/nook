@@ -28,9 +28,13 @@ export type ComposerDraft = {
 export const MAX_COMPOSER_ATTACHMENTS = 50;
 export const MAX_COMPOSER_RELATIONS = 50;
 
-export function emptyDraft(columnId: string, placement: { parentId?: string | null; level?: number | null; sprintId?: string | null } = {}): ComposerDraft {
+/** Fields a saved view on its board starts a new card with (lane VIEWS, D637). */
+export type ComposerPrefill = Partial<Pick<ComposerDraft, "assignees" | "tagIds" | "flags">>;
+
+export function emptyDraft(columnId: string, placement: { parentId?: string | null; level?: number | null; sprintId?: string | null } = {}, prefill: ComposerPrefill = {}): ComposerDraft {
   return {
-    columnId, title: "", description: "", dueOn: null, dueTime: null, dueTz: null, assignees: [], tagIds: [], flags: [], relations: [], attachments: [],
+    columnId, title: "", description: "", dueOn: null, dueTime: null, dueTz: null,
+    assignees: prefill.assignees ?? [], tagIds: prefill.tagIds ?? [], flags: prefill.flags ?? [], relations: [], attachments: [],
     parentId: placement.parentId ?? null, level: placement.level ?? null, sprintId: placement.sprintId ?? null
   };
 }
@@ -46,10 +50,17 @@ export function defaultColumnId(columns: readonly BoardColumn[], cards: readonly
   return (columns.find((column) => column.is_done !== 1 && room(column)) ?? columns.find(room) ?? asked ?? columns[0])?.id ?? "";
 }
 
-/** Anything typed, picked, staged, or uploaded: closing then asks "Discard this card?". */
-export function composerDirty(draft: ComposerDraft) {
-  return Boolean(draft.title.trim() || draft.description.trim() || draft.dueOn || draft.assignees.length || draft.tagIds.length
-    || draft.flags.length || draft.relations.length || draft.attachments.length);
+const sameSet = (left: readonly string[], right: readonly string[]) => left.length === right.length && left.every((value) => right.includes(value));
+
+/**
+ * Anything typed, picked, staged, or uploaded: closing then asks "Discard this card?". A view's
+ * prefilled people, tags, and flags (`prefill`, D637) are not a change until they change.
+ */
+export function composerDirty(draft: ComposerDraft, prefill: ComposerPrefill = {}) {
+  return Boolean(draft.title.trim() || draft.description.trim() || draft.dueOn
+    || !sameSet(draft.assignees.map((person) => person.id), (prefill.assignees ?? []).map((person) => person.id))
+    || !sameSet(draft.tagIds, prefill.tagIds ?? []) || !sameSet(draft.flags, prefill.flags ?? [])
+    || draft.relations.length || draft.attachments.length);
 }
 
 /** Context a field passes with its change (the assignee picker knows the names). */

@@ -210,7 +210,7 @@ export type QuerySort = typeof QUERY_SORTS[number];
 /** Server-side groups: single-valued dimensions only, so a group is one contiguous run across pages. Multi-valued ones (assignee, tag) group on the client. */
 export const QUERY_GROUPS = ["none", "board", "state", "due"] as const;
 export type QueryGroup = typeof QUERY_GROUPS[number];
-/** `lanes` (D638): the board layout pages up to 200 cards at a time. */
+/** `lanes` (D643): the board layout pages up to 200 cards at a time. */
 export const QUERY_PAGE = { default: 50, max: 100, lanes: 200 } as const;
 /** `total` is reported only up to this many matches. */
 export const QUERY_TOTAL_CAP = 1000;
@@ -291,7 +291,7 @@ export type QueryInput = {
    */
   boardIds?: readonly string[];
   /**
-   * Lane VIEWS (D635–D638): the board layout's lanes. The first page then also carries the lane list
+   * Lane VIEWS (D640–D643): the board layout's lanes. The first page then also carries the lane list
    * (`columns`), true per-lane counts over the whole match (`laneCounts`), and the mode used.
    */
   lanes?: LaneMode;
@@ -427,7 +427,7 @@ export function runQuery(userId: string, query: TaskQuery, input: Omit<QueryInpu
 }
 
 /**
- * The lanes of a query's whole match (D635, D638): the columns of every board with a matching card
+ * The lanes of a query's whole match (D640, D643): the columns of every board with a matching card
  * (all readable, since the match is), merged by `buildLanes`, and each lane's true count. Each board
  * column carries its WIP limit and live, unarchived card count, so the client can refuse a drop on a
  * full column before asking (the server still checks, 409 COLUMN_FULL).

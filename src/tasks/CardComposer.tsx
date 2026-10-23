@@ -28,6 +28,7 @@ import {
   MAX_COMPOSER_RELATIONS,
   type ComposerDraft,
   type ComposerError,
+  type ComposerPrefill,
   type FieldContext
 } from "./composerDraft";
 import { RelationAdder, RelationList } from "./RelationsSection";
@@ -61,6 +62,8 @@ type CardComposerProps = {
   /** Sprints (17B): the board's sprints for the Sprint field, and the one the board shows (new cards start in it). */
   sprints?: SprintSummary[];
   initialSprintId?: string | null;
+  /** A saved view on its board starts the card with its single-value people, tags, and flags (D637). */
+  prefill?: ComposerPrefill;
 };
 
 /**
@@ -69,10 +72,11 @@ type CardComposerProps = {
  * guarded dialog, not a route (D69): full screen on phones, a large modal on desktop. Back, Escape,
  * and Close ask first when anything was entered, and discarding moves the uploads to the Bin.
  */
-export function CardComposer({ boardId, boardName, userId, columns, cards, initialColumnId, onClose, onCreated, notify, tags, owner = false, onTagsChange, structure = FLAT_STRUCTURE, parentCards = [], initialParentId = null, sprints, initialSprintId = null }: CardComposerProps) {
+export function CardComposer({ boardId, boardName, userId, columns, cards, initialColumnId, onClose, onCreated, notify, tags, owner = false, onTagsChange, structure = FLAT_STRUCTURE, parentCards = [], initialParentId = null, sprints, initialSprintId = null, prefill }: CardComposerProps) {
   const initialParent = initialParentId ? parentCards.find((card) => card.id === initialParentId) : undefined;
   const [draft, setDraft] = useState<ComposerDraft>(() => emptyDraft(defaultColumnId(columns, cards, initialColumnId),
-    initialParent ? { parentId: initialParent.id, level: levelOf(initialParent) + 1 } : { sprintId: initialSprintId }));
+    initialParent ? { parentId: initialParent.id, level: levelOf(initialParent) + 1 } : { sprintId: initialSprintId }, prefill));
+  const prefillRef = useRef(prefill);
   const [titleError, setTitleError] = useState<string | null>(null);
   const [error, setError] = useState<ComposerError | null>(null);
   const [creating, setCreating] = useState(false);
@@ -99,7 +103,7 @@ export function CardComposer({ boardId, boardName, userId, columns, cards, initi
   });
 
   const requestClose = useCallback(() => {
-    if (composerDirty(draftRef.current)) setConfirmDiscard(true);
+    if (composerDirty(draftRef.current, prefillRef.current)) setConfirmDiscard(true);
     else onClose();
   }, [onClose]);
   // Back closes the composer (or asks first); Back with the prompt open only closes the prompt.
@@ -153,7 +157,7 @@ export function CardComposer({ boardId, boardName, userId, columns, cards, initi
       if (mode === "another") {
         notify.success(`Added “${card.title}”. Add another.`);
         // "Create another" keeps the column, the level, and the parent (a run of subtasks).
-        update(() => emptyDraft(current.columnId, { parentId: current.parentId, level: current.level, sprintId: current.sprintId }));
+        update(() => emptyDraft(current.columnId, { parentId: current.parentId, level: current.level, sprintId: current.sprintId }, prefillRef.current));
         setTitleError(null);
         setAddingRelation(false);
         setRound((value) => value + 1);

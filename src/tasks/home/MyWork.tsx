@@ -55,7 +55,7 @@ export function MyWork({ userId, query, onQuery, directory, notify, onOpenCard, 
   };
 
   async function saveAsView(name: string) {
-    const { view } = await createView({ name, query: q, display: { layout: effective.layout, group: effective.group, sort: effective.sort } });
+    const { view } = await createView({ name, query: q, display: { layout: effective.layout, group: effective.group, sort: effective.sort, lanes: effective.lanes ?? "columns" } });
     setSaving(false);
     notify.success(`Saved “${view.name}” to your views`);
     onOpenView(view);
@@ -64,7 +64,7 @@ export function MyWork({ userId, query, onQuery, directory, notify, onOpenCard, 
   return <>
     <HomeResultsPane userId={userId} query={effective} onQuery={onQuery} directory={directory} notify={notify} onOpenCard={onOpenCard}
       source={{ kind: "query", request: { q, sort: effective.sort, group: serverGroup(effective.group), tz: viewerTimeZone() } }}
-      lockedKeys={["assignee"]} hiddenKeys={["state"]}
+      lockedKeys={["assignee"]} hiddenKeys={["state"]} prefsKey="my"
       above={<>
         <div className="task-home-states" role="radiogroup" aria-label="State">
           {STATE_PRESETS.map((item) => <button key={item.id} type="button" role="radio" aria-checked={preset === item.id} className={`task-home-state${preset === item.id ? " active" : ""}`}

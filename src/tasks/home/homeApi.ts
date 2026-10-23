@@ -1,6 +1,7 @@
 import { api } from "../../api";
 import { levelAtLeast, type ItemLevel } from "../../access/accessLevels";
 import type { TaskState } from "../../../shared/taskQuery";
+import type { LaneMode, QueryLane } from "../../../shared/taskLanes";
 import type { BoardColumn, BoardVisibility, CardAssignee, TagColor } from "../tasksApi";
 import type { HomeGroup, HomeLayout, HomeSort } from "./homeUrl";
 
@@ -49,9 +50,15 @@ export type QueryRefs = {
   users: Array<{ id: string; display_name: string } | { id: string; unknown: true }>;
 };
 
-export type QueryPage = { query: string; cards: QueriedCard[]; nextCursor: string | null; total?: number; refs?: QueryRefs };
+/**
+ * Lane VIEWS (D643): with `lanes`, the first page also carries the lanes of the whole match, each with
+ * its board columns (WIP limit, live card count), and the true count per lane.
+ */
+export type QueryLanes = { lanes: LaneMode; lanesFallback?: true; columns: QueryLane[]; laneCounts: Record<string, number> };
 
-export type QueryRequest = { q: string; sort: HomeSort; group: "none" | "board" | "state" | "due"; cursor?: string; limit?: number; tz: string };
+export type QueryPage = { query: string; cards: QueriedCard[]; nextCursor: string | null; total?: number; refs?: QueryRefs } & Partial<QueryLanes>;
+
+export type QueryRequest = { q: string; sort: HomeSort; group: "none" | "board" | "state" | "due"; cursor?: string; limit?: number; tz: string; lanes?: LaneMode };
 
 const json = (method: string, body: unknown): RequestInit => ({ method, body: JSON.stringify(body) });
 
@@ -59,7 +66,7 @@ const json = (method: string, body: unknown): RequestInit => ({ method, body: JS
 export const queryTaskCards = (body: QueryRequest, signal?: AbortSignal) =>
   api<QueryPage>("/tasks/query", { ...json("POST", body), ...(signal ? { signal } : {}) });
 
-export type ViewDisplay = { layout: HomeLayout; group: HomeGroup; sort: HomeSort };
+export type ViewDisplay = { layout: HomeLayout; group: HomeGroup; sort: HomeSort; lanes?: LaneMode };
 
 export type TaskView = {
   id: string;
@@ -74,6 +81,8 @@ export type TaskView = {
   revision: number;
   created_at: string;
   updated_at: string;
+  /** The one board the view is on, when the viewer can read it (D635): the app opens it as that board. Older servers omit it. */
+  board_id?: string | null;
 };
 
 export type ViewLists = { mine: TaskView[]; shared: TaskView[]; everyone: TaskView[]; truncated: boolean };
@@ -89,10 +98,11 @@ export const saveViewSharing = (viewId: string, visibility: BoardVisibility, use
   api<{ ok: true }>(`/tasks/views/${viewId}/sharing`, json("PUT", { visibility, userIds: visibility === "selected" ? userIds : [] }));
 
 /** `GET /api/tasks/views/:v/cards`: the stored query run as the viewer, with the view's sort and server group. */
-export function viewCards(viewId: string, options: { cursor?: string; limit?: number; tz: string }, signal?: AbortSignal) {
+export function viewCards(viewId: string, options: { cursor?: string; limit?: number; tz: string; lanes?: LaneMode }, signal?: AbortSignal) {
   const params = new URLSearchParams({ tz: options.tz });
   if (options.cursor) params.set("cursor", options.cursor);
   if (options.limit) params.set("limit", String(options.limit));
+  if (options.lanes) params.set("lanes", options.lanes);
   return api<QueryPage & { view: TaskView }>(`/tasks/views/${viewId}/cards?${params.toString()}`, signal ? { signal } : {});
 }
 
@@ -103,3 +113,8 @@ export const columnState = (column: StatefulColumn): TaskState => column.state ?
 /** Owner only: the column's state, with `is_done` kept equal to `state = "done"` by the server (T121). */
 export const updateColumnState = (columnId: string, state: TaskState) =>
   api<{ column: StatefulColumn; columns: StatefulColumn[] }>(`/tasks/columns/${columnId}`, json("PATCH", { state }));
+
+/** One person's collapsed lanes for a saved view, or `my` for My work (D644). */
+export const getViewLanePrefs = (viewKey: string) => api<{ collapsedLanes: string[] }>(`/tasks/views/${viewKey}/prefs`);
+export const saveViewLanePrefs = (viewKey: string, collapsedLanes: string[]) =>
+  api<{ collapsedLanes: string[] }>(`/tasks/views/${viewKey}/prefs`, json("PUT", { collapsedLanes }));

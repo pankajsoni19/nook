@@ -25,7 +25,8 @@ describe("phone sizing at 390 px", () => {
     const view = await read("tasks/BoardView.tsx");
     // A computer keeps the switch in the header; a phone moves it into the controls row with the filters.
     expect(view).toContain("{detail && !phone && viewSwitch}");
-    expect(view).toContain('{detail && (phone ? <div className="task-board-controls">{viewSwitch}{filterBar}</div> : filterBar)}');
+    // Lane VIEWS (D638): the saved-view picker rides in the same row, after the view switch.
+    expect(view).toContain('{detail && (phone ? <div className="task-board-controls">{viewSwitch}{savedViewPicker}{filterBar}</div> : filterBar)}');
     const phone = phoneRules(await read("tasks/boardViews.css"));
     expect(rule(phone, "  .task-board-header")).toContain("flex-wrap: nowrap");
     const controls = rule(phone, "  .task-board-controls");

@@ -13,6 +13,11 @@ type Options = {
   onQueryChange: (query: BoardQuery, options?: { push?: boolean }) => void;
   notify: TaskNotify;
   load: () => Promise<void>;
+  /**
+   * A saved view on its board (lane VIEWS, D637) shows every sprint unless the URL picks one, so the
+   * view's own filter (with any `sprint:` term) decides; picking the active sprint then names it.
+   */
+  defaultAll?: boolean;
 };
 
 const cards = (count: number) => count === 1 ? "1 card" : `${count} cards`;
@@ -23,18 +28,18 @@ const cards = (count: number) => count === 1 ? "1 card" : `${count} cards`;
  * scopes the views to it, and the owner's sprint actions. Every action refreshes the sprint list
  * from the server's answer; completing one reloads the board, since cards moved.
  */
-export function useBoardSprints({ detail, setDetail, query, onQueryChange, notify, load }: Options) {
+export function useBoardSprints({ detail, setDetail, query, onQueryChange, notify, load, defaultAll = false }: Options) {
   const structure = detail?.board.structure ?? FLAT_STRUCTURE;
   const sprints = useMemo(() => detail?.sprints ?? [], [detail]);
-  const selection: SprintSelection | null = resolveSprintSelection(query.sprint, sprints, structure);
+  const selection: SprintSelection | null = resolveSprintSelection(query.sprint ?? (defaultAll ? "all" : null), sprints, structure);
 
   const setSprints = useCallback((change: (current: SprintSummary[]) => SprintSummary[]) =>
     setDetail((current) => current ? { ...current, sprints: change(current.sprints ?? []) } : current), [setDetail]);
 
   /** Shows a sprint, the backlog, or every card; a pick is a committed change, so it gets its own Back step. */
   const select = useCallback((value: string) => {
-    onQueryChange(withBoardQuery(query, { sprint: sprintQueryValue(value, sprints) }), { push: true });
-  }, [onQueryChange, query, sprints]);
+    onQueryChange(withBoardQuery(query, { sprint: defaultAll ? (value === "all" ? null : value) : sprintQueryValue(value, sprints) }), { push: true });
+  }, [defaultAll, onQueryChange, query, sprints]);
 
   const create = useCallback(async (fields: SprintFields & { name: string }) => {
     if (!detail) return null;

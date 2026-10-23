@@ -1067,7 +1067,7 @@ export async function moveCard(userId: string, cardId: string, input: { columnId
 
 /**
  * The column a lane drop or MCP `move_card { state | columnName }` means on the card's own board
- * (lane VIEWS, D636, D637, D640): the first column of that state, or the first whose name folds to
+ * (lane VIEWS, D641, D642, D645): the first column of that state, or the first whose name folds to
  * the same text (case and accents), by position. Edit level, as the move itself; a board without
  * one is 400 `NO_SUCH_COLUMN`.
  */

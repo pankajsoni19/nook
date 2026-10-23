@@ -3,7 +3,7 @@ import { Database } from "bun:sqlite";
 import { registeredMigrations } from "../server/migrations";
 import { taskViewPrefsMigration } from "../server/migrations/077_task_view_prefs";
 
-/** Migration 077 (lane VIEWS, D639, T443): one person's collapsed lanes per view or My work, bounded and personal. */
+/** Migration 077 (lane VIEWS, D644, T443): one person's collapsed lanes per view or My work, bounded and personal. */
 describe("migration 077 task_view_prefs", () => {
   test("creates the table once; keys are a view id or my; the JSON is a bounded array; rows go with the person", () => {
     const sqlite = new Database(":memory:", { strict: true });

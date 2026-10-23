@@ -91,7 +91,7 @@ export const taskViewTools: McpToolSpec[] = [
       return {
         views: [...mine, ...shared, ...everyone].filter((view) => chosen === null || chosen.includes(view.id)).map((view) => ({
           id: view.id, name: view.name, owner_name: view.owner_name, is_owner: view.is_owner, visibility: view.visibility, query: view.query,
-          // Lane VIEWS (D640): the one board the view is on (null across boards), and its board lanes.
+          // Lane VIEWS (D645): the one board the view is on (null across boards), and its board lanes.
           board_id: view.board_id, lanes: view.display.lanes ?? "columns"
         }))
       };

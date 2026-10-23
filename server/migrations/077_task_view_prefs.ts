@@ -1,7 +1,7 @@
 import type { Migration } from "./types";
 
 /**
- * One person's collapsed lanes in a Tasks view (lane VIEWS, D639, T443):
+ * One person's collapsed lanes in a Tasks view (lane VIEWS, D644, T443):
  *
  * - `task_view_prefs` keeps, per person and view, the lanes of the board layout they collapsed.
  *   `view_key` is a saved view's id (task_views, migration 020) or `my` for My work, so it has no
