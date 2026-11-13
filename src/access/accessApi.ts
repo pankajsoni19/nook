@@ -56,10 +56,12 @@ const BASES: Record<AccessKind, string> = {
   calendar: "/calendars",
   agent: "/agents",
   chat: "/chats",
-  knowledge_base: "/knowledge"
+  knowledge_base: "/knowledge",
+  townhall_session: "/access/townhall_session"
 };
 
-export const accessPath = (kind: AccessKind, id: string) => `${BASES[kind]}/${encodeURIComponent(id)}/access`;
+// Workspace containers use the generic `/api/access/:kind/:id` (no trailing /access, D803).
+export const accessPath = (kind: AccessKind, id: string) => kind === "townhall_session" ? `${BASES[kind]}/${encodeURIComponent(id)}` : `${BASES[kind]}/${encodeURIComponent(id)}/access`;
 
 export const getAccess = (kind: AccessKind, id: string) => api<ItemAccess>(accessPath(kind, id));
 

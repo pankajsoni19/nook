@@ -15,7 +15,8 @@ import { moduleDef } from "../src/modules";
  */
 const src = join(import.meta.dir, "..", "src");
 const read = (path: string) => readFileSync(join(src, path), "utf8");
-const ids = (entries: ReturnType<typeof hubEntries>) => entries.map((entry) => entry.id);
+// Settings → Workspace (D836) joins the hub once a workspace module ships; these checks are about the rest.
+const ids = (entries: ReturnType<typeof hubEntries>) => entries.filter((entry) => entry.id !== "workspace").map((entry) => entry.id);
 
 describe("routes", () => {
   test("/settings/bin is canonical; /bin opens the same screen and is rewritten to it (both directions)", () => {
@@ -50,11 +51,10 @@ describe("routes", () => {
 describe("the hub's entries", () => {
   test("every role but guest has the Bin in a Workspace group between Account and Team", () => {
     for (const role of ["admin", "member", "viewer"] as const) {
-      const entries = hubEntries(role, { teamModuleEnabled: true });
+      const entries = hubEntries(role, { teamModuleEnabled: true }).filter((entry) => entry.id !== "workspace");
       const bin = entries.findIndex((entry) => entry.id === "bin");
       expect(entries[bin]).toMatchObject({ group: "workspace", label: "Bin", route: { app: "bin" } });
-      // Settings → Workspace (D836) joins the Workspace group once a workspace module ships (Goals).
-      expect(entries.slice(0, bin).every((entry) => entry.group === "account" || entry.id === "workspace")).toBe(true);
+      expect(entries.slice(0, bin).every((entry) => entry.group === "account")).toBe(true);
       expect(entries.slice(bin + 1).every((entry) => entry.group === "team")).toBe(true);
     }
     // wave38-fixes: a guest can delete nothing, so their (always empty) Bin has no entry.
@@ -62,8 +62,8 @@ describe("the hub's entries", () => {
   });
 
   test("the Bin module off removes the entry; the Team module still decides Team", () => {
-    expect(ids(hubEntries("member", { teamModuleEnabled: true, binModuleEnabled: false }))).toEqual(["security", "notifications", "access", "mcp", "agents", "knowledge", "modules", "about", "workspace", "team-members"]);
-    expect(ids(hubEntries("guest", { teamModuleEnabled: true, binModuleEnabled: false }))).toEqual(["security", "notifications", "mcp", "modules", "about", "workspace"]);
+    expect(ids(hubEntries("member", { teamModuleEnabled: true, binModuleEnabled: false }))).toEqual(["security", "notifications", "access", "mcp", "agents", "knowledge", "modules", "about", "team-members"]);
+    expect(ids(hubEntries("guest", { teamModuleEnabled: true, binModuleEnabled: false }))).toEqual(["security", "notifications", "mcp", "modules", "about"]);
     expect(ids(hubEntries("admin", { teamModuleEnabled: false, binModuleEnabled: false }))).not.toContain("bin");
     // While two-factor setup is required there is only Security.
     expect(ids(hubEntries("admin", { teamModuleEnabled: true, setupRequired: true, binCount: 4 }))).toEqual(["security"]);

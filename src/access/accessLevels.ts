@@ -5,7 +5,8 @@
 export type Level = "view" | "comment" | "edit" | "manage";
 export type ItemLevel = "none" | Level | "owner";
 /** Wave 43 (AC-D): agents (view, manage) and chats (view) use the same sheet. */
-export type AccessKind = "note" | "folder" | "document" | "board" | "task_view" | "collection" | "calendar" | "agent" | "chat" | "knowledge_base";
+/** Workspace containers join one by one as their lanes ship (the generic `/api/access/:kind/:id`, D803): Townhall (D1085). */
+export type AccessKind = "note" | "folder" | "document" | "board" | "task_view" | "collection" | "calendar" | "agent" | "chat" | "knowledge_base" | "townhall_session";
 
 const RANK: Record<ItemLevel, number> = { none: 0, view: 1, comment: 2, edit: 3, manage: 4, owner: 5 };
 
@@ -39,6 +40,8 @@ export function levelDescription(kind: AccessKind, level: Level): string {
       return "Read the conversation, tool calls and results included, and continue in their own copy";
     case "knowledge_base":
       return level === "manage" ? "Also add and remove sources, re-index, attach it to agents, and share it at Can view; never delete it" : "Search it (Try it); attaching it to agents needs Manage";
+    case "townhall_session":
+      return { view: "Ask, upvote, and vote in polls", comment: "Also reply under questions", edit: "Host: moderate, run polls, change the session", manage: "Also sharing and delete" }[level];
   }
 }
 

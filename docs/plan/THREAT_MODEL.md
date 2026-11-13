@@ -654,6 +654,23 @@ Plan: `docs/plan/WORKSPACE_MODULES.md` §D.3 (D900–D922).
 | T544 | **Titles leak through links, search, datasets, notifications** | The work kind adapters resolve a goal only for readers (null otherwise, T501); search and datasets AND `readableGoalSql`; notifications go only to people who can open the goal; activity payloads carry labels the item's readers may see, never check-in notes (T505). | Mitigated |
 | T545 | **Purge leaves orphans** (links, activity, comments, grants, schedules, search rows) | 097 triggers on `goals` and `key_results`; KRs, milestones, values, check-ins, contributors cascade. Test: Bin → purge → zero rows. | Mitigated |
 
+### Townhall (lane TOWNHALL, migration 115)
+
+Details and decisions in [WORKSPACE_MODULES.md §D.7 Townhall](WORKSPACE_MODULES.md#d7-townhall-lane-townhall-module-townhall).
+
+| ID | Threat | Mitigation | Status |
+| --- | --- | --- | --- |
+| T610 | **Deanonymizing anonymous askers or voters** | No author id for anonymous questions; upvotes, poll answers, attendance as keyed hashes; exports and MCP say "Anonymous"; audit rows carry ids only. | Required (built) |
+| T611 | **Public spam and vote stuffing** (incl. a room behind one NAT) | Ask: nonce, honeypot, fill time, per-address and per-link limits; votes: per-participant (60/min) and per-address (1200/min) buckets; review mode, hide, link off. Clearing storage mints a new participant (bounded by the address bucket): accepted. | Required (built) |
+| T612 | **Audience link leakage or reuse** | Hashed 43-character token, uniform 404, policy gate; the token is re-derived from a seed that revoking deletes; hosts only. | Required (built) |
+| T613 | **Reading pending, hidden, draft, or results-hidden content** | Per-viewer state; NOT_FOUND for unreadable sessions and questions; chosen-session keys. | Required (built) |
+| T614 | **Live streams as DoS** | Stream caps per person (8), address (300), session (3000); coalesced pushes; access re-check every 15 s. | Required (built) |
+| T615 | **Names shown to outsiders** | Named questions show the name to the session's audience, the public link included; the ask box says so; anonymous when allowed; no user ids in the public state. | Accepted (by design) |
+| T616 | **Moderation beyond rights over MCP/agents** | Host level at call time; agents get reads only. | Required (built) |
+| T617 | **Questions → cards leaking session content** | Hosts only, boards they can edit, through the Tasks service. | Required (built) |
+| T618 | **Export injection** | CSV cells neutralized (T514); Markdown escaped. | Required (built) |
+| T619 | **Notification href/body injection** | Server-built relative hrefs (T509); clipped text bodies. | Required (built) |
+
 ## Notes on shipped behaviour (v0.3.0–v0.4.0)
 
 Deliberate deviations and accepted low findings from the Wave 3–5 reviews. The mitigations above still hold.

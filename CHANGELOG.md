@@ -19,6 +19,12 @@ Release notes for Nook, newest first. Upgrade steps for each release are in [doc
 - **Links in mail, the Inbox, and MCP tool results** use the friendly forms. Vault items, chats, calendar events, and Team pages keep their ids on purpose.
 - **Privacy**: a link you cannot open behaves exactly like one that does not exist; the server log records app pages without their titles. API: `GET /api/links/:kind/:ref`; `short_id` on notes, documents, collections, and reports (migration 083).
 
+**Townhall** (new module)
+
+- All-hands and AMA sessions: people ask before and during the meeting (named, or anonymously when the host allows), upvote, and reply; hosts review, approve, hide, merge duplicates, star, pin the current question, and mark questions answered.
+- Live polls (single and multiple choice, word cloud, rating, open text) with results that update as people vote; a high-contrast presenter view with a QR code to join; an audience link for people without an account (public pages policy).
+- After the session: a recap (answered and open questions, poll results, attendance) to download or post as a note, and open questions turned into cards. Reminders, notifications, Insights, and MCP tools (`list/get/create` sessions, ask, upvote, moderate, launch and close polls, export the recap).
+
 **Tasks: card keys and moving cards between boards**
 
 - **Card keys.** Every board has a short code (MYT) and every card a key (MYT-12), shown in the card header (click to copy), on cards, and in the list and table views. New board suggests a code from the name; the owner changes it in Board settings, and old keys keep working.

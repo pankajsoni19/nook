@@ -3033,6 +3033,19 @@ No migration. Wire types: `shared/backups.ts` (`BackupsView`, `BackupRun`, `Dril
 
 **CLI** (`server/backup-admin.ts`): `backup`, `list`, `status`, `restore-drill [--from latest|<name>|<path>|litestream[@<RFC 3339>]] [--strict] [--keep]`, `restore --from … --to <empty folder> [--files-from …] [--db-only]`; since 0.47.0 (D689) `--from-dir <folder>` on `restore` and `restore-drill` looks for archives (`--from`, `--files-from`) in that folder only, never BACKUP_DIR or the bucket, with `--from` defaulting to `latest` on `restore` (exit 1 when the folder is missing or not a folder). `server/litestream.ts prepare <file>` (exit 0 written, 3 off or no bucket, 1 refused) and `config`.
 
+## Townhall (lane TOWNHALL, D1070–D1099)
+
+The full table is in [WORKSPACE_MODULES.md §D.7 Townhall](WORKSPACE_MODULES.md#d7-townhall-lane-townhall-module-townhall). In short, under `/api/townhall` (session, CSRF, and role guards; guests and viewers may ask, vote, withdraw their own question, and answer polls):
+
+- `GET/POST /sessions` (list: `state=upcoming|live|ended|all`, `q`, `cursor`, live first; create: `{ title, description?, startsAt?, endsAt?, eventId?, questionsOpen?, allowAnonymous?, moderation?: "off"|"review", allowComments?, reminderMinutes? }` → 201 `{ session }`).
+- `GET /sessions/:id` (id, short id, or `<slug>-<shortid>`) → `{ session, you, questions, polls, stats, publicUrl?, publicAllowed? }` for the caller; `GET /sessions/:id/live` is the same JSON as server-sent `event: state` frames (and `event: gone`).
+- `PATCH /sessions/:id` (`expectedRevision` → 409 `CONFLICT`), `DELETE /sessions/:id` (Bin; 403 `OWNER_ONLY` below manage), `POST /sessions/:id/state { state: "live"|"ended" }`, `PUT /sessions/:id/public-link { enabled }` → `{ publicUrl }` (403 `POLICY_OFF`), `PUT /sessions/:id/screen { pollId|null }`.
+- `POST /sessions/:id/questions { text ≤ 500, anonymous? }` → 201 `{ question }` (400 `ANONYMOUS_OFF`, 409 `SESSION_ENDED`, `QUESTIONS_CLOSED`, `LIMIT_REACHED`); `PUT /questions/:qid/vote { upvote }` → `{ questionId, votes, voted }`; `DELETE /questions/:qid` (own only; 409 `ANSWERED`); `POST /questions/:qid/moderate { action, targetId? }` (hosts; 400 `MERGE_TARGET`, 409 `HIDDEN`).
+- Polls: `POST /sessions/:id/polls { kind: single|multi|word_cloud|rating|open_text, title, options?, resultsHidden?, launch? }` → 201 `{ pollId }`; `POST …/polls/:pid/launch|close`; `PATCH …/polls/:pid { resultsHidden }`; `DELETE …/polls/:pid`; `POST …/polls/:pid/vote { optionIds? | rating? | text? }` (409 `POLL_CLOSED`, `WORD_LIMIT`).
+- `GET /sessions/:id/recap` → `{ recap }`; `?format=markdown|csv` → the file; `POST /sessions/:id/recap/note` → 201 `{ noteId, href }`; `POST /sessions/:id/cards { boardId, columnId, questionIds ≤ 50 }` → 201 `{ cards: [{ questionId, cardId, href }] }`.
+- Public (no session, strict headers, uniform 404): `GET /api/public/townhall/:token?p=` → state + `{ participant, renderNonce, meta }`; `GET …/live?p=`; `POST …/questions { participant, text, name?, nonce, website }`; `POST …/questions/:qid/vote { participant, upvote }`; `POST …/questions/:qid/withdraw { participant }`; `POST …/polls/:pid/vote { participant, … }`. Page: `/p/t/:token`.
+- MCP and REST v1: `list_townhall_sessions`, `get_townhall_session`, `create_townhall_session`, `ask_townhall_question`, `upvote_townhall_question`, `moderate_townhall_question`, `launch_townhall_poll`, `close_townhall_poll`, `export_townhall_recap`.
+
 ## Changes to existing note endpoints (Wave 4)
 
 - `DELETE /api/notes/:id`:
