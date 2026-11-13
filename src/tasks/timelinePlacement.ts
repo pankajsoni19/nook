@@ -1,12 +1,12 @@
 // Board timeline view placement (docs/plan/TASK_VIEWS.md §Timeline, D760–D769). Pure: no DOM.
 //
 // - A card's bar runs from its start day through its due day, both inclusive, on the days the viewer
-//   sees them (a timed start or due sits on its viewer-local date, as on the board calendar, D714).
+//   sees them (a timed start or due sits on its viewer-local date, as on the board calendar, D724).
 // - Due only: a one-day milestone on the due day. Start only: an open bar from the start day that
 //   fades out to the right. Neither: no bar (the row offers "+" to schedule it).
 // - Moves are day deltas applied to the card's civil `start_on` / `due_on`, so a timed card keeps its
 //   wall time and zone (the server keeps `startTime` / `dueTime` when only the date changes), and a
-//   handle can never put the start after the due day (START_AFTER_DUE, D711): it clamps.
+//   handle can never put the start after the due day (START_AFTER_DUE, D721): it clamps.
 import { addDays, daysBetween } from "../calendarRoute";
 import { displayedDay, displayedStartDay } from "./calendarPlacement";
 
