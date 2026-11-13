@@ -117,3 +117,12 @@
   .today-row { min-height: 44px; padding: 6px; }
   .today-row-label { font-size: .95rem; }
 }
+
+/* Quick actions (D836, workspace modules §B.11): one row of compact actions under the launcher, only when a module registers one. */
+.today-quick-label { margin-top: 18px; }
+.today-quick-actions { margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 8px; }
+.today-quick-action { min-height: 40px; display: inline-flex; align-items: center; gap: 8px; border: 1px solid #303035; border-radius: 999px; padding: 0 14px 0 12px; background: #151517; color: #e4e4e6; font: inherit; font-size: .84rem; font-weight: 600; text-decoration: none; cursor: pointer; }
+.today-quick-action:hover { border-color: #6f5928; background: #221f18; }
+.today-quick-action:focus-visible { outline: 2px solid var(--yellow); outline-offset: 2px; }
+.today-quick-action svg { width: 16px; height: 16px; color: #f4ca67; }
+@media (max-width: 760px) { .today-quick-action { min-height: 44px; } }

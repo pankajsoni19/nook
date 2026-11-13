@@ -56,6 +56,7 @@ import { ReadOnlyBanner, useRole } from "../team/roleAccess";
 import { levelAtLeast, type ItemLevel } from "../access/accessLevels";
 import { appName } from "../appName";
 import { FormError } from "../ui/FormError";
+import { CardHeaderActionsOutlet, CardSectionsOutlet } from "../ui/CardSlotOutlets";
 import { ActivityRow, TimelineControls, useCardTimeline } from "./cardActivity";
 import { activityRefreshKey, buildTimeline } from "./cardActivityModel";
 
@@ -704,6 +705,8 @@ export function CardDialog({ userId, cardId, columns, columnId, boardOwner, boar
           <FormError message={titleError} className="file-dialog-error" />
         </div>
         {card && <CopyCardLinkButton boardId={card.board_id} cardId={card.id} cardKey={card.key} notify={notify} />}
+        {/* Module header actions (D834: Time's Start timer); nothing while none is registered. */}
+        {card && <CardHeaderActionsOutlet card={card} readOnly={readOnly} idPrefix={titleId} notify={notify} />}
         {card && !readOnly && <button className="icon-button" onClick={() => onMove(card)} aria-haspopup="dialog" aria-label="Move card" title="Move to…"><ArrowRightLeft /></button>}
         {card && !readOnly && onArchive && !card.archived_at && <button className="icon-button" onClick={() => onArchive(card)} aria-label="Archive card" title="Archive: hide it from the board"><Archive /></button>}
         {card && !readOnly && <button className="icon-button" onClick={() => setConfirmDelete(true)} aria-haspopup="dialog" aria-label="Delete card" title="Move to the Bin"><Trash2 /></button>}
@@ -740,6 +743,8 @@ export function CardDialog({ userId, cardId, columns, columnId, boardOwner, boar
               setRelations(next);
               onRelationsChanged?.(card.id, { relation_count: next.length, open_blockers: openBlockerCount(next.map(relationRow)) });
             }} />
+          {/* Module sections in the fields column (D834: Goals' "Contributes to"). */}
+          <CardSectionsOutlet area="side" card={card} readOnly={readOnly} idPrefix={titleId} notify={notify} />
           </div>
 
           <div className="task-card-main">
@@ -785,6 +790,9 @@ export function CardDialog({ userId, cardId, columns, columnId, boardOwner, boar
             <UploadRows rows={uploads.rows} label="Uploading to this card" />
             {attachmentList(attachmentsFor(attachments, null), "Files on this card") || (!attaching && <p className="task-comment-empty">{readOnly ? "No files." : "No files yet. Drop or paste files on the card, or attach them here; pasted images in the description are attached here too."}</p>)}
           </section>
+
+          {/* Module sections above Comments (D834: Time's logged time). */}
+          <CardSectionsOutlet area="main" card={card} readOnly={readOnly} idPrefix={titleId} notify={notify} />
 
           <section className="task-card-section" aria-labelledby={`${titleId}-comments`}>
             <header><h3 id={`${titleId}-comments`}><MessageSquare aria-hidden="true" />Comments</h3>

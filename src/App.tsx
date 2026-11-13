@@ -139,6 +139,8 @@ import { FileSearchResults, useFileSearch } from "./search/FileSearchResults";
 import { ModulesSettings } from "./ModulesSettings";
 import { hiddenEntryStep, hiddenModuleForApp, normalizeDisabledModules, recordPopDepth, isAppEnabled, isModuleEnabled, moduleOffHint, ModulesContext, parsePreferences, routeGateModules, unavailableModules, type ModuleId, moduleDef } from "./modules";
 import { usePreferences, type PreferencesStatus } from "./usePreferences";
+import { isWorkspaceModuleId, workspaceHomeRoute, workspaceModule } from "./workspaceModules";
+import { WorkspaceModuleHost } from "./workspaceModules/WorkspaceModuleHost";
 import { errorText, flash as flashToast, notify } from "./ui/notify";
 
 type TotpState = { enabled: boolean; required: boolean; setupRequired: boolean };
@@ -1244,7 +1246,7 @@ export function App() {
   useEffect(() => {
     // The Settings hub names its own screens (Team's sections and the Bin too).
     if (activeApp === "settings" || activeApp === "team" || activeApp === "bin") return;
-    const sectionName = { home: "Home", notes: "Notes", files: "Files", tasks: "Tasks", collections: "Collections", calendar: "Calendar", notifications: "Notifications", inbox: "Inbox", whiteboards: "Whiteboards", vault: "Vault", chat: "Chat", reports: "Reports" }[activeApp];
+    const sectionName = isWorkspaceModuleId(activeApp) ? workspaceModule(activeApp)?.label ?? "Home" : { home: "Home", notes: "Notes", files: "Files", tasks: "Tasks", collections: "Collections", calendar: "Calendar", notifications: "Notifications", inbox: "Inbox", whiteboards: "Whiteboards", vault: "Vault", chat: "Chat", reports: "Reports" }[activeApp];
     const detail = activeApp === "notes" && note && note.id === selectedNoteId ? note.title || "Untitled" : null;
     document.title = session ? `${detail ? `${detail} · ` : ""}${sectionName} · ${appName()}` : `Sign in · ${appName()}`;
   }, [activeApp, note, selectedNoteId, session]);
@@ -1817,6 +1819,8 @@ export function App() {
     if (section === "vault") return { app: "vault", vaultId: null, envId: null, secretId: null, page: null };
     if (section === "chat") return { app: "chat", chatId: null };
     if (section === "reports") return { app: "reports", reportId: null };
+    // A workspace module's home (D833).
+    if (isWorkspaceModuleId(section)) return workspaceHomeRoute(section);
     return { app: section };
   }
 
@@ -2360,6 +2364,8 @@ export function App() {
       : shownApp === "chat" ? <Suspense fallback={<main className="app-page" aria-busy="true"><p className="sr-only" role="status">Loading chat…</p></main>}><ChatApp {...account} role={session.user.role ?? "member"} navigate={navigate} flash={flash} onHome={() => { void openHome(); }} onOpenAgents={(agentId) => { void openRoute({ app: "settings", section: "agents", ...(agentId ? { agentId } : {}) }); }} onOpenPath={openInboxPath} /></Suspense>
       : shownApp === "reports" ? <FriendlyLinkGate app="reports" listRoute={{ app: "reports", reportId: null }} navigate={navigate}><Suspense fallback={<main className="app-page" aria-busy="true"><p className="sr-only" role="status">Loading reports…</p></main>}><ReportsApp {...account} role={session.user.role ?? "member"} navigate={navigate} flash={flash} onHome={() => { void openHome(); }} onOpenDatasources={() => { void openRoute({ app: "settings", section: "datasources" }); }} onOpenToolServers={() => { void openRoute({ app: "settings", section: "ai", aiTab: "tools" }); }} /></Suspense></FriendlyLinkGate>
       : shownApp === "whiteboards" ? <FriendlyLinkGate app="whiteboards" listRoute={{ app: "whiteboards", folder: "all", boardId: null }} navigate={navigate}><Suspense fallback={<main className="app-page" aria-busy="true"><p className="sr-only" role="status">Loading whiteboards…</p></main>}><WhiteboardsApp {...account} userId={session.user.id} navigate={navigate} flash={flash} onHome={() => { void openHome(); }} onOpenPath={openInboxPath} /></Suspense></FriendlyLinkGate>
+      // The workspace modules (D833): one generic branch, the module's lazy app with the standard props.
+      : isWorkspaceModuleId(shownApp) ? <WorkspaceModuleHost key={shownApp} id={shownApp} {...account} userId={session.user.id} role={session.user.role ?? "member"} navigate={navigate} flash={flash} onHome={() => { void openHome(); }} onOpenPath={openInboxPath} />
       // Settings, Team, and the Bin (Wave 38) are the hub's routes.
       : settingsPage(false)}
     {toastStatus}

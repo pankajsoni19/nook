@@ -1,6 +1,8 @@
 import { readHistorySnapshot } from "./mobileNavigation";
+import { isWorkspaceModuleId, type WorkspaceModuleId } from "./workspaceModules/types";
 
-export type AppSection = "home" | "notes" | "files" | "tasks" | "collections" | "calendar" | "notifications" | "bin" | "team" | "inbox" | "whiteboards" | "vault" | "chat" | "reports" | "settings";
+// The workspace modules' sections are their module ids (D833).
+export type AppSection = "home" | "notes" | "files" | "tasks" | "collections" | "calendar" | "notifications" | "bin" | "team" | "inbox" | "whiteboards" | "vault" | "chat" | "reports" | "settings" | WorkspaceModuleId;
 
 const historyKey = "mynotes.app-shell";
 const historyVersion = 1;
@@ -24,7 +26,7 @@ export function readAppHistorySection(state: unknown, userId: string): AppSectio
   if (!value || typeof value !== "object") return null;
   const entry = value as { version?: unknown; userId?: unknown; section?: unknown };
   if (entry.version !== historyVersion || entry.userId !== userId) return null;
-  return entry.section === "home" || entry.section === "notes" || entry.section === "files" || entry.section === "tasks" || entry.section === "collections" || entry.section === "calendar" || entry.section === "notifications" || entry.section === "bin" || entry.section === "team" || entry.section === "inbox" || entry.section === "whiteboards" || entry.section === "vault" || entry.section === "chat" || entry.section === "reports" || entry.section === "settings" ? entry.section : null;
+  return entry.section === "home" || entry.section === "notes" || entry.section === "files" || entry.section === "tasks" || entry.section === "collections" || entry.section === "calendar" || entry.section === "notifications" || entry.section === "bin" || entry.section === "team" || entry.section === "inbox" || entry.section === "whiteboards" || entry.section === "vault" || entry.section === "chat" || entry.section === "reports" || entry.section === "settings" || isWorkspaceModuleId(entry.section) ? entry.section : null;
 }
 
 // Entries written before the app shell existed carry only a Notes panel snapshot.

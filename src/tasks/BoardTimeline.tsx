@@ -15,6 +15,7 @@ import {
 import { byPosition } from "./boardOrder";
 import { cardCountLabel } from "./taskActions";
 import "./timeline.css";
+import { TimelineDecorationsOutlet } from "../ui/CardSlotOutlets";
 
 type BoardTimelineProps = {
   board: BoardData;
@@ -630,6 +631,8 @@ function CardRow({ card, bar, top, range, dayWidth, today, status, columnName, s
         onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerCancel}
         onKeyDown={(event) => onBarKeyDown(event, card, bar)}>
         {bar.kind === "milestone" ? <span className="task-tl-diamond" aria-hidden="true" /> : <span className="task-tl-fill" aria-hidden="true" />}
+        {/* Module decorations (D834, C14: Time's logged-vs-estimate fill); none while none is registered. */}
+        {bar.kind !== "milestone" && <TimelineDecorationsOutlet card={card} />}
         {inside && <span className="task-tl-bar-title" aria-hidden="true">{card.title}</span>}
         {!inside && <span className="task-tl-bar-label" aria-hidden="true">{card.title}</span>}
         {editable && bar.kind !== "open" && <span className="task-tl-handle start" aria-hidden="true"

@@ -6,6 +6,7 @@ import { api, ApiError } from "./api";
 import { formatRoute, locationUrl, routeFromLocation, type PendingLink, type Route } from "./router";
 import { nameBoard, nameCard, nameItems, setCanonicalizer } from "./routeNames";
 import { lookupCardKey } from "./tasks/tasksApi";
+import { WORKSPACE_MODULE_IDS } from "./workspaceModules/types";
 
 type Resolved = { id: string; title?: string; code?: string };
 
@@ -56,7 +57,8 @@ export async function resolveLocation(): Promise<Route | "missing"> {
 /** The pending link of a route, if any. */
 export const pendingOf = (route: Route): PendingLink | null => ("pending" in route && route.pending) || null;
 
-const FRIENDLY_APPS = new Set<Route["app"]>(["notes", "files", "tasks", "collections", "whiteboards", "reports"]);
+// The workspace modules' URLs are friendly too (D812, D833); each module's formatRoute writes its canonical one.
+const FRIENDLY_APPS = new Set<Route["app"]>(["notes", "files", "tasks", "collections", "whiteboards", "reports", ...WORKSPACE_MODULE_IDS]);
 
 /**
  * Replaces the address bar with the current route's canonical URL when they differ (D774): a UUID

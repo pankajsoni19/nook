@@ -11,6 +11,7 @@ import TableHeader from "@tiptap/extension-table-header";
 import TableCell from "@tiptap/extension-table-cell";
 import { WhiteboardEmbed } from "./whiteboardEmbed";
 import { FileChip } from "./fileChip";
+import { ModuleEmbed } from "./moduleEmbed";
 
 // Options for the marked lexer used by @tiptap/markdown. GFM enables pipe tables and task lists.
 export const markdownOptions = { gfm: true, breaks: false };
@@ -42,6 +43,9 @@ export function noteContentExtensions(): AnyExtension[] {
     // A whiteboard card (D208): `[Name](/whiteboards/<uuid> "whiteboard")` alone in its paragraph.
     WhiteboardEmbed,
     // A file card (U4, D408): `[📎 name](/files/<uuid>)` alone in its paragraph.
-    FileChip
+    FileChip,
+    // A module embed (D835): `[Poll](/forms/<slug>-<shortid> "nook-embed")` alone in its paragraph,
+    // only for paths a registered kind claims; anything else stays a link.
+    ModuleEmbed
   ];
 }

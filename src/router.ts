@@ -5,6 +5,8 @@ import { appName } from "./appName";
 import { normalizeBoardCode, parseCardKey } from "../shared/boardKeys";
 import { shortIdOfSegment, type LinkKind } from "../shared/friendlyUrls";
 import { boardCodeOf, boardIdForCode, cardForKey, cardKeyOf, itemFolderSlug, itemIdForShortId, itemSegment, type ItemKind } from "./routeNames";
+import { formatWorkspaceRoute, parseWorkspaceRoute, workspaceModuleForSegment } from "./workspaceModules/registry";
+import { isWorkspaceModuleId, type WorkspaceRoute } from "./workspaceModules/types";
 
 /**
  * Friendly URLs (D773): a URL that names an item by short id, board code, or card key the tab has no
@@ -159,7 +161,11 @@ export type Route =
   // Wave 44 (AC-E): Settings → Knowledge has a page per base below it at /settings/knowledge/:kbId.
   // Settings → AI is tabbed: /settings/ai/providers, /settings/ai/tools, /settings/ai/policy (`aiTab`).
   // API keys too: /settings/keys/general, /settings/keys/vault, /settings/keys/agents (`keysTab`).
-  | { app: "settings"; section: SettingsSection | null; agentId?: string; aiTab?: AiTab; keysTab?: KeysTab; kbId?: string };
+  | { app: "settings"; section: SettingsSection | null; agentId?: string; aiTab?: AiTab; keysTab?: KeysTab; kbId?: string }
+  // The workspace modules (D833, docs/plan/WORKSPACE_MODULES.md §B.1): one generic shape, `/<segment>/…`
+  // parsed and written by the module's own parseRoute/formatRoute (src/<module>/module.tsx). Only a
+  // ready module's segment parses; anything else opens Home like any unknown path.
+  | WorkspaceRoute;
 
 /** The Audit log's filters in its URL (Wave 42 QA L4); anything malformed is dropped. */
 export type AuditQuery = { key?: string; agent?: string; status?: string; from?: string; to?: string };
@@ -378,7 +384,7 @@ export function parseRoute(pathname: string, search = ""): Route {
     if (rest.length === 2 && reportId === "lists" && folderId !== undefined && isRouteId(folderId)) return list(reportsListView(folderId));
     return list();
   }
-  return { app: "home" };
+  return parseWorkspaceRoute(segments, search) ?? { app: "home" };
 }
 
 export const NEW_AGENT = "new";
@@ -491,6 +497,7 @@ function formatCollection(base: string, kind: ItemKind, folder: string, itemId: 
 export function formatRoute(route: Route): string {
   // A link still resolving keeps its URL as it came (D773).
   if ("pending" in route && route.pending) return route.pending.url;
+  if (isWorkspaceModuleId(route.app)) return formatWorkspaceRoute(route as WorkspaceRoute);
   if (route.app === "notes") return formatCollection("/notes", "note", route.folder, route.noteId);
   if (route.app === "files") return formatCollection("/files", "file", route.folder, route.documentId);
   if (route.app === "tasks") {
@@ -667,6 +674,8 @@ const REPORT_PAGE_PATH = /^\/reports\/(?!(?:unfiled|shared|favorites)\/?$)[^/]+$
 export function locationUrl(location: { pathname: string; search: string }) {
   // A report page keeps only its parameter values (D489), in the order formatRoute writes them.
   if (REPORT_PAGE_PATH.test(location.pathname)) return `${location.pathname}${formatReportParams(parseReportParams(location.search))}`;
+  // A workspace module's URLs carry whatever query its parseRoute keeps (D833), as formatRoute writes it.
+  if (workspaceModuleForSegment(location.pathname.split("/")[1])) return formatRoute(parseRoute(location.pathname, location.search));
   // Tasks URLs carry the board query; /chat/new carries the preselected agent (Wave 40); the Audit log its filters (Wave 42);
   // the Reports list its filters (report organization phase 1); a report page its parameter values (D489).
   return /^\/tasks(\/|$)/.test(location.pathname) || location.pathname === "/chat/new" || /^\/chat\/audit(\/|$)/.test(location.pathname) || REPORTS_LIST_PATH.test(location.pathname)

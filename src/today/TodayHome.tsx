@@ -6,6 +6,7 @@ import { ApiError } from "../api";
 import { hiddenTodaySections, useDisabledModules } from "../modules";
 import { formatRoute, type Route } from "../router";
 import { CustomizeSections } from "./CustomizeSections";
+import { QuickActions } from "./QuickActions";
 import { DigestPrompt } from "./DigestPrompt";
 import { getToday, type TodayResponse, type TodaySection } from "./todayApi";
 import { enabledTodayApps } from "./todayApps";
@@ -75,6 +76,8 @@ function SectionView({ name, section, date, busy, retrying, onRetry, onOpenRoute
         </div>
         : name === "storage"
           ? <StorageMeter usage={section.items[0] as StorageUsage} />
+          : def.render
+          ? <def.render name={name} items={section.items as Record<string, any>[]} more={section.more} date={date} onOpenRoute={onOpenRoute} />
           : <>
             <ul className="today-list">
               {section.items.map((item) => {
@@ -261,6 +264,7 @@ export function TodayHome({ userId, displayName, onOpen, onOpenRoute, onSettings
             </li>)}
           </ul>
         </nav>
+        <QuickActions onOpenRoute={onOpenRoute} />
       </section>
 
       <div className="today-toolbar">
