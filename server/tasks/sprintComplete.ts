@@ -64,7 +64,10 @@ export async function completeSprint(userId: string, sprintId: string, input: Co
       const carried = db.query(`UPDATE cards SET sprint_id = $target, revision = revision + 1, updated_at = $timestamp WHERE ${unfinished}`)
         .run({ ...params, target: destination?.id ?? null, timestamp }).changes;
       // Card history (lane ACTIVITY): each carried card's sprint change.
-      for (const cardId of carriedIds) recordCardChange(cardId, board.id, userId, "sprint", activityValue.sprint(sprint.id), activityValue.sprint(destination?.id), timestamp);
+      // The two sprint values are looked up once, not per card.
+      const fromSprint = activityValue.sprint(sprint.id);
+      const toSprint = activityValue.sprint(destination?.id);
+      for (const cardId of carriedIds) recordCardChange(cardId, board.id, userId, "sprint", fromSprint, toSprint, timestamp);
       db.query("UPDATE board_sprints SET state = 'closed', closed_at = ?, updated_at = ? WHERE id = ?").run(timestamp, timestamp, sprint.id);
       db.query("UPDATE boards SET updated_at = ? WHERE id = ?").run(timestamp, board.id);
       mailSprint(userId, board.id, sprint.id, "completed", assignees, { done: doneCount, carried });
