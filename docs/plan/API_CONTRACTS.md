@@ -3172,3 +3172,39 @@ All JSON under `/api/crm`, behind the session, CSRF, and role write gates; error
 | GET | `/export.csv?book=&entity=&q=&list=&filter=` | — | `text/csv`; 429 `RATE_LIMITED` past 30 a day |
 
 MCP (`crm:read` / `crm:write`; `bin_*` also `bin:write`): see D982. Datasets: `crm.contacts`, `crm.deals`, `crm.deal_stage_changes`, `crm.interactions`. Search scope `contacts`. Today section `crmFollowups`. Schedules `crm.followup`, `crm.rotting`. Progress sources `crm_won_value`, `crm_won_count`, `crm_pipeline_value`.
+
+## Time (lane TIME, docs/plan/WORKSPACE_MODULES.md §D.2, D870–D899)
+
+Migrations **093** (`time_projects`, `time_member_rates`, `time_entries`, `time_tags`, `time_approvals`, `time_user_settings`) and **094** (`time_entry_fts`, purge triggers). Every route is under the module dispatcher (behind every guard); errors are `{ error, code }`; anything the caller cannot read is 404 `NOT_FOUND`. Money is minor units; durations are seconds (or text such as `1h30`, `90m`, `1:30` where noted). Guests may send the writes marked †, for their own time on projects they belong to.
+
+| Method | Path | Body / query | Returns |
+| --- | --- | --- | --- |
+| GET | `/api/time/timer?tz=` | — | `{ entry \| null, today: { date, seconds, entries } }` |
+| POST | `/api/time/timer/start` † | `{ description?, projectId?, target?, billable?, tags?, startedAt?, tz? }`; `target` is a key (`MYT-12`), an in-app URL, `{ kind, id }`, or `{ ref }` | 201 `{ entry, stopped }` (the previous timer's id when one was running); 409 `PROJECT_ARCHIVED`, `WEEK_LOCKED`; 400 `PROJECT_REQUIRED` (guests), `DESCRIPTION_REQUIRED` |
+| POST | `/api/time/timer/stop` † | `{ at? }` | `{ entry \| null }` (past 24 h it is split into entries of at most 24 h) |
+| GET | `/api/time/entries` | `from, to` (dates in `tz` or instants), `user=me\|all\|<id>`, `project=<id>\|none`, `target=kind:id`, `billable`, `tag`, `q`, `cursor`, `limit ≤ 200` | `{ entries, nextCursor }` (visible entries only, D872) |
+| GET | `/api/time/recent` | — | `{ entries }` (distinct recent ones to continue) |
+| POST | `/api/time/entries` † | `{ startedAt, duration \| endedAt, description?, projectId?, target?, billable?, tags?, tz?, source? }` | 201 `{ entry }`; 400 `TOO_LONG` (> 24 h), `DURATION_REQUIRED` |
+| PATCH | `/api/time/entries/:id` † | any of the above plus `expectedRevision` | `{ entry }`; 409 `LOCKED`, `WEEK_LOCKED`, `ENTRY_CHANGED`; 403 `READ_ONLY` |
+| DELETE | `/api/time/entries/:id` † | — | `{ undoTicket }` (`POST /api/undo/:ticket` restores) |
+| POST | `/api/time/entries/:id/split` † | `{ at }` | `{ entries: [first, second] }` |
+| POST | `/api/time/entries/bulk` | `{ op: create\|update\|delete, items ≤ 100, dryRun? }` | `{ dryRun, count, entries, undoTicket? }` (all or nothing; errors name the item) |
+| GET | `/api/time/timesheet` | `week` (any date in it), `tz`, `carry=1` (keep last week's rows) | `{ weekStart, days, rows: [{ key, project, target, days[7], locked[7] }], totals, approvals }` |
+| PUT | `/api/time/timesheet/cell` † | `{ day, projectId \| null, target \| null, duration (seconds or text) \| null, tz }` | `{ timesheet, undoTicket? }`; 409 `CELL_HAS_DETAILS` (lowering below timer entries), `LOCKED`, `TIMER_RUNNING` |
+| GET | `/api/time/summary` | entry filters (`user` defaults to `all`), `groupBy` (up to two of `project, client, user, target, tag, day, week, month, billable`), `rounding=0\|6\|15\|30`, `roundingMode=nearest\|up` | `{ rows: [{ key, label, seconds, billableSeconds, amountMinor, entries, sub? }], totals, currency, mixedCurrency, rounding }` |
+| GET | `/api/time/export.csv` | as summary | CSV (formula-safe, BOM), audited `time.export` |
+| GET / POST | `/api/time/projects` | `archived=0`, `q`, `loggable=1` / `{ name, code?, color?, clientId? \| newClient?, boardId?, billableDefault?, rateMinor?, currency?, budget?, settings?, visibility?, memberIds? }` | `{ projects }` / 201 `{ project }` (members and admins) |
+| GET / PATCH / DELETE | `/api/time/projects/:id` (id or short id) | PATCH as POST plus `archived`, `expectedRevision` (managers) | `{ project }`; DELETE (owner) moves it to the Bin |
+| GET | `/api/time/projects/:id/rates` | — | managers: `{ currency, projectRateMinor, members: [{ id, name, level, rateMinor }] }` |
+| PUT | `/api/time/projects/:id/rates/:userId` | `{ rateMinor \| null }` | the same |
+| GET / POST | `/api/time/clients` | `q` / `{ name }` | companies in readable books / a company in the caller's hidden Clients book |
+| GET | `/api/time/tags` | — | `{ tags }` |
+| GET | `/api/time/approvals` | `project`, `status`, `mine=1` | `{ approvals }` (managed projects, or the caller's) |
+| POST | `/api/time/approvals` † | `{ projectId, weekStart, note? }` | 201 submitted (managers notified) |
+| PATCH | `/api/time/approvals/:id` | `{ decision: approve\|reject\|unlock, note? }` | `{ status, entries }` (approve locks the person's entries of that week on the project) |
+| GET | `/api/time/targets/:kind/:id` | — | `{ target, totalSeconds, mySeconds, estimateSeconds, entries, byPerson, privateEntries, defaultProject }` |
+| GET | `/api/time/cards?ids=` | ≤ 500 card ids | `{ cards: { [id]: { seconds, estimateSeconds, running } } }` (readable cards only) |
+| GET | `/api/time/suggestions?date=&tz=` | — | `{ suggestions }`: the day's events on your own calendars and cards you changed, not yet logged |
+| GET / PUT | `/api/time/settings` † | `{ dailyReminder, reminderAt, reminderDays, longTimerHours, tz }` | `{ settings }` |
+
+**MCP** (`time:read` / `time:write`): `get_running_timer`, `start_timer`, `stop_timer`, `log_time`, `list_time_entries`, `update_time_entry`, `discard_time_entry` (destructive; named `discard_` because tool names never say delete or remove, D265), `bulk_log_time` (dry run), `time_summary`, `list_time_projects`, `create_time_project`, `update_time_project`, `get_time_for_item`, `suggest_time_entries`. REST v1 exposes the same at `/api/v1/tools/<name>`. Chat agents: reads and `log_time` (as an Inbox proposal `time_log` unless the agent's mode allows writes). Dataset `time.entries`; Goals progress source `time`; Today section `timeToday`; search scope `time`; Bin type `time_project`; schedules `time.long_timer`, `time.daily_reminder`.
