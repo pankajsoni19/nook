@@ -80,6 +80,17 @@ test("a view's URL query is an unsaved override that always names its layout, gr
   expect(viewHomeQuery({ query: "", display: { layout: "grid", group: "x", sort: "y" } })).toEqual({ layout: "list", group: "none", sort: "due", filter: { terms: [] } });
 });
 
+test("every sort the server takes opens as saved and stays in the URL, start included", async () => {
+  const { QUERY_SORTS } = await import("../server/tasks/query");
+  const { HOME_SORTS } = await import("../src/tasks/home/homeUrl");
+  const { SORT_LABELS } = await import("../src/tasks/home/HomeResultsPane");
+  expect([...HOME_SORTS]).toEqual([...QUERY_SORTS]);
+  for (const sort of QUERY_SORTS) expect(SORT_LABELS[sort]).toBeTruthy();
+  expect(viewHomeQuery({ query: "", display: { layout: "list", group: "none", sort: "start" } }).sort).toBe("start");
+  expect(parseMyWorkSearch("?sort=start").sort).toBe("start");
+  expect(parseViewSearch("?layout=list&group=none&sort=start")?.sort).toBe("start");
+});
+
 test("Back steps view → views list → board list → Home, and never leaves Nook", () => {
   const view = tasksHomeRoute({ section: "view", viewId });
   expect(parentTasksRoute(view)).toEqual(tasksHomeRoute({ section: "views" }));

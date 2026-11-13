@@ -46,6 +46,10 @@ export const TASK_QUERY_LIMITS = {
 } as const;
 
 /** Keys in canonical order. */
+/** The sort orders of a task query (POST /api/tasks/query, saved views, MCP, and the home's Sort menu). */
+export const QUERY_SORTS = ["due", "updated", "created", "title", "board", "start"] as const;
+export type QuerySort = typeof QUERY_SORTS[number];
+
 export const FILTER_KEYS = ["board", "state", "column", "assignee", "creator", "tag", "flag", "due", "start", "sprint", "parent", "level", "has", "text"] as const;
 export type FilterKey = typeof FILTER_KEYS[number];
 

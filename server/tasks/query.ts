@@ -1,7 +1,7 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { db } from "../db";
 import { dateInZone } from "../today/registry";
-import { addQueryDays, dueWindow, parse, format, SPRINT_VALUES, type FilterTerm, type TaskQuery } from "../../shared/taskQuery";
+import { addQueryDays, dueWindow, parse, format, SPRINT_VALUES, type FilterTerm, type QuerySort, type TaskQuery } from "../../shared/taskQuery";
 import { EFFECTIVE_SPRINT_SQL } from "./sprintData";
 import { boardLevel, readableBoard, readableBoardPredicate } from "./access";
 import type { ItemLevel } from "../access/levels";
@@ -235,8 +235,8 @@ export function compileTaskQuery(query: TaskQuery, context: CompileContext): Com
 // ---------------------------------------------------------------------------
 // Running a query.
 
-export const QUERY_SORTS = ["due", "updated", "created", "title", "board", "start"] as const;
-export type QuerySort = typeof QUERY_SORTS[number];
+// One list with the client's Sort menu (src/tasks/home/homeUrl.ts).
+export { QUERY_SORTS, type QuerySort } from "../../shared/taskQuery";
 /** Server-side groups: single-valued dimensions only, so a group is one contiguous run across pages. Multi-valued ones (assignee, tag) group on the client. */
 export const QUERY_GROUPS = ["none", "board", "state", "due"] as const;
 export type QueryGroup = typeof QUERY_GROUPS[number];

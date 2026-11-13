@@ -10,7 +10,7 @@
 //
 // Filters are the one task grammar (shared/taskQuery.ts) as a canonical `q=`; the presentation keys
 // are `layout`, `group`, and `sort`. Decoding never throws: bad values fall back to the default.
-import { decodeFilterParams, encodeFilterParams, format, parse, type FilterTerm, type TaskQuery } from "../../../shared/taskQuery";
+import { decodeFilterParams, encodeFilterParams, format, parse, QUERY_SORTS, type FilterTerm, type TaskQuery } from "../../../shared/taskQuery";
 import { isLaneMode, type LaneMode } from "../../../shared/taskLanes";
 
 export const HOME_LAYOUTS = ["list", "table", "board"] as const;
@@ -18,7 +18,8 @@ export type HomeLayout = typeof HOME_LAYOUTS[number];
 /** `board`, `state`, and `due` group on the server; `assignee` and `tag` group the loaded cards. */
 export const HOME_GROUPS = ["none", "board", "state", "due", "assignee", "tag"] as const;
 export type HomeGroup = typeof HOME_GROUPS[number];
-export const HOME_SORTS = ["due", "updated", "created", "title", "board"] as const;
+/** The server's sorts (shared/taskQuery.ts), so a saved view sorted by start opens as saved. */
+export const HOME_SORTS = QUERY_SORTS;
 export type HomeSort = typeof HOME_SORTS[number];
 
 /**
