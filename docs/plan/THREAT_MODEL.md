@@ -640,6 +640,13 @@ Plan: `docs/plan/WAVES_45-48_REPORTS.md` (D410–D422). Reports run SQL that peo
 | T512 | **Undo replays another person's later delete** | Tickets are bound to the deleter, single use, 10 minutes; a key clash refuses (409). | Required (built) |
 | T513 | **Embeds reveal titles** | Embed lines always carry the neutral kind word (`shared/embeds.ts` `neutralizeEmbeds`). | Required (built) |
 | T514 | **CSV formula injection** | `csvCell` prefixes `'` to cells starting with `= + - @`, tab, or CR. | Required (built) |
+| T550 | **Participants read others' answers when they should not** | Participants read by default (D938); `private_answers` limits every answer surface (round, feed, search, datasets, comments on an answer, reactions) to the author and managers; tests cover round, feed. | Required (built) |
+| T551 | **MCP `answer_checkin` impersonation** | Answers only as the key's owner, only rounds they take part in; another person's round is NOT_FOUND; agents propose (`checkin_answer`) for the person to approve. | Required (built) |
+| T552 | **Schedule storms** | One drive schedule per standup handles every participant and zone in one handler run (D939). | Required (built) |
+| T553 | **Small-n deanonymization of pulses** | No user link on anonymous responses (keyed hash only), no times, no comments or reactions, results from three answers on, dataset rows only for rounds with three answers or more. | Required (built) |
+| T554 | **Blockers flag cards the author cannot edit** | The flag needs edit on the board and a writing role; otherwise only the link; card readers only (an unreadable ref resolves to nothing). | Required (built) |
+| T555 | **Blocker notifications leak the standup** | Assignees get "KAN-12 was named as a blocker in a standup" with the card's link, never the standup's name or text. | Required (built) |
+| T556 | **Guests write beyond answering** | The module's read-only writes are only answer, skip, own zone and pause, own summaries; handlers check participation; guests cannot comment or react (role cap). | Required (built) |
 
 ### Goals (lane GOALS, migrations 096–097)
 

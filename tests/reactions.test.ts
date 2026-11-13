@@ -35,7 +35,7 @@ describe("reactions: the curated set and the registry", () => {
     expect(new Set(REACTIONS.map((reaction) => reaction.glyph)).size).toBe(12);
     expect(isReactionKey("thumbs_up")).toBe(true);
     for (const value of ["👍", "Thumbs_up", "toString", "__proto__", "", null, 1]) expect(isReactionKey(value)).toBe(false);
-    expect(reactionTargetKinds()).toEqual(["card_comment"]);
+    expect(reactionTargetKinds()).toEqual(["card_comment", "checkin_answer"]); // checkin_answer: Standups answers (D941)
     expect(reactionTarget("message")).toBeNull();
     expect(() => registerReactionTarget({ kind: "card_comment", readable: () => null, writable: () => false })).toThrow();
     expect(() => registerReactionTarget({ kind: "Bad-Kind", readable: () => null, writable: () => false })).toThrow();

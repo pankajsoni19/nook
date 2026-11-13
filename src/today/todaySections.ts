@@ -139,7 +139,14 @@ export const DEFAULT_SECTION_ORDER = Object.keys(TODAY_SECTIONS);
  * provider of the same name (registerTodayProvider) supplies the items. Re-registering replaces it.
  */
 export function registerTodayRenderer(name: string, def: TodaySectionDef) {
-  if (!TODAY_SECTIONS[name]) DEFAULT_SECTION_ORDER.push(name);
+  if (!TODAY_SECTIONS[name]) {
+    // After the last section of its group (as documented), so the order stays group order.
+    const groupIndex = (section: string) => TODAY_GROUPS.findIndex((group) => group.id === TODAY_SECTIONS[section]?.group);
+    const mine = TODAY_GROUPS.findIndex((group) => group.id === def.group);
+    const at = DEFAULT_SECTION_ORDER.findIndex((section) => groupIndex(section) > mine);
+    if (at < 0) DEFAULT_SECTION_ORDER.push(name);
+    else DEFAULT_SECTION_ORDER.splice(at, 0, name);
+  }
   TODAY_SECTIONS[name] = def;
 }
 
