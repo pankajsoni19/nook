@@ -536,5 +536,9 @@ export function registerProposalKind(kind: WorkspaceProposalKind, def: KindDef &
   const { tool: toolName, ...rest } = def;
   PROPOSAL_KIND_DEFS[kind] = rest;
   KIND_TOOL[kind] = toolName;
+  return () => {
+    delete (PROPOSAL_KIND_DEFS as Partial<Record<ProposalKind, KindDef>>)[kind];
+    delete (KIND_TOOL as Partial<Record<string, string>>)[kind];
+  };
 }
 

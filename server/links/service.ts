@@ -65,11 +65,11 @@ export function refFrom(input: { kind?: unknown; id?: unknown; ref?: unknown }, 
     if (!resolved) throw notFound();
     return resolved.ref;
   }
-  if (!isWorkKind(input.kind) || typeof input.id !== "string" || input.id.length > 64 || !workKindAdapter(input.kind)) throw notFound();
-  const adapter = workKindAdapter(input.kind)!;
-  const id = /^[0-9a-f-]{36}$/i.test(input.id) ? input.id.toLowerCase() : adapter.lookup?.(parseWorkRef(`${input.kind}:${input.id}`) ?? { kind: input.kind, ref: input.id, by: "id" }) ?? null;
+  const adapter = typeof input.kind === "string" ? workKindAdapter(input.kind) : null;
+  if (!adapter || typeof input.id !== "string" || input.id.length > 64) throw notFound();
+  const id = /^[0-9a-f-]{36}$/i.test(input.id) ? input.id.toLowerCase() : adapter.lookup?.(parseWorkRef(`${adapter.kind}:${input.id}`) ?? { kind: adapter.kind, ref: input.id, by: "id" }) ?? null;
   if (!id) throw notFound();
-  return { kind: input.kind, id };
+  return { kind: adapter.kind, id };
 }
 
 type Via = "web" | "mcp" | "rest" | "agent" | "proposal" | "system" | "public";

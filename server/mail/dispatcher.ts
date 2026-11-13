@@ -2,11 +2,10 @@ import { config } from "../config";
 import { db } from "../db";
 import { mailEnabled, sendMail } from "../mail";
 import { suppressionOf, sweepSoftBounces } from "./suppression";
-import { addressHash } from "../mail";
 import { appLink, paths } from "./links";
 import { prefsAllow, quietHoursEnd, readEmailPrefs } from "./prefs";
 import { isTemplateName, registeredMailTemplate, renderTemplate, TEMPLATES, type RegisteredMailTemplate, type TemplateName } from "./registry";
-import { externalStopToken } from "../notify/external";
+import { externalMailStopped, externalStopToken } from "../notify/external";
 import { resolvePayload, type Recipient } from "./resolve";
 import type { MailCategory, MailClass } from "./templates/types";
 import { createUnsubscribeToken } from "./unsubscribe";
@@ -201,7 +200,7 @@ async function handleRegistered(row: Row, template: RegisteredMailTemplate, nowM
       return "suppressed";
     }
     const item = payload._item as { kind?: string; id?: string } | undefined;
-    if (item?.kind && item.id && externalStopped(address, item.kind, item.id)) return skip(row, "stopped", nowMs);
+    if (item?.kind && item.id && externalMailStopped(address, item.kind, item.id)) return skip(row, "stopped", nowMs);
     const hold = capHold(row, nowMs);
     if (hold !== null) {
       requeue(row.id, Math.max(hold, nowMs + 1000));
@@ -271,10 +270,6 @@ function finishOutcome(row: Row, outcome: Awaited<ReturnType<typeof sendMail>>, 
   }
   requeue(row.id, nowMs + backoff(row.attempts), { attempt: true, errorCode: outcome.code });
   return "retried";
-}
-
-function externalStopped(address: string, kind: string, id: string) {
-  return Boolean(db.query("SELECT 1 FROM external_mail_stops WHERE address_hash = ? AND ((item_kind = ? AND item_id = ?) OR item_kind = '*')").get(addressHash(address), kind, id));
 }
 
 function skip(row: Row, reason: string, nowMs: number): keyof TickCounts {

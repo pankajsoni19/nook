@@ -117,11 +117,11 @@ export const schedulesPublicMigration: Migration = {
       CREATE INDEX IF NOT EXISTS public_verifications_expiry ON public_verifications(expires_at);
 
       -- "Stop emails about this booking" (§B.7, T508): an outside address that asked to hear nothing more
-      -- about one item (or, with item_kind '*', about anything); checked before every external mail.
+      -- about one item; item_id is the item's keyed hash (or '*' for anything), never the id itself.
       CREATE TABLE IF NOT EXISTS external_mail_stops (
         address_hash TEXT NOT NULL CHECK (length(address_hash) = 64),
-        item_kind TEXT NOT NULL CHECK (length(item_kind) BETWEEN 1 AND 32),
-        item_id TEXT NOT NULL CHECK (length(item_id) BETWEEN 1 AND 64),
+        item_kind TEXT NOT NULL CHECK (item_kind IN ('item')),
+        item_id TEXT NOT NULL CHECK (item_id = '*' OR length(item_id) = 64),
         created_at TEXT NOT NULL,
         PRIMARY KEY (address_hash, item_kind, item_id)
       ) STRICT, WITHOUT ROWID;

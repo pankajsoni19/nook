@@ -41,7 +41,7 @@ import { registerVaultTools } from "./vault/mcpTools";
 import { attachmentTools } from "./attachments/mcpTools";
 import { isSystemFolder, isSystemFolderError, SYSTEM_FOLDER_MESSAGE } from "./attachments/service";
 import { elapsed, logger, shortId } from "./log";
-import { onToolRegistered, registeredMcpResources, registeredToolSpecs, reserveToolNames } from "./mcpRegistry";
+import { onToolRegistered, onToolUnregistered, registeredMcpResources, registeredToolSpecs, reserveToolNames } from "./mcpRegistry";
 import { ResourceTemplate } from "@modelcontextprotocol/server";
 import { toolAnnotations } from "./mcpToolKit";
 
@@ -584,6 +584,10 @@ export const mcpToolSpecs: McpToolSpec[] = [
 reserveToolNames(mcpToolSpecs.map((spec) => spec.name));
 mcpToolSpecs.push(...registeredToolSpecs());
 onToolRegistered((spec) => { mcpToolSpecs.push(spec); });
+onToolUnregistered((name) => {
+  const index = mcpToolSpecs.findIndex((spec) => spec.name === name);
+  if (index >= 0) mcpToolSpecs.splice(index, 1);
+});
 
 /** Whether a key holding `scopes` may see and call `spec`: any one of its scopes and all of alsoRequires (D172). */
 export const toolAllowed = (spec: McpToolSpec, scopes: McpKeyContext["scopes"]) => hasAnyScope(scopes, spec.scopes) && hasAllScopes(scopes, spec.alsoRequires);

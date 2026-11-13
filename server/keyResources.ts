@@ -101,6 +101,7 @@ const registeredLookups = new Map<WorkspaceItemKind, (id: string) => Anchor[] | 
 export function registerItemKind(kind: WorkspaceItemKind, anchors: (id: string) => Anchor[] | null) {
   if (registeredLookups.has(kind)) throw new Error(`Item kind ${kind} is already registered`);
   registeredLookups.set(kind, anchors);
+  return () => { if (registeredLookups.get(kind) === anchors) registeredLookups.delete(kind); };
 }
 
 /** A lookup by SQL that selects the container id (`SELECT form_id AS anchor FROM responses WHERE id = ?`). */

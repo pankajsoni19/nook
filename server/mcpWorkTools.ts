@@ -1,6 +1,6 @@
 import * as z from "zod/v4";
 import { defineTool, McpToolError, notFound, type McpKeyContext, type McpToolSpec } from "./mcpToolKit";
-import { hasScope, MCP_READ_SCOPES, type McpScope } from "./mcpScopes";
+import { hasScope, type McpScope } from "./mcpScopes";
 import { anchorsOf, keyReach, reachCovers } from "./keyResources";
 import { workKindAdapter } from "./links/adapters";
 import { createLink, deleteLink, LinkError, linksOf, refFrom, resolveRef } from "./links/service";
@@ -35,8 +35,13 @@ import { WORKSPACE_SCOPES } from "../shared/workspaceModules";
  * and datasets cover whole modules, so they are hidden from keys limited to chosen items (`global`).
  */
 
-const WRITE_SCOPES: readonly McpScope[] = ["notes:write-draft", "files:write", "tasks:write", "calendar:write", "collections:write", "whiteboards:write", "reports:write", ...WORKSPACE_SCOPES.filter((scope) => scope.endsWith(":write"))];
-const READ_SCOPES: readonly McpScope[] = MCP_READ_SCOPES.filter((scope) => !["today:read", "team:read", "inbox:read", "agents:read"].includes(scope));
+/**
+ * The tools are offered to keys holding a workspace module scope (D814 as built): a key of the older
+ * modules only keeps exactly the tools it had. Each call still checks the named item's own module scope
+ * (a card needs tasks:read too), so a forms key cannot read a card through resolve_ref.
+ */
+const WRITE_SCOPES: readonly McpScope[] = WORKSPACE_SCOPES.filter((scope) => scope.endsWith(":write"));
+const READ_SCOPES: readonly McpScope[] = WORKSPACE_SCOPES.filter((scope) => scope.endsWith(":read"));
 
 /** The item if the key may `need` it (its module's scope over the item's anchors) and the person can read it; else NOT_FOUND. */
 function keyItem(key: McpKeyContext, ref: WorkRef, need: "read" | "write") {

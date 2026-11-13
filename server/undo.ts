@@ -30,6 +30,7 @@ const kinds = new Map<string, { restored?: (rows: CapturedRow[], actorId: string
 export function registerUndoKind(kind: string, def: { restored?: (rows: CapturedRow[], actorId: string) => void }) {
   if (kinds.has(kind)) throw new Error(`Undo kind ${kind} is already registered`);
   kinds.set(kind, def);
+  return () => { kinds.delete(kind); };
 }
 
 const knownTable = (table: string) => /^[a-z_]+$/.test(table) && db.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table) !== null;

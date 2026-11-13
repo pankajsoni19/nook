@@ -38,17 +38,23 @@ export function onToolRegistered(listener: (spec: McpToolSpec) => void) {
   listeners.push(listener);
 }
 
+const removeListeners: Array<(name: string) => void> = [];
+/** Called when a registered tool is removed (tests only). */
+export function onToolUnregistered(listener: (name: string) => void) {
+  removeListeners.push(listener);
+}
+
 /** Test hook: removes registered tools by name (the throwaway test module unregisters itself). */
-export function unregisterMcpToolsForTests(names: readonly string[], sink?: McpToolSpec[]) {
+export function unregisterMcpToolsForTests(names: readonly string[]) {
   for (const name of names) {
     const index = registered.findIndex((spec) => spec.name === name);
-    if (index >= 0) registered.splice(index, 1);
-    if (sink) {
-      const at = sink.findIndex((spec) => spec.name === name);
-      if (at >= 0) sink.splice(at, 1);
-    }
+    if (index < 0) continue;
+    registered.splice(index, 1);
+    for (const listener of removeListeners) listener(name);
   }
 }
+
+export const unregisterMcpResourceForTests = (kind: string) => resources.delete(kind);
 
 // ---------------------------------------------------------------- resources (§B.15)
 

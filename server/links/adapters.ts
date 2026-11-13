@@ -8,7 +8,7 @@ import { readableReport, reportLevel } from "../reports/access";
 import { boardPath, cardPath, collectionPath, collectionRowPath, documentPath, notePath, reportPath, sprintsPath, whiteboardPath } from "../friendlyPaths";
 import { cardIdForKey } from "../tasks/keys";
 import { cardKey } from "../../shared/boardKeys";
-import { WORK_KIND_ICONS, type ParsedWorkRef, type WorkKind, type WorkSummary } from "../../shared/workRefs";
+import { WORK_KIND_ICONS, WORK_KINDS as WORK_KIND_LIST, type ParsedWorkRef, type WorkKind, type WorkSummary } from "../../shared/workRefs";
 import type { ItemLevel } from "../access/levels";
 import type { ItemKind } from "../keyResources";
 import type { McpScope } from "../mcpScopes";
@@ -38,6 +38,9 @@ export type WorkKindAdapter = {
 const adapters = new Map<WorkKind, WorkKindAdapter>();
 
 export function registerWorkKind(adapter: WorkKindAdapter) {
+  // Kinds are the shared list (shared/workRefs.ts); the throwaway module of the tests uses `test_*` words.
+  const testKind = /^test_[a-z]+$/.test(adapter.kind) && process.env.NODE_ENV === "test";
+  if (!(WORK_KIND_LIST as readonly string[]).includes(adapter.kind) && !testKind) throw new Error(`Unknown work kind ${adapter.kind}`);
   if (adapters.has(adapter.kind)) throw new Error(`Work kind ${adapter.kind} is already registered`);
   adapters.set(adapter.kind, adapter);
   return () => { if (adapters.get(adapter.kind) === adapter) adapters.delete(adapter.kind); };

@@ -115,7 +115,9 @@ const registered: Array<AllowedWrite & { regex: RegExp }> = [];
 
 export function registerReadOnlyWrite(entry: AllowedWrite) {
   if (!entry.path.startsWith("/api/") || entry.path.startsWith("/api/public/")) throw new Error(`Invalid read-only write ${entry.path}`);
-  registered.push({ ...entry, regex: pathRegex(entry.path) });
+  const compiledEntry = { ...entry, regex: pathRegex(entry.path) };
+  registered.push(compiledEntry);
+  return () => { const index = registered.indexOf(compiledEntry); if (index >= 0) registered.splice(index, 1); };
 }
 
 export const registeredReadOnlyWrites = (): readonly AllowedWrite[] => registered.map(({ regex: _regex, ...entry }) => entry);

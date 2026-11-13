@@ -60,8 +60,6 @@ function setPolicies(actorId: string, patch: Partial<Policies>) {
 
 // Uploads everywhere U0 (D402): the generic attachment reads come with every host module's read scope.
 const NOTES_READ = ["list_attachments", "list_folders", "list_notes", "read_attachment_text", "read_note", "search_notes"];
-// Workspace modules foundation (W1-CORE, §B.15): the cross-module read tools any module read scope offers; each checks the named item's own module scope.
-const CROSS_MODULE_READ = ["get_item_activity", "list_datasets", "list_item_comments", "list_links", "query_dataset", "resolve_ref", "search_workspace"];
 
 describe("Nook key rights", () => {
   test("tools/list follows grants: notes:read plus tasks:write over all boards shows exactly those tools", async () => {
@@ -154,7 +152,7 @@ describe("Nook key rights", () => {
     expect((await rpc(forever.token, "tools/list")).body).toMatchObject({ code: "KEY_POLICY" });
     setPolicies(admin.userId, { keyModulesByRole: { ...DEFAULT_POLICIES.keyModulesByRole, member: ["notes"] } });
     const names = await toolNames(forever.token);
-    expect(names).toEqual([...NOTES_READ, ...CROSS_MODULE_READ].sort());
+    expect(names).toEqual(NOTES_READ);
     expect((await call(forever.id, "list_boards")).value.code).toBe("SCOPE_REQUIRED");
   });
 

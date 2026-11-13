@@ -23,11 +23,19 @@ export function parseDuration(text: string, options: { bare?: BareUnit } = {}): 
   if (colon) seconds = Number(colon[1]) * 3600 + Number(colon[2]) * 60 + Number(colon[3] ?? 0);
   else if (/^\d+(\.\d+)?$/.test(value)) seconds = Math.round(Number(value) * (options.bare === "hours" ? 3600 : 60));
   else {
-    const units = /^(?:(\d+(?:\.\d+)?)\s*(?:h|hr|hrs|hour|hours))?\s*(?:(\d+(?:\.\d+)?)\s*(?:m|min|mins|minute|minutes)?)?\s*(?:(\d+)\s*(?:s|sec|secs|second|seconds))?$/.exec(value);
-    if (!units || (!units[1] && !units[2] && !units[3])) return null;
-    // "1h30" (no unit after the minutes) is fine; "30" alone was handled above.
-    if (!units[1] && units[2] && !/m/.test(value) && !units[3]) return null;
-    seconds = Math.round(Number(units[1] ?? 0) * 3600 + Number(units[2] ?? 0) * 60 + Number(units[3] ?? 0));
+    // Number-and-unit parts, largest first; a bare number right after hours is minutes ("1h30").
+    const parts = [...value.matchAll(/(\d+(?:\.\d+)?)\s*([a-z]*)\s*/g)];
+    if (!parts.length || parts.map((part) => part[0]).join("") !== value) return null;
+    const UNIT: Record<string, number> = { h: 3600, hr: 3600, hrs: 3600, hour: 3600, hours: 3600, m: 60, min: 60, mins: 60, minute: 60, minutes: 60, s: 1, sec: 1, secs: 1, second: 1, seconds: 1 };
+    let total = 0;
+    let last = Infinity;
+    for (const [index, part] of parts.entries()) {
+      const unit = part[2] ? UNIT[part[2]] : index === parts.length - 1 && last === 3600 ? 60 : undefined;
+      if (unit === undefined || unit >= last) return null;
+      total += Number(part[1]) * unit;
+      last = unit;
+    }
+    seconds = Math.round(total);
   }
   if (seconds === null || !Number.isFinite(seconds) || seconds < 0 || seconds > MAX_DURATION_SECONDS) return null;
   return seconds;

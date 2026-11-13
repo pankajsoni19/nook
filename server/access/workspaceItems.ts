@@ -5,7 +5,7 @@ import type { AppEnv } from "../auth";
 import { audit, db, now } from "../db";
 import { avatarUrlFor } from "../avatars";
 import { readPolicies } from "../team/policies";
-import type { Role } from "../team/roles";
+import { audienceAllUsersFor, type Role } from "../team/roles";
 import { parseJson, uuid } from "../validation";
 import { recordAccessEvent } from "./events";
 import { capByRole, isLevel, LEVEL_RANK, LEVELS, maxLevel, type ItemLevel, type Level } from "./levels";
@@ -47,6 +47,7 @@ export function registerAccessContainer(container: AccessContainer) {
   if (!(WORKSPACE_CONTAINER_KINDS as readonly string[]).includes(container.kind)) throw new Error(`Unknown container kind ${container.kind}`);
   if (!/^[a-z_]+$/.test(container.table) || !/^[a-z_]+$/.test(container.nameColumn)) throw new Error("Invalid container table");
   containers.set(container.kind, container);
+  return () => { if (containers.get(container.kind) === container) containers.delete(container.kind); };
 }
 
 export const accessContainer = (kind: string): AccessContainer | null => containers.get(kind as WorkspaceContainerKind) ?? null;
@@ -109,10 +110,9 @@ export function readableContainerSql(kind: WorkspaceContainerKind, alias: string
   const user = options.userParam ?? "$userId";
   const rank = LEVEL_RANK[options.minLevel ?? "view"];
   const writer = `(SELECT u_w.role IN ('admin','member') FROM users u_w WHERE u_w.id = ${user} AND u_w.disabled_at IS NULL) = 1`;
-  const person = `(SELECT u_a.role <> 'guest' AND u_a.kind = 'person' FROM users u_a WHERE u_a.id = ${user} AND u_a.disabled_at IS NULL) = 1`;
   const capped = rank > 1 ? ` AND ${writer}` : ` AND EXISTS (SELECT 1 FROM users u_l WHERE u_l.id = ${user} AND u_l.disabled_at IS NULL)`;
   return `(${alias}.deleted_at IS NULL AND (${alias}.owner_id = ${user}
-    OR (${alias}.visibility = 'all_users' AND ${levelSql(`${alias}.share_role`)} >= ${rank} AND ${person}${capped})
+    OR (${alias}.visibility = 'all_users' AND ${audienceAllUsersFor(user)} AND ${levelSql(`${alias}.share_role`)} >= ${rank}${capped})
     OR (${alias}.visibility = 'selected'${capped} AND (
       EXISTS (SELECT 1 FROM item_members im WHERE im.item_kind = '${kind}' AND im.item_id = ${alias}.id AND im.user_id = ${user} AND ${levelSql("im.level")} >= ${rank})
       OR EXISTS (SELECT 1 FROM item_group_grants ig JOIN group_members igm ON igm.group_id = ig.group_id

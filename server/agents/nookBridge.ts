@@ -113,6 +113,10 @@ export function registerAgentTools(classes: { allowed?: readonly string[]; never
     if (NOOK_AGENT_TOOLS.has(name)) throw new Error(`Tool ${name} is classified as offered`);
     (NOOK_NEVER_TOOLS as Set<string>).add(name);
   }
+  return () => {
+    for (const name of classes.allowed ?? []) (NOOK_AGENT_TOOLS as Set<string>).delete(name);
+    for (const name of classes.never ?? []) (NOOK_NEVER_TOOLS as Set<string>).delete(name);
+  };
 }
 
 export const isBinTool = (name: string) => name.startsWith("bin_") || name.startsWith("restore_");

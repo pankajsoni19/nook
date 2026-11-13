@@ -3,7 +3,7 @@ import { addressHash, mailEnabled, recipientHash } from "../mail";
 import { registeredMailTemplate } from "../mail/registry";
 import { suppressionOf } from "../mail/suppression";
 import { isEmail, normalizeEmail } from "../../shared/questions";
-import { seal, unseal } from "../public/secret";
+import { keyedHash, readSignedToken, signedToken } from "../public/secret";
 
 /**
  * Mail to people outside the workspace (docs/plan/WORKSPACE_MODULES.md §B.7, T508): bookers and
@@ -42,7 +42,7 @@ export function enqueueExternalMail(input: ExternalMailInput): string | null {
   if (!/^[a-z_]{1,20}$/.test(input.itemRef.kind) || !/^[A-Za-z0-9-]{1,40}$/.test(input.itemRef.id)) throw new Error("Invalid item reference");
   const nowMs = input.nowMs ?? Date.now();
   if (suppressionOf(to, nowMs)) return null;
-  if (db.query("SELECT 1 FROM external_mail_stops WHERE address_hash = ? AND ((item_kind = ? AND item_id = ?) OR item_kind = '*')").get(addressHash(to), input.itemRef.kind, input.itemRef.id)) return null;
+  if (externalMailStopped(to, input.itemRef.kind, input.itemRef.id)) return null;
   const hash = recipientHash(to);
   const since = (ms: number) => new Date(nowMs - ms).toISOString();
   const count = (sql: string, ...params: string[]) => (db.query(sql).get(...params) as { count: number }).count;
@@ -61,18 +61,22 @@ export function enqueueExternalMail(input: ExternalMailInput): string | null {
 }
 
 const STOP = "external-mail-stop";
+/** The keyed hash of an item for the stop list: an internal id never appears in a mail or a stop link. */
+const itemHash = (kind: string, id: string) => keyedHash("mail-item", `${kind}:${id}`);
 
-/** The sealed token of a "stop emails about this" link: the address hash and the item, never readable from outside. */
-export const externalStopToken = (address: string, kind: string, id: string) => seal(STOP, JSON.stringify([addressHash(address), kind, id]));
+/** Whether the address asked to hear nothing more about the item (or anything). */
+export function externalMailStopped(address: string, kind: string, id: string) {
+  return Boolean(db.query("SELECT 1 FROM external_mail_stops WHERE address_hash = ? AND item_kind = 'item' AND item_id IN (?, '*')").get(addressHash(address), itemHash(kind, id)));
+}
+
+/** The signed token of a "stop emails about this" link: the address hash and the item's keyed hash only. */
+export const externalStopToken = (address: string, kind: string, id: string) => signedToken(STOP, `${addressHash(address)}.${itemHash(kind, id)}`);
 
 /** Records a stop from its token; true when the token was ours. Idempotent. */
 export function applyExternalStop(token: string, nowMs = Date.now()) {
-  const text = unseal(STOP, token);
-  if (!text) return false;
-  let parsed: unknown;
-  try { parsed = JSON.parse(text); } catch { return false; }
-  if (!Array.isArray(parsed) || parsed.length !== 3 || !parsed.every((part) => typeof part === "string")) return false;
-  const [hash, kind, id] = parsed as [string, string, string];
-  db.query("INSERT OR IGNORE INTO external_mail_stops (address_hash, item_kind, item_id, created_at) VALUES (?, ?, ?, ?)").run(hash, kind, id, new Date(nowMs).toISOString());
+  const text = readSignedToken(STOP, token);
+  const match = text ? /^([0-9a-f]{64})\.([0-9a-f]{64})$/.exec(text) : null;
+  if (!match) return false;
+  db.query("INSERT OR IGNORE INTO external_mail_stops (address_hash, item_kind, item_id, created_at) VALUES (?, 'item', ?, ?)").run(match[1]!, match[2]!, new Date(nowMs).toISOString());
   return true;
 }

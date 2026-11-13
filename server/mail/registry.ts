@@ -102,6 +102,7 @@ export function registerMailTemplate<D>(name: string, def: RegisteredMailTemplat
   if (isTemplateName(name) || registeredTemplates.has(name)) throw new Error(`Mail template ${name} is already registered`);
   if (!def.resolve && !def.resolveExternal) throw new Error(`Mail template ${name} needs resolve or resolveExternal`);
   registeredTemplates.set(name, def as RegisteredMailTemplate);
+  return () => { registeredTemplates.delete(name); };
 }
 
 export const registeredMailTemplate = (name: string): RegisteredMailTemplate | null => registeredTemplates.get(name) ?? null;

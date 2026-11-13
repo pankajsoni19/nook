@@ -4,7 +4,7 @@ import type { AppEnv } from "../auth";
 import { parseJson } from "../validation";
 import { createLink, deleteLink, LinkError, linksOf, refFrom, resolveRef, resolveRefs } from "./service";
 import { workKindAdapter } from "./adapters";
-import { isWorkKind, LINK_RELATIONS, workRefKey } from "../../shared/workRefs";
+import { LINK_RELATIONS, workRefKey } from "../../shared/workRefs";
 
 /**
  * Work link routes (docs/plan/WORKSPACE_MODULES.md §D.0 HTTP):
@@ -28,7 +28,7 @@ export function registerWorkLinkRoutes(app: Hono<AppEnv>) {
   app.get("/api/links", (c) => {
     const kind = c.req.query("kind");
     const id = c.req.query("id");
-    if (!isWorkKind(kind) || !id || !workKindAdapter(kind)) return c.json({ error: "Not found", code: "NOT_FOUND" }, 404);
+    if (!kind || !id || !workKindAdapter(kind)) return c.json({ error: "Not found", code: "NOT_FOUND" }, 404);
     const viewer = { userId: c.get("user").id };
     try {
       return c.json({ links: linksOf(refFrom({ kind, id }, viewer), viewer) });
@@ -62,7 +62,7 @@ export function registerWorkLinkRoutes(app: Hono<AppEnv>) {
   });
   app.post("/api/refs/summaries", async (c) => {
     const body = await parseJson(c.req.raw, z.object({ refs: z.array(z.object({ kind: z.string().max(32), id: z.string().max(64) }).strict()).max(200) }).strict());
-    const refs = body.refs.filter((ref) => isWorkKind(ref.kind)).map((ref) => ({ kind: ref.kind as never, id: ref.id.toLowerCase() }));
+    const refs = body.refs.filter((ref) => workKindAdapter(ref.kind) !== null).map((ref) => ({ kind: ref.kind as never, id: ref.id.toLowerCase() }));
     const summaries = resolveRefs(refs, { userId: c.get("user").id });
     return c.json({ summaries: refs.map((ref) => summaries.get(workRefKey(ref)) ?? { kind: ref.kind, hidden: true }) });
   });
