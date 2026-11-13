@@ -53,7 +53,11 @@ export const boardKeysMigration: Migration = {
       UPDATE cards SET number = (SELECT x.rn FROM (
           SELECT id, ROW_NUMBER() OVER (PARTITION BY board_id ORDER BY created_at, id) AS rn FROM cards) x WHERE x.id = cards.id)
         WHERE number IS NULL;
-      UPDATE boards SET next_card_number = COALESCE((SELECT MAX(k.number) FROM cards k WHERE k.board_id = boards.id), 0) + 1;
+      -- Never lowered: a re-run after a card was purged or moved away must not hand its number out again,
+      -- nor a number a moved card left behind as an alias (D713, D715).
+      UPDATE boards SET next_card_number = MAX(next_card_number,
+        COALESCE((SELECT MAX(k.number) FROM cards k WHERE k.board_id = boards.id), 0) + 1,
+        COALESCE((SELECT MAX(a.number) FROM card_key_aliases a WHERE a.board_id = boards.id), 0) + 1);
       CREATE UNIQUE INDEX IF NOT EXISTS idx_boards_code ON boards(code COLLATE NOCASE);
       CREATE UNIQUE INDEX IF NOT EXISTS idx_cards_board_number ON cards(board_id, number);
 

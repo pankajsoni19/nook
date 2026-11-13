@@ -95,6 +95,10 @@ describe("migration 079", () => {
     expect(() => sqlite.query("UPDATE boards SET code = 'myt' WHERE id = 'b3'").run()).toThrow();
     expect(() => sqlite.query("UPDATE boards SET code = 'ROAD-1' WHERE id = 'b3'").run()).toThrow();
     expect(() => sqlite.query("UPDATE cards SET number = 1 WHERE id = 'k3'").run()).toThrow();
+    // A re-run never lowers a board's counter: the purged k4's number is not handed out again.
+    sqlite.query("DELETE FROM cards WHERE id = 'k4'").run();
+    sqlite.transaction(() => boardKeysMigration.up(sqlite))();
+    expect(sqlite.query("SELECT next_card_number FROM boards WHERE id = 'b1'").get()).toEqual({ next_card_number: 5 });
   });
 });
 
