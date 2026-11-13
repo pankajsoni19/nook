@@ -640,6 +640,16 @@ Plan: `docs/plan/WAVES_45-48_REPORTS.md` (D410–D422). Reports run SQL that peo
 | T512 | **Undo replays another person's later delete** | Tickets are bound to the deleter, single use, 10 minutes; a key clash refuses (409). | Required (built) |
 | T513 | **Embeds reveal titles** | Embed lines always carry the neutral kind word (`shared/embeds.ts` `neutralizeEmbeds`). | Required (built) |
 | T514 | **CSV formula injection** | `csvCell` prefixes `'` to cells starting with `= + - @`, tab, or CR. | Required (built) |
+| T560 | **Contact details reach people without the book** (lane CRM) | Every Contacts read joins the reader's books (`readableContainerSql('contact_book')`, system books excluded) before LIMIT; search joins the live rows and the books; chips redact (T503); notifications go only to readers of the book (`notifyReaders`). `tests/crm.test.ts` (other user 404, viewer read-only). | Required (built) |
+| T561 | **CSV import abuse or formula injection** | CSV only, 5 MiB, 10,000 rows, 60 columns, the Collections parser's limits; export cells neutralized (`'=`), import cells restored. `tests/crm.test.ts`. | Required (built) |
+| T562 | **Merge across books** | Refused (`OTHER_BOOK`); both records must be readable and the target's book editable. | Required (built) |
+| T563 | **Upserts overwrite people's edits** | Edits mark fields (`markContactEdited`); upserts fill empty fields only (D806). Tested. | Required (built) |
+| T564 | **Mass export by a compromised session** | 30 exports a day per person, ≤ 10,000 rows, `crm.export` audited with counts only. | Required (built) |
+| T565 | **vCard / CSV header injection** | vCard values escape `\ , ;` and drop line breaks; filenames are slugged. | Required (built) |
+| T566 | **Agents or keys pull channels in bulk** | List tools omit emails and phones; only `get_contact` returns them; chosen-book keys narrow lists before LIMIT and item tools anchor on the book. Agents get read tools only. | Required (built) |
+| T567 | **A merge rewrites another lane's table** | Only fixed `(table, column)` pairs, only when the table and column exist. | Required (built) |
+| T568 | **Import jobs keep personal data** | The CSV stays only on a preview job (deleted after a day) and is cleared on commit; undo data is the changed rows only, cleared on undo. | Accepted (24 h undo window) |
+| T569 | **Dataset alias collisions return 500s** | Dimension names never equal a joined column; a test groups by every dimension. | Required (built) |
 
 ## Notes on shipped behaviour (v0.3.0–v0.4.0)
 

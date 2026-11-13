@@ -3044,3 +3044,36 @@ No migration. Wire types: `shared/backups.ts` (`BackupsView`, `BackupRun`, `Dril
   - Content → moved to the Bin with the draft file and `draft_revision`/`draft_checksum` **kept** (today this route deletes them). The response still returns `{ ok: true }`, plus `binned: true`, so the client can pick the right toast.
 - "Blank" means `current_version = 0` and the draft is absent or empty after `trim()` (DEVELOPMENT_PLAN §9.1).
 - Unchanged: every read endpoint continues to exclude `deleted_at IS NOT NULL`. So do all MCP tools.
+
+## Contacts (lane CRM, module `crm`, D960–D985)
+
+All JSON under `/api/crm`, behind the session, CSRF, and role write gates; errors `{ error, code, ...details }`; unreadable is 404 `NOT_FOUND`; `:id` takes a UUID or a short id.
+
+| Method | Path | Body / query | Returns |
+| --- | --- | --- | --- |
+| GET / POST | `/books` | `{ name, visibility? }` | `{ books }` / 201 `{ book }` (with a five-stage pipeline) |
+| GET / PATCH / DELETE | `/books/:id` | `{ name?, color?, settings?: { linkCompaniesByDomain, lifecycles, rottingDays, currency } }` | `{ book }`; DELETE moves it to the Bin (owner) |
+| PUT | `/books/:id/fields/:entity` | `{ fields: FieldInput[] }` (Collections engine + `person`, `contact`) | `{ book }` (managers) |
+| GET / POST | `/contacts` | `?book=&q=&list=&filter=<json>&sort=<json>&cursor=&limit=` / contact fields | `{ items, nextCursor }` / 201 `{ contact }`; 409 `EXISTS` with `contactId` |
+| GET | `/contacts/duplicates?book=` | — | `{ pairs: [{ a, b, reason }] }` |
+| GET / PATCH / DELETE | `/contacts/:id` | partial fields, `expectedRevision?` | `{ contact }` (detail: channels, deals, lists, duplicates); 409 `CONFLICT`; DELETE → Bin |
+| POST | `/contacts/:id/merge` | `{ intoId }` | `{ contact }`; 400 `OTHER_BOOK` |
+| GET | `/contacts/:id/vcard` | — | `text/vcard` |
+| GET / POST, GET / PATCH / DELETE, POST merge | `/companies[/:id][/merge]` | as contacts; 409 `EXISTS` with `companyId` on a taken domain | |
+| GET / POST | `/pipelines?book=` | `{ bookId, name, currency?, stages? }` | `{ pipelines }` / 201 `{ pipeline }` (managers) |
+| PATCH / PUT stages / DELETE | `/pipelines/:id`, `/pipelines/:id/stages` | `{ name?, currency?, stages?: [{ id?, name, kind, probability, rotDays?, color? }], moveDealsTo? }` | `{ pipeline }`; 409 `STAGE_IN_USE`, `PIPELINE_IN_USE`, `LAST_PIPELINE` |
+| GET | `/pipelines/:id/board?owner=me&q=` | — | `{ board: { pipeline, currency, columns: [{ stage, count, sum, weighted, deals ≤ 200 }], totals } }` |
+| GET / POST | `/deals` | `?book=&pipeline=&stage=&owner=&status=&company=&list=&q=&filter=&sort=&cursor=` / `{ bookId \| pipelineId, stageId \| stageName, title, value (minor units), currency?, expectedCloseOn?, ownerId?, companyId?, contactIds?, nextStep?, nextStepOn?, tags?, custom? }` | `{ items, nextCursor }` / 201 `{ deal }` |
+| GET / PATCH / DELETE | `/deals/:id` | partial fields, `stageId \| stageName`, `position` (index in the stage), `lostReason`, `expectedRevision?` | `{ deal }` |
+| GET / POST | `/interactions?subject=kind:id&book=&kind=&cursor=` | `{ kind, direction?, occurredAt?, durationS?, title?, body?, subjects: [{ kind, id }] }` | `{ items, nextCursor }` / 201 `{ interaction }` |
+| PATCH / DELETE | `/interactions/:id` | partial | `{ interaction }` / `{ undoTicket }` (`POST /api/undo/:ticket`) |
+| GET / POST / PATCH | `/followups[?subject=kind:id]`, `/followups/:id` | `{ subject, dueAt, note? }` / `{ done?, dueAt?, note? }` | the caller's follow-ups |
+| POST | `/tasks` | `{ subject, boardId, columnId, title, dueOn? }` | 201 `{ cardId, linkId }` |
+| GET | `/records/:kind/:id/timeline?cursor=` | — | `{ interactions, nextCursor, activity, links, followups }` |
+| CRUD | `/lists[/:id]`, POST `/lists/:id/members` | `{ bookId, name, entity }`, `{ add?, remove? }` | `{ lists }` / `{ list }` |
+| CRUD | `/views[/:id]` | `{ bookId, entity, name, kind?, config, shared? }` | `{ views }` / `{ view }` |
+| POST | `/import` | `{ bookId, entity: contact \| company, csv }` | 201 `{ preview: { jobId, header, mapping, total, creates, duplicates, duplicatesInFile, invalid, sample } }` |
+| POST | `/import/:jobId/preview`, `/commit`, `/undo` | `{ mapping }`, `{ duplicates: update \| skip, mapping? }` | `{ preview }`, `{ result }`, `{ deleted, restored }`; 409 `IMPORT_DONE`, `UNDO_EXPIRED` |
+| GET | `/export.csv?book=&entity=&q=&list=&filter=` | — | `text/csv`; 429 `RATE_LIMITED` past 30 a day |
+
+MCP (`crm:read` / `crm:write`; `bin_*` also `bin:write`): see D982. Datasets: `crm.contacts`, `crm.deals`, `crm.deal_stage_changes`, `crm.interactions`. Search scope `contacts`. Today section `crmFollowups`. Schedules `crm.followup`, `crm.rotting`. Progress sources `crm_won_value`, `crm_won_count`, `crm_pipeline_value`.

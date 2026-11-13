@@ -4,6 +4,8 @@ Release notes for Nook, newest first. Upgrade steps for each release are in [doc
 
 ## Unreleased
 
+**Contacts (new module)**: contact books shared like other containers; people and companies with custom fields (including team member and contact fields), dedupe by email and domain, duplicate finder and merge; deals on pipelines with stage probabilities, a drag-and-drop board with totals and weighted totals, rotting deals, won/lost reasons; a timeline of notes, calls, meetings, and emails with linked cards and comments; follow-up reminders and tasks; lists and saved views; CSV import with mapping, duplicate handling, and undo; CSV and vCard export; Insights (pipeline, win rate, stage conversion, activity); search, Today, goal progress sources, and 27 MCP tools.
+
 **Friendly, shareable URLs**
 
 - **Cards and boards**: the address bar shows `/tasks/KAN-1` for an open card (dialog or full page, `/tasks/KAN-1/full`) and `/tasks/KAN` for a board, keeping the board's view in the query when it is not the default. Old `/tasks/<id>/card/<id>` links, board ids, old card keys of moved cards, and a board's former code still open and turn into the current URL without an extra history entry.
