@@ -7,7 +7,7 @@
  * A query is a list of terms separated by spaces. Terms AND together; the
  * values of one term OR together; a leading `-` negates a term.
  *
- *   assignee:me state:todo,doing due:overdue,week
+ *   assignee:me state:todo,doing due:overdue,week start:<2026-12-01
  *   board:<uuid> -state:done tag:"Needs design" "invoice"
  *
  * - `key:value[,value…]` filters one field. Values may be quoted (`"a b"`, with
@@ -46,7 +46,7 @@ export const TASK_QUERY_LIMITS = {
 } as const;
 
 /** Keys in canonical order. */
-export const FILTER_KEYS = ["board", "state", "column", "assignee", "creator", "tag", "flag", "due", "sprint", "parent", "level", "has", "text"] as const;
+export const FILTER_KEYS = ["board", "state", "column", "assignee", "creator", "tag", "flag", "due", "start", "sprint", "parent", "level", "has", "text"] as const;
 export type FilterKey = typeof FILTER_KEYS[number];
 
 /**
@@ -77,6 +77,11 @@ const RESERVED_HAS_VALUES: readonly string[] = [];
 export const LEVEL_VALUES = ["work", "0", "1", "2"] as const;
 /** Relative due keywords. `week` is today and the next six days; `next-week` the seven days after that. */
 export const DUE_KEYWORDS = ["overdue", "today", "week", "next-week", "none"] as const;
+/**
+ * `start:` values (D712): the due keywords but `overdue`, and the same dates (`YYYY-MM-DD`,
+ * `<YYYY-MM-DD`, `>YYYY-MM-DD`), over the card's civil `start_on`.
+ */
+export const START_KEYWORDS = ["today", "week", "next-week", "none"] as const;
 
 export type FilterTerm = { key: FilterKey; negate: boolean; values: string[] };
 export type TaskQuery = { terms: FilterTerm[] };
@@ -168,6 +173,12 @@ function normalizeValue(key: FilterKey, raw: string, position: number): string {
       if (!isQueryDate(date)) throw bad("due: takes overdue, today, week, next-week, none, or a date as YYYY-MM-DD, <YYYY-MM-DD, or >YYYY-MM-DD");
       return comparison;
     }
+    case "start": {
+      if ((START_KEYWORDS as readonly string[]).includes(lower)) return lower;
+      const date = lower.replace(/^[<>]/, "");
+      if (!isQueryDate(date)) throw bad("start: takes today, week, next-week, none, or a date as YYYY-MM-DD, <YYYY-MM-DD, or >YYYY-MM-DD");
+      return lower;
+    }
     case "parent":
       if (lower === "none") return lower;
       if (!isUuid(raw)) throw bad("parent: takes none or a card id");
@@ -201,6 +212,7 @@ const KEYWORD_ORDER: Partial<Record<FilterKey, readonly string[]>> = {
   flag: [...TASK_FLAGS, "none"],
   tag: ["none"],
   due: DUE_KEYWORDS,
+  start: START_KEYWORDS,
   parent: ["none"],
   sprint: SPRINT_VALUES,
   level: LEVEL_VALUES,
@@ -216,7 +228,7 @@ function compareValues(key: FilterKey, a: string, b: string) {
   const byRank = rank(a) - rank(b);
   if (byRank) return byRank;
   // Dates sort by date, then exact before < before >.
-  if (key === "due") {
+  if (key === "due" || key === "start") {
     const date = (value: string) => value.replace(/^[<>]/, "");
     const op = (value: string) => (value[0] === "<" ? 1 : value[0] === ">" ? 2 : 0);
     if (date(a) !== date(b)) return date(a) < date(b) ? -1 : 1;
@@ -768,6 +780,8 @@ export type MemoryQueryCard = QueryCard & {
   created_by?: string | null;
   due_time?: string | null;
   due_at?: string | null;
+  /** The optional start's civil date (D710), for `start:`. */
+  start_on?: string | null;
   relation_count?: number;
   open_blockers?: number;
   /** Hierarchy (17A): the parent on the same board, the level, and live direct children. */
@@ -810,6 +824,20 @@ function matchesDueValue(card: MemoryQueryCard, value: string, context: MemoryQu
   }
 }
 
+/** A `start:` value over the card's civil `start_on` (D712), as `dueWindow` reads the due keywords. */
+function matchesStartValue(card: MemoryQueryCard, value: string, context: MemoryQueryContext) {
+  const window = dueWindow(value, context.today);
+  const start = card.start_on ?? null;
+  if (window.kind === "none") return start === null;
+  if (start === null) return false;
+  switch (window.kind) {
+    case "overdue": return false;
+    case "range": return start >= window.from && start <= window.to;
+    case "before": return start < window.date;
+    case "after": return start > window.date;
+  }
+}
+
 function matchesTerm(card: MemoryQueryCard, term: FilterTerm, context: MemoryQueryContext) {
   const values = term.values;
   const user = (value: string) => value === "me" ? context.userId.toLowerCase() : value;
@@ -831,6 +859,7 @@ function matchesTerm(card: MemoryQueryCard, term: FilterTerm, context: MemoryQue
     }
     case "flag": return (values.includes("none") && card.flags.length === 0) || card.flags.some((flag) => values.includes(flag));
     case "due": return values.some((value) => matchesDueValue(card, value, context));
+    case "start": return values.some((value) => matchesStartValue(card, value, context));
     case "parent": return (values.includes("none") && !card.parent_card_id) || (!!card.parent_card_id && values.includes(card.parent_card_id));
     case "sprint": {
       const sprint = card.sprint_id ?? null;

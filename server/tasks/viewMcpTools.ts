@@ -41,6 +41,10 @@ function mcpCard(card: QueriedCard) {
     due_time: card.due_time,
     due_tz: card.due_tz,
     due_at: card.due_at,
+    start_on: card.start_on,
+    start_time: card.start_time,
+    start_tz: card.start_tz,
+    start_at: card.start_at,
     assignees: card.assignees.map((assignee) => assignee.display_name),
     assignee_name: card.assignees[0]?.display_name ?? null,
     tags: card.tags.map((tag) => tag.name),
@@ -124,7 +128,7 @@ export const taskViewTools: McpToolSpec[] = [
     inputSchema: z.object({
       viewId: uuid.optional().describe("A saved view from list_views; runs its filter, sort, and grouping as this user"),
       filter: z.string().max(TASK_QUERY_LIMITS.length).optional().describe("A filter in the task query language; an empty string matches every card"),
-      sort: z.enum(QUERY_SORTS).optional().describe("With filter: due (default), updated, created, title, or board"),
+      sort: z.enum(QUERY_SORTS).optional().describe("With filter: due (default), updated, created, title, board, or start"),
       group: z.enum(QUERY_GROUPS).optional().describe("With filter: none (default), board, state, or due (overdue, today, this week, later, none)"),
       cursor: z.string().min(1).max(1024).optional().describe("nextCursor from the previous page of the same query"),
       limit: z.number().int().min(1).max(MCP_QUERY_PAGE_MAX).optional().describe(`Cards per page, 1 to ${MCP_QUERY_PAGE_MAX} (default 50)`),
@@ -173,7 +177,7 @@ export const taskViewTools: McpToolSpec[] = [
       filter: z.string().max(TASK_QUERY_LIMITS.length).optional().describe("A filter in the task query language, as for query_cards"),
       layout: z.enum(VIEW_LAYOUTS).optional().describe("list (default), table, or board"),
       group: z.enum(VIEW_GROUPS).optional().describe("The list's grouping: none, board, state, due, assignee, or tag"),
-      sort: z.enum(QUERY_SORTS).optional().describe("due (default), updated, created, title, or board"),
+      sort: z.enum(QUERY_SORTS).optional().describe("due (default), updated, created, title, board, or start"),
       lanes: z.enum(LANE_MODES).optional().describe("The board layout's lanes across boards: columns (default), state, assignee, tag, sprint, due, or board")
     }).strict(),
     handler: async ({ viewId, baseRevision, name, filter, layout, group, sort, lanes }, key) => {

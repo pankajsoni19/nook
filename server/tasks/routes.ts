@@ -142,6 +142,10 @@ export const cardCreateSchema = z.object({
   dueOn: dueOnSchema.nullable().optional(),
   dueTime: dueTimeSchema.nullable().optional(),
   dueTz: dueTzSchema.nullable().optional(),
+  /** The optional start (D710): the due fields' shapes and rules; on or before the due date (D711). */
+  startOn: dueOnSchema.nullable().optional(),
+  startTime: dueTimeSchema.nullable().optional(),
+  startTz: dueTzSchema.nullable().optional(),
   assigneeIds: assigneeIdsSchema.optional(),
   tagIds: tagIdsSchema.optional(),
   flags: flagsSchema.optional(),
@@ -163,6 +167,10 @@ export const cardPatchSchema = z.object({
   dueOn: dueOnSchema.nullable().optional(),
   dueTime: dueTimeSchema.nullable().optional(),
   dueTz: dueTzSchema.nullable().optional(),
+  /** The start (D710): startOn null clears it and its time; startTime null clears only the time. */
+  startOn: dueOnSchema.nullable().optional(),
+  startTime: dueTimeSchema.nullable().optional(),
+  startTz: dueTzSchema.nullable().optional(),
   /** Legacy (D103), kept for the Wave 10 client and MCP; 400 together with assigneeIds. */
   assigneeId: uuid.nullable().optional(),
   assigneeIds: assigneeIdsSchema.optional(),
@@ -178,9 +186,9 @@ export const cardPatchSchema = z.object({
 }).strict()
   .refine((value) => value.assigneeId === undefined || value.assigneeIds === undefined, "Send assigneeIds or the legacy assigneeId, not both")
   .refine((value) => value.title !== undefined || value.description !== undefined || value.dueOn !== undefined || value.dueTime !== undefined
-    || value.dueTz !== undefined || value.assigneeId !== undefined || value.assigneeIds !== undefined || value.tagIds !== undefined || value.flags !== undefined
+    || value.dueTz !== undefined || value.startOn !== undefined || value.startTime !== undefined || value.startTz !== undefined || value.assigneeId !== undefined || value.assigneeIds !== undefined || value.tagIds !== undefined || value.flags !== undefined
     || value.parentId !== undefined || value.level !== undefined || value.sprintId !== undefined,
-  "Provide a title, description, dueOn, dueTime, assigneeIds, tagIds, flags, parentId, level, or sprintId");
+  "Provide a title, description, dueOn, dueTime, startOn, startTime, assigneeIds, tagIds, flags, parentId, level, or sprintId");
 // A blank body is allowed only with files (files-only comments, uploads everywhere D397): the server
 // stores a generated body then (shared/commentFiles.ts).
 const commentBody = z.string().refine((value) => Buffer.byteLength(value, "utf8") <= COMMENT_MAX_BYTES, `Comments can be at most ${COMMENT_MAX_BYTES} bytes`);

@@ -69,6 +69,7 @@ import { taskArchiveMigration } from "./074_task_archive";
 import { vaultKeyFlagConfirmMigration } from "./076_vault_key_flag_confirm";
 import { taskViewPrefsMigration } from "./077_task_view_prefs";
 import { taskViewPinsMigration } from "./078_task_view_pins";
+import { cardStartDatesMigration } from "./080_card_start_dates";
 
 const migrations = [initialMigration, folderSharingMigration, totpMigration, totpRecoveryCodesMigration, mcpApiKeysMigration, documentsMigration, binMigration, noteSearchMigration, taskBoardsMigration, mcpKeyScopesMigration, taskDatesMigration, collectionsMigration, calendarMigration, eventNextOccurrenceMigration, taskCardUxMigration, userPreferencesMigration, teamRolesMigration,
   // 018 (Team invites) may reach existing installs after 019 (task hierarchy) and 020 (task views); none depends on another.
@@ -193,7 +194,10 @@ const migrations = [initialMigration, folderSharingMigration, totpMigration, tot
   taskViewPrefsMigration,
   // 078 (lane VIEWS2, D655–D659: task_view_pins; board_view_prefs.show_all_levels and collapsed_rows; task_view_prefs.own_collapse,
   // collapsed_columns, collapsed_rows) needs 009, 020, 074, and 077.
-  taskViewPinsMigration
+  taskViewPinsMigration,
+  // 080 (card start dates, D710–D712: cards.start_on, start_time, start_tz, idx_cards_start) needs 009, 011, and 015.
+  // 079 is left to the parallel board short codes lane; runMigrations applies each missing id on its own.
+  cardStartDatesMigration
 ];
 
 /** Every registered migration in order (read-only), for tests that build an older database shape. */

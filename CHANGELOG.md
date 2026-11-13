@@ -2,6 +2,18 @@
 
 Release notes for Nook, newest first. Upgrade steps for each release are in [docs/OPERATIONS.md](docs/OPERATIONS.md#upgrades).
 
+## Unreleased
+
+**Tasks**
+
+- **Start dates**: a card can have a start date, with an optional time, next to its due date (the same picker, same time zone rules). The start must be on or before the due date.
+- Cards, lists and tables show the range ("Nov 12 → Nov 15"); the board calendar spans a card from its start to its due date, and dragging it moves the whole range.
+- Filter by start (`start:`, or **Start** in + Filter) and sort by start. MCP `create_card` / `update_card` take `startOn`, `startTime`, `startTz`; cards carry `start_on`, `start_time`, `start_tz`, `start_at`.
+
+**Upgrading**
+
+- Migration **080** (`card_start_dates`) runs once on the first boot; quick. **Back up first** (`./scripts/backup.sh --force`).
+
 ## v0.47.0 — 2026-10-24
 
 **Task views**

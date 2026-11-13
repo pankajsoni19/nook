@@ -56,3 +56,43 @@ export function resolveDue(current: DueFields, input: DueInput): { value: DueFie
   }
   return { value: { due_on, due_time, due_tz }, timeChange };
 }
+
+/**
+ * Optional start dates (D710–D712; migration 080). The start mirrors the due date exactly:
+ * `start_on` is the civil date, `start_time` an optional `HH:MM` in `start_tz`, the zone the
+ * setter's browser sent, and `start_at` the derived instant. The same rules apply (a time needs a
+ * date and a zone; changing only the date keeps the wall time and zone; clearing the date clears
+ * the time), so `resolveStart` runs `resolveDue` over the start columns.
+ */
+export type StartFields = { start_on: string | null; start_time: string | null; start_tz: string | null };
+export type StartInput = { startOn?: string | null; startTime?: string | null; startTz?: string | null };
+
+const asDue = (start: StartFields): DueFields => ({ due_on: start.start_on, due_time: start.start_time, due_tz: start.start_tz });
+const asStart = (due: DueFields): StartFields => ({ start_on: due.due_on, start_time: due.due_time, start_tz: due.due_tz });
+
+/** The UTC instant of a timed start as an ISO string, or null for a date-only (or unset) start. */
+export const startAt = (card: StartFields) => dueAt(asDue(card));
+
+/** The start fields after applying `input` to `current`, or a user-facing error (`resolveDue`'s rules, worded for the start). */
+export function resolveStart(current: StartFields, input: StartInput): { value: StartFields; timeChange: "set" | "cleared" | null } | { error: string } {
+  const resolved = resolveDue(asDue(current), { dueOn: input.startOn, dueTime: input.startTime, dueTz: input.startTz });
+  if ("error" in resolved) {
+    return { error: resolved.error.replace(/dueTz/g, "startTz").replace(/dueTime/g, "startTime").replace(/due time/g, "start time").replace(/due date/g, "start date") };
+  }
+  return { value: asStart(resolved.value), timeChange: resolved.timeChange };
+}
+
+/**
+ * Whether the start comes after the due date (D711), which a card refuses (400 START_AFTER_DUE).
+ * With both times set, the two instants compare, so zones never matter. Otherwise the civil dates
+ * compare: a date-only start or due date means its whole day, so a start on the due day is fine
+ * whatever its time, and a timed side counts by the date it was set on (in its own zone). Either
+ * side unset never conflicts.
+ */
+export function startAfterDue(start: StartFields, due: DueFields) {
+  if (!start.start_on || !due.due_on) return false;
+  const startInstant = startAt(start);
+  const dueInstant = dueAt(due);
+  if (startInstant && dueInstant) return Date.parse(startInstant) > Date.parse(dueInstant);
+  return start.start_on > due.due_on;
+}
