@@ -24,6 +24,7 @@ import { groupGrantExists } from "../access/groups";
 import { foldText } from "../../shared/taskQuery";
 import { boardCodeMessage, normalizeBoardCode } from "../../shared/boardKeys";
 import { boardCodeTaken, freeBoardCode, keyOfCard, writeBoardCode } from "./keys";
+import { visibleEstimateSql } from "./estimateSql";
 import { activityValue, cardActivitySnapshot, recordCardActivity, recordCardChange, recordCardItems, recordSnapshotChanges } from "./activity";
 import { checkEstimate, estimateSettingsOf, type EstimateKind, type EstimateScale, type EstimateSettings } from "../../shared/estimates";
 
@@ -218,8 +219,6 @@ export type CardSummary = {
   updated_at: string;
 };
 
-/** A card's estimate as readers see it (D752): hidden (null) while its board has estimates off, the stored value kept. */
-export const ESTIMATE_SQL = "CASE WHEN (SELECT eb.estimate_kind FROM boards eb WHERE eb.id = k.board_id) = 'none' THEN NULL ELSE k.estimate END";
 
 const cardSelect = (extraColumns = "") => `
   SELECT k.id, k.board_id, k.column_id, k.position, k.title,
@@ -229,8 +228,8 @@ const cardSelect = (extraColumns = "") => `
          (SELECT COUNT(*) FROM card_comments cc WHERE cc.card_id = k.id) AS comment_count,
          (SELECT COUNT(*) FROM card_attachments ca WHERE ca.card_id = k.id) AS attachment_count,
          k.parent_card_id, k.level, ${EFFECTIVE_SPRINT_SQL} AS sprint_id,
-         k.done_at, k.archived_at, k.number, ${ESTIMATE_SQL} AS estimate, k.created_at, k.updated_at${extraColumns}
-  FROM cards k LEFT JOIN users cu ON cu.id = k.created_by
+         k.done_at, k.archived_at, k.number, ${visibleEstimateSql("eb.estimate_kind")} AS estimate, k.created_at, k.updated_at${extraColumns}
+  FROM cards k JOIN boards eb ON eb.id = k.board_id LEFT JOIN users cu ON cu.id = k.created_by
 `;
 const cardSummarySelect = cardSelect();
 const cardDetailSelect = cardSelect(", k.description");

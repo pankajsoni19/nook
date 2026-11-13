@@ -234,3 +234,15 @@ describe("estimates over MCP and the query (D755, D756)", () => {
     expect(await titles(`board:${boardId} has:estimate`)).toEqual([]);
   });
 });
+
+test("one rule hides estimates on boards with them off, for the card reads and the query alike", async () => {
+  const { visibleEstimateSql } = await import("../server/tasks/estimateSql");
+  expect(visibleEstimateSql("b.estimate_kind")).toBe("(CASE WHEN b.estimate_kind = 'none' THEN NULL ELSE k.estimate END)");
+  const read = (path: string) => Bun.file(new URL(path, import.meta.url)).text();
+  const [service, query] = await Promise.all([read("../server/tasks/service.ts"), read("../server/tasks/query.ts")]);
+  // The card selects join the board once instead of a subquery per row.
+  expect(service).toContain('${visibleEstimateSql("eb.estimate_kind")} AS estimate');
+  expect(service).toContain("FROM cards k JOIN boards eb ON eb.id = k.board_id");
+  expect(query).toContain('visibleEstimateSql("b.estimate_kind")');
+  for (const source of [service, query]) expect(source).not.toContain("THEN NULL ELSE k.estimate END");
+});

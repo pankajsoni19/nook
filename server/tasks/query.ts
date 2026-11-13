@@ -8,6 +8,7 @@ import type { ItemLevel } from "../access/levels";
 import { assigneesForCards, type CardAssignee } from "./assignees";
 import { dueAt, startAt } from "./dueTime";
 import { TaskError } from "./service";
+import { visibleEstimateSql } from "./estimateSql";
 import { AUDIENCE_ALL_USERS, audienceAllUsersFor, can } from "../team/roles";
 import { userRole } from "../team/userRole";
 import { groupGrantExists } from "../access/groups";
@@ -43,7 +44,7 @@ export type CompiledFilter = { where: string; params: Record<string, Binding> };
 export type CompileContext = { userId: string; today: string; nowTime: string };
 
 /** A card's estimate as readers see it (lane ESTIMATES, D752, D756): null while its board `b` has estimates off. */
-const HAS_ESTIMATE_VALUE = "(CASE WHEN b.estimate_kind = 'none' THEN NULL ELSE k.estimate END)";
+const HAS_ESTIMATE_VALUE = visibleEstimateSql("b.estimate_kind");
 
 /** The normalized column state (migration 020, D141), kept equal to `is_done` by the service. */
 export const COLUMN_STATE = "col.state";
