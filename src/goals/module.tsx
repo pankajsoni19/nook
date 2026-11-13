@@ -42,11 +42,11 @@ export const module: WorkspaceClientModule = {
   formatRoute: (route: WorkspaceRoute) => `/goals${route.path[0] ? `/${encodeURIComponent(route.path[0])}` : ""}${route.path[0] ? "" : route.search}`,
   todaySections: {
     goalsCheckin: {
-      title: "Goals to check in on", group: "today", empty: "every goal is checked in", app: "Goals", module: "goals",
+      title: "Goals to check in on", group: "housekeeping", empty: "every goal is checked in", app: "Goals", module: "goals",
       row: (item) => ({ key: String(item.id), label: String(item.title), meta: `${pct(item.progress)}${item.lastCheckinAt ? "" : " · no check-in yet"}`, route: goalRoute(String(item.href)), tone: "today" })
     },
     goalsAtRisk: {
-      title: "Goals at risk", group: "today", empty: "nothing at risk", app: "Goals", module: "goals",
+      title: "Goals at risk", group: "housekeeping", empty: "nothing at risk", app: "Goals", module: "goals",
       row: (item) => ({ key: String(item.id), label: String(item.title), meta: `${healthWord[String(item.health)] ?? ""} · ${pct(item.progress)}`, route: goalRoute(String(item.href)), tone: item.health === "off_track" ? "overdue" : "soon" })
     }
   },

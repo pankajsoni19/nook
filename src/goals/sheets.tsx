@@ -309,8 +309,8 @@ export function KrEditor({ goal, kr, onClose, onSaved }: { goal: GoalDetail; kr?
     {metric === "milestones" && <fieldset className="goals-sheet-kr" style={{ margin: 0 }}>
       <legend className="goals-sheet-kr-head" style={{ padding: "0 4px" }}>Milestones</legend>
       {milestones.map((milestone, index) => <div key={milestone.id ?? index} className="goals-inline-row" style={{ gridTemplateColumns: "auto minmax(0,1fr) auto", alignItems: "center" }}>
-        <input type="checkbox" aria-label={`Milestone ${index + 1} done`} checked={!!milestone.done} onChange={(event) => setMilestones((list) => list.map((item, at) => at === index ? { ...item, done: event.target.checked } : item))} />
-        <input aria-label={`Milestone ${index + 1}`} className="goals-milestone-input" value={milestone.title} maxLength={200} onChange={(event) => setMilestones((list) => list.map((item, at) => at === index ? { ...item, title: event.target.value } : item))} style={{ minHeight: 36, border: "1px solid var(--field-border)", borderRadius: "var(--field-radius)", background: "var(--field-bg)", color: "#ededee", padding: "0 10px" }} />
+        <input type="checkbox" aria-label={`Milestone ${index + 1} done`} checked={!!milestone.done} onChange={(event) => { const checked = event.target.checked; setMilestones((list) => list.map((item, at) => at === index ? { ...item, done: checked } : item)); }} />
+        <input aria-label={`Milestone ${index + 1}`} className="goals-milestone-input" value={milestone.title} maxLength={200} onChange={(event) => { const title = event.target.value; setMilestones((list) => list.map((item, at) => at === index ? { ...item, title } : item)); }} style={{ minHeight: 36, border: "1px solid var(--field-border)", borderRadius: "var(--field-radius)", background: "var(--field-bg)", color: "#ededee", padding: "0 10px" }} />
         <button type="button" className="icon-button" aria-label={`Remove milestone ${index + 1}`} onClick={() => setMilestones((list) => list.filter((_, at) => at !== index))}><Trash2 /></button>
       </div>)}
       <button type="button" className="secondary-button ui-small-button" style={{ justifySelf: "start" }} onClick={() => setMilestones((list) => [...list, { title: "" }])}><Plus aria-hidden="true" />Add milestone</button>
@@ -355,10 +355,10 @@ export function CheckInSheet({ goal, onClose, onSaved }: { goal: GoalDetail; onC
       {kr.source.kind !== "manual"
         ? <span className="goals-note">Updates itself · now {formatKrValue(kr.currentValue, kr)} ({kr.source.description})</span>
         : kr.metric === "boolean"
-          ? <label style={{ display: "flex", alignItems: "center", gap: 8 }}><input type="checkbox" checked={values[kr.id] === "1"} onChange={(event) => setValues((current) => ({ ...current, [kr.id]: event.target.checked ? "1" : "0" }))} />Done</label>
+          ? <label style={{ display: "flex", alignItems: "center", gap: 8 }}><input type="checkbox" checked={values[kr.id] === "1"} onChange={(event) => { const value = event.target.checked ? "1" : "0"; setValues((current) => ({ ...current, [kr.id]: value })); }} />Done</label>
           : kr.metric === "milestones"
             ? <ul className="goals-milestones">{kr.milestones.map((milestone) => <li key={milestone.id}><label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <input type="checkbox" checked={done[kr.id]?.includes(milestone.id) ?? false} onChange={(event) => setDone((current) => ({ ...current, [kr.id]: event.target.checked ? [...(current[kr.id] ?? []), milestone.id] : (current[kr.id] ?? []).filter((id) => id !== milestone.id) }))} />{milestone.title}</label></li>)}</ul>
+              <input type="checkbox" checked={done[kr.id]?.includes(milestone.id) ?? false} onChange={(event) => { const checked = event.target.checked; setDone((current) => ({ ...current, [kr.id]: checked ? [...(current[kr.id] ?? []), milestone.id] : (current[kr.id] ?? []).filter((id) => id !== milestone.id) })); }} />{milestone.title}</label></li>)}</ul>
             : <TextField label={`New value${kr.unit ? ` (${kr.unit})` : kr.metric === "percent" ? " (%)" : kr.metric === "currency" ? ` (${kr.currency})` : ""}`} type="number" step="any" value={values[kr.id] ?? ""} onChange={(value) => setValues((current) => ({ ...current, [kr.id]: value }))} />}
     </div>)}
     <div className="ui-field">

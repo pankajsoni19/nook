@@ -3,7 +3,7 @@ import { BIN_BUCKETS, BIN_DESCRIPTION, defineTool, McpToolError, notFound, type 
 import { keyFilter } from "../keyResources";
 import { linksOf } from "../links/service";
 import {
-  addKeyResult, checkIn, closeGoal, createGoal, createPeriod, deleteGoal, deleteKeyResult, getGoal, GoalError, listCheckins, listGoals, listPeriods,
+  addKeyResult, checkIn, closeGoal, createGoal, createPeriod, deleteGoal, getGoal, GoalError, listCheckins, listGoals, listPeriods,
   progressSources, requireGoal, updateGoal, updateKeyResult
 } from "./service";
 import { checkinSchema, closeSchema, goalInputSchema, goalPatchSchema, krInputSchema, krPatchSchema, periodSchema } from "./schemas";
@@ -115,17 +115,6 @@ export const goalTools = [
     handler: ({ keyResultId, ...patch }, key) => run(() => updateKeyResult(key.userId, keyResultId, patch as never))
   }),
   defineTool({
-    name: "remove_kr",
-    title: "Remove a key result",
-    description: "Remove a key result from its goal (with its history). The person can undo it in the app for 10 minutes.",
-    scopes: ["goals:write"],
-    access: { mode: "items", items: [{ arg: "keyResultId", kind: "key_result" }] },
-    write: true,
-    annotations: { destructiveHint: true },
-    inputSchema: z.object({ keyResultId: krId }).strict(),
-    handler: ({ keyResultId }, key) => run(() => { deleteKeyResult(key.userId, keyResultId); return { removed: true, keyResultId }; })
-  }),
-  defineTool({
     name: "check_in_goal",
     title: "Check in on a goal",
     description: "Record a check-in: health (on_track, at_risk, off_track, none), confidence 1–10, a note, and new values for manual key results (`values: { <keyResultId>: number }`; true/false for boolean ones; `milestonesDone: { <keyResultId>: [milestoneId…] }`). Automatic key results update themselves. Needs edit on the goal (owners, contributors, editors).",
@@ -232,7 +221,7 @@ export const goalTools = [
 /** Reads are offered to chat agents; writes too except binning (agents check in through proposals where the mode asks, §B.15). */
 export const goalAgentTools = {
   allowed: ["list_goals", "get_goal", "list_goal_checkins", "list_goal_periods", "list_goal_sources", "get_goal_tree", "check_in_goal", "create_goal", "update_goal", "add_kr", "update_kr"],
-  never: ["bin_goal", "remove_kr", "close_goal", "create_goal_period"]
+  never: ["bin_goal", "close_goal", "create_goal_period"]
 };
 
 export { requireGoal };
