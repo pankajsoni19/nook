@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, ChevronLeft, ChevronsLeftRight, ChevronsRightLeft, CircleCheck, Gauge, Pencil, Plus, RotateCcw, Settings2, Trash2, TriangleAlert } from "lucide-react";
 import { BoardSettingsSheet } from "./BoardSettingsSheet";
+import { keyedSendQueue } from "./keyedSendQueue";
 import { useBoardHierarchy } from "./useBoardHierarchy";
 import { useBoardSprints } from "./useBoardSprints";
 import { SprintBar } from "./SprintBar";
@@ -693,7 +694,8 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
    */
   // Date changes to one card are sent in order (D764): quick Alt+Arrow presses each wait for the
   // revision the one before them saved, while every bar move shows at once.
-  const datesQueueRef = useRef(new Map<string, { chain: Promise<void>; pending: number }>());
+  // A failed send drops the ones queued behind it (keyedSendQueue): the board reloads instead.
+  const datesQueueRef = useRef(keyedSendQueue());
   function setDates(cardId: string, change: DateChange) {
     const current = detailRef.current;
     const card = current?.cards.find((item) => item.id === cardId);
@@ -708,37 +710,28 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
       ...(dueOn !== undefined ? { due_on: dueOn, due_at: shiftedDueAt(item.due_at, shift(item.due_on, dueOn)) } : {}),
       ...(startOn !== undefined ? { start_on: startOn, start_at: shiftedDueAt(item.start_at, shift(item.start_on, startOn)) } : {})
     }));
-    const queues = datesQueueRef.current;
-    const queue = queues.get(cardId) ?? { chain: Promise.resolve(), pending: 0 };
-    queue.pending += 1;
-    queue.chain = queue.chain.then(async () => {
+    void datesQueueRef.current(cardId, async (isLast) => {
       const latest = detailRef.current?.cards.find((item) => item.id === cardId);
       if (!latest) return;
-      try {
-        const { card: saved } = await updateCard(cardId, { ...(startOn !== undefined ? { startOn } : {}), ...(dueOn !== undefined ? { dueOn } : {}), revision: latest.revision });
-        const last = queue.pending === 1;
-        // A later change already shows on screen: take only the revision, so the bar does not step back.
-        setCards((items) => items.map((item) => item.id !== cardId ? item : last
-          ? { ...item, revision: saved.revision, due_on: saved.due_on, due_time: saved.due_time, due_tz: saved.due_tz, due_at: saved.due_at,
-            start_on: saved.start_on, start_time: saved.start_time, start_tz: saved.start_tz, start_at: saved.start_at, updated_at: saved.updated_at }
-          : { ...item, revision: saved.revision, updated_at: saved.updated_at }));
-        if (detailRef.current) detailRef.current = { ...detailRef.current, cards: detailRef.current.cards.map((item) => item.id === cardId ? { ...item, revision: saved.revision } : item) };
-        const bar = barOf(saved, viewerTimeZone());
-        if (last) setAnnouncement(`${card.title}: ${bar ? barLabel(bar) : "no dates"}`);
-      } catch (reason) {
-        const code = taskErrorCode(reason);
-        notify.error(code === "CARD_CHANGED" ? "Someone else changed this card. It was reloaded."
-          : code === "START_AFTER_DUE" ? "The start must be on or before the due date"
-          : taskErrorMessage(reason, "Could not change the dates"));
-        // The bar goes back at once, then to what the server has.
-        setCards((items) => items.map((item) => item.id === cardId ? { ...item, ...prior } : item));
-        await load();
-      } finally {
-        queue.pending -= 1;
-        if (!queue.pending) queues.delete(cardId);
-      }
+      const { card: saved } = await updateCard(cardId, { ...(startOn !== undefined ? { startOn } : {}), ...(dueOn !== undefined ? { dueOn } : {}), revision: latest.revision });
+      const last = isLast();
+      // A later change already shows on screen: take only the revision, so the bar does not step back.
+      setCards((items) => items.map((item) => item.id !== cardId ? item : last
+        ? { ...item, revision: saved.revision, due_on: saved.due_on, due_time: saved.due_time, due_tz: saved.due_tz, due_at: saved.due_at,
+          start_on: saved.start_on, start_time: saved.start_time, start_tz: saved.start_tz, start_at: saved.start_at, updated_at: saved.updated_at }
+        : { ...item, revision: saved.revision, updated_at: saved.updated_at }));
+      if (detailRef.current) detailRef.current = { ...detailRef.current, cards: detailRef.current.cards.map((item) => item.id === cardId ? { ...item, revision: saved.revision } : item) };
+      const bar = barOf(saved, viewerTimeZone());
+      if (last) setAnnouncement(`${card.title}: ${bar ? barLabel(bar) : "no dates"}`);
+    }, async (reason) => {
+      const code = taskErrorCode(reason);
+      notify.error(code === "CARD_CHANGED" ? "Someone else changed this card. It was reloaded."
+        : code === "START_AFTER_DUE" ? "The start must be on or before the due date"
+        : taskErrorMessage(reason, "Could not change the dates"));
+      // The bar goes back at once (with any moves queued behind this one, which are dropped), then to what the server has.
+      setCards((items) => items.map((item) => item.id === cardId ? { ...item, ...prior } : item));
+      await load();
     });
-    queues.set(cardId, queue);
   }
 
   /** The composer created a card: it joins the board, then closes, opens, or starts another (§4.3). */
