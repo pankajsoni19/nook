@@ -3,7 +3,7 @@ import { Clock, FolderClock, Play, Timer } from "lucide-react";
 import { WORKSPACE_MODULE_LABELS } from "../../shared/workspaceModules";
 import type { WorkspaceClientModule, WorkspaceRoutePart } from "../workspaceModules/types";
 import { TimerTopBar } from "./TimerBar";
-import { CardTimeBadge, CardTimerAction, CardTimeSection, TimelineTimeFill } from "./CardTime";
+import { CardTimerAction, CardTimeSection, TimelineTimeFill } from "./CardTime";
 import { TodayTimeSection } from "./TodayTime";
 import { startTimer } from "./timerStore";
 
@@ -46,7 +46,6 @@ export const module: WorkspaceClientModule = {
   quickActions: [{ id: "start-timer", label: "Start timer", icon: Play, hiddenFor: ["viewer"], run: async () => { await startTimer({}); } }],
   cardSections: [{ id: "time.section", area: "side", order: 20, component: CardTimeSection }],
   cardHeaderActions: [{ id: "time.start", order: 10, component: CardTimerAction }],
-  cardFaceBadges: [{ id: "time.badge", order: 10, component: CardTimeBadge }],
   timelineDecorations: [{ id: "time.fill", order: 10, component: TimelineTimeFill }],
   shortcuts: [{ keys: "Alt+T", label: "Start or stop the timer" }, { keys: "n", label: "Log time (in Time)" }, { keys: "j / k", label: "Move between entries" }],
   notificationTopics: [
