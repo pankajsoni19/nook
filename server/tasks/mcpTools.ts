@@ -27,6 +27,9 @@ import { SPRINT_STATES } from "../../shared/sprintPlan";
 import { openSprintRows, sprintById, sprintNames } from "./sprintData";
 import { createSprint, listSprints, patchSprint } from "./sprints";
 import { sprintCreateSchema } from "./sprintRoutes";
+import { cardIdForKey, keyOfCard } from "./keys";
+import { moveCardToBoard } from "./moveBoard";
+import { CARD_KEY_PATTERN } from "../../shared/boardKeys";
 
 /**
  * MCP tools for Task Boards (docs/plan/WAVES_7-9.md §4.2, D38–D40, D70).
@@ -229,6 +232,7 @@ function resolveTags(tags: readonly BoardTag[], refs: readonly string[], allowNo
 function listedCard(card: CardWithDescription, columnName: string | undefined, tags: Map<string, string>, counts: RelationCounts, structure?: BoardStructure, sprints?: Map<string, string>) {
   return {
     id: card.id,
+    key: keyOfCard(card.id),
     column_id: card.column_id,
     column_name: columnName ?? null,
     position: card.position,
@@ -246,10 +250,20 @@ function listedCard(card: CardWithDescription, columnName: string | undefined, t
 }
 
 const uuid = z.string().uuid();
+/** No card has this id: a key that names no card reads as it, so the service answers NOT_FOUND like an unknown id. */
+const NO_CARD = "00000000-0000-4000-8000-000000000000";
+/**
+ * A card by id or by key (lane KEYS, D713): `MYT-12` in any case, an old code or a moved card's old key
+ * too. The key is only translated to the card it names; the service then checks the card exactly as
+ * for an id, so a key never reaches a card the id would not (T460).
+ */
+export const cardRef = z.string().refine((value) => uuid.safeParse(value).success || CARD_KEY_PATTERN.test(value), "Use a card id or a key such as MYT-12")
+  .transform((value) => uuid.safeParse(value).success ? value : cardIdForKey(value) ?? NO_CARD)
+  .describe("The card's id, or its key such as MYT-12");
 
 /** A card as create_card and update_card return it. */
 const writtenCard = (card: CardSummary) => ({
-  id: card.id, board_id: card.board_id, column_id: card.column_id, title: card.title, revision: card.revision,
+  id: card.id, key: keyOfCard(card.id), board_id: card.board_id, column_id: card.column_id, title: card.title, revision: card.revision,
   ...cardFields(card, tagNames(listBoardTags(card.board_id)), boardStructure(card.board_id), sprintNames(card.board_id))
 });
 
@@ -357,7 +371,7 @@ export const taskTools: McpToolSpec[] = [
     scopes: ["tasks:read"],
     access: { mode: "items", items: [{ arg: "cardId", kind: "card" }] },
     write: false,
-    inputSchema: z.object({ cardId: uuid }),
+    inputSchema: z.object({ cardId: cardRef }),
     handler: async ({ cardId }, key) => service(key, () => {
       const { card, board } = getCard(key.userId, cardId);
       const { columns, tags } = getBoard(key.userId, board.id);
@@ -366,6 +380,7 @@ export const taskTools: McpToolSpec[] = [
       return {
         card: {
           id: card.id,
+          key: card.key,
           board_id: board.id,
           board_name: board.name,
           column_id: card.column_id,
@@ -397,7 +412,7 @@ export const taskTools: McpToolSpec[] = [
     scopes: ["tasks:read"],
     access: { mode: "items", items: [{ arg: "cardId", kind: "card" }] },
     write: false,
-    inputSchema: z.object({ cardId: uuid }),
+    inputSchema: z.object({ cardId: cardRef }),
     handler: async ({ cardId }, key) => service(key, () => {
       const { board } = getCard(key.userId, cardId);
       const structure = boardStructure(board.id);
@@ -489,7 +504,7 @@ export const taskTools: McpToolSpec[] = [
     write: true,
     dailyBucket: "task_write",
     inputSchema: z.object({
-      cardId: uuid,
+      cardId: cardRef,
       baseRevision: z.number().int().min(1),
       title: z.string().min(1).max(200).optional(),
       dueOn: z.string().nullable().optional().describe("Due date as YYYY-MM-DD, or null to clear"),
@@ -526,7 +541,7 @@ export const taskTools: McpToolSpec[] = [
     write: true,
     dailyBucket: "task_write",
     inputSchema: z.object({
-      cardId: uuid,
+      cardId: cardRef,
       columnId: uuid.optional(),
       state: z.enum(["todo", "doing", "done"]).optional().describe("Instead of columnId: the first column in this state on the card's board"),
       columnName: z.string().trim().min(1).max(60).optional().describe("Instead of columnId: the first column with this name on the card's board"),
@@ -542,6 +557,29 @@ export const taskTools: McpToolSpec[] = [
       });
     }
   }),
+  defineTool({
+    name: "move_card_to_board",
+    title: "Move a card to another board",
+    description: [
+      "Move a card to another board where the user can edit cards (and can edit the card's own board). It goes to the bottom of columnId on that board, or of its first column that is not done.",
+      "Comments, files, relations, assignees, flags, and the due date go with it; tags are matched by name to the new board's tags and the others dropped (dropped_tags); the sprint is cleared and the parent link dropped.",
+      "A card with live sub-cards fails with HAS_CHILDREN. The card gets a new key on the new board (key); its old key still finds it."
+    ].join(" "),
+    scopes: ["tasks:write"],
+    // Both boards are named items (lane KEYS, D716): a key limited to chosen boards needs both.
+    access: { mode: "items", items: [{ arg: "cardId", kind: "card" }, { arg: "boardId", kind: "board" }], related: ["columnId"] },
+    write: true,
+    dailyBucket: "task_write",
+    inputSchema: z.object({
+      cardId: cardRef,
+      boardId: uuid.describe("The board to move the card to"),
+      columnId: uuid.optional().describe("A column of that board; omitted, its first column that is not done")
+    }).strict(),
+    handler: async ({ cardId, boardId, columnId }, key) => service(key, async () => {
+      const { card, previousKey, droppedTags } = await moveCardToBoard(key.userId, cardId, { boardId, columnId: columnId ?? null });
+      return { card: { ...writtenCard(card), previous_key: previousKey }, dropped_tags: droppedTags };
+    })
+  }),
   // Lane TASKS (D627): archiving hides a card and is undone by unarchive_card, so it is not a removal (D180).
   defineTool({
     name: "archive_card",
@@ -551,7 +589,7 @@ export const taskTools: McpToolSpec[] = [
     access: { mode: "items", items: [{ arg: "cardId", kind: "card" }] },
     write: true,
     dailyBucket: "task_write",
-    inputSchema: z.object({ cardId: uuid }).strict(),
+    inputSchema: z.object({ cardId: cardRef }).strict(),
     handler: async ({ cardId }, key) => service(key, async () => {
       const { card } = await archiveCard(key.userId, cardId);
       return { card: { id: card.id, column_id: card.column_id, archived: card.archived_at !== null, archived_at: card.archived_at } };
@@ -565,7 +603,7 @@ export const taskTools: McpToolSpec[] = [
     access: { mode: "items", items: [{ arg: "cardId", kind: "card" }] },
     write: true,
     dailyBucket: "task_write",
-    inputSchema: z.object({ cardId: uuid }).strict(),
+    inputSchema: z.object({ cardId: cardRef }).strict(),
     handler: async ({ cardId }, key) => service(key, async () => {
       const { card } = await unarchiveCard(key.userId, cardId);
       return { card: { id: card.id, column_id: card.column_id, archived: card.archived_at !== null, archived_at: card.archived_at } };
@@ -580,8 +618,8 @@ export const taskTools: McpToolSpec[] = [
     write: true,
     dailyBucket: "task_write",
     inputSchema: z.object({
-      cardId: uuid,
-      targetCardId: uuid,
+      cardId: cardRef,
+      targetCardId: cardRef,
       type: z.enum(RELATION_TYPES as [RelationType, ...RelationType[]])
     }).strict(),
     handler: async ({ cardId, targetCardId, type }, key) => {
@@ -600,7 +638,7 @@ export const taskTools: McpToolSpec[] = [
     access: { mode: "items", items: [{ arg: "cardId", kind: "card" }], related: ["attachmentIds"] },
     write: true,
     dailyBucket: "task_write",
-    inputSchema: z.object({ cardId: uuid, body: z.string().optional(), attachmentIds: z.array(uuid).max(10).optional() }),
+    inputSchema: z.object({ cardId: cardRef, body: z.string().optional(), attachmentIds: z.array(uuid).max(10).optional() }),
     handler: async ({ cardId, body, attachmentIds }, key) => {
       // Inbox proposals carry no files (plan G12): an approval never attaches the approver's files.
       if (key.person && attachmentIds?.length) throw new McpToolError("INVALID", "Suggested comments cannot attach files", { reason: "PROPOSAL_FILES" });
@@ -624,7 +662,7 @@ export const taskTools: McpToolSpec[] = [
     alsoRequires: ["bin:write"],
     write: true,
     buckets: BIN_BUCKETS,
-    inputSchema: z.object({ cardId: uuid }).strict(),
+    inputSchema: z.object({ cardId: cardRef }).strict(),
     handler: async ({ cardId }, key) => service(key, async () => {
       const { purgeAfter, descendantCount } = await deleteCard(key.userId, cardId);
       return { cardId, binned: true, purgeAfter, descendantCount };
@@ -638,7 +676,7 @@ export const taskTools: McpToolSpec[] = [
     access: { mode: "items", items: [{ arg: "cardId", kind: "card" }] },
     alsoRequires: ["bin:write"],
     write: true,
-    inputSchema: z.object({ cardId: uuid }).strict(),
+    inputSchema: z.object({ cardId: cardRef }).strict(),
     handler: async ({ cardId }, key) => service(key, async () => {
       const outcome = await restoreTaskItem("card", cardId, key.userId);
       switch (outcome.status) {
@@ -750,7 +788,7 @@ export const taskTools: McpToolSpec[] = [
     access: { mode: "items", items: [{ arg: "cardId", kind: "card" }], related: ["documentId", "commentId"] },
     write: true,
     dailyBucket: "task_write",
-    inputSchema: z.object({ cardId: uuid, documentId: uuid, commentId: uuid.nullable().optional(), confirmed: z.boolean().optional() }).strict(),
+    inputSchema: z.object({ cardId: cardRef, documentId: uuid, commentId: uuid.nullable().optional(), confirmed: z.boolean().optional() }).strict(),
     handler: async ({ cardId, ...fields }, key) => {
       const input = routeInput(attachmentSchema, fields);
       return service(key, async () => {

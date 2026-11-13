@@ -5,6 +5,8 @@ import { parentTitleOf, structureOfData, treeRows, type BoardCard, type BoardDat
 import type { BoardSort, BoardSortField } from "./boardUrl";
 import { assigneeNames, Avatars, DueChip, FlagIcons, shortTimestamp, TagChips } from "./boardViewParts";
 import { ArchivedChip } from "./CardFace";
+import { CardKeyButton } from "./cardLink";
+import { notifier } from "../ui/notify";
 
 type BoardTableProps = {
   board: BoardData;
@@ -87,6 +89,7 @@ export function BoardTable({ board, cards, sort, today, onSort, onOpenCard, onCa
                     {collapsed.has(card.id) ? <ChevronRight /> : <ChevronDown />}
                   </button>
                   : <span className="task-tree-spacer" aria-hidden="true" />)}
+                {card.key && <CardKeyButton cardKey={card.key} notify={notifier} className="task-table-key" />}
                 <button type="button" className="task-table-open" onClick={() => onOpenCard(card)} data-open-card={card.id} title={card.description_excerpt || undefined}>{card.title}</button>
                 <button type="button" className="icon-button task-table-more" onClick={(event) => onCardMenu(card, event.currentTarget)} aria-haspopup="dialog" aria-label={`More actions for “${card.title}”`} title="More actions"><Ellipsis /></button>
               </span>

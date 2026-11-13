@@ -616,7 +616,27 @@ type CardHierarchy = {
 - **Roll-ups (D125, D134).** `child_count` and `done_child_count` count a card's live direct children and those in an `is_done` column. `GET /boards/:b` and MCP `list_cards` compute them with one grouped query per board, never a per-card subquery; the board payload has every live card at every level, so a client can also derive them locally. A parent never moves on its own when its children do.
 - **Audit** (ids only): `task.card_create` adds `parentId` and `level` when set; `task.card_reparent { boardId, cardId, parentId }`; `task.card_level { boardId, cardId, level }`.
 - **WIP limits** count every card in a column, whatever its level (§8, Q7).
-- There is no endpoint that changes a card's board, so a parent never ends up on another board (T112).
+- Only `POST /cards/:k/move-board` (lane KEYS, D716) changes a card's board, and it refuses a card with live children and drops the moved card's parent, so a parent never ends up on another board (T112).
+
+### Board codes, card keys, and moving a card to another board (lane KEYS, D710–D716, migration 079)
+
+Every board has a **code** (`board.code`, such as `MYT`): 2–10 of A–Z and 0–9, starting with a letter, stored upper case. Every card has a **number** on its board (`card.number`), and its **key** is `<code>-<number>` (`MYT-12`). `GET /boards/:b` sends `board.code` and each card's `number` (the app builds the key); `GET /cards/:k`, `POST /boards/:b/cards`, `PATCH /cards/:k`, `POST /query` results, and `GET /cards/search` hits carry `key`. Numbers are never reused on a board (binned, purged, and moved-away cards keep theirs); the insert trigger numbers every new card.
+
+| Endpoint | Who | Success | Errors |
+| --- | --- | --- | --- |
+| `POST /boards { …, code? }` | any | As before; `code` in any case. Omitted, the name suggests one, made free (`My tasks` → `MYT`, then `MYT2`). | 400 `CODE_INVALID`, 409 `CODE_TAKEN { suggestion }` |
+| `PATCH /boards/:b { code }` | owner (403 `OWNER_ONLY` for a manager) | 200 `{ board }`. The old code becomes the board's alias: `OLD-12` keeps resolving, and no other board may take it; the board may take a former code back. Audited `task.board_code { boardId, code, previous }`. | 400 `CODE_INVALID`, 403, 404, 409 `CODE_TAKEN { suggestion }` |
+| `GET /board-codes/suggest?name=` | any | 200 `{ code }`: a free code for the name (D711). | |
+| `GET /keys/:key` | reader of the card | 200 `{ cardId, boardId, key, moved }`: `key` is the card's key now; `moved` when the key asked for is an old one (a former code, or a board the card left). Any case. | 400 (not a key), 404 `Card not found` for an unknown, binned, or unreadable card alike (T460) |
+| `POST /cards/:k/move-board { boardId, columnId? }` | Can edit on both boards | 200 `{ card, fromBoardId, previousKey, droppedTags: string[], parentDetached? }` (D716). The card goes to the bottom of `columnId` (default: the destination's first column that is not done) with the destination's next number. | 400 `SAME_BOARD`, 403 `READ_ONLY`, 404 (either board or the column), 409 `HAS_CHILDREN { childCount }`, `COLUMN_FULL`, `LIMIT_REACHED`, `CARD_CHANGED` (it moved while waiting) |
+
+Codes are unique without case over every board that still exists (binned ones too, so a restore never collides) and over every board's former codes. `CODE_TAKEN` never names the board that has it (T461).
+
+**What a move keeps and drops (D716).** Comments, reactions, attachments, relations, assignees (one who cannot open the destination stays as Former member), flags, and the due date go with the card. Tags are matched by name, without case, to the destination's tags; the rest are dropped and listed in `droppedTags`. The sprint is cleared (backlog), the parent link is dropped (`parentDetached`), and the level is kept when the destination has it at or above its work level, else it becomes the destination's work level. A card with live sub-cards is refused (`HAS_CHILDREN`); sub-cards in the Bin are detached and restore detached (D130). The revision goes up by one; `card_key_aliases` keeps the old board and number, so the old key and old `/tasks/:b/card/:k` links still find the card. Both boards' locks are taken in id order (T462). Audited `task.card_move_board { cardId, fromBoardId, boardId, columnId, previousKey, key, tagsDropped?, parentDetached? }`.
+
+**Short links (D713).** `/tasks/MYT-12` (any case) is a client route: the app asks `GET /keys/:key` and replaces the entry with `/tasks/:b/card/:k`; a 404 says "Card MYT-12 not found" and opens the board list. **Copy link** copies the short link. A card dialog opened under a board the card has left follows it to its board.
+
+**Search and MCP.** `GET /cards/search?q=MYT-12` lists that card first when the caller can read it. Every MCP task tool that takes `cardId` (and `link_cards`'s `targetCardId`) also takes a key; a chosen-boards key reaches a card by key only when it reaches the card's board now. `get_card`, `list_cards`, `create_card`, and `update_card` return `key`; `list_boards` returns `code`. New tool `move_card_to_board { cardId, boardId, columnId? }` (`tasks:write`; both boards are named items; never offered to agents) returns `{ card: { …, key, previous_key }, dropped_tags }`.
 
 ### Board structure (sub-wave 17A, D122, D123, T120)
 

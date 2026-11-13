@@ -768,3 +768,20 @@ svg.task-column-status.done { color: #6fbf85; }
   .task-card-title-display { font-size: 1rem; }
 }
 .task-card-title-static { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+
+/* Card keys and board codes (lane KEYS, D710–D714): quiet monospace text on faces, list rows, and
+   the board list; a copy button in the card header's eyebrow and the table's title cell. */
+.task-card-key-face, .task-board-code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .7rem; font-weight: 600; letter-spacing: .02em; color: #85858c; white-space: nowrap; }
+.task-board-code { color: #a8a8ae; }
+.task-card-key { display: inline-flex; align-items: center; min-height: 24px; padding: 0 4px; border: 0; border-radius: 4px; background: transparent; color: inherit;
+  font: inherit; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: .02em; text-transform: none; cursor: copy; white-space: nowrap; }
+.task-card-key:hover, .task-card-key:focus-visible { background: rgba(255, 255, 255, .08); color: #ededee; }
+.task-card-eyebrow .task-card-key-eyebrow { min-height: 20px; margin-left: -4px; padding: 0 4px; font-size: .72rem; font-weight: 700; color: inherit; vertical-align: baseline; }
+.task-table-key { flex: none; font-size: .72rem; color: #85858c; }
+.task-board-code-input { max-width: 14ch; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; }
+.task-settings-code { display: grid; gap: 6px; }
+.task-settings-code-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+@media (pointer: coarse) {
+  .task-card-key { min-height: 44px; }
+  .task-card-eyebrow .task-card-key-eyebrow { min-height: 32px; }
+}

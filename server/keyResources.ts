@@ -2,6 +2,8 @@ import { db } from "./db";
 import { scopeReach, grantsForScopes, selectionHas, unionReach, type ResourceKind, type ScopeReach } from "./keyGrants";
 import { hasScope, type McpScope } from "./mcpScopes";
 import type { McpKeyContext } from "./mcpToolKit";
+import { cardIdForKey } from "./tasks/keys";
+import { CARD_KEY_PATTERN } from "../shared/boardKeys";
 
 /**
  * Where an item sits, for chosen-item keys (access plan D281, §C.10, T203; Wave 34).
@@ -47,7 +49,12 @@ const LOOKUPS: Record<ItemKind, Lookup | ((id: string) => Anchor[])> = {
   },
   whiteboard: { sql: "SELECT document_id AS id FROM whiteboards WHERE document_id = ?", anchors: (row) => [{ kind: "whiteboard", id: row.id! }] },
   board: direct("board"),
-  card: { sql: "SELECT board_id FROM cards WHERE id = ?", anchors: (row) => [{ kind: "board", id: row.board_id! }] },
+  // A card by id, or by key (MYT-12, lane KEYS D713): the key is read as the card it names, on its board now.
+  card: (id) => {
+    const cardId = CARD_KEY_PATTERN.test(id) ? cardIdForKey(id) : id;
+    const row = cardId ? db.query("SELECT board_id FROM cards WHERE id = ?").get(cardId) as { board_id: string } | null : null;
+    return row ? [{ kind: "board", id: row.board_id }] : [];
+  },
   column: { sql: "SELECT board_id FROM board_columns WHERE id = ?", anchors: (row) => [{ kind: "board", id: row.board_id! }] },
   sprint: { sql: "SELECT board_id FROM board_sprints WHERE id = ?", anchors: (row) => [{ kind: "board", id: row.board_id! }] },
   task_view: direct("task_view"),

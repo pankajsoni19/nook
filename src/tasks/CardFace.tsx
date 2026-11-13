@@ -93,6 +93,7 @@ export function avatarTone(id: string) {
  */
 export function cardFaceLabel({ card, tags, done, today, parentTitle, rollup, childLabel = "subtasks" }: FaceInput) {
   const parts = [card.title];
+  if (card.key) parts.push(card.key);
   if (card.archived_at) parts.push("archived");
   if (parentTitle) parts.push(`in ${parentTitle}`);
   if (rollup?.total) parts.push(`${rollup.done} of ${rollup.total} ${childLabel} done`);
@@ -128,7 +129,10 @@ export function CardFace({ card, tags, done, today, excerptId, rollup, childLabe
   const people = cardAssignees(card);
   const children = rollup && rollup.total > 0 ? rollup : null;
   const archived = Boolean(card.archived_at);
+  // The card's key (lane KEYS, D710), quietly first on the footer line; the dialog's copies it.
+  const key = card.key ?? null;
   const countTexts = [
+    ...(key ? [key] : []),
     // The Archived chip (D605) takes footer room like a count.
     ...(archived ? ["Archived"] : []),
     ...(card.has_description === 1 && !excerpt ? [""] : []),
@@ -142,9 +146,9 @@ export function CardFace({ card, tags, done, today, excerptId, rollup, childLabe
   const shownPeople = visibleItems(people, FACE_PEOPLE);
   const assigned = people.length ? `Assigned to ${assigneeSentence(people.map((person) => person.display_name))}` : "";
   const counts = (card.has_description === 1 && !excerpt) || card.comment_count > 0 || card.attachment_count > 0 || Boolean(card.relation_count) || Boolean(card.open_blockers);
-  const meta = archived || due || allTags.length > 0 || counts || people.length > 0 || children;
+  const meta = key || archived || due || allTags.length > 0 || counts || people.length > 0 || children;
   const subtasks = children && <span className={`task-subtask-chip${children.done === children.total ? " complete" : ""}`} title={`${children.done} of ${children.total} ${childLabel} done`}><ListChecks />{children.done}/{children.total}</span>;
-  const main = archived || due || allTags.length > 0 || counts || children;
+  const main = key || archived || due || allTags.length > 0 || counts || children;
 
   return <div className="task-card-face" aria-hidden="true">
     <span className="task-card-title">
@@ -156,6 +160,7 @@ export function CardFace({ card, tags, done, today, excerptId, rollup, childLabe
     {excerpt && <span id={excerptId} className="task-card-excerpt">{excerpt}</span>}
     {meta && <span className="task-card-meta">
       {main && <span className="task-card-meta-main">
+        {key && <span className="task-card-key-face">{key}</span>}
         {archived && <ArchivedChip at={card.archived_at!} />}
         {due && <span className={`task-due-chip ${due.tone}`} title={due.description}><CalendarDays />{due.label}</span>}
         {allTags.length > 0 && <span className="task-card-tags">

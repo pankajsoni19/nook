@@ -22,6 +22,8 @@ import { mailShared, shareMembers } from "../mail/triggers";
 import { GUEST_SHARE_DISABLED, legacyGuestShareBlocked, legacyShareLevels, writeDirectShares } from "../access/shares";
 import { groupGrantExists } from "../access/groups";
 import { foldText } from "../../shared/taskQuery";
+import { boardCodeMessage, normalizeBoardCode } from "../../shared/boardKeys";
+import { boardCodeTaken, freeBoardCode, keyOfCard, writeBoardCode } from "./keys";
 
 /**
  * Task Boards services (WAVES_7-9.md §3). Routes are thin adapters over these
@@ -99,6 +101,8 @@ export type BoardSummary = {
   auto_archive_days: number | null;
   /** Level names, work level, and sprints (migration 019, D122). */
   structure: BoardStructure;
+  /** The board's short code (migration 079, D710): cards' keys are `<code>-<number>`. */
+  code: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -111,7 +115,7 @@ const boardSummarySelect = `
          b.visibility, b.share_role,
          (SELECT COUNT(*) FROM cards k WHERE k.board_id = b.id AND k.deleted_at IS NULL) AS card_count,
          (SELECT COUNT(*) FROM cards k WHERE k.board_id = b.id AND k.deleted_at IS NULL AND k.archived_at IS NOT NULL) AS archived_count,
-         b.auto_archive_days, b.structure_json, b.created_at, b.updated_at
+         b.auto_archive_days, b.structure_json, b.code, b.created_at, b.updated_at
   FROM boards b JOIN users u ON u.id = b.owner_id
 `;
 
@@ -194,6 +198,8 @@ export type CardSummary = {
   done_at: string | null;
   /** When the auto-archive sweep archived it, or null (D605). Archived cards are live, not binned. */
   archived_at: string | null;
+  /** Its number on its board (migration 079, D713); the key is the board's code, a hyphen, and this. */
+  number: number | null;
   created_at: string;
   updated_at: string;
 };
@@ -206,7 +212,7 @@ const cardSelect = (extraColumns = "") => `
          (SELECT COUNT(*) FROM card_comments cc WHERE cc.card_id = k.id) AS comment_count,
          (SELECT COUNT(*) FROM card_attachments ca WHERE ca.card_id = k.id) AS attachment_count,
          k.parent_card_id, k.level, ${EFFECTIVE_SPRINT_SQL} AS sprint_id,
-         k.done_at, k.archived_at, k.created_at, k.updated_at${extraColumns}
+         k.done_at, k.archived_at, k.number, k.created_at, k.updated_at${extraColumns}
   FROM cards k LEFT JOIN users cu ON cu.id = k.created_by
 `;
 const cardSummarySelect = cardSelect();
@@ -331,15 +337,17 @@ export function requireOwnedBoard(boardId: string, userId: string) {
 }
 
 /** Creates a board from a template (D136; default Simple kanban): its columns and states, its structure, and any tags. Never cards. */
-export function createBoard(userId: string, name: string, templateId: BoardTemplateId = "kanban", tz?: string) {
+export function createBoard(userId: string, name: string, templateId: BoardTemplateId = "kanban", tz?: string, requestedCode?: string) {
   const template = TEMPLATES[templateId];
   return db.transaction(() => {
     const owned = (db.query("SELECT COUNT(*) AS count FROM boards WHERE owner_id = ? AND deleted_at IS NULL").get(userId) as { count: number }).count;
     if (owned >= LIMITS.boardsPerOwner) throw limitReached(`You can have up to ${LIMITS.boardsPerOwner} boards`);
+    // A code asked for must be free (409 CODE_TAKEN); without one the name suggests a free code (D711).
+    const code = requestedCode === undefined ? freeBoardCode(name) : requireFreeCode(requestedCode, null);
     const id = crypto.randomUUID();
     const timestamp = now();
-    db.query("INSERT INTO boards (id, owner_id, name, structure_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
-      .run(id, userId, name, JSON.stringify(template.structure), timestamp, timestamp);
+    db.query("INSERT INTO boards (id, owner_id, name, structure_json, code, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run(id, userId, name, JSON.stringify(template.structure), code, timestamp, timestamp);
     const insertColumn = db.query("INSERT INTO board_columns (id, board_id, name, position, is_done, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
     // A done column is a done column (D53), as the 011 backfill does for existing boards; states follow D141.
     template.columns.forEach((column, index) => {
@@ -358,6 +366,20 @@ export function createBoard(userId: string, name: string, templateId: BoardTempl
     audit(userId, null, "task.board_create", { boardId: id, ...(templateId !== "kanban" ? { template: templateId } : {}) });
     return { board: boardSummary(id, userId)!, columns: listColumns(id) };
   })();
+}
+
+/**
+ * The code as stored, or 400 CODE_INVALID for a malformed one and 409 CODE_TAKEN for one another
+ * board has or had (D712, D714). Codes are workspace-wide, so CODE_TAKEN says a code is in use
+ * without naming the board (T461).
+ */
+function requireFreeCode(value: string, boardId: string | null) {
+  const code = normalizeBoardCode(value);
+  if (!code) throw new TaskError(400, boardCodeMessage, "CODE_INVALID");
+  if (boardCodeTaken(code, boardId)) {
+    throw new TaskError(409, `The code ${code} is already used by another board`, "CODE_TAKEN", { suggestion: freeBoardCode(code, boardId) });
+  }
+  return code;
 }
 
 export function renameBoard(userId: string, boardId: string, name: string) {
@@ -407,9 +429,12 @@ function checkStructureChange(boardId: string, structure: BoardStructure) {
  * then written in one transaction under the board lock, so a refused structure never leaves the
  * name changed and a failed write leaves neither.
  */
-export function updateBoard(userId: string, boardId: string, input: { name?: string; structure?: BoardStructure; keepSprintDefaults?: boolean; autoArchiveDays?: number | null }) {
+export function updateBoard(userId: string, boardId: string, input: { name?: string; structure?: BoardStructure; keepSprintDefaults?: boolean; autoArchiveDays?: number | null; code?: string }) {
   return withBoardLock(boardId, () => {
     requireBoardAt(boardId, userId, "manage");
+    // The code changes every card's key, so only the owner changes it (D712); old keys keep working (D714).
+    if (input.code !== undefined) requireOwnedBoard(boardId, userId);
+    const code = input.code === undefined ? undefined : requireFreeCode(input.code, boardId);
     const { name } = input;
     // A structure sent without `sprintDefaults` keeps the stored ones; `null` clears them.
     const kept = input.structure && input.keepSprintDefaults ? boardStructure(boardId).sprintDefaults : undefined;
@@ -429,6 +454,10 @@ export function updateBoard(userId: string, boardId: string, input: { name?: str
         // Only later sweeps read it: cards already archived stay archived (D604).
         db.query("UPDATE boards SET auto_archive_days = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL").run(input.autoArchiveDays, timestamp, boardId);
         audit(userId, null, "task.board_auto_archive", { boardId, days: input.autoArchiveDays });
+      }
+      if (code !== undefined) {
+        const before = (db.query("SELECT code FROM boards WHERE id = ?").get(boardId) as { code: string | null }).code;
+        if (writeBoardCode(boardId, code, timestamp)) audit(userId, null, "task.board_code", { boardId, code, previous: before });
       }
     })();
     return { board: boardSummary(boardId, userId)! };
@@ -621,13 +650,14 @@ export async function deleteColumn(userId: string, columnId: string) {
 // ---------------------------------------------------------------------------
 // Cards (readers). Every change runs under the board lock.
 
-export type CardDetail = CardSummary & { description: string };
+/** `key` (D710): the card's key on its board now, such as MYT-12. */
+export type CardDetail = CardSummary & { description: string; key: string | null };
 
 export const cardNotFound = () => new TaskError(404, "Card not found");
 
 export function cardDetail(cardId: string): CardDetail | null {
   const card = db.query(`${cardDetailSelect} WHERE k.id = ? AND k.deleted_at IS NULL`).get(cardId) as (SelectedCard & { description: string }) | null;
-  return card ? withCardFields(card, { assignees: assigneesForCard(cardId), tagIds: tagIdsForCard(cardId), flags: flagsForCard(cardId), rollup: rollupFor(cardId) }) : null;
+  return card ? { ...withCardFields(card, { assignees: assigneesForCard(cardId), tagIds: tagIdsForCard(cardId), flags: flagsForCard(cardId), rollup: rollupFor(cardId) }), key: keyOfCard(cardId) } : null;
 }
 
 export function liveCardsIn(columnId: string) {
@@ -643,7 +673,7 @@ function stalePosition(columnId: string) {
 }
 
 /** A column of this board (path and body ids are joined to their board, T39). */
-function requireBoardColumn(boardId: string, columnId: string) {
+export function requireBoardColumn(boardId: string, columnId: string) {
   const column = db.query("SELECT id, wip_limit, state FROM board_columns WHERE id = ? AND board_id = ?").get(columnId, boardId) as { id: string; wip_limit: number | null; state: ColumnState } | null;
   if (!column) throw columnNotFound();
   return column;
@@ -656,7 +686,7 @@ function requireBoardColumn(boardId: string, columnId: string) {
  * restore are always allowed. Every live card in the column counts, except archived ones (hidden
  * from the board, D605).
  */
-function requireColumnRoom(column: { id: string; wip_limit: number | null }) {
+export function requireColumnRoom(column: { id: string; wip_limit: number | null }) {
   if (column.wip_limit === null) return;
   const cardCount = (db.query("SELECT COUNT(*) AS count FROM cards WHERE column_id = ? AND deleted_at IS NULL AND archived_at IS NULL").get(column.id) as { count: number }).count;
   if (cardCount >= column.wip_limit) {

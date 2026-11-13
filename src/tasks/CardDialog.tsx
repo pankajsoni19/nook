@@ -47,7 +47,7 @@ import {
   type SprintSummary
 } from "./tasksApi";
 import { useHistoryDialogGuard } from "./useHistoryDialogGuard";
-import { CopyCardLinkButton } from "./cardLink";
+import { CardKeyButton, CopyCardLinkButton } from "./cardLink";
 import { CommentReactions } from "./CommentReactions";
 import type { TaskNotify } from "./taskActions";
 import { ReadOnlyBanner, useRole } from "../team/roleAccess";
@@ -71,6 +71,12 @@ type CardDialogProps = {
   onMove: (card: CardDetail) => void;
   /** Moves the card to the Bin (the dialog confirms first) and closes it. */
   onDelete: (cardId: string) => Promise<void>;
+  /**
+   * The board this dialog is over (lane KEYS): a card that loads on another board (it moved there,
+   * D716, while an old link or a notification still names this one) is handed to `onElsewhere`.
+   */
+  boardId?: string;
+  onElsewhere?: (card: CardDetail) => void;
   notify: TaskNotify;
   /** The board's tags for the Tags field, and how the board hears of a tag change (13C). */
   tags?: BoardTag[];
@@ -117,7 +123,7 @@ const payloadCard = (reason: unknown) => reason instanceof ApiError && reason.pa
  * The description is Markdown shown through the notes renderer read-only (D44) and edited with
  * an explicit Save; a revision conflict offers Reload or Copy my text.
  */
-export function CardDialog({ userId, cardId, columns, columnId, boardOwner, boardLevel, onClose, onMissing, onChanged, onArchive, onMove, onDelete, notify, tags, onTagsChange, onOpenRelated, onRelationsChanged, layout = "dialog", onExpand, onCollapse, hierarchy, sprints, initialView }: CardDialogProps) {
+export function CardDialog({ userId, cardId, columns, columnId, boardOwner, boardLevel, onClose, onMissing, onChanged, onArchive, onMove, onDelete, boardId, onElsewhere, notify, tags, onTagsChange, onOpenRelated, onRelationsChanged, layout = "dialog", onExpand, onCollapse, hierarchy, sprints, initialView }: CardDialogProps) {
   const page = layout === "page";
   // Viewers and guests read the card: every write control is left out or shown as text, since the
   // server's write gate refuses those writes (403 ROLE_READ_ONLY), comments included. Members below
@@ -169,6 +175,10 @@ export function CardDialog({ userId, cardId, columns, columnId, boardOwner, boar
     setLoadError(null);
     try {
       const view = await getCard(cardId);
+      if (boardId && onElsewhere && view.card.board_id !== boardId) {
+        onElsewhere(view.card);
+        return;
+      }
       setCard(view.card);
       setTitle(view.card.title);
       setComments(view.comments);
@@ -179,7 +189,7 @@ export function CardDialog({ userId, cardId, columns, columnId, boardOwner, boar
       if (reason instanceof ApiError && reason.status === 404) onMissing();
       else setLoadError(taskErrorMessage(reason, "Could not load this card"));
     }
-  }, [cardId, onMissing]);
+  }, [cardId, onMissing, boardId, onElsewhere]);
   useEffect(() => { void load(); }, [load]);
 
   const closeSubDialog = useCallback(() => { setDeletingComment(null); setUnlinking(null); setConfirmDelete(false); setDiscardPrompt(false); }, []);
@@ -643,7 +653,9 @@ export function CardDialog({ userId, cardId, columns, columnId, boardOwner, boar
       {drop.dragging && <div className="task-card-drop" aria-hidden="true"><Paperclip />Drop files to attach them</div>}
       <header className="task-card-dialog-header">
         <div className="task-card-dialog-heading">
-          <span className="eyebrow">{[card && hierarchy ? levelEyebrow(hierarchy.structure, levelOf(card)) : null, column ? columnEyebrow(column.name) : "Card"].filter(Boolean).join(" · ")}</span>
+          <span className="eyebrow task-card-eyebrow">{[card && hierarchy ? levelEyebrow(hierarchy.structure, levelOf(card)) : null, column ? columnEyebrow(column.name) : "Card"].filter(Boolean).join(" · ")}
+            {/* The card's key (D713), click to copy: "IN DOING · MYT-12". */}
+            {card?.key && <>{" · "}<CardKeyButton cardKey={card.key} notify={notify} className="task-card-key-eyebrow" /></>}</span>
           {card && hierarchy && <CardBreadcrumb card={card} context={hierarchy} />}
           {card && readOnly
             ? <h2 id={titleId} className="task-card-title-static">{card.title}</h2>
@@ -665,7 +677,7 @@ export function CardDialog({ userId, cardId, columns, columnId, boardOwner, boar
             : <h2 id={titleId}>Loading…</h2>}
           <FormError message={titleError} className="file-dialog-error" />
         </div>
-        {card && <CopyCardLinkButton boardId={card.board_id} cardId={card.id} notify={notify} />}
+        {card && <CopyCardLinkButton boardId={card.board_id} cardId={card.id} cardKey={card.key} notify={notify} />}
         {card && !readOnly && <button className="icon-button" onClick={() => onMove(card)} aria-haspopup="dialog" aria-label="Move card" title="Move to…"><ArrowRightLeft /></button>}
         {card && !readOnly && onArchive && !card.archived_at && <button className="icon-button" onClick={() => onArchive(card)} aria-label="Archive card" title="Archive: hide it from the board"><Archive /></button>}
         {card && !readOnly && <button className="icon-button" onClick={() => setConfirmDelete(true)} aria-haspopup="dialog" aria-label="Delete card" title="Move to the Bin"><Trash2 /></button>}
