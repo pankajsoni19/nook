@@ -3044,3 +3044,31 @@ No migration. Wire types: `shared/backups.ts` (`BackupsView`, `BackupRun`, `Dril
   - Content → moved to the Bin with the draft file and `draft_revision`/`draft_checksum` **kept** (today this route deletes them). The response still returns `{ ok: true }`, plus `binned: true`, so the client can pick the right toast.
 - "Blank" means `current_version = 0` and the draft is absent or empty after `trim()` (DEVELOPMENT_PLAN §9.1).
 - Unchanged: every read endpoint continues to exclude `deleted_at IS NOT NULL`. So do all MCP tools.
+
+## Standups (module `checkins`, lane CHECKINS, D930–D952)
+
+JSON under `/api`, errors `{ error, code }`; `:id` is the UUID, short id, or friendly segment; anything unreadable is 404. Guests and viewers may send only the answering writes (answer, skip, `participants/me`, timezone, subscription).
+
+| Method | Path | Body / query | Returns |
+| --- | --- | --- | --- |
+| GET | `/api/checkins?mine=participant\|all&cursor=` | — | `{ items: CheckinSummary[], nextCursor }` |
+| POST | `/api/checkins` | `{ template, name?, description?, schedule?, deadlineMinutes?, reminderMinutesBefore?, participants?: { people, groups }, privateAnswers?, summary? }` | 201 `{ checkin }` |
+| GET / PATCH / DELETE | `/api/checkins/:id` | PATCH: settings, `schedule`, `status`, `expectedRevision` (409 `CHECKIN_CHANGED`) | `{ checkin }` / `{ binned }` |
+| GET / PUT | `/api/checkins/:id/questions` | PUT `{ set }` (draft) | `{ current, version, draft }` |
+| POST | `/api/checkins/:id/questions/publish` | — | `{ version, set }` (409 `NO_DRAFT`) |
+| GET / PUT | `/api/checkins/:id/participants` | `{ people, groups }` | `{ participants, added, removed }` |
+| PATCH | `/api/checkins/:id/participants/me` | `{ tz?, pausedUntil? }` | `{ tz, paused_until }` |
+| PUT | `/api/checkins/:id/subscription` | `{ summaries }` | `{ summaries }` |
+| PUT | `/api/checkin-participation/timezone` | `{ tz }` | `{ updated }` |
+| GET / POST | `/api/checkins/:id/rounds` | GET `?cursor=<date>`; POST starts today's round | rounds page / 201 `{ round }` (409 `ROUND_EXISTS`) |
+| GET | `/api/checkins/:id/rounds/:date` | — | `RoundView` |
+| GET | `/api/checkins/:id/stats?from=&to=` | — | `CheckinStats` |
+| POST | `/api/checkins/:id/unblock` | `{ cardId }` | `{ unblocked }` |
+| GET | `/api/checkins/due` | — | `{ items: DueRound[] }` |
+| GET | `/api/checkins/feed?checkin=&person=&blockers=1&q=&cursor=` | — | `{ items: FeedEntry[], nextCursor }` |
+| GET | `/api/checkin-rounds/:rid` · `/me` · `/summary` | — | `RoundView` · prefill · structured summary |
+| POST / PUT | `/api/checkin-rounds/:rid/answer` | `{ answers, expectedRevision? }` | 201/200 `{ status, edited, blockers, round }` (400 `INVALID_ANSWERS` with `errors`, 403 `NOT_PARTICIPANT`, 409 `ROUND_CLOSED`) |
+| POST | `/api/checkin-rounds/:rid/skip` · `/close` · `/nudge` | — | `{ status }` · `RoundView` · `{ nudged }` |
+| PUT / DELETE | `/api/reactions/checkin_answer/:responseId/:emoji` | — | `{ reactions }` |
+
+MCP (`checkins:read` / `checkins:write`): `list_checkins`, `get_checkin`, `list_checkin_rounds`, `get_checkin_round`, `summarize_checkin_round`, `get_due_checkins`, `get_checkin_feed`, `checkin_stats`, `answer_checkin`, `skip_checkin`, `create_checkin`, `update_checkin`, `set_checkin_participants`, `delete_checkin` (+ `bin:write`); resource `nook://checkin_round/<id>`; proposal kind `checkin_answer`. Datasets `checkins.participation`, `checkins.answers`; search scope `standups`; Today section `checkinsDue`; digest section "Standups you missed".

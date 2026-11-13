@@ -4,6 +4,11 @@ Release notes for Nook, newest first. Upgrade steps for each release are in [doc
 
 ## Unreleased
 
+**Standups**
+
+- **Standups** (`/standups`): daily standups, weekly updates, retros, and anonymous pulse surveys from templates, on weekdays at a time in each person's own zone (or one zone), with a deadline, a reminder, nudges, and "Start a round now". Answer from the round, Today ("Standups due"), a notification, or MCP; the answer sheet suggests the cards you finished or are working on, offers "Same as last time" and "No blockers", and is one question per step on phones.
+- Card keys in answers become chips; blockers link the cards and flag them Blocked (when you can edit them), with card history and an "Unblock" offer next time. Rounds show participation, blockers on top, mood, and answers by person or by question, with reactions and threads; the team feed filters by standup, person, words, and blockers. Insights, round summaries (inbox, optional email), datasets, search, MCP tools, and the Bin.
+
 **Friendly, shareable URLs**
 
 - **Cards and boards**: the address bar shows `/tasks/KAN-1` for an open card (dialog or full page, `/tasks/KAN-1/full`) and `/tasks/KAN` for a board, keeping the board's view in the query when it is not the default. Old `/tasks/<id>/card/<id>` links, board ids, old card keys of moved cards, and a board's former code still open and turn into the current URL without an extra history entry.
