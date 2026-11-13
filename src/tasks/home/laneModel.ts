@@ -151,7 +151,9 @@ export function faceOf(card: QueriedCard): { card: CardSummary; tags: BoardTag[]
       has_description: card.description_excerpt ? 1 : 0, revision: card.revision, created_by: card.created_by, creator_name: card.creator_name,
       due_on: card.due_on, due_time: card.due_time, due_tz: card.due_tz, due_at: card.due_at, assignees: card.assignees,
       description_excerpt: card.description_excerpt, tag_ids: card.tags.map((tag) => tag.id), flags: card.flags as CardSummary["flags"],
-      comment_count: 0, attachment_count: 0, archived_at: card.archived_at ?? null
+      comment_count: 0, attachment_count: 0, archived_at: card.archived_at ?? null,
+      // The card's key (lane KEYS, D710), shown quietly on the face.
+      ...(card.key ? { key: card.key } : {})
     } as CardSummary,
     tags: card.tags.map((tag) => ({ id: tag.id, name: tag.name, color: tag.color })) as unknown as BoardTag[]
   };

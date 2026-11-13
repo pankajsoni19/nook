@@ -45,8 +45,8 @@ export function BoardList({ onOpen, onOpenBoard, notify, header }: BoardListProp
   const shared = all.filter((board) => board.is_owner !== 1);
   const dialogBoard = dialog && dialog.kind !== "new" ? all.find((board) => board.id === dialog.boardId) ?? null : null;
 
-  async function create(name: string, template: BoardTemplateId) {
-    const { board } = await createBoard(name, template, viewerTimeZone());
+  async function create(name: string, template: BoardTemplateId, code?: string) {
+    const { board } = await createBoard(name, template, viewerTimeZone(), code);
     setDialog(null);
     setBoards((current) => current ? [...current, board] : [board]);
     onOpen(board);
@@ -91,6 +91,7 @@ export function BoardList({ onOpen, onOpenBoard, notify, header }: BoardListProp
       <span className="task-board-copy">
         <span className="task-board-name" title={board.name}>{board.name}</span>
         <span className="task-board-meta">
+          {board.code && <span className="task-board-code" title="Board code: card keys start with it">{board.code}</span>}
           <span>{cardCountLabel(board.card_count)}</span>
           {board.structure && (board.structure.levels.length > 1 || board.structure.sprints) && <span>{structureLabel(board.structure)}</span>}
           <time dateTime={board.updated_at}>Updated {relativeTime(board.updated_at)}</time>

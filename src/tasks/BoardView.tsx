@@ -76,10 +76,13 @@ import {
   taskErrorCode,
   taskErrorMessage,
   updateColumn,
+  moveCardToBoard,
   type BoardDetail,
+  type BoardSummary,
   type CardDetail,
   type CardSummary
 } from "./tasksApi";
+import { cardKey } from "../../shared/boardKeys";
 import { useHistoryDialogGuard } from "./useHistoryDialogGuard";
 import { useLayerOpener } from "../historyDialogs";
 
@@ -102,6 +105,11 @@ type BoardViewProps = {
   onOpenBoard: (boardId: string) => void;
   /** Opens a card on any board (a relation link): pushes its route. */
   onOpenCardRoute?: (boardId: string, cardId: string) => void;
+  /**
+   * The open card is on another board now (lane KEYS, D716: it moved, or an old link named this
+   * board): the host replaces the entry with the card on its board.
+   */
+  onCardElsewhere?: (boardId: string, cardId: string) => void;
   /** The Sprints sheet (/tasks/:b/sprints) is open over the board; the host opens and closes its route. */
   sprintsOpen?: boolean;
   onOpenSprints?: () => void;
@@ -135,7 +143,7 @@ type BoardDialog =
 
 export const MAX_COLUMNS = 20;
 
-export function BoardView({ userId, boardId, openCardId, openCardFull = false, onExpandCard, onCollapseCard, onOpenCard, onCloseCard, onBack, onMissing, notify, onBoardDeleted, onOpenBoard, onOpenCardRoute, query: routeQuery, onQueryChange: routeQueryChange, sprintsOpen = false, onOpenSprints, onCloseSprints,
+export function BoardView({ userId, boardId, openCardId, openCardFull = false, onExpandCard, onCollapseCard, onOpenCard, onCloseCard, onBack, onMissing, notify, onBoardDeleted, onOpenBoard, onOpenCardRoute, onCardElsewhere, query: routeQuery, onQueryChange: routeQueryChange, sprintsOpen = false, onOpenSprints, onCloseSprints,
   savedViewId = null, viewUnsaved = false, onSavedView, onLeaveSavedView, displayName = "Me" }: BoardViewProps) {
   const focusCardId = openCardId;
   const [boardDetail, setDetail] = useState<BoardDetail | null>(null);
@@ -614,7 +622,7 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
     if (!next || loadingArchived) return;
     setLoadingArchived(true);
     try {
-      const page = await getArchivedCards(boardId, next);
+      const page = await getArchivedCards(boardId, next, detailRef.current?.board.code);
       setDetail((current) => {
         if (!current) return current;
         const listed = new Set(current.cards.map((card) => card.id));
@@ -830,6 +838,26 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
     people: cards.flatMap((card) => card.assignees ?? [])
   }) : null;
 
+  /**
+   * Move to another board (lane KEYS, D716): the card leaves this board. From its open dialog the
+   * route follows it to the other board; from the board, a toast offers to open it there.
+   */
+  async function moveToBoard(card: CardSummary, target: BoardSummary, columnId: string) {
+    const result = await moveCardToBoard(card.id, target.id, columnId);
+    setDialog(null);
+    returnFocusRef.current = null;
+    setDetail((current) => current ? { ...current, cards: current.cards.filter((item) => item.id !== card.id) } : current);
+    const dropped = result.droppedTags.length === 1 ? ` “${result.droppedTags[0]}” is not a tag there, so it was dropped.`
+      : result.droppedTags.length > 1 ? ` ${result.droppedTags.length} tags are not on that board, so they were dropped.` : "";
+    const message = `Moved to ${target.name}${result.card.key ? ` as ${result.card.key}` : ""}.${dropped}`;
+    if (openCardIdRef.current === card.id) {
+      onCardElsewhere?.(target.id, card.id);
+      notify.success(message);
+    } else {
+      notify.success(message, onOpenCardRoute ? { action: { label: "Open", onClick: () => onOpenCardRoute(target.id, card.id) } } : undefined);
+    }
+  }
+
   return <section className="task-board" data-read-only={readOnly && !roleReadOnly ? "true" : undefined} aria-labelledby={cardPage ? undefined : "task-board-title"}>
     {!cardPage && <>
     <header className="task-board-header">
@@ -974,6 +1002,8 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
       boardLevel={board?.level}
       onClose={cardPage && onCollapseCard ? onCollapseCard : onCloseCard}
       onMissing={onCardMissing}
+      boardId={boardId}
+      onElsewhere={(card) => onCardElsewhere?.(card.board_id, card.id)}
       notify={notify}
       onMove={(card) => openDialog({ kind: "moveCard", cardId: card.id })}
       onDelete={removeCard}
@@ -1014,7 +1044,7 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
     {savedViews.dialogs}
     {(dialog?.kind === "settings" || overSettings) && board && <BoardSettingsSheet board={board} owner={canManage} isOwner={owner} showAllLevels={hierarchy.showAll} onShowAllLevels={hierarchy.setShowAll}
       showArchived={showArchived} onShowArchived={(value) => { void setShowArchived(value); }}
-      onBoardSaved={(saved) => setDetail((current) => current ? { ...current, board: saved } : current)}
+      onBoardSaved={(saved) => setDetail((current) => current ? withBoardKeys({ ...current, board: saved }) : current)}
       onClose={closeDialog} notify={notify} suspended={overSettings}
       onRename={() => openOverSettings("rename")} onShare={() => openOverSettings("share")} onDelete={() => openOverSettings("deleteBoard")} onAddColumn={() => openOverSettings("addColumn")}
       onStructureSaved={(saved) => setDetail((current) => current ? { ...current, board: saved } : current)}
@@ -1085,11 +1115,17 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
     />}
     {dialog?.kind === "moveCard" && dialogCard && <MoveCardSheet card={dialogCard} columns={columns} cards={cards} onCancel={closeDialog} readOnly={readOnly} parentPicker={readOnly ? undefined : hierarchy.parentPicker(dialogCard)}
       onArchive={readOnly ? undefined : () => { void setArchived(dialogCard.id, !dialogCard.archived_at); }}
-      onCopyLink={() => { void copyCardLink(boardId, dialogCard.id, notify); }} onMove={async (columnId, place) => {
+      onCopyLink={() => { void copyCardLink(boardId, dialogCard.id, notify, undefined, dialogCard.key); }} onMove={async (columnId, place) => {
       const current = detailRef.current;
       setDialog(null);
       returnFocusRef.current = null;
       if (current) await move(dialogCard.id, columnId, sheetMoveAnchor(current.cards, dialogCard.id, columnId, place), { focus: true });
-    }} />}
+    }}
+      onMoveToBoard={readOnly ? undefined : (target, columnId) => moveToBoard(dialogCard, target, columnId)} />}
   </section>;
+}
+
+/** Each card's key from the board's code (D710), after the code changed in Board settings (D714). */
+function withBoardKeys(detail: BoardDetail): BoardDetail {
+  return { ...detail, cards: detail.cards.map((card) => ({ ...card, key: cardKey(detail.board.code, card.number) })) };
 }

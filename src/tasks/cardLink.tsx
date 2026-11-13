@@ -1,5 +1,6 @@
 import { Link as LinkIcon } from "lucide-react";
 import { formatRoute } from "../router";
+import { parseCardKey } from "../../shared/boardKeys";
 import type { TaskNotify } from "./taskActions";
 
 /**
@@ -8,6 +9,16 @@ import type { TaskNotify } from "./taskActions";
  */
 export function cardPermalink(boardId: string, cardId: string, origin = window.location.origin) {
   return `${origin}${formatRoute({ app: "tasks", boardId, cardId })}`;
+}
+
+/**
+ * A card's short link (lane KEYS, D713): `/tasks/MYT-12` on this origin. It keeps opening the card
+ * after its board's code changes (D714) or it moves to another board (D715). Null without a
+ * well-formed key (an older server sends none), so callers fall back to the permalink.
+ */
+export function cardShortLink(key: string | null | undefined, origin = window.location.origin) {
+  const parsed = key ? parseCardKey(key) : null;
+  return parsed ? `${origin}/tasks/${parsed.code}-${parsed.number}` : null;
 }
 
 type ClipboardDeps = {
@@ -51,15 +62,35 @@ export async function copyText(text: string, deps: ClipboardDeps = {
   }
 }
 
-/** Copies a card's permalink and says so; on failure the toast shows the link to select by hand. */
-export async function copyCardLink(boardId: string, cardId: string, notify: TaskNotify, copy: (text: string) => Promise<boolean> = copyText) {
-  const url = cardPermalink(boardId, cardId);
+/**
+ * Copies a card's link and says so: the short link when the card's key is known (D713), else the
+ * permalink. On failure the toast shows the link to select by hand.
+ */
+export async function copyCardLink(boardId: string, cardId: string, notify: TaskNotify, copy: (text: string) => Promise<boolean> = copyText, key?: string | null) {
+  const url = cardShortLink(key) ?? cardPermalink(boardId, cardId);
   if (await copy(url)) notify.success("Link copied");
   else notify.warning(`Could not copy — here is the link: ${url}`, { selectable: true });
 }
 
-/** The card header's "Copy link" (the dialog and the full-page card). */
-export function CopyCardLinkButton({ boardId, cardId, notify }: { boardId: string; cardId: string; notify: TaskNotify }) {
-  return <button type="button" className="icon-button task-card-copy-link" onClick={() => { void copyCardLink(boardId, cardId, notify); }}
+/** Copies the key itself ("MYT-12", D713), for pasting into a chat or a commit message. */
+export async function copyCardKey(key: string, notify: TaskNotify, copy: (text: string) => Promise<boolean> = copyText) {
+  if (await copy(key)) notify.success(`Copied ${key}`);
+  else notify.warning(`Could not copy — the key is ${key}`, { selectable: true });
+}
+
+/** The card header's "Copy link" (the dialog and the full-page card): the short link when `cardKey` is known. */
+export function CopyCardLinkButton({ boardId, cardId, cardKey, notify }: { boardId: string; cardId: string; cardKey?: string | null; notify: TaskNotify }) {
+  return <button type="button" className="icon-button task-card-copy-link" onClick={() => { void copyCardLink(boardId, cardId, notify, copyText, cardKey); }}
     aria-label="Copy link to this card" title="Copy link"><LinkIcon aria-hidden="true" /></button>;
+}
+
+/**
+ * A card's key as a small button that copies it (D713): in the card header's eyebrow, and quietly on
+ * card faces, list rows, and table rows. `onClick` stops there, so a key on a card face never opens the card.
+ */
+export function CardKeyButton({ cardKey, notify, className = "" }: { cardKey: string; notify: TaskNotify; className?: string }) {
+  return <button type="button" className={`task-card-key${className ? ` ${className}` : ""}`}
+    onClick={(event) => { event.stopPropagation(); event.preventDefault(); void copyCardKey(cardKey, notify); }}
+    onPointerDown={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") event.stopPropagation(); }}
+    draggable={false} aria-label={`${cardKey}: copy the card's key`} title="Copy key">{cardKey}</button>;
 }

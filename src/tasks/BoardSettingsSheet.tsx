@@ -16,8 +16,10 @@ import {
   type StructurePreset
 } from "../../shared/boardStructure";
 import { structureOf } from "./hierarchyModel";
-import { setAutoArchiveDays, taskErrorMessage, updateBoardStructure, type BoardSummary } from "./tasksApi";
+import { setAutoArchiveDays, setBoardCode, taskErrorMessage, updateBoardStructure, type BoardSummary } from "./tasksApi";
 import { FormError } from "../ui/FormError";
+import { ApiError } from "../api";
+import { BOARD_CODE_MAX, boardCodeMessage, normalizeBoardCode } from "../../shared/boardKeys";
 
 type BoardSettingsSheetProps = {
   board: BoardSummary;
@@ -46,6 +48,62 @@ type BoardSettingsSheetProps = {
   sprintsSection?: ReactNode;
   notify: Notifier;
 };
+
+/**
+ * Board settings → General → Code (lane KEYS, D712, D714): every card's key starts with it. The owner
+ * changes it here; old keys and short links keep opening their cards. Everyone else sees it.
+ */
+export function BoardCodeRow({ board, isOwner, onSaved, notify }: { board: BoardSummary; isOwner: boolean; onSaved: (board: BoardSummary) => void; notify: Notifier }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(board.code ?? "");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const inputId = useId();
+  if (!board.code) return null;
+  async function save() {
+    const code = normalizeBoardCode(value);
+    if (!code) {
+      setError(boardCodeMessage);
+      return;
+    }
+    if (code === board.code) {
+      setEditing(false);
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const { board: next } = await setBoardCode(board.id, code);
+      onSaved(next);
+      setEditing(false);
+      notify.success(`Code changed to ${next.code}. Old keys and links still open their cards.`);
+    } catch (reason) {
+      const suggestion = reason instanceof ApiError && reason.payload && typeof reason.payload === "object" ? (reason.payload as { suggestion?: unknown }).suggestion : undefined;
+      setError(`${taskErrorMessage(reason, "Could not change the code")}${typeof suggestion === "string" ? `. ${suggestion} is free.` : ""}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+  if (!editing) {
+    return <div className="task-settings-row">
+      <span><strong className="task-board-code">{board.code}</strong><small>Card keys: {board.code}-1, {board.code}-2, …</small></span>
+      {isOwner && <button className="secondary-button task-small-button" onClick={() => { setValue(board.code ?? ""); setError(null); setEditing(true); }}><Pencil />Change code</button>}
+    </div>;
+  }
+  return <form className="task-settings-code" onSubmit={(event) => { event.preventDefault(); void save(); }} noValidate>
+    <label htmlFor={inputId}>Board code</label>
+    <span className="task-settings-code-row">
+      <input id={inputId} className="task-board-code-input" value={value} autoFocus autoComplete="off" spellCheck={false} maxLength={BOARD_CODE_MAX} disabled={busy}
+        aria-invalid={error ? true : undefined} aria-describedby={`${inputId}-hint`}
+        onChange={(event) => { setValue(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "")); setError(null); }}
+        onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setEditing(false); } }} />
+      <button type="button" className="secondary-button task-small-button" disabled={busy} onClick={() => setEditing(false)}>Cancel</button>
+      <button type="submit" className="primary-button task-small-button" disabled={busy}>{busy ? "Saving…" : "Save"}</button>
+    </span>
+    <small id={`${inputId}-hint`} className="task-settings-note">Every card's key changes to the new code. Old keys and short links keep working, and no other board can take the old code.</small>
+    <FormError message={error} className="file-dialog-error" />
+  </form>;
+}
 
 /** The structure without its sprint defaults: what Save structure compares and sends. */
 const levelsOnly = ({ levels, workLevel, sprints }: BoardStructure): BoardStructure => ({ levels, workLevel, sprints });
@@ -143,6 +201,7 @@ export function BoardSettingsSheet({ board, owner, isOwner = owner, showAllLevel
             <span><strong title={board.name}>{board.name}</strong><small>{isOwner ? "You own this board" : owner ? `${board.owner_name}’s board · you manage it` : `${board.owner_name}’s board`}</small></span>
             {owner && <button className="secondary-button task-small-button" onClick={onRename}><Pencil />Rename</button>}
           </div>
+          <BoardCodeRow board={board} isOwner={isOwner} onSaved={(next) => onBoardSaved?.(next)} notify={notify} />
         </section>
 
         <section className="task-settings-section" aria-labelledby={`${titleId}-structure`}>

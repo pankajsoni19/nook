@@ -16,6 +16,8 @@ export type QueriedCard = {
   column_name: string;
   column_state: TaskState;
   is_done: 0 | 1;
+  /** The key, such as MYT-12 (lane KEYS, D710); older servers omit it. */
+  key?: string | null;
   /** Archived (D605, D610): still listed, marked; older servers omit it. */
   archived_at?: string | null;
   position: number;
