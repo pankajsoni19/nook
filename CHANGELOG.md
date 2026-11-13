@@ -4,6 +4,14 @@ Release notes for Nook, newest first. Upgrade steps for each release are in [doc
 
 ## Unreleased
 
+**Friendly, shareable URLs**
+
+- **Cards and boards**: the address bar shows `/tasks/KAN-1` for an open card (dialog or full page, `/tasks/KAN-1/full`) and `/tasks/KAN` for a board, keeping the board's view in the query when it is not the default. Old `/tasks/<id>/card/<id>` links, board ids, old card keys of moved cards, and a board's former code still open and turn into the current URL without an extra history entry.
+- **Notes**: `/notes/<folder>/<title>-<shortid>` (`/notes/engineering/release-checklist-3f9x2ab01k`; no folder segment for a note in no folder). Renaming the note or its folder updates the URL in place; a stale or wrong title, a missing folder, and old id links still open the note.
+- **Files, whiteboards, collections, reports**: `/files/<name>-<shortid>`, `/whiteboards/<name>-<shortid>`, `/collections/<name>-<shortid>` (views and rows below it), `/reports/<title>-<shortid>`.
+- **Links in mail, the Inbox, and MCP tool results** use the friendly forms. Vault items, chats, calendar events, and Team pages keep their ids on purpose.
+- **Privacy**: a link you cannot open behaves exactly like one that does not exist; the server log records app pages without their titles. API: `GET /api/links/:kind/:ref`; `short_id` on notes, documents, collections, and reports (migration 083).
+
 **Tasks: card keys and moving cards between boards**
 
 - **Card keys.** Every board has a short code (MYT) and every card a key (MYT-12), shown in the card header (click to copy), on cards, and in the list and table views. New board suggests a code from the name; the owner changes it in Board settings, and old keys keep working.
