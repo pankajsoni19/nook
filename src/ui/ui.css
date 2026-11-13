@@ -16,6 +16,9 @@
 .ui-select-cell:hover { border-color: #2c2c31; }
 .ui-select-cell:focus-visible, .ui-select-cell[aria-expanded="true"] { border-color: #6b582f; background: #0b0b0d; }
 .ui-select-chip { width: auto; min-height: 32px; border-radius: 999px; padding: 0 10px; }
+/* An icon trigger (iconOnly): the icon and a small chevron; the label is its name and tooltip. */
+.ui-select-icon-only { justify-content: center; gap: 2px; padding: 0 6px 0 10px; }
+.ui-select-icon-only .ui-select-chevron { width: 12px; height: 12px; }
 
 .ui-option-swatch { width: 12px; height: 12px; flex: none; border-radius: 999px; background: #55555c; box-shadow: inset 0 0 0 1px rgb(255 255 255 / 12%); }
 .ui-option-icon { display: inline-grid; flex: none; place-items: center; }

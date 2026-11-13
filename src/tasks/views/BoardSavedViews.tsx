@@ -307,19 +307,26 @@ export function useBoardSavedViews({ boardId, savedViewId, routeFilter, unsaved,
   const isPinned = Boolean(current && pinned.some((item) => item.id === current.id));
   const listed = current && !views.some((item) => item.id === current.id) && !isPinned ? [current, ...views] : views;
   const everyView = [...pinned, ...listed];
+  const viewOptions = [
+    { value: ALL_CARDS, label: "View: All cards" },
+    ...pinned.map((item) => ({ value: item.id, label: `View: ${item.name}`, icon: <Pin />, group: "Pinned for everyone" })),
+    ...listed.map((item) => ({ value: item.id, label: `View: ${item.name}`, icon: <Bookmark />, ...(pinned.length ? { group: "Your views" } : {}) }))
+  ];
+  const pick = (value: string) => {
+    if (value === (savedViewId ?? ALL_CARDS)) return;
+    onSelect(value === ALL_CARDS ? null : everyView.find((item) => item.id === value) ?? null);
+  };
+  const more: ReactNode = current && (owner || canCreate || canPin || own !== null) ? <button type="button" className="icon-button task-saved-view-more" onClick={(event) => open({ kind: "menu" }, event.currentTarget)}
+    aria-haspopup="dialog" aria-label={`Options for the view ${current.name}`} title="View options"><Ellipsis /></button> : null;
   const picker: ReactNode = <span className="task-saved-view-picker">
-    <Select<string> variant="chip" label="Saved view" value={savedViewId ?? ALL_CARDS} searchable="auto"
-      options={[
-        { value: ALL_CARDS, label: "View: All cards" },
-        ...pinned.map((item) => ({ value: item.id, label: `View: ${item.name}`, icon: <Pin />, group: "Pinned for everyone" })),
-        ...listed.map((item) => ({ value: item.id, label: `View: ${item.name}`, icon: <Bookmark />, ...(pinned.length ? { group: "Your views" } : {}) }))
-      ]}
-      onChange={(value) => {
-        if (value === (savedViewId ?? ALL_CARDS)) return;
-        onSelect(value === ALL_CARDS ? null : everyView.find((item) => item.id === value) ?? null);
-      }} />
-    {current && (owner || canCreate || canPin || own !== null) && <button type="button" className="icon-button task-saved-view-more" onClick={(event) => open({ kind: "menu" }, event.currentTarget)}
-      aria-haspopup="dialog" aria-label={`Options for the view ${current.name}`} title="View options"><Ellipsis /></button>}
+    <Select<string> variant="chip" label="Saved view" value={savedViewId ?? ALL_CARDS} searchable="auto" options={viewOptions} onChange={pick} />
+    {more}
+  </span>;
+  // Phones (two rows, nothing hidden): an icon chip named "View: All cards" (or the view's name),
+  // lit while a saved view is on; the view's ⋯ moves to the filter row (BoardView).
+  const compactPicker: ReactNode = <span className="task-saved-view-picker">
+    <Select<string> variant="chip" label="Saved view" value={savedViewId ?? ALL_CARDS} searchable="auto" options={viewOptions} onChange={pick}
+      iconOnly icon={<Bookmark />} className={`task-saved-view-select${current ? " active" : ""}`} />
   </span>;
 
   const hasFilter = filter.terms.length > 0;
@@ -390,6 +397,9 @@ export function useBoardSavedViews({ boardId, savedViewId, routeFilter, unsaved,
     saveOwnRows: (rows: string[]) => { if (own?.on) void saveOwn({ ...own, rows }, { collapsedRows: rows }, "Could not change the collapsed rows"); },
     dirty,
     picker,
+    compactPicker,
+    /** The current view's ⋯ (null without one): beside the picker on a computer, in the filter row on a phone. */
+    more,
     filterActions,
     dialogs
   };

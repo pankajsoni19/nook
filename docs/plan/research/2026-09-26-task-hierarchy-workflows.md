@@ -291,6 +291,8 @@ This is a new **Board settings** sheet that replaces the three loose owner icons
 │ To do 5 │ Doing 3 │ Review 1 │ Done 8 │ +    │  column tabs (existing, BoardView.tsx:362)
 ```
 
+- **Superseding note (2026-11, phone toolbar):** v0.31 put the view switch, Swimlanes, the saved-view picker, and the filters in one row under the title that scrolled sideways, so at 375 px Swimlanes, View, and the filters sat past the right edge; a later fix wrapped that row onto three lines. The rule now is **two rows, nothing hidden**, on every board view: row one is the view switch with the per-view controls as 44 px icon chips (Swimlanes on Columns, the saved view), each named and titled by its value ("View: All cards") and lit while on; row two is + Filter and the search, which takes the rest, with a saved view's ⋯ and Save after it. Desktop is unchanged. See `src/tasks/boardViews.css` (`.task-board-controls`) and `tests/v031UiFollowups.test.tsx`.
+
 - **Sprint switcher** (only when `sprints:true`): a `Select`-styled button listing *Active: Sprint 12 (Sep 22 – Oct 3) · 8/14 done*, the planned sprints, *Backlog* (no sprint), and *All cards*. The owner sees "Start sprint", "Complete sprint…", and "New sprint" at the bottom. The choice lives in the URL as `?sprint=current|backlog|<id>|all`, part of the Wave 13 filter query, so Back restores it.
 - **Default when sprints are on:** the active sprint, or Backlog when none is active.
 - **Sprint header strip** below the switcher, when a sprint is selected: "Sprint 12 · ends in 4 days · 8 of 14 done" with a segmented bar (todo, doing, done by column state after 020, otherwise done and not done). There is no burndown in v1 (D134).

@@ -25,6 +25,13 @@ export type SelectProps<V extends string> = {
   className?: string;
   /** Hides the label text on the trigger (a compact swatch picker still names it for screen readers). */
   swatchOnly?: boolean;
+  /**
+   * A crowded phone toolbar: the trigger shows only an icon (the chosen option's, else `icon`) and its
+   * chevron; the chosen option's label becomes its accessible name and tooltip.
+   */
+  iconOnly?: boolean;
+  /** The trigger's icon when the chosen option has none (with `iconOnly`). */
+  icon?: ReactNode;
   /** Tests and special hosts: force the popup or the sheet instead of following the viewport. */
   presentation?: Presentation;
   defaultOpen?: boolean;
@@ -40,7 +47,7 @@ export type SelectProps<V extends string> = {
  * A select-only combobox (APG) that replaces the native select (D91). Desktop: a popup under the
  * trigger with type-ahead. Phones: a bottom sheet with 44 px rows that Back closes (D69).
  */
-export function Select<V extends string>({ value, onChange, options, label, labelledBy, placeholder = "Choose…", disabled = false, variant = "field", searchable = "auto", id, autoFocus, className, swatchOnly, presentation = "auto", defaultOpen = false, onSearch, emptyText, footer }: SelectProps<V>) {
+export function Select<V extends string>({ value, onChange, options, label, labelledBy, placeholder = "Choose…", disabled = false, variant = "field", searchable = "auto", id, autoFocus, className, swatchOnly, iconOnly = false, icon, presentation = "auto", defaultOpen = false, onSearch, emptyText, footer }: SelectProps<V>) {
   const autoId = useId();
   const triggerId = id ?? `${autoId}-trigger`;
   const listId = `${autoId}-listbox`;
@@ -55,7 +62,7 @@ export function Select<V extends string>({ value, onChange, options, label, labe
   const shown = useMemo(() => search && query ? filterOptions(options, query) : options, [options, query, search]);
   const selectedIndex = shown.findIndex((option) => option.value === value);
   const current = options.find((option) => option.value === value) ?? null;
-  const name = label ?? current?.label ?? placeholder;
+  const name = iconOnly ? current?.label ?? label ?? placeholder : label ?? current?.label ?? placeholder;
 
   const changeQuery = (next: string) => {
     setQuery(next);
@@ -103,20 +110,20 @@ export function Select<V extends string>({ value, onChange, options, label, labe
 
   const open = state.open && !disabled;
   const activeId = open && state.active >= 0 ? optionDomId(listId, state.active) : undefined;
-  const variantClass = `ui-select ui-select-${variant}${swatchOnly ? " ui-select-swatch-only" : ""}${className ? ` ${className}` : ""}`;
+  const variantClass = `ui-select ui-select-${variant}${swatchOnly ? " ui-select-swatch-only" : ""}${iconOnly ? " ui-select-icon-only" : ""}${className ? ` ${className}` : ""}`;
 
   return <div ref={rootRef} className={`ui-select-root ui-select-root-${variant}`}>
     <button ref={triggerRef} id={triggerId} type="button" className={variantClass} role="combobox" aria-haspopup="listbox" aria-expanded={open} aria-controls={listId}
       aria-activedescendant={!search && !sheet ? activeId : undefined} aria-label={labelledBy ? undefined : name} aria-labelledby={labelledBy}
-      disabled={disabled} autoFocus={autoFocus} data-placeholder={current ? undefined : "true"}
+      title={iconOnly ? name : undefined} disabled={disabled} autoFocus={autoFocus} data-placeholder={current ? undefined : "true"}
       onClick={() => {
         if (open) close();
         else setState({ ...state, open: true, active: selectedIndex >= 0 ? selectedIndex : firstEnabled(shown) });
       }}
       onKeyDown={(event) => onKey(event, false)}>
       {current?.swatch && <span className={`ui-option-swatch color-${current.swatch}`} aria-hidden="true" />}
-      {current?.icon && <span className="ui-option-icon" aria-hidden="true">{current.icon}</span>}
-      <span className={`ui-select-value${swatchOnly ? " ui-visually-hidden" : ""}`}>{current ? current.label : placeholder}</span>
+      {(current?.icon ?? (iconOnly ? icon : null)) && <span className="ui-option-icon" aria-hidden="true">{current?.icon ?? icon}</span>}
+      <span className={`ui-select-value${swatchOnly || iconOnly ? " ui-visually-hidden" : ""}`}>{current ? current.label : placeholder}</span>
       <ChevronDown className="ui-select-chevron" aria-hidden="true" />
     </button>
     {open && <DropdownSurface sheet={sheet} anchorRef={triggerRef} title={label ?? placeholder} onClose={() => close()} footer={footer}

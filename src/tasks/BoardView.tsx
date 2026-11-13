@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, ChevronLeft, ChevronsLeftRight, ChevronsRightLeft, CircleCheck, Gauge, Pencil, Plus, RotateCcw, Settings2, Trash2, TriangleAlert } from "lucide-react";
+import { ArrowLeft, ArrowRight, ChevronLeft, ChevronsLeftRight, ChevronsRightLeft, CircleCheck, Gauge, Pencil, Plus, RotateCcw, Rows3, Settings2, Trash2, TriangleAlert } from "lucide-react";
 import { BoardSettingsSheet } from "./BoardSettingsSheet";
 import { keyedSendQueue } from "./keyedSendQueue";
 import { useBoardHierarchy } from "./useBoardHierarchy";
@@ -871,15 +871,17 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
     }
   }
 
-  // Phones (v0.31 follow-up): the view switch leads the filter row, which scrolls sideways, so the
-  // board's header is two rows (title and actions; views and filters), not three.
+  // Phones: two rows under the title, nothing hidden. Row one is the view switch with the
+  // per-view controls as icon chips (Swimlanes, the saved view); row two is + Filter and the search
+  // (with the saved view's ⋯ and Save). boardViews.css, .task-board-controls.
   const viewSwitch = <BoardViewSwitch value={view} onChange={(next) => onQueryChange(withBoardQuery(query, { view: next }), { push: true })} />;
   // Swimlanes (lane VIEWS2, D655): rows by assignee, or by parent on a board with levels.
   const parentLevel = hierarchy.structure.levels.length > 1 ? hierarchy.structure.levels[Math.max(0, hierarchy.structure.workLevel - 1)] : undefined;
   // The URL's choice, else (in a saved view) the view's own, else none.
   const swimChoice = query.swim === "none" ? null : isSwimlaneMode(query.swim) ? query.swim : savedViewId ? savedViews.view?.display.swimlanes ?? null : null;
   const swimMode: SwimlaneMode | null = swimChoice && (swimChoice === "assignee" || (swimChoice === "parent" && parentLevel)) ? swimChoice : null;
-  const swimSelect = view === "board" ? <Select<string> variant="chip" label="Swimlanes" value={swimMode ?? "none"} searchable={false} className="task-swim-select"
+  const swimSelect = view === "board" ? <Select<string> variant="chip" label="Swimlanes" value={swimMode ?? "none"} searchable={false}
+    className={`task-swim-select${phone && swimMode ? " active" : ""}`} iconOnly={phone} icon={<Rows3 />}
     options={[{ value: "none", label: "Swimlanes: None" }, { value: "assignee", label: "Swimlanes: Assignee" }, ...(parentLevel ? [{ value: "parent", label: `Swimlanes: ${parentLevel.name}` }] : [])]}
     onChange={(value) => onQueryChange(withBoardQuery(query, { swim: isSwimlaneMode(value) ? value : savedViewId ? "none" : null }))} /> : null;
   // A saved view's Board field (D661): more boards make it a cross-board view.
@@ -889,8 +891,8 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
     labelFor: (value) => otherBoards.find((item) => item.id === value)?.name ?? "Board"
   } } : undefined;
   const filterBar = data && result ? <FilterBar board={data} context={viewContext} filter={query.filter} shown={result.cards.length} total={scopedTotal}
-    onChange={(filter) => onQueryChange(withBoardQuery(query, { filter }))} actions={savedViews.filterActions} extraFields={boardField} /> : null;
-  const savedViewPicker = savedViews.showPicker ? savedViews.picker : null;
+    onChange={(filter) => onQueryChange(withBoardQuery(query, { filter }))} actions={phone ? <>{savedViews.filterActions}{savedViews.more}</> : savedViews.filterActions} extraFields={boardField} /> : null;
+  const savedViewPicker = savedViews.showPicker ? phone ? savedViews.compactPicker : savedViews.picker : null;
   // New card in a saved view starts where the view looks (D637).
   const composerStart = savedViewId && detail ? composerStartFor(query.filter, {
     columns, tags: detail.tags ?? [], sprints: detail.sprints ?? [], userId, userName: displayName,
