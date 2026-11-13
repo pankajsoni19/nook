@@ -81,6 +81,17 @@ export type ItemActivityEntry = {
 
 export const ITEM_COMMENT_MAX = 20_000;
 
+/**
+ * A mention in a comment's Markdown: `@[Ana Silva](user:<uuid>)`. The client inserts it from the
+ * people picker and renders it as a chip; the server notifies each mentioned person who can read the
+ * item (and no one else).
+ */
+export const MENTION_PATTERN = /@\[([^\]\n]{1,120})\]\(user:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\)/gi;
+export const mentionMarkdown = (name: string, userId: string) => `@[${name.replace(/[[\]\n]/g, "")}](user:${userId})`;
+export function mentionedUserIds(markdown: string): string[] {
+  return [...new Set([...markdown.matchAll(MENTION_PATTERN)].map((match) => match[2]!.toLowerCase()))];
+}
+
 /** One comment as GET /api/items/:kind/:id/comments returns it. Replies sit one level under a top-level comment. */
 export type ItemComment = {
   id: string;

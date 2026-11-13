@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
+import { containerName, containerReachable } from "./access/workspaceItems";
 import { z } from "zod";
 import { audit, db, now } from "./db";
 import { config } from "./config";
@@ -440,7 +441,8 @@ export function resourceReachable(userId: string, kind: ResourceKind, id: string
     case "knowledge_base": return !write && Boolean(db.query(`SELECT 1 FROM knowledge_bases k WHERE k.id = $id AND ${shareReadableSql("knowledge_base", "k")}`).get({ id, userId }));
     // Wave 45: a report the holder can open now (their own, live).
     case "report": return Boolean(db.query(`SELECT 1 FROM reports r WHERE r.id = $id AND ${readableReportSql("r")}`).get({ id, userId }));
-    default: return false;
+    // Workspace modules (§B.9): a container the holder can open now (edit and up for a writing grant).
+    default: return containerReachable(kind, id, userId, write);
   }
 }
 
@@ -462,7 +464,7 @@ function resourceName(userId: string, kind: ResourceKind, id: string): string | 
     case "agent": return (db.query(`SELECT a.name FROM agents a WHERE a.id = $id AND ${shareReadableSql("agent", "a")}`).get({ id, userId }) as { name: string } | null)?.name ?? null;
     case "knowledge_base": return (db.query(`SELECT k.name FROM knowledge_bases k WHERE k.id = $id AND ${shareReadableSql("knowledge_base", "k")}`).get({ id, userId }) as { name: string } | null)?.name ?? null;
     case "report": return (db.query(`SELECT r.title FROM reports r WHERE r.id = $id AND ${readableReportSql("r")}`).get({ id, userId }) as { title: string } | null)?.title ?? null;
-    default: return null;
+    default: return containerName(kind, id, userId);
   }
 }
 

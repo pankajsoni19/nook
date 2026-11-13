@@ -123,7 +123,7 @@ export async function submitProposal(key: McpKeyContext, item: SubmitItem, times
 type KindSubmitResult = Awaited<ReturnType<typeof PROPOSAL_KIND_DEFS[ProposalKind]["submit"]>>;
 
 /** Which payload field names each kind's target, and what kind of item it is (review S3). */
-const TARGET_FIELDS: Record<Exclude<ProposalKind, "note_draft">, { field: string; kind: ItemKind }> = {
+const TARGET_FIELDS: Partial<Record<Exclude<ProposalKind, "note_draft">, { field: string; kind: ItemKind }>> = {
   card_create: { field: "boardId", kind: "board" },
   card_update: { field: "cardId", kind: "card" },
   card_comment: { field: "cardId", kind: "card" },
@@ -134,7 +134,9 @@ const TARGET_FIELDS: Record<Exclude<ProposalKind, "note_draft">, { field: string
 };
 
 function checkTargetReach(reach: Exclude<ScopeReach, "all" | null>, kind: Exclude<ProposalKind, "note_draft">, payload: unknown) {
-  const target = TARGET_FIELDS[kind];
+  // Workspace kinds name their target in their registration; a kind without one is refused for chosen-item keys (fail closed).
+  const target = TARGET_FIELDS[kind] ?? PROPOSAL_KIND_DEFS[kind].target;
+  if (!target) throw new McpToolError("NOT_FOUND", "Not found");
   const value = payload && typeof payload === "object" ? (payload as Record<string, unknown>)[target.field] : undefined;
   if (typeof value !== "string" || !reachCovers(reach, anchorsOf(target.kind, value))) throw new McpToolError("NOT_FOUND", "Not found");
 }

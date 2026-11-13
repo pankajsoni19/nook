@@ -41,6 +41,9 @@ import { registerVaultTools } from "./vault/mcpTools";
 import { attachmentTools } from "./attachments/mcpTools";
 import { isSystemFolder, isSystemFolderError, SYSTEM_FOLDER_MESSAGE } from "./attachments/service";
 import { elapsed, logger, shortId } from "./log";
+import { onToolRegistered, registeredMcpResources, registeredToolSpecs, reserveToolNames } from "./mcpRegistry";
+import { ResourceTemplate } from "@modelcontextprotocol/server";
+import { toolAnnotations } from "./mcpToolKit";
 
 const slog = logger("mcp");
 
@@ -106,7 +109,10 @@ function toolFits(spec: McpToolSpec, reach: ToolReach) {
 
 const ITEM_LABELS: Record<ItemKind, string> = {
   note: "Note", folder: "Folder", document: "File", whiteboard: "Whiteboard", board: "Board", card: "Card", column: "Column", sprint: "Sprint",
-  task_view: "View", collection: "Collection", row: "Row", calendar: "Calendar", event: "Event", routine: "Routine", run: "Run", vault: "Vault", agent: "Agent", knowledge_base: "Knowledge base", report: "Report"
+  task_view: "View", collection: "Collection", row: "Row", calendar: "Calendar", event: "Event", routine: "Routine", run: "Run", vault: "Vault", agent: "Agent", knowledge_base: "Knowledge base", report: "Report",
+  form: "Form", response: "Response", time_project: "Time project", time_entry: "Time entry", goal: "Goal", key_result: "Key result", checkin: "Standup",
+  checkin_round: "Standup round", contact_book: "Contact book", contact: "Contact", company: "Company", deal: "Deal", interaction: "Interaction",
+  booking_type: "Booking type", booking: "Booking", townhall_session: "Townhall", townhall_question: "Question"
 };
 
 /**
@@ -197,7 +203,10 @@ async function runToolChecked(spec: McpToolSpec, args: unknown, keyId: string, s
     // for a scope limited to chosen items (T203).
     const handlerKey: McpKeyContext = { ...(key.grants?.every((grant) => grant.resourceKind === null) ? key : { ...key, scopes: wholeModuleScopes(key) }), surface };
     const result = await withSurfaceAuditContext(surface === "rest" ? { via: "rest" } : null, () => spec.handler(parsed.data, handlerKey));
-    return textResult(result);
+    // D814: a tool with an output schema also returns its result as structuredContent.
+    return spec.outputSchema && result && typeof result === "object" && !Array.isArray(result)
+      ? { ...textResult(result), structuredContent: result as Record<string, unknown> }
+      : textResult(result);
   } catch (error) {
     if (error instanceof McpToolError) return errorResult(error.code, error.message, error.details);
     // S3 storage (review L1): any tool that reads file bytes (files, whiteboards) reports an outage as retryable.
@@ -548,7 +557,7 @@ const fileTools: McpToolSpec[] = [
  * Every tool group. A module adds its tools as one spread here, built with
  * defineTool from server/mcpToolKit.ts (task tools: server/tasks/mcpTools.ts).
  */
-export const mcpToolSpecs: readonly McpToolSpec[] = [
+export const mcpToolSpecs: McpToolSpec[] = [
   ...noteReadTools,
   ...noteWriteTools,
   ...noteManageTools,
@@ -568,6 +577,13 @@ export const mcpToolSpecs: readonly McpToolSpec[] = [
   // Uploads everywhere (U0, D402): list and read attachments, gated by each host module's read scope.
   ...attachmentTools
 ];
+
+// Workspace modules (docs/plan/WORKSPACE_MODULES.md §B.1, D801): tools registered through
+// registerWorkspaceModule (server/mcpRegistry.ts) are appended here, whether they registered before
+// this module loaded or after. A name already taken refuses to start.
+reserveToolNames(mcpToolSpecs.map((spec) => spec.name));
+mcpToolSpecs.push(...registeredToolSpecs());
+onToolRegistered((spec) => { mcpToolSpecs.push(spec); });
 
 /** Whether a key holding `scopes` may see and call `spec`: any one of its scopes and all of alsoRequires (D172). */
 export const toolAllowed = (spec: McpToolSpec, scopes: McpKeyContext["scopes"]) => hasAnyScope(scopes, spec.scopes) && hasAllScopes(scopes, spec.alsoRequires);
@@ -602,8 +618,44 @@ export function registerMcpTools(server: McpServer, key: McpKeyContext) {
       title: spec.title,
       description: spec.description,
       inputSchema: spec.inputSchema,
-      annotations: { readOnlyHint: !spec.write, destructiveHint: false, idempotentHint: !spec.write, openWorldHint: false }
+      ...(spec.outputSchema ? { outputSchema: spec.outputSchema } : {}),
+      annotations: toolAnnotations(spec)
     }, (args: unknown) => runTool(spec, args, key.keyId));
+  }
+  registerMcpResources(server, key);
+}
+
+/**
+ * Resource templates `nook://<kind>/{id}` (D814, §B.15) for the scopes this key holds: read through the
+ * same checks as the `get_*` tools (scopes, chosen items, limits), by the `resource:<kind>` path of
+ * runResource. Missing, unreadable, and outside the grant are the same "not found".
+ */
+function registerMcpResources(server: McpServer, key: McpKeyContext) {
+  for (const resource of registeredMcpResources()) {
+    if (!hasAnyScope(key.scopes, resource.scopes)) continue;
+    server.registerResource(`nook-${resource.kind}`, new ResourceTemplate(`nook://${resource.kind}/{id}`, { list: undefined }), { title: resource.title, description: resource.description, mimeType: "application/json" },
+      async (uri: URL, variables: Record<string, string | string[]>) => {
+        const id = Array.isArray(variables.id) ? variables.id[0] ?? "" : variables.id ?? "";
+        const value = await readMcpResource(resource.kind, decodeURIComponent(id), key.keyId);
+        return { contents: [{ uri: uri.href, mimeType: "application/json", text: JSON.stringify(value ?? { error: "Not found", code: "NOT_FOUND" }) }] };
+      });
+  }
+}
+
+/** Reads `nook://<kind>/<id>` for a key (MCP resources and tests): the live key, its scopes, and chosen items are checked first. */
+export async function readMcpResource(kind: string, id: string, keyId: string): Promise<unknown | null> {
+  const resource = registeredMcpResources().find((item) => item.kind === kind);
+  const key = loadLiveKey(keyId);
+  if (!resource || !key || !hasAnyScope(key.scopes, resource.scopes) || id.length > 200) return null;
+  if (resource.itemKind) {
+    const reach = keyReachAny(key, resource.scopes.filter((scope) => hasScope(key.scopes, scope)));
+    if (!reachCovers(reach, anchorsOf(resource.itemKind, id))) return null;
+  }
+  try {
+    return await resource.read(id, key) ?? null;
+  } catch (error) {
+    if (error instanceof McpToolError && error.code === "NOT_FOUND") return null;
+    throw error;
   }
 }
 

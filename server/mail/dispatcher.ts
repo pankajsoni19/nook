@@ -2,9 +2,11 @@ import { config } from "../config";
 import { db } from "../db";
 import { mailEnabled, sendMail } from "../mail";
 import { suppressionOf, sweepSoftBounces } from "./suppression";
+import { addressHash } from "../mail";
 import { appLink, paths } from "./links";
 import { prefsAllow, quietHoursEnd, readEmailPrefs } from "./prefs";
-import { isTemplateName, renderTemplate, TEMPLATES, type TemplateName } from "./registry";
+import { isTemplateName, registeredMailTemplate, renderTemplate, TEMPLATES, type RegisteredMailTemplate, type TemplateName } from "./registry";
+import { externalStopToken } from "../notify/external";
 import { resolvePayload, type Recipient } from "./resolve";
 import type { MailCategory, MailClass } from "./templates/types";
 import { createUnsubscribeToken } from "./unsubscribe";
@@ -41,7 +43,7 @@ const iso = (ms: number) => new Date(ms).toISOString();
 
 type Row = {
   id: string; user_id: string | null; template: string; class: MailClass; category: MailCategory | null; payload: string;
-  idempotency_key: string; attempts: number; not_before: string; created_at: string;
+  idempotency_key: string; attempts: number; not_before: string; created_at: string; to_address?: string | null;
 };
 type UserState = { id: string; email: string; display_name: string; role: string; disabled_at: string | null; email_verified_at: string | null };
 
@@ -96,6 +98,9 @@ const backoff = (attempt: number) => {
 
 /** Handles one claimed row. Returns what happened, for the tick's counts. */
 async function handle(row: Row, nowMs: number): Promise<keyof TickCounts> {
+  // Workspace modules' templates (D809), for team users and for outside addresses.
+  const registered = registeredMailTemplate(row.template);
+  if (registered) return handleRegistered(row, registered, nowMs);
   if (!isTemplateName(row.template) || row.template === "team.invite" || row.user_id === null) {
     finish(row.id, "dead", { errorCode: "unknown_template", nowMs });
     return "dead";
@@ -175,6 +180,101 @@ async function handle(row: Row, nowMs: number): Promise<keyof TickCounts> {
   }
   requeue(row.id, nowMs + backoff(row.attempts), { attempt: true, errorCode: outcome.code });
   return "retried";
+}
+
+/**
+ * A registered template's row (D809). A team user's row goes through the same send-time checks as the
+ * built-in templates (blocked, suppressed, unverified, preferences by the module's category, quiet
+ * hours, stale, caps); an outside address (`to_address`, no user) through suppression, its stop list,
+ * and the instance cap (the per-address caps were applied when it was queued, T508).
+ */
+async function handleRegistered(row: Row, template: RegisteredMailTemplate, nowMs: number): Promise<keyof TickCounts> {
+  const payload = JSON.parse(row.payload) as Record<string, unknown>;
+  if (row.user_id === null) {
+    const address = row.to_address ?? null;
+    if (!address || !template.resolveExternal) {
+      finish(row.id, "dead", { errorCode: "unknown_template", nowMs });
+      return "dead";
+    }
+    if (suppressionOf(address, nowMs)) {
+      finish(row.id, "suppressed", { skipReason: "suppressed", nowMs });
+      return "suppressed";
+    }
+    const item = payload._item as { kind?: string; id?: string } | undefined;
+    if (item?.kind && item.id && externalStopped(address, item.kind, item.id)) return skip(row, "stopped", nowMs);
+    const hold = capHold(row, nowMs);
+    if (hold !== null) {
+      requeue(row.id, Math.max(hold, nowMs + 1000));
+      return "held";
+    }
+    const resolved = template.resolveExternal(payload, nowMs);
+    if ("skip" in resolved) return skip(row, resolved.skip, nowMs);
+    const stopHref = item?.kind && item.id ? appLink(`/api/public/mail-stop/${externalStopToken(address, item.kind, item.id)}`) : undefined;
+    const rendered = template.render({ ...(resolved.data as object), stopHref } as never, { instanceName: config.mail.instanceName, tz: typeof payload.tz === "string" ? payload.tz : "UTC" });
+    const outcome = await sendMail({ to: address, subject: rendered.subject, text: rendered.text, html: rendered.html }, { purpose: row.template, senderId: null, recipient: "address", idempotencyKey: row.idempotency_key });
+    return finishOutcome(row, outcome, nowMs);
+  }
+  if (!template.resolve) {
+    finish(row.id, "dead", { errorCode: "unknown_template", nowMs });
+    return "dead";
+  }
+  const user = db.query("SELECT id, email, display_name, role, disabled_at, email_verified_at FROM users WHERE id = ? AND kind = 'person'").get(row.user_id) as UserState | null;
+  if (!user) return skip(row, "no_user", nowMs);
+  if (user.disabled_at !== null) return skip(row, "blocked", nowMs);
+  if (suppressionOf(user.email, nowMs)) {
+    finish(row.id, "suppressed", { skipReason: "suppressed", nowMs });
+    return "suppressed";
+  }
+  if (user.email_verified_at === null) return skip(row, "unverified", nowMs);
+  const prefs = readEmailPrefs(user.id);
+  if (!prefsAllow(prefs, row.class, row.category)) return skip(row, "prefs_off", nowMs);
+  if (row.class === "activity") {
+    const quietEnd = quietHoursEnd(prefs, nowMs);
+    if (quietEnd !== null) {
+      requeue(row.id, quietEnd);
+      return "held";
+    }
+    if (nowMs - Date.parse(row.created_at) > STALE_AFTER_MS) return skip(row, "stale", nowMs);
+  }
+  const hold = capHold(row, nowMs);
+  if (hold !== null) {
+    requeue(row.id, Math.max(hold, nowMs + 1000));
+    return "held";
+  }
+  const recipient: Recipient = { id: user.id, email: user.email, displayName: user.display_name, role: user.role, tz: prefs.tz };
+  const resolved = template.resolve(payload, recipient, nowMs);
+  if ("skip" in resolved) return skip(row, resolved.skip, nowMs);
+  const switchable = (row.class === "activity" || row.class === "reminders") && row.category !== null;
+  const token = switchable ? await createUnsubscribeToken(user.id, row.category!) : null;
+  const rendered = template.render(resolved.data, { instanceName: config.mail.instanceName, tz: prefs.tz, unsubscribeHref: token ? appLink(paths.unsubscribePage(token)) : undefined });
+  const headers = token ? { "List-Unsubscribe": `<${appLink(paths.unsubscribeApi(token))}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" } : undefined;
+  const outcome = await sendMail({ to: user.email, subject: rendered.subject, text: rendered.text, html: rendered.html, headers }, { purpose: row.template, senderId: null, recipient: "user", idempotencyKey: row.idempotency_key });
+  return finishOutcome(row, outcome, nowMs);
+}
+
+function finishOutcome(row: Row, outcome: Awaited<ReturnType<typeof sendMail>>, nowMs: number): keyof TickCounts {
+  if (outcome.sent) {
+    finish(row.id, "sent", { providerId: outcome.id.slice(0, 64), nowMs, attempt: true });
+    return "sent";
+  }
+  if (outcome.reason === "rate_limited") {
+    requeue(row.id, nowMs + 5 * 60_000);
+    return "held";
+  }
+  if (outcome.reason === "not_configured") {
+    requeue(row.id, nowMs + 10 * 60_000);
+    return "held";
+  }
+  if (!outcome.retryable || row.attempts + 1 >= MAX_ATTEMPTS) {
+    finish(row.id, "dead", { errorCode: outcome.code, nowMs, attempt: true });
+    return "dead";
+  }
+  requeue(row.id, nowMs + backoff(row.attempts), { attempt: true, errorCode: outcome.code });
+  return "retried";
+}
+
+function externalStopped(address: string, kind: string, id: string) {
+  return Boolean(db.query("SELECT 1 FROM external_mail_stops WHERE address_hash = ? AND ((item_kind = ? AND item_id = ?) OR item_kind = '*')").get(addressHash(address), kind, id));
 }
 
 function skip(row: Row, reason: string, nowMs: number): keyof TickCounts {
