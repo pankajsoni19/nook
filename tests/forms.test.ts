@@ -13,6 +13,8 @@ const { runDatasetQuery } = await import("../server/datasets/registry");
 const { formsBinProvider } = await import("../server/forms/registry");
 const { restoreUndo } = await import("../server/undo");
 const { NOOK_AGENT_TOOLS, NOOK_NEVER_TOOLS } = await import("../server/agents/nookBridge");
+const { escapeMarkdown, renderTemplate } = await import("../server/forms/actions");
+const { pollSet } = await import("../shared/forms");
 
 /**
  * Forms, polls, and time polls (docs/plan/WORKSPACE_MODULES.md §D.1 acceptance): the service through
@@ -246,6 +248,12 @@ describe("response actions (C2, C3)", () => {
 });
 
 describe("polls and time polls", () => {
+  test("action templates escape answers and link only http(s) urls (T520)", () => {
+    const set = { ...pollSet("Pick", ["A", "B"], false), questions: [{ id: "n", type: "short_text" as const, title: "Name" }, { id: "u", type: "url" as const, title: "Site" }] };
+    expect(renderTemplate("Lead: {{Name}}", set, { n: "Ana *bold*" }, { markdown: false })).toBe("Lead: Ana *bold*");
+    expect(renderTemplate("{{Name}} {{Site}}", set, { n: "[x](javascript:alert(1))", u: "https://acme.test" }, { markdown: true })).toBe(`${escapeMarkdown("[x](javascript:alert(1))")} <https://acme.test>`);
+  });
+
   test("a poll opens at once; results after voting; one vote per person, changeable; anonymous hides voters", async () => {
     const created = await api(owner, "POST", "/forms/polls", { question: "Lunch?", options: ["Pizza", "Sushi"], resultsVisibility: "after_vote" });
     expect(created.body.form).toMatchObject({ kind: "poll", status: "open" });

@@ -493,7 +493,8 @@ export function listForms(userId: string, filter: ListFilter = {}): { items: For
   if (tab === "mine") terms.push("f.deleted_at IS NULL AND f.owner_id = $userId");
   else if (tab === "shared") terms.push(`f.owner_id <> $userId AND ${readableContainerSql("form", "f")}`);
   else if (tab === "answer") {
-    terms.push(`${respondableSql("f")} AND f.status = 'open' AND (f.opens_at IS NULL OR f.opens_at <= $now) AND (f.closes_at IS NULL OR f.closes_at > $now) AND (f.max_responses IS NULL OR f.response_count < f.max_responses)`);
+    // Your own forms are not "to answer" (they are in My forms).
+    terms.push(`${respondableSql("f")} AND f.owner_id <> $userId AND f.status = 'open' AND (f.opens_at IS NULL OR f.opens_at <= $now) AND (f.closes_at IS NULL OR f.closes_at > $now) AND (f.max_responses IS NULL OR f.response_count < f.max_responses)`);
     terms.push(`NOT EXISTS (SELECT 1 FROM responses r WHERE r.host_kind = 'form' AND r.host_id = f.id AND r.status = 'submitted' AND r.respondent_user_id = $userId)`);
     params.now = now();
   } else terms.push(`(${readableContainerSql("form", "f")} OR ${respondableSql("f")})`);

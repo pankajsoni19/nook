@@ -4,6 +4,11 @@ Release notes for Nook, newest first. Upgrade steps for each release are in [doc
 
 ## Unreleased
 
+**Forms, polls, and find a time** (new module, Forms)
+
+- Build forms with every question type, sections, logic, endings, a live preview, and **Publish changes** (old responses keep their questions); share with the workspace, chosen people, or anyone with a public link (QR code, light public page, bot checks, optional email code); results with per-question charts, a responses table, one response with comments, filters, and CSV export; actions turn responses into cards, contacts, or notifications.
+- Quick polls (live results, anonymous or named, results after voting or after close) and find-a-time polls (yes / if need be / no, best slot, pick a time to create the event); both embed in notes (`/poll`, `/form`) and work over MCP and REST.
+
 **Friendly, shareable URLs**
 
 - **Cards and boards**: the address bar shows `/tasks/KAN-1` for an open card (dialog or full page, `/tasks/KAN-1/full`) and `/tasks/KAN` for a board, keeping the board's view in the query when it is not the default. Old `/tasks/<id>/card/<id>` links, board ids, old card keys of moved cards, and a board's former code still open and turn into the current URL without an extra history entry.

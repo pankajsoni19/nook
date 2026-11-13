@@ -15,6 +15,8 @@ const { resetSearchRateLimit } = await import("../server/searchRoutes");
 const { MODULES } = await import("../src/modules");
 const { MODULE_IDS } = await import("../server/moduleIds");
 const { WORKSPACE_MODULE_IDS } = await import("../shared/workspaceModules");
+/** Modules whose lane has shipped (ready: true in src/<module>/module.tsx); the rest stay hidden. */
+const READY_MODULES: readonly string[] = ["forms"];
 
 /**
  * The workspace module registry (docs/plan/WORKSPACE_MODULES.md §B.1, §F.2 acceptance, D800, D801,
@@ -44,10 +46,10 @@ beforeAll(async () => {
 afterAll(() => unregisterTestModule());
 
 describe("vocabulary and stubs (D800)", () => {
-  test("the seven module stubs are registered on the server and hidden in the app", () => {
+  test("the seven modules are registered on the server; those not shipped are hidden in the app", () => {
     for (const id of WORKSPACE_MODULE_IDS) expect(registeredWorkspaceModules()).toContain(id);
     for (const id of WORKSPACE_MODULE_IDS) expect(MODULE_IDS).toContain(id);
-    expect(MODULES.filter((module) => (WORKSPACE_MODULE_IDS as readonly string[]).includes(module.id)).map((module) => [module.id, module.planned])).toEqual(WORKSPACE_MODULE_IDS.map((id) => [id, true]));
+    expect(MODULES.filter((module) => (WORKSPACE_MODULE_IDS as readonly string[]).includes(module.id)).map((module) => [module.id, module.planned])).toEqual(WORKSPACE_MODULE_IDS.map((id) => [id, !READY_MODULES.includes(id)]));
     expect(MODULES.find((module) => module.id === "crm")!.label).toBe("Contacts");
     expect(MODULES.find((module) => module.id === "checkins")!.label).toBe("Standups");
   });
