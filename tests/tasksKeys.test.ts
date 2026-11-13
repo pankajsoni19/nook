@@ -297,6 +297,10 @@ describe("MCP (D713, D716)", () => {
     expect(read.isError).toBe(false);
     expect(read.value.card).toMatchObject({ id: one.id, key: "MKA-1" });
     expect((await tool(whole, "get_card", { cardId: "MKA-99" })).value.code).toBe("NOT_FOUND");
+    // list_cards keys each card from the board it loaded.
+    await card(owner, a.id, a.columns[0]!.id, "Second");
+    const listed = await tool(whole, "list_cards", { boardId: a.id });
+    expect((listed.value.cards as Array<{ title: string; key: string }>).map((item) => [item.title, item.key])).toEqual([["By key", "MKA-1"], ["Second", "MKA-2"]]);
     const onlyB = key(owner, [{ module: "tasks", permission: "write", resourceKind: "board", resourceId: b.id }]);
     expect((await tool(onlyB, "get_card", { cardId: "MKA-1" })).value.code).toBe("NOT_FOUND");
     expect((await tool(onlyB, "move_card_to_board", { cardId: "MKA-1", boardId: b.id })).value.code).toBe("NOT_FOUND");

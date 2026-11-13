@@ -29,6 +29,7 @@ import { openSprintRows, sprintById, sprintNames } from "./sprintData";
 import { createSprint, listSprints, patchSprint } from "./sprints";
 import { sprintCreateSchema } from "./sprintRoutes";
 import { cardRef, keyOfCard } from "./keys";
+import { cardKey } from "../../shared/boardKeys";
 import { moveCardToBoard } from "./moveBoard";
 import { ESTIMATE_MAX, FIBONACCI_POINTS } from "../../shared/estimates";
 
@@ -237,10 +238,11 @@ function resolveTags(tags: readonly BoardTag[], refs: readonly string[], allowNo
   return ids;
 }
 
-function listedCard(card: CardWithDescription, columnName: string | undefined, tags: Map<string, string>, counts: RelationCounts, structure?: BoardStructure, sprints?: Map<string, string>) {
+function listedCard(card: CardWithDescription, boardCode: string | null, columnName: string | undefined, tags: Map<string, string>, counts: RelationCounts, structure?: BoardStructure, sprints?: Map<string, string>) {
   return {
     id: card.id,
-    key: keyOfCard(card.id),
+    // From the board already loaded, not a query per card.
+    key: cardKey(boardCode, card.number),
     column_id: card.column_id,
     column_name: columnName ?? null,
     position: card.position,
@@ -364,7 +366,7 @@ export const taskTools: McpToolSpec[] = [
         columns: columns.map((column) => ({ id: column.id, name: column.name, position: column.position, wip_limit: column.wip_limit })),
         tags: boardTags.map((tag) => ({ id: tag.id, name: tag.name, color: tag.color })),
         // Cards come from the board just authorized above.
-        cards: cards.filter((card) => matching.has(card.id) && inSprint(card) && archiveMatch(card)).map((card) => listedCard(cardDetail(card.id) ?? card, names.get(card.column_id), tagName, card, structure, sprints)),
+        cards: cards.filter((card) => matching.has(card.id) && inSprint(card) && archiveMatch(card)).map((card) => listedCard(cardDetail(card.id) ?? card, board.code, names.get(card.column_id), tagName, card, structure, sprints)),
         // The page of archived cards read (before the filters): how many there are, and the cursor for the next page.
         ...(archived === false ? {} : { archived_page: { total: board.archived_count, ...archivedPage(cards) } })
       };
