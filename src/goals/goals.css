@@ -101,6 +101,7 @@
 .goals-periods small { color: #8d8d94; }
 .goals-card-goals { display: grid; gap: 6px; }
 .goals-card-goals ul { margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 6px; }
+.goals-card-goals li { min-width: 0; max-width: 100%; }
 
 @media (max-width: 1100px) {
   .goals-layout { grid-template-columns: minmax(0, 1fr); }

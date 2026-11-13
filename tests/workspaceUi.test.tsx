@@ -327,3 +327,16 @@ describe("the question set editor", () => {
     expect(current.questions[1]!.title).toBe("A");
   });
 });
+
+describe("phone layouts (Wave 2 integration)", () => {
+  test("the card dialog's body and sections keep one column the width of the screen, so a wide slot cannot push the dialog past 375 px", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const css = (path: string) => readFileSync(join(import.meta.dir, "..", "src", path), "utf8");
+    const tasks = css("tasks/tasks.css");
+    // An implicit grid track sizes to its widest item (a long goal chip measured 741 px at 375).
+    expect(tasks).toMatch(/\.task-card-dialog-body \{[^}]*grid-template-columns: minmax\(0, 1fr\);/);
+    expect(tasks).toMatch(/\.task-card-section \{[^}]*grid-template-columns: minmax\(0, 1fr\);/);
+    expect(css("goals/goals.css")).toContain(".goals-card-goals li { min-width: 0; max-width: 100%; }");
+  });
+});
