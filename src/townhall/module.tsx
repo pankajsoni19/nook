@@ -1,4 +1,5 @@
 import { Presentation } from "lucide-react";
+import { WORKSPACE_MODULE_LABELS } from "../../shared/workspaceModules";
 import type { WorkspaceClientModule } from "../workspaceModules/types";
 
 /**
@@ -9,10 +10,10 @@ import type { WorkspaceClientModule } from "../workspaceModules/types";
  */
 export const module: WorkspaceClientModule = {
   id: "townhall",
-  segment: "townhall",
-  label: "Townhall",
+  segment: WORKSPACE_MODULE_LABELS.townhall.path.slice(1),
+  label: WORKSPACE_MODULE_LABELS.townhall.label,
   icon: Presentation,
-  description: "All-hands and AMAs: questions with upvotes, live polls, and a presenter view.",
+  description: WORKSPACE_MODULE_LABELS.townhall.description,
   ready: false,
   app: null
 };

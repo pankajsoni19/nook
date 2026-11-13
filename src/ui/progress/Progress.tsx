@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { TONE_ICONS, type Tone } from "../tone";
+import { HEALTH_LABEL, HEALTH_TONE, TONE_ICONS, type Health, type Tone } from "../tone";
 import "../workspace.css";
 
 /**
@@ -17,7 +17,7 @@ export function percentOf(value: number) {
 
 const clampFill = (value: number) => Math.min(100, Math.max(0, percentOf(value)));
 
-export function ProgressBar({ value, label, valueText, tone = "warn", target, thin = false, meter = false, children }: {
+export function ProgressBar({ value, label, valueText, tone = "accent", target, thin = false, meter = false, children }: {
   /** 0–1; above 1 is shown full in the bad tone ("over"). */
   value: number;
   /** What it measures ("Grow MRR"); the bar's accessible name and, unless thin, its visible caption. */
@@ -45,7 +45,7 @@ export function ProgressBar({ value, label, valueText, tone = "warn", target, th
   </div>;
 }
 
-export function ProgressRing({ value, label, size = 40, stroke = 4, tone = "warn", valueText, large = false }: {
+export function ProgressRing({ value, label, size = 40, stroke = 4, tone = "accent", valueText, large = false }: {
   value: number;
   label: string;
   size?: number;
@@ -59,7 +59,7 @@ export function ProgressRing({ value, label, size = 40, stroke = 4, tone = "warn
   const circumference = 2 * Math.PI * radius;
   const fill = clampFill(value) / 100;
   const text = valueText ?? `${percentOf(value)}%`;
-  return <span className={`ui-ring${large ? " large" : ""}`} data-tone={value > 1 ? "bad" : tone} role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.min(percentOf(value), 100)} aria-valuetext={text} style={{ width: size, height: size }}>
+  return <span className={`ui-ring${large ? " large" : ""}`} data-tone={value > 1 ? "danger" : tone} role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.min(percentOf(value), 100)} aria-valuetext={text} style={{ width: size, height: size }}>
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden="true">
       <circle className="ui-ring-track" cx={size / 2} cy={size / 2} r={radius} fill="none" strokeWidth={stroke} />
       <circle className="ui-ring-fill" cx={size / 2} cy={size / 2} r={radius} fill="none" strokeWidth={stroke} strokeDasharray={circumference} strokeDashoffset={circumference * (1 - fill)} />
@@ -74,5 +74,5 @@ export function HealthChip({ tone, label, title }: { tone: Tone; label: string; 
   return <span className="ui-health" data-tone={tone} title={title}><Icon aria-hidden="true" />{label}</span>;
 }
 
-/** The common health words for goals (§D.3); modules may pass their own labels. */
-export const HEALTH_LABELS = { on_track: { tone: "good", label: "On track" }, at_risk: { tone: "warn", label: "At risk" }, off_track: { tone: "bad", label: "Off track" }, done: { tone: "info", label: "Done" }, none: { tone: "neutral", label: "No update" } } as const satisfies Record<string, { tone: Tone; label: string }>;
+/** A goal's or key result's health (§D.3) as its chip: shared/tones.ts names the tone and the words. */
+export const GoalHealthChip = ({ health }: { health: Health }) => <HealthChip tone={HEALTH_TONE[health]} label={HEALTH_LABEL[health]} />;

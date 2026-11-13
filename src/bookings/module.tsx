@@ -1,4 +1,5 @@
 import { CalendarClock } from "lucide-react";
+import { WORKSPACE_MODULE_LABELS } from "../../shared/workspaceModules";
 import type { WorkspaceClientModule } from "../workspaceModules/types";
 
 /**
@@ -9,10 +10,10 @@ import type { WorkspaceClientModule } from "../workspaceModules/types";
  */
 export const module: WorkspaceClientModule = {
   id: "bookings",
-  segment: "bookings",
-  label: "Bookings",
+  segment: WORKSPACE_MODULE_LABELS.bookings.path.slice(1),
+  label: WORKSPACE_MODULE_LABELS.bookings.label,
   icon: CalendarClock,
-  description: "Booking pages people outside the workspace use to book time with you.",
+  description: WORKSPACE_MODULE_LABELS.bookings.description,
   ready: false,
   app: null
 };

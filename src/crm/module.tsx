@@ -1,4 +1,5 @@
 import { Contact } from "lucide-react";
+import { WORKSPACE_MODULE_LABELS } from "../../shared/workspaceModules";
 import type { WorkspaceClientModule } from "../workspaceModules/types";
 
 /**
@@ -9,10 +10,10 @@ import type { WorkspaceClientModule } from "../workspaceModules/types";
  */
 export const module: WorkspaceClientModule = {
   id: "crm",
-  segment: "contacts",
-  label: "Contacts",
+  segment: WORKSPACE_MODULE_LABELS.crm.path.slice(1),
+  label: WORKSPACE_MODULE_LABELS.crm.label,
   icon: Contact,
-  description: "Contacts, companies, and deals, with a timeline of calls, meetings, and bookings.",
+  description: WORKSPACE_MODULE_LABELS.crm.description,
   ready: false,
   app: null
 };

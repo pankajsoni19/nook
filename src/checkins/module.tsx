@@ -1,4 +1,5 @@
 import { Sunrise } from "lucide-react";
+import { WORKSPACE_MODULE_LABELS } from "../../shared/workspaceModules";
 import type { WorkspaceClientModule } from "../workspaceModules/types";
 
 /**
@@ -9,10 +10,10 @@ import type { WorkspaceClientModule } from "../workspaceModules/types";
  */
 export const module: WorkspaceClientModule = {
   id: "checkins",
-  segment: "standups",
-  label: "Standups",
+  segment: WORKSPACE_MODULE_LABELS.checkins.path.slice(1),
+  label: WORKSPACE_MODULE_LABELS.checkins.label,
   icon: Sunrise,
-  description: "Standups, retros, and pulse surveys on a schedule, with blockers linked to cards.",
+  description: WORKSPACE_MODULE_LABELS.checkins.description,
   ready: false,
   app: null
 };

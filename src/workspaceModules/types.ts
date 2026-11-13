@@ -5,6 +5,8 @@ import type { Role } from "../team/teamRoles";
 import type { TodaySectionDef } from "../today/todaySections";
 import type { EmbedKindDef, SlashItemDef } from "../editor/moduleEmbedRegistry";
 import type { CardFaceBadgeDef, CardHeaderActionDef, CardSectionDef, TimelineDecorationDef } from "../ui/cardSlots";
+import type { WorkspaceModuleId } from "../../shared/workspaceModules";
+import type { ItemActivityEntry } from "../../shared/itemActivity";
 
 /**
  * The client side of a workspace module (docs/plan/WORKSPACE_MODULES.md §B.1, D801, D832). Each lane
@@ -12,13 +14,10 @@ import type { CardFaceBadgeDef, CardHeaderActionDef, CardSectionDef, TimelineDec
  * imports the seven files and registers them, so a lane never edits src/modules.ts, router.ts,
  * App.tsx, appShellNavigation.ts, Today, the card dialog, or the editor.
  *
- * The ids are pre-registered here (D800) in Settings order. User-facing names follow the product
- * owner (§G.1): `crm` is "Contacts" at /contacts, `checkins` is "Standups" at /standups.
+ * The ids are W1-CORE's (shared/workspaceModules.ts, D800), in Settings order; user-facing names
+ * follow the product owner (§G.1): `crm` is "Contacts" at /contacts, `checkins` "Standups" at /standups.
  */
-export const WORKSPACE_MODULE_IDS = ["forms", "time", "goals", "checkins", "crm", "bookings", "townhall"] as const;
-export type WorkspaceModuleId = (typeof WORKSPACE_MODULE_IDS)[number];
-
-export const isWorkspaceModuleId = (value: unknown): value is WorkspaceModuleId => typeof value === "string" && (WORKSPACE_MODULE_IDS as readonly string[]).includes(value);
+export { WORKSPACE_MODULE_IDS, isWorkspaceModuleId, type WorkspaceModuleId } from "../../shared/workspaceModules";
 
 /**
  * A workspace module's route (D833): the one generic route shape. `path` is the URL's segments after
@@ -70,8 +69,8 @@ export type NotificationTopicDef = { id: string; label: string; description?: st
 /** One renderer for a WorkSummary kind (§B.4): its icon and, optionally, a richer chip body. */
 export type WorkKindRendererDef = { icon: LucideIcon; label: string; render?: (summary: { title: string; subtitle?: string }) => ReactNode };
 
-/** One item-activity kind's line in ItemTimeline (§B.5): "moved *Grow MRR* to At risk". */
-export type ActivityRendererDef = (entry: { kind: string; payload: Record<string, unknown>; actorLabel: string }) => ReactNode;
+/** One item-activity kind's line in ItemTimeline (§B.5): "moved *Grow MRR* to At risk" (after the actor's name). */
+export type ActivityRendererDef = (entry: ItemActivityEntry) => ReactNode;
 
 /** The module's section in global search's All scope (§B.12). */
 export type SearchRendererDef = {

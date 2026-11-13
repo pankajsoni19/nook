@@ -62,7 +62,7 @@ const goalsTest: WorkspaceClientModule = {
   cardFaceBadges: [{ id: "goals.badge", component: ({ card }) => <span className="test-badge">G·{card.key}</span> }],
   cardHeaderActions: [{ id: "goals.action", component: () => <button type="button" aria-label="Start timer"><Timer /></button> }],
   timelineDecorations: [{ id: "goals.fill", component: () => <span className="test-fill" /> }],
-  embedRenderers: [{ kind: "goal", word: "Goal", match: (path) => /^\/goals\/[a-z0-9-]+$/.test(path), component: ({ path }) => <p>Goal card {path}</p> }],
+  embedRenderers: [{ kind: "goal", component: ({ path }) => <p>Goal card {path}</p> }],
   slashItems: [{ label: "Goal", hint: "Show a goal's progress", keywords: "goal okr progress", run: () => undefined }]
 };
 
@@ -162,6 +162,9 @@ describe("a ready module (the throwaway test module)", () => {
     expect(moduleEmbedMarkdown("goal", "/goals/grow-mrr-7k3f9x2ab0")).toBe('[Goal](/goals/grow-mrr-7k3f9x2ab0 "nook-embed")');
     expect(parseModuleEmbedLine('[Secret plan](/goals/grow-mrr-7k3f9x2ab0 "nook-embed")\n')?.path).toBe("/goals/grow-mrr-7k3f9x2ab0");
     expect(parseModuleEmbedLine('[Poll](/forms/x "nook-embed")')).toBeNull();
+    // The word names the kind: a goal path under another kind's word is not a goal card.
+    expect(parseModuleEmbedLine('[Poll](/goals/grow-mrr-7k3f9x2ab0 "nook-embed")')).toBeNull();
+    expect(parseModuleEmbedLine('[Goal](/goals/insights "nook-embed")')).toBeNull();
     expect(parseModuleEmbedLine('[Goal](//evil.example/goals/x "nook-embed")')).toBeNull();
     const manager = new MarkdownManager({ extensions: noteContentExtensions(), markedOptions: markdownOptions });
     const json = manager.parse('Before\n\n[Secret plan](/goals/grow-mrr-7k3f9x2ab0 "nook-embed")\n\nAfter');

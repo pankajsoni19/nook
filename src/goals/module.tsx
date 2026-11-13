@@ -1,4 +1,5 @@
 import { Target } from "lucide-react";
+import { WORKSPACE_MODULE_LABELS } from "../../shared/workspaceModules";
 import type { WorkspaceClientModule } from "../workspaceModules/types";
 
 /**
@@ -9,10 +10,10 @@ import type { WorkspaceClientModule } from "../workspaceModules/types";
  */
 export const module: WorkspaceClientModule = {
   id: "goals",
-  segment: "goals",
-  label: "Goals",
+  segment: WORKSPACE_MODULE_LABELS.goals.path.slice(1),
+  label: WORKSPACE_MODULE_LABELS.goals.label,
   icon: Target,
-  description: "Goals and key results with check-ins and progress from tasks, time, contacts, and forms.",
+  description: WORKSPACE_MODULE_LABELS.goals.description,
   ready: false,
   app: null
 };

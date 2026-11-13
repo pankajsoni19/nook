@@ -1,7 +1,8 @@
 import { Node } from "@tiptap/core";
 import { NodeViewWrapper, ReactNodeViewRenderer, type NodeViewProps } from "@tiptap/react";
 import { useDisabledModules } from "../modules";
-import { embedKind, embedKindForPath, MODULE_EMBED_TITLE, moduleEmbedMarkdown } from "./moduleEmbedRegistry";
+import type { EmbedKind } from "../../shared/embeds";
+import { embedKind, embedKindForPath, embedWord, isEmbedKind, MODULE_EMBED_TITLE, moduleEmbedMarkdown } from "./moduleEmbedRegistry";
 
 /**
  * The generic module embed node (D835, §B.4.4): `[Poll](/forms/<slug>-<shortid> "nook-embed")` alone
@@ -21,7 +22,7 @@ export function parseModuleEmbedLine(src: string): { raw: string; path: string; 
   if (!match) return null;
   const path = match[2]!;
   if (path.includes("//") || path.includes("/../")) return null;
-  const kind = embedKindForPath(path);
+  const kind = embedKindForPath(path, match[1]!.replace(/\\(.)/g, "$1"));
   return kind ? { raw: match[0], path, kind: kind.kind } : null;
 }
 
@@ -34,7 +35,7 @@ function ModuleEmbedView({ node, selected, editor }: NodeViewProps) {
   return <NodeViewWrapper className={`module-embed${selected ? " is-selected" : ""}`} data-module-embed="">
     <div contentEditable={false}>
       {off || !Card
-        ? <p className="module-embed-off">{def?.word ?? "Item"} · this module is turned off. <a href={path}>Open link</a></p>
+        ? <p className="module-embed-off">{def ? embedWord(def.kind) : "Item"} · this module is turned off. <a href={path}>Open link</a></p>
         : <Card path={path} kind={def.kind} selected={selected} editable={editor.isEditable} />}
     </div>
   </NodeViewWrapper>;
@@ -44,7 +45,7 @@ declare module "@tiptap/core" {
   interface Commands<ReturnType> {
     moduleEmbed: {
       /** Inserts a module embed (a poll, a form, a goal) at the selection. */
-      insertModuleEmbed: (attrs: { kind: string; path: string }) => ReturnType;
+      insertModuleEmbed: (attrs: { kind: EmbedKind; path: string }) => ReturnType;
     };
   }
 }
@@ -69,7 +70,8 @@ export const ModuleEmbed = Node.create({
   },
   renderHTML({ HTMLAttributes, node }) {
     // Copied HTML carries the neutral word only (T513).
-    return ["div", { ...HTMLAttributes, "data-module-embed": "", class: "module-embed" }, embedKind(String(node.attrs.kind ?? ""))?.word ?? "Item"];
+    const kind = String(node.attrs.kind ?? "");
+    return ["div", { ...HTMLAttributes, "data-module-embed": "", class: "module-embed" }, isEmbedKind(kind) ? embedWord(kind) : "Item"];
   },
   markdownTokenizer: {
     name: "moduleEmbed",
@@ -81,7 +83,7 @@ export const ModuleEmbed = Node.create({
     }
   },
   parseMarkdown: (token, helpers) => helpers.createNode("moduleEmbed", { path: (token as { path?: string }).path, kind: (token as { kind?: string }).kind }),
-  renderMarkdown: (node) => typeof node.attrs?.path === "string" && typeof node.attrs?.kind === "string" ? moduleEmbedMarkdown(node.attrs.kind, node.attrs.path) : "",
+  renderMarkdown: (node) => typeof node.attrs?.path === "string" && isEmbedKind(node.attrs?.kind) ? moduleEmbedMarkdown(node.attrs.kind, node.attrs.path) : "",
   addCommands() {
     return {
       insertModuleEmbed: (attrs) => ({ commands }) => commands.insertContent({ type: this.name, attrs })

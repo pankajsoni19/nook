@@ -1,4 +1,5 @@
 import { Timer } from "lucide-react";
+import { WORKSPACE_MODULE_LABELS } from "../../shared/workspaceModules";
 import type { WorkspaceClientModule } from "../workspaceModules/types";
 
 /**
@@ -9,10 +10,10 @@ import type { WorkspaceClientModule } from "../workspaceModules/types";
  */
 export const module: WorkspaceClientModule = {
   id: "time",
-  segment: "time",
-  label: "Time",
+  segment: WORKSPACE_MODULE_LABELS.time.path.slice(1),
+  label: WORKSPACE_MODULE_LABELS.time.label,
   icon: Timer,
-  description: "Timers and timesheets on cards, projects, and clients, with budgets and billable reports.",
+  description: WORKSPACE_MODULE_LABELS.time.description,
   ready: false,
   app: null
 };

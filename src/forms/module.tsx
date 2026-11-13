@@ -1,4 +1,5 @@
 import { ClipboardList } from "lucide-react";
+import { WORKSPACE_MODULE_LABELS } from "../../shared/workspaceModules";
 import type { WorkspaceClientModule } from "../workspaceModules/types";
 
 /**
@@ -9,10 +10,10 @@ import type { WorkspaceClientModule } from "../workspaceModules/types";
  */
 export const module: WorkspaceClientModule = {
   id: "forms",
-  segment: "forms",
-  label: "Forms",
+  segment: WORKSPACE_MODULE_LABELS.forms.path.slice(1),
+  label: WORKSPACE_MODULE_LABELS.forms.label,
   icon: ClipboardList,
-  description: "Forms, surveys, and polls: share them inside the workspace or on a public page, and see the answers.",
+  description: WORKSPACE_MODULE_LABELS.forms.description,
   ready: false,
   app: null
 };

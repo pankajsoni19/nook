@@ -1,5 +1,7 @@
 import type { ComponentType } from "react";
 import type { Editor, Range } from "@tiptap/core";
+import { EMBED_KINDS, EMBED_TITLE, EMBED_WORDS, EMBED_WORK_KIND, embedMarkdown, type EmbedKind } from "../../shared/embeds";
+import { parseWorkRef } from "../../shared/workRefs";
 
 /**
  * Module embeds and slash items (docs/plan/WORKSPACE_MODULES.md §B.4.4, D835). A leaf (types only),
@@ -10,7 +12,7 @@ import type { Editor, Range } from "@tiptap/core";
  * word (QA H1, T513): readers of the note never learn a title they cannot open. A line whose path no
  * registered kind claims (a module that is off, not ready, or not installed) stays an ordinary link.
  */
-export const MODULE_EMBED_TITLE = "nook-embed";
+export const MODULE_EMBED_TITLE = EMBED_TITLE;
 
 export type EmbedCardProps = {
   /** The in-app path of the embedded item (`/forms/team-lunch-4k2m9x0a1b`). */
@@ -23,12 +25,10 @@ export type EmbedCardProps = {
 };
 
 export type EmbedKindDef = {
-  /** "poll", "form", "goal", "booking_type", "time_poll". */
-  kind: string;
-  /** The neutral link text: "Poll", "Form", "Goal", "Booking link". */
-  word: string;
-  /** Claims an in-app path (`/forms/…`) for this kind. */
-  match: (path: string) => boolean;
+  /** shared/embeds.ts EMBED_KINDS; its neutral word (EMBED_WORDS) is the link text: "Poll", "Goal". */
+  kind: EmbedKind;
+  /** Claims an in-app path (`/forms/…`) for this kind; by default any path of the kind's work kind (shared/embeds.ts EMBED_WORK_KIND). */
+  match?: (path: string) => boolean;
   /** The live card, fetched as the reader (render EmbedCard from src/ui/embeds). */
   component: ComponentType<EmbedCardProps>;
   module?: string;
@@ -59,19 +59,33 @@ export function registerSlashItem(def: SlashItemDef) {
   else slashItems.push(def);
 }
 
-/** The kind that claims a path, or null. */
-export const embedKindForPath = (path: string): EmbedKindDef | null => kinds.find((kind) => kind.match(path)) ?? null;
+const claims = (def: EmbedKindDef, path: string) => def.match ? def.match(path) : parseWorkRef(path)?.kind === EMBED_WORK_KIND[def.kind];
+const WORD_KINDS = new Map(Object.entries(EMBED_WORDS).map(([kind, word]) => [word, kind as EmbedKind]));
+
+/**
+ * The registered kind an embed line names: by its neutral word when it is one ("Poll" and "Form" share
+ * the form paths), else (a title typed into the text) the first registered kind that claims the path.
+ * Null when no registered kind claims it: the line stays an ordinary link.
+ */
+export function embedKindForPath(path: string, word?: string): EmbedKindDef | null {
+  const named = word !== undefined ? WORD_KINDS.get(word.trim()) : undefined;
+  if (named) {
+    const def = kinds.find((item) => item.kind === named);
+    return def && claims(def, path) ? def : null;
+  }
+  return kinds.find((item) => claims(item, path)) ?? null;
+}
 export const embedKind = (kind: string): EmbedKindDef | null => kinds.find((item) => item.kind === kind) ?? null;
 export const registeredSlashItems = (): readonly SlashItemDef[] => slashItems;
 
-/** The Markdown line for one embed: the kind's neutral word, never the item's title. */
-export function moduleEmbedMarkdown(kind: string, path: string) {
-  const def = embedKind(kind);
-  return `[${def?.word ?? "Item"}](${path} "${MODULE_EMBED_TITLE}")`;
-}
+/** The Markdown line for one embed: the kind's neutral word, never the item's title (shared/embeds.ts). */
+export const moduleEmbedMarkdown = (kind: EmbedKind, path: string) => embedMarkdown(kind, path);
+export const embedWord = (kind: EmbedKind) => EMBED_WORDS[kind];
 
 /** Tests: drop every registration. */
 export function clearModuleEmbedsForTests() {
   kinds.length = 0;
   slashItems.length = 0;
 }
+
+export const isEmbedKind = (value: unknown): value is EmbedKind => typeof value === "string" && (EMBED_KINDS as readonly string[]).includes(value);
