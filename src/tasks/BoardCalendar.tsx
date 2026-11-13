@@ -7,13 +7,13 @@ import { AgendaList } from "../ui/calendarGrid/AgendaList";
 import { MonthGrid } from "../ui/calendarGrid/MonthGrid";
 import { useIsPhone } from "../ui/Listbox";
 import { CARD_DRAG_TYPE, isCardDrag, readCardDragPayload } from "./boardOrder";
-import { cardsDueInMonth, displayedDay, displayedTime, dropDueOn, emptyMonthNote, keyboardDayDelta, placeCards, selectGridDay } from "./calendarPlacement";
+import { cardsDueInMonth, displayedDay, displayedTime, dropDueOn, emptyMonthNote, keyboardDayDelta, placeCards, selectGridDay, spanningDays } from "./calendarPlacement";
 import type { BoardCard, BoardData } from "./boardQuery";
 import type { CalendarLayout } from "./boardUrl";
 import { FlagIcons, KeyboardMoveHint } from "./boardViewParts";
 import { ArchivedChip } from "./CardFace";
 import { useModuleEnabled } from "../modules";
-import { committableDueDate } from "./taskActions";
+import { committableDueDate, startChipLabel } from "./taskActions";
 import { useHistoryDialogGuard } from "./useHistoryDialogGuard";
 import "../calendar/calendar.css";
 
@@ -30,8 +30,11 @@ type BoardCalendarProps = {
   onMonth: (month: string | null) => void;
   onLayout: (layout: CalendarLayout) => void;
   onOpenCard: (card: BoardCard) => void;
-  /** PATCH `{ dueOn }` with the card's revision; `null` clears the date (and its time). */
-  onSetDue: (card: BoardCard, dueOn: string | null) => void;
+  /**
+   * PATCH `{ dueOn }` with the card's revision; `null` clears the date (and its time). `keepSpan`
+   * (a drag or Alt+Arrow, D714) moves the card's start by as many days, so its range keeps its length.
+   */
+  onSetDue: (card: BoardCard, dueOn: string | null, keepSpan?: boolean) => void;
   filtered: boolean;
   /** Below Can edit on the board, or a read-only Team role: no drag, no Alt+Arrow, no Set due date. */
   readOnly?: boolean;
@@ -60,6 +63,9 @@ export function BoardCalendar({ board, cards, layout, month: routeMonth, today, 
   useHistoryDialogGuard(sheet !== null, () => setSheet(null));
 
   const { byDay, unscheduled } = placeCards(cards, viewerZone);
+  // A card with a start also shows on the days before its due day (D714), within the grid's six weeks.
+  const spans = spanningDays(cards, viewerZone, addDays(`${month}-01`, -7), addDays(`${month}-01`, 42));
+  const dayItems = (cell: string) => [...(spans.get(cell) ?? []), ...(byDay.get(cell) ?? [])];
   const done = new Set(board.columns.filter((column) => column.is_done === 1).map((column) => column.id));
   const day = selected && selected.startsWith(month) ? selected : today.startsWith(month) ? today : `${month}-01`;
   const monthCount = cardsDueInMonth(byDay, month);
@@ -75,7 +81,7 @@ export function BoardCalendar({ board, cards, layout, month: routeMonth, today, 
       return;
     }
     const next = dropDueOn(card, target, viewerZone);
-    if (next) onSetDue(card, next);
+    if (next) onSetDue(card, next, true);
   }
 
   function chipKeyDown(event: ReactKeyboardEvent<HTMLElement>, card: BoardCard) {
@@ -88,7 +94,7 @@ export function BoardCalendar({ board, cards, layout, month: routeMonth, today, 
     const shown = displayedDay(card, viewerZone);
     if (delta === null || !shown || !card.due_on) return;
     event.preventDefault();
-    onSetDue(card, addDays(card.due_on, delta));
+    onSetDue(card, addDays(card.due_on, delta), true);
   }
 
   function openDueDialog(card: BoardCard) {
@@ -99,10 +105,12 @@ export function BoardCalendar({ board, cards, layout, month: routeMonth, today, 
   const chipLabel = (card: BoardCard) => {
     const time = displayedTime(card, viewerZone);
     const home = card.due_time && card.due_tz && card.due_tz !== viewerZone ? `, set as ${card.due_time} ${card.due_tz} (${time} your time)` : "";
-    return `${card.title}${time ? `, due at ${time}` : ""}${home}${done.has(card.column_id) ? ", done" : ""}`;
+    const start = startChipLabel(card, today, viewerZone);
+    return `${card.title}${start ? `, starts ${start}` : ""}${time ? `, due at ${time}` : ""}${home}${done.has(card.column_id) ? ", done" : ""}`;
   };
 
-  const chip = (card: BoardCard) => <div key={card.id} className={`task-cal-chip${done.has(card.column_id) ? " done" : ""}`} tabIndex={0} role="button"
+  // `continued`: a day of the card's range before its due day (D714).
+  const chip = (card: BoardCard, cell?: string) => <div key={card.id} className={`task-cal-chip${done.has(card.column_id) ? " done" : ""}${cell && displayedDay(card, viewerZone) !== cell ? " continued" : ""}`} tabIndex={0} role="button"
     data-card-id={card.id} data-open-card={card.id} draggable={movable} aria-label={chipLabel(card)} aria-roledescription={readOnly ? "Card" : "Draggable card"}
     aria-keyshortcuts={readOnly ? undefined : "Alt+ArrowLeft Alt+ArrowRight Alt+ArrowUp Alt+ArrowDown"} aria-describedby={readOnly ? undefined : "task-cal-keys"}
     title={chipLabel(card)}
@@ -147,7 +155,7 @@ export function BoardCalendar({ board, cards, layout, month: routeMonth, today, 
       <div className="task-cal-main">
         {layout === "month"
           ? <MonthGrid month={month} today={today} selectedDay={day} compact={phone} titleId="task-cal-title"
-            countFor={(cell) => byDay.get(cell)?.length ?? 0}
+            countFor={(cell) => dayItems(cell).length}
             onSelectDay={(cell) => {
               const next = selectGridDay(cell, month, today);
               setSelected(next.selected);
@@ -156,19 +164,19 @@ export function BoardCalendar({ board, cards, layout, month: routeMonth, today, 
             onShiftMonth={(delta) => onMonth(shiftMonth(month, delta))}
             onToday={() => { setSelected(null); onMonth(null); }}
             drop={!movable ? undefined : { accepts: (types) => isCardDrag(types), type: CARD_DRAG_TYPE, onDropOnDay: (target, payload) => dropOn(target, payload) }}
-            renderDots={(cell) => (byDay.get(cell) ?? []).slice(0, 3).map((card) => <span key={card.id} className={`calendar-dot task-cal-dot${card.flags.length ? " flagged" : ""}`} />)}
+            renderDots={(cell) => dayItems(cell).slice(0, 3).map((card) => <span key={card.id} className={`calendar-dot task-cal-dot${card.flags.length ? " flagged" : ""}`} />)}
             renderDay={(cell) => {
-              const items = byDay.get(cell) ?? [];
+              const items = dayItems(cell);
               return <>
-                {items.slice(0, CHIPS_PER_DAY).map(chip)}
+                {items.slice(0, CHIPS_PER_DAY).map((card) => chip(card, cell))}
                 {items.length > CHIPS_PER_DAY && <button className="calendar-more" onClick={() => setSelected(cell)}>+{items.length - CHIPS_PER_DAY} more</button>}
               </>;
             }}>
             {monthCount === 0 && <p className="task-cal-note">{emptyMonthNote(month, filtered)}</p>}
-            {(phone || (byDay.get(day)?.length ?? 0) > CHIPS_PER_DAY || selected) && <section className="calendar-day-list" aria-labelledby="task-cal-day-title">
+            {(phone || dayItems(day).length > CHIPS_PER_DAY || selected) && <section className="calendar-day-list" aria-labelledby="task-cal-day-title">
               <header><h3 id="task-cal-day-title">{dayHeading(day, today)}</h3></header>
-              {(byDay.get(day) ?? []).length
-                ? <ul>{(byDay.get(day) ?? []).map((card) => <li key={card.id}>{row(card)}</li>)}</ul>
+              {dayItems(day).length
+                ? <ul>{dayItems(day).map((card) => <li key={card.id}>{row(card)}</li>)}</ul>
                 : <p className="calendar-note">No cards due this day.</p>}
             </section>}
           </MonthGrid>

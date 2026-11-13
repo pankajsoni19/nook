@@ -2,7 +2,7 @@ import { AlignLeft, Archive, CalendarDays, Link2, ListChecks, MessageSquare, Oct
 import { cardTags, FLAG_LABELS, visibleItems } from "./cardTags";
 import { FlagIcon } from "./TagPicker";
 import { Avatar } from "../ui/Avatar";
-import { assigneeSentence, attachmentCountLabel, cardAssignees, commentCountLabel, dueStatus } from "./taskActions";
+import { assigneeSentence, attachmentCountLabel, cardAssignees, cardDateStatus, commentCountLabel } from "./taskActions";
 import type { BoardTag, CardSummary } from "./tasksApi";
 
 /** At most this many tag chips and avatars on a lane card, then "+N" (§4.4). */
@@ -97,7 +97,7 @@ export function cardFaceLabel({ card, tags, done, today, parentTitle, rollup, ch
   if (parentTitle) parts.push(`in ${parentTitle}`);
   if (rollup?.total) parts.push(`${rollup.done} of ${rollup.total} ${childLabel} done`);
   for (const flag of card.flags ?? []) parts.push(FLAG_LABELS[flag].toLowerCase());
-  const due = dueStatus(card.due_on, today, done, { dueAt: card.due_at });
+  const due = cardDateStatus(card, today, done);
   if (due) parts.push(lowerFirst(due.description));
   const names = cardTags(card.tag_ids, tags).map((tag) => tag.name);
   if (names.length) parts.push(`${names.length === 1 ? "tag" : "tags"} ${listSentence(names)}`);
@@ -123,7 +123,7 @@ export function cardFaceLabel({ card, tags, done, today, parentTitle, rollup, ch
 export function CardFace({ card, tags, done, today, excerptId, rollup, childLabel = "subtasks" }: FaceInput & { excerptId: string }) {
   const flags = card.flags ?? [];
   const excerpt = card.description_excerpt?.trim() ?? "";
-  const due = dueStatus(card.due_on, today, done, { dueAt: card.due_at });
+  const due = cardDateStatus(card, today, done);
   const allTags = cardTags(card.tag_ids, tags);
   const people = cardAssignees(card);
   const children = rollup && rollup.total > 0 ? rollup : null;

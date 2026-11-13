@@ -3,7 +3,7 @@ import { CalendarDays, ChevronDown, ChevronRight, Ellipsis, KanbanSquare } from 
 import { Avatars, FlagIcons, shortTimestamp } from "../boardViewParts";
 import type { BoardCard } from "../boardQuery";
 import { ArchivedChip } from "../CardFace";
-import { cardCountLabel, dueStatus } from "../taskActions";
+import { cardCountLabel, cardDateStatus } from "../taskActions";
 import { useRole } from "../../team/roleAccess";
 import type { QueryLane } from "../../../shared/taskLanes";
 import { canChangeCard, type QueriedCard, type QueryLanes as QueryLaneLayout } from "./homeApi";
@@ -48,7 +48,7 @@ type QueryResultsProps = {
 };
 
 function Due({ card, today }: { card: QueriedCard; today: string }) {
-  const due = dueStatus(card.due_on, today, card.is_done === 1, { dueAt: card.due_at });
+  const due = cardDateStatus(card, today, card.is_done === 1);
   if (!due) return null;
   return <span className={`task-due-chip ${due.tone}`} title={due.description}><CalendarDays aria-hidden="true" /><span aria-hidden="true">{due.label}</span><span className="sr-only">{due.description}</span></span>;
 }

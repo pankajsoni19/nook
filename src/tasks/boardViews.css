@@ -181,6 +181,8 @@ span.task-filter-chip-body { cursor: default; }
 .task-cal-chip:focus-visible { outline: 2px solid var(--yellow); outline-offset: 1px; }
 .task-cal-chip.done { border-left-color: #55555c; color: #8d8d94; }
 .task-cal-chip.done .task-cal-title { text-decoration: line-through; text-decoration-color: #55555c; }
+/* A day of a card's range before its due day (D714): the same chip, quieter, so the due day stands out. */
+.task-cal-chip.continued { border-left-style: dashed; background: #18181b; color: #a9a9b0; }
 .task-cal-flag { width: 6px; height: 6px; flex: none; border-radius: 999px; background: #ff8f86; }
 .task-cal-time { flex: none; color: #9a9aa1; font-variant-numeric: tabular-nums; }
 .task-cal-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; }

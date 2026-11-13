@@ -5,7 +5,7 @@ import { cardTags, FLAG_LABELS, visibleItems } from "./cardTags";
 import { FlagIcon } from "./TagPicker";
 import { Avatar } from "../ui/Avatar";
 import type { BoardCard, BoardData } from "./boardQuery";
-import { dueStatus } from "./taskActions";
+import { cardDateStatus } from "./taskActions";
 import type { CardAssignee, CardFlag } from "./tasksApi";
 
 // Small read-only pieces the table, list, and calendar views share, drawn like the lane card face
@@ -33,7 +33,7 @@ export function TagChips({ tagIds, board, max = FACE_TAGS }: { tagIds: readonly 
 }
 
 export function DueChip({ card, today, done }: { card: BoardCard; today: string; done: boolean }) {
-  const due = dueStatus(card.due_on, today, done, { dueAt: card.due_at });
+  const due = cardDateStatus(card, today, done);
   if (!due) return null;
   return <span className={`task-due-chip ${due.tone}`} title={due.description}><CalendarDays aria-hidden="true" /><span aria-hidden="true">{due.label}</span><span className="sr-only">{due.description}</span></span>;
 }

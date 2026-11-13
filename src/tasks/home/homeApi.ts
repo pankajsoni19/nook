@@ -28,6 +28,11 @@ export type QueriedCard = {
   due_time: string | null;
   due_tz: string | null;
   due_at: string | null;
+  /** The optional start (D710); older servers omit it. */
+  start_on?: string | null;
+  start_time?: string | null;
+  start_tz?: string | null;
+  start_at?: string | null;
   assignees: CardAssignee[];
   tags: Array<{ id: string; name: string; color: TagColor | string }>;
   flags: string[];

@@ -249,6 +249,16 @@ export const FILTER_FIELDS: Record<string, FilterField> = {
     ],
     labelFor: (value) => dueValueLabel(value)
   },
+  start: {
+    // D712: the card's start, with the due field's windows and dates (no Overdue).
+    label: "Start",
+    key: "start",
+    optionsFor: () => [
+      { value: "today", label: "Today" }, { value: "week", label: "Next 7 days" },
+      { value: "next-week", label: "The 7 days after" }, { value: "none", label: "No start date" }
+    ],
+    labelFor: (value) => dueValueLabel(value)
+  },
   column: {
     label: "Column",
     key: "column",
