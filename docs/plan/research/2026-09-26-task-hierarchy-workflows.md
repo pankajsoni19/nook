@@ -117,7 +117,7 @@ W6 and W7 need nothing from hierarchy. They are covered by Wave 13 (tags, flags,
 | D131 | **Closing a sprint** (owner) opens a dialog: "8 done · 3 not done → [Next sprint ▾ / Backlog]". Unfinished work-level cards move to the chosen sprint. If no planned sprint exists, the dialog offers "Create Sprint N+1 (dates +length)". Done cards stay in the closed sprint. Their children follow by derivation. | Linear and Jira behave this way, in one step, and it is reversible by hand. |
 | D132 | **Sprint management is owner-only** (create, edit, start, close, delete an empty sprint). **Any reader** assigns work cards to a sprint (it is a card field). | Consistent with columns (D38). §13 Q2 offers "members manage sprints" for family boards. |
 | D133 | **No cross-board parents in v1.** Cross-board aggregation is served by **views** (D140). Cross-board *links* are Wave 13 relations. | Keeps the board as the ACL and lock unit. Parent titles can never leak across boards (T112). |
-| D134 | **Roll-up is computed at read time with one grouped query per board**, never with per-card subqueries: `SELECT parent_card_id, COUNT(*), SUM(col.is_done) FROM cards JOIN board_columns col … WHERE board_id = ? AND deleted_at IS NULL AND parent_card_id IS NOT NULL GROUP BY parent_card_id`. Sprint counts come from the same pattern. **No story points in v1.** | ≤ 1000 cards per board makes this microseconds. Points need estimation UX and reports that small teams rarely use (§13 Q4). |
+| D134 | **Roll-up is computed at read time with one grouped query per board**, never with per-card subqueries: `SELECT parent_card_id, COUNT(*), SUM(col.is_done) FROM cards JOIN board_columns col … WHERE board_id = ? AND deleted_at IS NULL AND parent_card_id IS NOT NULL GROUP BY parent_card_id`. Sprint counts come from the same pattern. **No story points in v1** (superseded 2026-11-13 by D750–D757, §18: optional estimates per board). | ≤ 1000 cards per board makes this microseconds. Points need estimation UX and reports that small teams rarely use (§13 Q4). |
 | D135 | **Limits:** ≤ 100 direct children per card and ≤ 3 levels. The existing 1000 live cards per board covers every level. ≤ 50 open (planned or active) sprints per board, closed ones unbounded but listed paged. | Bounds the grouped queries, the dialog lists, and depth bombs (T111). |
 | D136 | **Templates at board creation**: Simple kanban (the default), Personal to-do, Task checklist, Scrum sprint board, Epic › Story › Subtask, Bug triage, Content pipeline. Each sets columns (with `is_done` and, after 020, `state`), `structure_json`, and optionally a first sprint. `POST /boards {name, template?}`. | One-tap workflows (§3). No template ever creates cards. |
 | D137 | **Filters (shared grammar, §10.3)** gain `parent:<id>\|none`, `level:<0-2>\|work`, `sprint:current\|next\|backlog\|<id>`, and `has:subtasks`. | One grammar for board filters, cross-board views, URLs, and MCP. |
@@ -689,7 +689,7 @@ The director assigns numbers. Suggested: **Wave 17**, after Wave 13 and in paral
 | Q1 | Should a sprint be a card level ("Sprint" cards) or its own entity? | **Its own entity** (D124). The UI still reads "Sprint › Task › Subtask". |
 | Q2 | Who manages sprints: owner only or any member? | **Owner only** (D132), consistent with columns. Revisit with Team roles, since an "editor" role could manage them. |
 | Q3 | Maximum depth? | **3 levels** (D121). Custom names up to 24 chars. |
-| Q4 | Story points and a burndown chart? | **No, not in v1.** Counts and a progress strip only. Add an optional `estimate` field later if a scrum team asks. |
+| Q4 | Story points and a burndown chart? | **No, not in v1.** Counts and a progress strip only. Add an optional `estimate` field later if a scrum team asks. **Superseded 2026-11-13 by D750–D757** (§18): a per-board estimate kind (off, points, hours) and a card `estimate`; still no burndown chart. |
 | Q5 | Should a parent auto-close when all its children are done (Linear)? | **No.** A toast suggests it (D125). A per-board "auto-complete parents" switch can come later. |
 | Q6 | How are subtasks ordered inside the parent: their own sibling order, or column and position? | **Column order, then position** (no new field). Add `child_position` only if users ask to hand-order checklists. |
 | Q7 | Do WIP limits count every level? | **Every card in the column counts.** A "work level only" option comes later. |
@@ -809,3 +809,18 @@ Operator, 2026-10-23: views should offer what boards offer (collapse, the board'
 | D644 | **`task_view_prefs`** (migration 077): collapsed lanes per person and view or My work. | Collapse everywhere, personal, bounded. |
 | D645 | **MCP** `list_views` gains `board_id` and `lanes`; `move_card` takes `state` or `columnName`. | Agents move cards the way lanes do. |
 | D646 | **Phones**: lanes are the board's pager; drag off; **Move to…** lists the lanes. | One layout model at 390 px. |
+
+## 18. Card estimates (lane ESTIMATES, 2026-11-13)
+
+Operator, 2026-11-13: estimates on task cards, with a board-level setting for what they mean. This **supersedes Q4** (§13) and the "no story points" sentence of D134. The full plan is [docs/plan/TASK_ESTIMATES.md](../TASK_ESTIMATES.md); migration 082, no new threat.
+
+| ID | Decision | Why |
+| --- | --- | --- |
+| D750 | **`boards.estimate_kind`**: `none` (default), `points`, or `hours`; owner or manager, Board settings → Estimates; audited `task.board_estimates`. | A per-board switch keeps boards that do not estimate free of the field. |
+| D751 | **`boards.estimate_scale`** for points: Fibonacci 0–21 (default) or free. | The common planning-poker scale, and Jira-style free numbers. |
+| D752 | **Kind and scale changes never rewrite values**: off hides them at every read, points ↔ hours keeps the numbers (the settings warn), off-scale values stay until changed. | Nothing is lost by trying a setting; no guessed conversion. |
+| D753 | **`cards.estimate`** 0–999, two decimals, on the scale for Fibonacci; 400 `ESTIMATES_OFF` / `ESTIMATE_INVALID`; `null` always clears. | Bounded, coded errors like `SPRINTS_OFF`. |
+| D754 | **App**: the Estimate field (chips or a number with its unit), a chip on faces and rows, a sortable table column, column header totals. | The due chip's vocabulary; totals follow the screen. |
+| D755 | **Sprint bar**: "13 of 21 pts done · 8 pts left" over work-level cards; MCP `list_cards`, `get_card`, `create_card`, `update_card` carry it. | What a scrum team reads; no double counting of subtasks. |
+| D756 | **`has:estimate`** in the grammar; query results carry `estimate` and `estimate_kind`. | Find unestimated cards before planning. |
+| D757 | **Out of scope**: conversions, other scales, the composer, roll-ups, burndown. | Keep the lane small. |
