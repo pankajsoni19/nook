@@ -106,6 +106,7 @@ function MoveToBoardSheet({ card, onMoveToBoard, onBack, onCancel, loadBoards, l
   }
 
   const chosenColumn = columns?.find((column) => column.id === columnId) ?? null;
+  const targetStatuses = columnStatuses(columns ?? []);
   return <ModalDialog title={`Move “${card.title}” to another board`} eyebrow="Move to" onClose={onCancel} variant="sheet" busy={busy}>
     <div className="move-list" role={target ? undefined : "radiogroup"} aria-label={target ? undefined : "Board"}>
       <button className="move-option" onClick={target ? () => { setTarget(null); setColumns(null); setError(null); } : onBack} disabled={busy}>
@@ -122,12 +123,16 @@ function MoveToBoardSheet({ card, onMoveToBoard, onBack, onCancel, loadBoards, l
     {target && <>
       {columns === null && !error && <p className="bin-loading" role="status">Loading {target.name}…</p>}
       {columns && <div className="move-list" role="radiogroup" aria-label={`Column on ${target.name}`}>
-        {columns.map((column) => <button key={column.id} role="radio" aria-checked={columnId === column.id} className={`move-option${columnId === column.id ? " active" : ""}`} disabled={busy} onClick={() => setColumnId(column.id)}>
-          <span>{column.name}{column.is_done === 1 && <small>Done column</small>}</span>
-          {columnId === column.id && <Check aria-hidden="true" />}
-        </button>)}
+        {columns.map((column) => {
+          const status = targetStatuses.get(column.id);
+          return <button key={column.id} role="radio" aria-checked={columnId === column.id} className={`move-option${columnId === column.id ? " active" : ""}`} disabled={busy} onClick={() => setColumnId(column.id)}>
+            {status ? <ColumnStatusIcon status={status} /> : <Layers aria-hidden="true" />}
+            <span>{column.name}{column.is_done === 1 && <small>Done column</small>}</span>
+            {columnId === column.id && <Check aria-hidden="true" />}
+          </button>;
+        })}
       </div>}
-      <p className="task-settings-note">It goes to the bottom of the column with its comments, files, people, and links, and gets a {target.code ? `${target.code}-` : "new "}key there; its old key still finds it. Tags {target.name} has no tag of the same name for are dropped, and its sprint and parent are cleared.</p>
+      <p className="file-dialog-copy">It goes to the bottom of the column with its comments, files, people, and links, and gets a new key{target.code ? ` (${target.code}-…)` : ""}; its old key still opens it. Tags that {target.name} has no tag of the same name for are dropped, and its sprint and parent are cleared.</p>
     </>}
     <FormError message={error} className="file-dialog-error" />
     <footer className="file-dialog-actions">

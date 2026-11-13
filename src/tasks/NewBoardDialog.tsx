@@ -88,7 +88,7 @@ export function NewBoardDialog({ onSubmit, onCancel, suggest = serverSuggestion 
       <input id={`${inputId}-code`} className="task-board-code-input" value={code} autoComplete="off" spellCheck={false} maxLength={BOARD_CODE_MAX}
         aria-describedby={`${inputId}-code-hint`} aria-invalid={codeError ? true : undefined} disabled={busy}
         onChange={(event) => { setCode(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "")); setCodeEdited(true); setCodeError(null); }} />
-      <small id={`${inputId}-code-hint`} className="task-settings-note">Card keys start with it: {normalizeBoardCode(code) ?? "MYT"}-1, {normalizeBoardCode(code) ?? "MYT"}-2. {BOARD_CODE_MAX} letters or digits at most.</small>
+      <small id={`${inputId}-code-hint`} className="task-settings-note">{normalizeBoardCode(code) ? `Card keys start with it: ${normalizeBoardCode(code)}-1, ${normalizeBoardCode(code)}-2.` : "Card keys start with it, such as ABC-1."} {BOARD_CODE_MAX} letters or digits at most.</small>
       <FormError message={codeError} className="file-dialog-error" />
       <span className="task-template-label" id={`${inputId}-templates`}>Start from</span>
       <div className="task-template-grid" role="radiogroup" aria-labelledby={`${inputId}-templates`}>
