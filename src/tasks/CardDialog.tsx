@@ -54,6 +54,8 @@ import { ReadOnlyBanner, useRole } from "../team/roleAccess";
 import { levelAtLeast, type ItemLevel } from "../access/accessLevels";
 import { appName } from "../appName";
 import { FormError } from "../ui/FormError";
+import { ActivityRow, TimelineControls, useCardTimeline } from "./cardActivity";
+import { activityRefreshKey, buildTimeline } from "./cardActivityModel";
 
 type CardDialogProps = {
   userId: string;
@@ -164,6 +166,8 @@ export function CardDialog({ userId, cardId, columns, columnId, boardOwner, boar
   const cardRef = useRef<CardDetail | null>(null);
   cardRef.current = card;
   const titleId = useId();
+  // Lane ACTIVITY: the card's history interleaved with its comments, re-read when the card changes.
+  const timeline = useCardTimeline(userId, cardId, activityRefreshKey(card, { columnId, relations: relations.length, attachments: attachments.length }));
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -628,6 +632,15 @@ export function CardDialog({ userId, cardId, columns, columnId, boardOwner, boar
     discardStaged([file]);
   };
 
+  // Comments and (when switched on) history in one list; "Load earlier" pages whichever list is behind,
+  // at the top when oldest first and at the bottom when newest first.
+  const timelineItems = buildTimeline({ comments, hasMoreComments: hasMore, activity: timeline.activity, hasMoreActivity: timeline.hasMoreActivity, showActivity: timeline.prefs.showActivity, order: timeline.prefs.order });
+  const loadingEarlier = loadingMore || timeline.loadingOlder;
+  const loadEarlierButton = (timelineItems.loadComments || timelineItems.loadActivity) && <button className="task-load-earlier" disabled={loadingEarlier} onClick={() => {
+    if (timelineItems.loadComments) void loadEarlier();
+    if (timelineItems.loadActivity) void timeline.loadOlder();
+  }}>{loadingEarlier ? "Loading…" : timeline.prefs.showActivity ? "Load earlier" : "Load earlier comments"}</button>;
+
   const column = card ? columns.find((item) => item.id === (columnId ?? card.column_id)) : undefined;
   const composerKey = (event: ReactKeyboardEvent<HTMLTextAreaElement>, submit: () => void) => {
     if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
@@ -748,10 +761,13 @@ export function CardDialog({ userId, cardId, columns, columnId, boardOwner, boar
           </section>
 
           <section className="task-card-section" aria-labelledby={`${titleId}-comments`}>
-            <header><h3 id={`${titleId}-comments`}><MessageSquare aria-hidden="true" />Comments</h3></header>
-            {hasMore && <button className="task-load-earlier" onClick={() => { void loadEarlier(); }} disabled={loadingMore}>{loadingMore ? "Loading…" : "Load earlier comments"}</button>}
-            <ol className="task-comments">
-              {comments.map((comment) => {
+            <header><h3 id={`${titleId}-comments`}><MessageSquare aria-hidden="true" />Comments</h3>
+              <TimelineControls prefs={timeline.prefs} onChange={timeline.setPrefs} idPrefix={titleId} /></header>
+            {timeline.prefs.order === "asc" && loadEarlierButton}
+            <ol className="task-comments" aria-label={timeline.prefs.showActivity ? "Comments and activity" : "Comments"}>
+              {timelineItems.items.map((timelineItem) => {
+                if (timelineItem.type === "activity") return <ActivityRow key={timelineItem.id} entry={timelineItem.entry} />;
+                const comment = timelineItem.comment;
                 const commentFiles = attachmentsFor(attachments, comment.id);
                 const filesOnly = commentFilesOnly(comment.body, commentFiles);
                 return <li key={comment.id} className="task-comment">
@@ -784,8 +800,9 @@ export function CardDialog({ userId, cardId, columns, columnId, boardOwner, boar
                 <CommentReactions commentId={comment.id} reactions={comment.reactions ?? []} readOnly={commentReadOnly} onUpdate={updateReactions} notify={notify} />
               </li>;
               })}
-              {!comments.length && <li className="task-comment-empty">No comments yet.</li>}
+              {!timelineItems.items.length && <li className="task-comment-empty">No comments yet.</li>}
             </ol>
+            {timeline.prefs.order === "desc" && loadEarlierButton}
             {commentReadOnly
               ? <p className="task-comment-empty" role="note">{roleReadOnly ? "View only: your Team role can read comments but not post them." : "View only: you can read this board's comments but not post them."}</p>
               : <div className="task-comment-composer" data-attach-zone="comment">

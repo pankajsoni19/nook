@@ -2,6 +2,18 @@
 
 Release notes for Nook, newest first. Upgrade steps for each release are in [docs/OPERATIONS.md](docs/OPERATIONS.md#upgrades).
 
+## Unreleased
+
+**Tasks**
+
+- **Card activity history**: who created a card, renamed it, edited the description, moved it, changed assignees, due date, tags, flags, parent, level, relations, sprint, or files, and when it was archived, binned, or restored, shown between the comments ("Ann moved this from **To do** to **Done** · 10 days ago"). Changes made through MCP, the REST API, or an agent are recorded too and say so; quick repeat edits of one field are one entry.
+- The Comments header has an **Activity** switch and a **Newest first / Oldest first** button, remembered per person in this browser.
+- MCP and REST: `get_card_activity` reads a card's history, paged.
+
+**Upgrading**
+
+- Migration **067** (`card_activity`) runs once on the first boot; quick (it creates an empty table). Cards changed before the upgrade have no history from before it.
+
 ## v0.47.0 — 2026-10-24
 
 **Task views**
