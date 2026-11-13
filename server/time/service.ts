@@ -26,7 +26,7 @@ import { atLeast, canLogOn, moneyVisibleSql, PROJECT_JOIN, projectLevel, project
  *   partial unique index refuses a second even under a race (T534).
  * - A stored entry is at most 24 hours (D871); stopping a longer timer splits it into consecutive
  *   entries of at most 24 hours each, so no time is lost.
- * - The rate and currency are copied onto billable entries when written (D884): the person's rate on
+ * - The rate and currency are copied onto billable entries when written (D882): the person's rate on
  *   the project, else the project's rate.
  * - Locked entries (an approved week, D874) are read-only to their author; the project's managers
  *   may still change them, and every check is here, so MCP and bulk writes cannot bypass it (T533).
@@ -176,7 +176,7 @@ export function defaultProjectFor(target: WorkRef | null, userId: string): Proje
   return row && canLogOn(row.id, userId) ? row : null;
 }
 
-/** The rate on billable entries (D884): the person's rate on the project, else the project's. */
+/** The rate on billable entries (D882): the person's rate on the project, else the project's. */
 function rateFor(project: ProjectRow | null, userId: string, billable: boolean): { rate: number | null; currency: string | null } {
   if (!project || !billable) return { rate: null, currency: project?.currency ?? null };
   const member = db.query("SELECT rate_minor FROM time_member_rates WHERE project_id = ? AND user_id = ?").get(project.id, userId) as { rate_minor: number } | null;

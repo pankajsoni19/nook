@@ -67,7 +67,7 @@ export const workKinds: WorkKindAdapter[] = [
 ];
 
 // ---------------------------------------------------------------------------
-// The Bin: time projects (the owner restores and purges; entries stay, D885)
+// The Bin: time projects (the owner restores and purges; entries stay, T533)
 
 const binDefaults = { size_bytes: null, board_id: null, board_name: null, attachment: false, attachment_of: null, attachment_kind: null } as const;
 type Binned = { id: string; owner_id: string; name: string; deleted_at: string | null; purge_after: string | null; purge_started_at: string | null; visibility: "private" | "selected" | "all_users" };
@@ -200,7 +200,7 @@ export const timeDataset: DatasetDef = {
 };
 
 // ---------------------------------------------------------------------------
-// Schedules: the long-running timer alert and the "nothing logged today" reminder (D888)
+// Schedules: the long-running timer alert and the "nothing logged today" reminder (D885)
 
 export const scheduleHandlers: Record<string, ScheduleHandler> = {
   "time.long_timer": {

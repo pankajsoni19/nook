@@ -8,15 +8,15 @@ import { shortIdSql } from "./083_short_ids";
  *   `item_members` / `item_group_grants` as kind `time_project`), with an optional client (a company,
  *   088) and an optional linked board (one project per board among live projects, D876), billable
  *   default, an hourly rate in minor units and the project's currency (the workspace currency when it
- *   was made, D885), a budget, settings, a friendly short id, and the Bin columns.
+ *   was made, D882), a budget, settings, a friendly short id, and the Bin columns.
  * - `time_member_rates`: a person's rate on a project, over the project's rate.
  * - `time_entries`: one block of time. `started_at` + `duration_s` (+ `ended_at` once stopped); a
  *   running timer has neither (D871), and a person has at most one (D870, the partial unique index).
  *   The rate and currency are copied when the entry is written, so later rate changes never reprice
- *   history (D884). `target_kind`/`target_id` is the work it tracks (a card, goal, contact, …).
+ *   history (D882). `target_kind`/`target_id` is the work it tracks (a card, goal, contact, …).
  * - `time_tags`: the workspace's tag list (names are free text on entries, up to 5).
  * - `time_approvals`: a person's week on a project, submitted / approved / rejected (D874).
- * - `time_user_settings`: each person's reminders (D888).
+ * - `time_user_settings`: each person's reminders (D885).
  *
  * Needs 001, 009 (boards), 083, 085, 086, and 088. Transactional and filesystem-free; re-running
  * changes nothing.

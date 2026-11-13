@@ -21,7 +21,7 @@ import { LEVEL_RANK } from "../access/levels";
  *   rates and money and approves weeks (D873, D874).
  * - Its client is a company (088): any company in a book the person can read, or a new one in their
  *   own hidden "Clients" book (D807), so Time never needs the Contacts app. The client's name is
- *   part of the project and shown to every project reader (D886).
+ *   part of the project and shown to every project reader (D883).
  * - Linking a board makes the project the default for time on that board's cards (D876): one live
  *   project per board, and only someone who can edit the board links it.
  */

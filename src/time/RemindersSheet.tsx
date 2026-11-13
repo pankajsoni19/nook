@@ -8,7 +8,7 @@ import { timeApi, viewerZone, type TimeSettings } from "./api";
 import { errorText } from "./timerStore";
 
 /**
- * Time reminders (§D.2 "Notifications", D888): "You have no time logged today" on the days and at
+ * Time reminders (§D.2 "Notifications", D885): "You have no time logged today" on the days and at
  * the time you choose (off by default), and the alert when a timer has run for N hours (8 by
  * default; 0 turns it off). Both arrive as Nook notifications (bell and push).
  */
