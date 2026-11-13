@@ -3,7 +3,7 @@
 // the history. Pure helpers are in cardActivityModel.ts; the kinds are in shared/cardActivity.ts.
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
-  Archive, ArchiveRestore, ArrowDownWideNarrow, ArrowRight, ArrowUpNarrowWide, CalendarClock, Flag, FlagOff, IterationCw, Layers, Link2, Network,
+  Archive, ArchiveRestore, ArrowDownWideNarrow, ArrowRight, ArrowRightLeft, ArrowUpNarrowWide, CalendarClock, CalendarPlus, Flag, FlagOff, Gauge, IterationCw, Layers, Link2, Network,
   Paperclip, Plus, Tag, TextAlignStart, Trash2, Type, Unlink, UserMinus, UserPlus, type LucideIcon
 } from "lucide-react";
 import { relativeTime, formatDateTime } from "../files/format";
@@ -52,6 +52,8 @@ const relationText = (verb: string) => ({ item: value }: CardActivityPayload) =>
   const type = value?.detail ? RELATION_LABELS[value.detail as RelationType]?.toLowerCase() : null;
   return <>{verb} {value ? b(value.label) : "a card"}{type ? <> ({type})</> : null}</>;
 };
+/** A board the card moved from or to (D716): "Roadmap (ROA-2)", the key it had there. */
+const boardLabel: Format = (value) => value.detail ? `${value.label} (${value.detail})` : value.label;
 const subtasks = (count: number | undefined, verb: string) => count ? ` with ${count === 1 ? "1 subtask" : `${count} subtasks`}${verb}` : "";
 
 /**
@@ -68,6 +70,14 @@ export const ACTIVITY_RENDERERS: Record<CardActivityKind, Renderer> = {
   assignee_added: item("assigned", UserPlus),
   assignee_removed: item("unassigned", UserMinus),
   due: change("due date", CalendarClock, dueValueLabel),
+  // Added at integration (shared/cardActivity.ts): the start date (D720), the estimate (D750, its label
+  // carries the board's unit then: "5 pts", "3h"), and a move to another board (D716).
+  start: change("start date", CalendarPlus, dueValueLabel),
+  estimate: change("estimate", Gauge),
+  board_move: {
+    icon: ArrowRightLeft,
+    text: ({ from, to }) => <>moved this card{from ? <> from {b(boardLabel(from))}</> : null}{to ? <> to {b(boardLabel(to))}</> : null}</>
+  },
   tag_added: item("added the tag", Tag),
   tag_removed: item("removed the tag", Tag),
   flag_set: item("flagged this", Flag, flagLabel),

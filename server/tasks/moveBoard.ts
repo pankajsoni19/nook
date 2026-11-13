@@ -4,6 +4,7 @@ import { boardStructure, liveChildCount } from "./hierarchy";
 import { planInsert } from "./boardOrder";
 import { tagIdsForCard, replaceCardTags } from "./tags";
 import { keyOfCard, takeCardNumber } from "./keys";
+import { activityValue, recordCardActivity, recordCardChange } from "./activity";
 import {
   applyRenumber, cardDetail, liveCardsIn, listColumns, requireBoardAt, requireBoardColumn, requireBoardRoom, requireCardAt, requireColumnRoom, TaskError, withBoardLock
 } from "./service";
@@ -41,6 +42,9 @@ export function defaultMoveColumn(boardId: string) {
  *   behind the person's back. Sub-cards in the Bin are detached and restore detached (D130).
  * - The card gets the destination's next number; its old key keeps opening it (card_key_aliases, D715).
  *   The revision goes up by one, so an open copy elsewhere reloads.
+ * - Its history (card_activity, keyed by card) goes with it: a `board_move` entry names both boards
+ *   and keys, then one `tag_removed` entry per tag dropped. Earlier
+ *   entries keep the old board's id in `board_id`; reads go by card only.
  */
 export async function moveCardToBoard(userId: string, cardId: string, input: MoveToBoardInput) {
   const source = requireCardAt(cardId, userId, "edit").board;
@@ -94,6 +98,9 @@ export async function moveCardToBoard(userId: string, cardId: string, input: Mov
       db.query("DELETE FROM card_tags WHERE card_id = ?").run(cardId);
       replaceCardTags(cardId, mappedTags, timestamp);
       db.query("UPDATE boards SET updated_at = ? WHERE id IN (?, ?)").run(timestamp, source.id, target.id);
+      // Card history (lane ACTIVITY), in the same transaction: the move, then each tag it lost (the parent and sprint it left stay implied, so no old-board name reaches readers of the new board).
+      recordCardChange(cardId, target.id, userId, "board_move", activityValue.board(source.id, previousKey), activityValue.board(target.id, keyOfCard(cardId)), timestamp);
+      for (const row of ordered) if (!row.target_id) recordCardActivity({ cardId, boardId: target.id, actorId: userId, kind: "tag_removed", payload: { item: { id: row.id, label: row.name } }, at: timestamp });
       audit(userId, null, "task.card_move_board", {
         cardId, fromBoardId: source.id, boardId: target.id, columnId: column.id, previousKey, key: keyOfCard(cardId),
         ...(droppedTags.length ? { tagsDropped: droppedTags.length } : {}),

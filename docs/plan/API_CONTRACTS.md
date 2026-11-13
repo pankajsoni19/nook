@@ -562,6 +562,9 @@ A card's history, shown interleaved with its comments. Entries are written by th
 | `relation_added` / `_removed` | `item` (the other card, `detail` = the type as this card sees it) | relation create and delete, on both cards |
 | `attachment_added` / `_removed` | `item` (the file) | files linked to the card itself (not a comment's files), removals, Undo |
 | `binned` (`count` subtasks), `restored` (`to`, `count`), `archived`, `unarchived` | as noted | Bin, archive; the auto-archive sweep records `archived` with `actor_id` null and `via: "system"` |
+| `start` (D720) | `from`, `to` shaped like `due` (`YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, zone in `detail`); coalesces | PATCH (and a calendar drag that shifts the range) |
+| `estimate` (D750) | `from`, `to`: `id` the number as text, `label` with the board's unit then (`5 pts`, `3h`), `detail` the board's kind; coalesces | PATCH, MCP `update_card` |
+| `board_move` (D716) | `from`, `to`: the boards (`label` the name, `detail` the card's key there, e.g. `MYT-2`); a board the reader cannot open (or a key limited to chosen boards cannot reach) reads `{ label: "a board you can't open" }` | `POST /cards/:k/move-board`, MCP `move_card_to_board`; followed by one `tag_removed` per tag the move dropped. Entries keep `card_id` across the move (earlier rows keep the old `board_id`; reads go by card) |
 
 ```ts
 type ActivityValue = { id?: string; label: string; detail?: string }; // label: the name when it happened

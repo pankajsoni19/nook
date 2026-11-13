@@ -28,9 +28,8 @@ import { SPRINT_STATES } from "../../shared/sprintPlan";
 import { openSprintRows, sprintById, sprintNames } from "./sprintData";
 import { createSprint, listSprints, patchSprint } from "./sprints";
 import { sprintCreateSchema } from "./sprintRoutes";
-import { cardIdForKey, keyOfCard } from "./keys";
+import { cardRef, keyOfCard } from "./keys";
 import { moveCardToBoard } from "./moveBoard";
-import { CARD_KEY_PATTERN } from "../../shared/boardKeys";
 import { ESTIMATE_MAX, FIBONACCI_POINTS } from "../../shared/estimates";
 
 /**
@@ -259,16 +258,8 @@ function listedCard(card: CardWithDescription, columnName: string | undefined, t
 }
 
 const uuid = z.string().uuid();
-/** No card has this id: a key that names no card reads as it, so the service answers NOT_FOUND like an unknown id. */
-const NO_CARD = "00000000-0000-4000-8000-000000000000";
-/**
- * A card by id or by key (lane KEYS, D713): `MYT-12` in any case, an old code or a moved card's old key
- * too. The key is only translated to the card it names; the service then checks the card exactly as
- * for an id, so a key never reaches a card the id would not (T460).
- */
-export const cardRef = z.string().refine((value) => uuid.safeParse(value).success || CARD_KEY_PATTERN.test(value), "Use a card id or a key such as MYT-12")
-  .transform((value) => uuid.safeParse(value).success ? value : cardIdForKey(value) ?? NO_CARD)
-  .describe("The card's id, or its key such as MYT-12");
+// A card by id or by key (lane KEYS, D713); defined in keys.ts so get_card_activity (activityRoutes.ts) takes keys too.
+export { cardRef };
 
 /** A card as create_card and update_card return it. */
 const writtenCard = (card: CardSummary) => ({

@@ -1,6 +1,7 @@
+import * as z from "zod/v4";
 import { db } from "../db";
 import { readableCard } from "./access";
-import { cardKey, normalizeBoardCode, parseCardKey, suggestBoardCode, uniqueBoardCode } from "../../shared/boardKeys";
+import { CARD_KEY_PATTERN, cardKey, normalizeBoardCode, parseCardKey, suggestBoardCode, uniqueBoardCode } from "../../shared/boardKeys";
 
 /**
  * Board codes and card keys (lane KEYS, docs/plan/TASK_KEYS.md, D710–D716). Lookups here check no
@@ -91,3 +92,15 @@ export function readableCardForKey(userId: string, key: string) {
   const current = keyOfCard(found.card.id);
   return { cardId: found.card.id, boardId: found.board.id, key: current, moved: current !== null && current !== key.trim().toUpperCase() };
 }
+
+const uuidSchema = z.string().uuid();
+/** No card has this id: a key that names no card reads as it, so the service answers NOT_FOUND like an unknown id. */
+const NO_CARD = "00000000-0000-4000-8000-000000000000";
+/**
+ * An MCP tool's card argument, by id or by key (lane KEYS, D713): `MYT-12` in any case, an old code or a
+ * moved card's old key too. The key is only translated to the card it names; the service then checks
+ * the card exactly as for an id, so a key never reaches a card the id would not (T460).
+ */
+export const cardRef = z.string().refine((value) => uuidSchema.safeParse(value).success || CARD_KEY_PATTERN.test(value), "Use a card id or a key such as MYT-12")
+  .transform((value) => uuidSchema.safeParse(value).success ? value : cardIdForKey(value) ?? NO_CARD)
+  .describe("The card's id, or its key such as MYT-12");

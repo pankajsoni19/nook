@@ -24,7 +24,8 @@
  *    `start: change("start date", CalendarClock, dueLabel)`.
  *
  * TypeScript then refuses a kind that is listed here and not drawn there, or drawn and not listed.
- * Expected next kinds: `start` (start date and time), `estimate`, and `board` (moved from board X).
+ * Added at integration: `start` (start date and time, D720), `estimate` (D750), and `board_move`
+ * (moved to another board, D716).
  */
 export type ActivityShape = "change" | "item" | "event";
 
@@ -40,6 +41,18 @@ export const CARD_ACTIVITY_KINDS = {
   assignee_removed: { shape: "item", coalesce: false },
   /** `id` is `YYYY-MM-DD`, or `YYYY-MM-DDTHH:MM` with `tz` in the label's `detail`. */
   due: { shape: "change", coalesce: true },
+  /** The start date (D720), shaped exactly like `due`. */
+  start: { shape: "change", coalesce: true },
+  /**
+   * The estimate (D750): `id` is the number as text, `label` it with the board's unit when it was set
+   * ("5 pts", "3h"), `detail` the board's estimate kind then (points, hours, none).
+   */
+  estimate: { shape: "change", coalesce: true },
+  /**
+   * Moved to another board (D716): `from` and `to` are the boards (`id`, `label` the name, `detail` the
+   * card's key there, e.g. MYT-2). Recorded on the card, so its history moves with it.
+   */
+  board_move: { shape: "change", coalesce: false },
   tag_added: { shape: "item", coalesce: false },
   tag_removed: { shape: "item", coalesce: false },
   flag_set: { shape: "item", coalesce: false },

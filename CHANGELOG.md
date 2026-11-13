@@ -21,6 +21,7 @@ Release notes for Nook, newest first. Upgrade steps for each release are in [doc
 - **Card activity history**: who created a card, renamed it, edited the description, moved it, changed assignees, due date, tags, flags, parent, level, relations, sprint, or files, and when it was archived, binned, or restored, shown between the comments ("Ann moved this from **To do** to **Done** · 10 days ago"). Changes made through MCP, the REST API, or an agent are recorded too and say so; quick repeat edits of one field are one entry.
 - The Comments header has an **Activity** switch and a **Newest first / Oldest first** button, remembered per person in this browser.
 - MCP and REST: `get_card_activity` reads a card's history, paged.
+- The history also records start date and estimate changes, and a move to another board ("moved this card from **My tasks (MYT-2)** to **Roadmap (ROA-2)**", with any tags it lost); a moved card keeps its history.
 
 **Tasks: card estimates**
 
@@ -31,10 +32,11 @@ Release notes for Nook, newest first. Upgrade steps for each release are in [doc
 
 **Upgrading**
 
-- Migration **079** (`board_keys`) gives every board a code from its name and numbers every card in creation order; quick. **Back up first** (`./scripts/backup.sh --force`).
-- Migration **080** (`card_start_dates`) runs once on the first boot; quick. **Back up first** (`./scripts/backup.sh --force`).
-- Migration **081** (`card_activity`) runs once on the first boot; quick (it creates an empty table). Cards changed before the upgrade have no history from before it.
-- Migration **082** (`card_estimates`) adds three columns on the first boot; quick. Every board starts with estimates off.
+- **Back up first** (`./scripts/backup.sh --force`). Four migrations run once on the first boot, all quick:
+- Migration **079** (`board_keys`) gives every board a code from its name and numbers every card in creation order.
+- Migration **080** (`card_start_dates`) adds the start date columns.
+- Migration **081** (`card_activity`) creates an empty table. Cards changed before the upgrade have no history from before it.
+- Migration **082** (`card_estimates`) adds three columns. Every board starts with estimates off.
 
 ## v0.47.0 — 2026-10-24
 

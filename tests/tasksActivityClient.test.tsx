@@ -41,13 +41,30 @@ test("every kind has a renderer, and each reads as a sentence with its values in
   }
 });
 
+test("start, estimate, and a move to another board read as sentences (integration: D720, D750, D716)", () => {
+  const text = (kind: CardActivityKind, payload: CardActivityPayload) => renderToStaticMarkup(<ActivityRow entry={entry("e1", at(1), kind, payload)} />);
+  const bold = (value: string) => `<strong class="task-activity-value">${value}</strong>`;
+  expect(text("start", { from: null, to: { id: "2026-11-12T09:00", label: "2026-11-12 09:00", detail: "Europe/Berlin" } }))
+    .toMatch(/set the start date to <strong class="task-activity-value">[^<]*09:00 \(Europe\/Berlin\)<\/strong>/);
+  expect(text("start", { from: { id: "2026-11-12", label: "2026-11-12" }, to: null })).toContain("cleared the start date (was");
+  expect(text("estimate", { from: null, to: { id: "5", label: "5 pts", detail: "points" } })).toContain(`set the estimate to ${bold("5 pts")}`);
+  expect(text("estimate", { from: { id: "5", label: "5 pts", detail: "points" }, to: { id: "3", label: "3h", detail: "hours" } }))
+    .toContain(`changed the estimate from ${bold("5 pts")} to ${bold("3h")}`);
+  expect(text("estimate", { from: { id: "3", label: "3h", detail: "hours" }, to: null })).toContain(`cleared the estimate (was ${bold("3h")})`);
+  expect(text("board_move", { from: { id: "b1", label: "My tasks", detail: "MYT-2" }, to: { id: "b2", label: "Roadmap", detail: "ROA-2" } }))
+    .toContain(`moved this card from ${bold("My tasks (MYT-2)")} to ${bold("Roadmap (ROA-2)")}`);
+  // A board the reader cannot open comes without its name or key (server side).
+  expect(text("board_move", { from: { label: "a board you can't open" }, to: { id: "b2", label: "Roadmap", detail: "ROA-2" } }))
+    .toContain(`moved this card from ${bold("a board you can&#x27;t open")} to`);
+});
+
 test("surfaces and Nook itself are named", () => {
   expect(renderToStaticMarkup(<ActivityRow entry={entry("e1", at(1), "title", undefined, { via: "mcp" })} />)).toContain("via MCP");
   const system = renderToStaticMarkup(<ActivityRow entry={entry("e2", at(1), "archived", {}, { via: "system", actor_id: null, actor_name: "" })} />);
   expect(system).toContain("<strong class=\"task-activity-actor\">Nook</strong> archived this card");
   expect(renderToStaticMarkup(<ActivityRow entry={entry("e3", at(1), "title", undefined, { actor_id: null, actor_name: "" })} />)).toContain("Former member");
   // A kind this build does not know (a newer server) is skipped, not drawn wrong.
-  expect(renderToStaticMarkup(<ActivityRow entry={entry("e4", at(1), "estimate" as CardActivityKind)} />)).toBe("");
+  expect(renderToStaticMarkup(<ActivityRow entry={entry("e4", at(1), "some_future_kind" as CardActivityKind)} />)).toBe("");
   expect(dueValueLabel({ id: "2026-12-02T14:30", label: "2026-12-02 14:30", detail: "Europe/Paris" })).toMatch(/14:30 \(Europe\/Paris\)$/);
 });
 

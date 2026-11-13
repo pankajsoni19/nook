@@ -1,6 +1,7 @@
 import { auditVia, db, now } from "../db";
-import { readableCard } from "./access";
+import { readableBoard, readableCard } from "./access";
 import { boardStructure } from "./hierarchy";
+import { estimateBadge, type EstimateKind } from "../../shared/estimates";
 import {
   ACTIVITY_COALESCE_MS,
   ACTIVITY_LABEL_MAX,
@@ -141,14 +142,27 @@ export const activityValue = {
     if (!due.due_on) return null;
     const id = due.due_time ? `${due.due_on}T${due.due_time}` : due.due_on;
     return { id, label: due.due_time ? `${due.due_on} ${due.due_time}` : due.due_on, ...(due.due_time && due.due_tz ? { detail: due.due_tz } : {}) };
-  }
+  },
+  /** The start date (D720), as `due` words it. */
+  start: (start: { start_on: string | null; start_time: string | null; start_tz: string | null }) =>
+    activityValue.due({ due_on: start.start_on, due_time: start.start_time, due_tz: start.start_tz }),
+  /** An estimate (D750) with the board's unit then ("5 pts", "3h"); null when there is none. */
+  estimate: (kind: EstimateKind, value: number | null): ActivityValue | null =>
+    value === null ? null : { id: String(value), label: estimateBadge(kind, value) || String(value), detail: kind },
+  /** A board (D716) with the card's key on it, as "My tasks" and "MYT-2". */
+  board: (boardId: string, key: string | null): ActivityValue => ({
+    ...named("SELECT name AS label FROM boards WHERE id = ?", boardId, "Deleted board")!, ...(key ? { detail: key } : {})
+  })
 };
 
 /** The fields of a card the history compares before and after a change. */
 export function cardActivitySnapshot(cardId: string) {
-  return db.query("SELECT board_id, column_id, title, due_on, due_time, due_tz, parent_card_id, level, sprint_id FROM cards WHERE id = ?").get(cardId) as {
+  return db.query(`SELECT k.board_id, k.column_id, k.title, k.due_on, k.due_time, k.due_tz, k.start_on, k.start_time, k.start_tz,
+      k.parent_card_id, k.level, k.sprint_id, k.estimate, b.estimate_kind
+    FROM cards k JOIN boards b ON b.id = k.board_id WHERE k.id = ?`).get(cardId) as {
     board_id: string; column_id: string | null; title: string; due_on: string | null; due_time: string | null; due_tz: string | null;
-    parent_card_id: string | null; level: number; sprint_id: string | null;
+    start_on: string | null; start_time: string | null; start_tz: string | null;
+    parent_card_id: string | null; level: number; sprint_id: string | null; estimate: number | null; estimate_kind: EstimateKind;
   } | null;
 }
 
@@ -158,6 +172,10 @@ export function recordSnapshotChanges(cardId: string, actorId: string, before: N
   if (before.title !== after.title) recordCardChange(cardId, boardId, actorId, "title", { label: before.title }, { label: after.title }, at);
   if (before.column_id !== after.column_id) recordCardChange(cardId, boardId, actorId, "column", activityValue.column(before.column_id), activityValue.column(after.column_id), at);
   recordCardChange(cardId, boardId, actorId, "due", activityValue.due(before), activityValue.due(after), at);
+  recordCardChange(cardId, boardId, actorId, "start", activityValue.start(before), activityValue.start(after), at);
+  if (before.estimate !== after.estimate) {
+    recordCardChange(cardId, boardId, actorId, "estimate", activityValue.estimate(before.estimate_kind, before.estimate), activityValue.estimate(after.estimate_kind, after.estimate), at);
+  }
   if (before.level !== after.level) recordCardChange(cardId, boardId, actorId, "level", activityValue.level(boardId, before.level), activityValue.level(boardId, after.level), at);
   if (before.parent_card_id !== after.parent_card_id) recordCardChange(cardId, boardId, actorId, "parent", activityValue.card(before.parent_card_id), activityValue.card(after.parent_card_id), at);
   if (before.sprint_id !== after.sprint_id) recordCardChange(cardId, boardId, actorId, "sprint", activityValue.sprint(before.sprint_id), activityValue.sprint(after.sprint_id), at);
@@ -191,7 +209,9 @@ type ListedRow = StoredRow & { card_id: string; actor_label: string; current_nam
  * One page of a card's history. The caller has checked that `userId` can read the card. `mayRead`
  * narrows which related cards show their title (an MCP key limited to chosen boards, T203).
  */
-export function listCardActivity(userId: string, cardId: string, options: { order?: ActivityOrder; limit: number; cursor?: ActivityCursor | null; mayRead?: (cardId: string) => boolean }) {
+export function listCardActivity(userId: string, cardId: string, options: {
+  order?: ActivityOrder; limit: number; cursor?: ActivityCursor | null; mayRead?: (cardId: string) => boolean; mayReadBoard?: (boardId: string) => boolean;
+}) {
   const order = options.order ?? "desc";
   const keyset = options.cursor
     ? order === "desc" ? "AND (a.created_at < $at OR (a.created_at = $at AND a.id < $id))" : "AND (a.created_at > $at OR (a.created_at = $at AND a.id > $id))"
@@ -208,12 +228,20 @@ export function listCardActivity(userId: string, cardId: string, options: { orde
     if (!readable.has(otherId)) readable.set(otherId, readableCard(otherId, userId) !== null && (options.mayRead?.(otherId) ?? true));
     return readable.get(otherId)!;
   };
+  const boardReadable = new Map<string, boolean>();
+  const canOpenBoard = (boardId: string) => {
+    if (!boardReadable.has(boardId)) boardReadable.set(boardId, readableBoard(boardId, userId) !== null && (options.mayReadBoard?.(boardId) ?? true));
+    return boardReadable.get(boardId)!;
+  };
+  // A board the card moved from (or to) that the reader cannot open shows neither its name nor the key there.
+  const boardSide = (value: ActivityValue | null | undefined) => value?.id && !canOpenBoard(value.id) ? { label: "a board you can't open" } : value ?? null;
   const activity: CardActivityEntry[] = page.filter((row) => isCardActivityKind(row.kind)).map((row) => {
     let payload = JSON.parse(row.payload) as CardActivityPayload;
     // A related card the reader cannot open shows only that it exists (T90).
     if ((row.kind === "relation_added" || row.kind === "relation_removed") && payload.item?.id && !canOpen(payload.item.id)) {
       payload = { ...payload, item: { label: "a card you can't open", ...(payload.item.detail ? { detail: payload.item.detail } : {}) } };
     }
+    if (row.kind === "board_move") payload = { ...payload, from: boardSide(payload.from), to: boardSide(payload.to) };
     return {
       id: row.id,
       card_id: row.card_id,
