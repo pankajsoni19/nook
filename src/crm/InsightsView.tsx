@@ -54,21 +54,21 @@ export function InsightsView({ book, books }: { book: CrmBook | null; books: rea
     setError(null);
     const scope: DatasetFilter[] = [
       ...(book ? [{ column: "book", op: "eq" as const, value: book.name }] : []),
-      ...(pipeline ? [{ column: "pipeline_id", op: "eq" as const, value: pipeline.id }] : []),
-      { column: "currency", op: "eq", value: currency }
+      ...(pipeline ? [{ column: "pipeline_key", op: "eq" as const, value: pipeline.id }] : []),
+      { column: "deal_currency", op: "eq", value: currency }
     ];
     const pipelineIds = pipeline ? [pipeline.id] : pipelines.map((item) => item.id);
     const base = { dataset: "crm.deals", tz };
     Promise.all([
       queryDataset({ ...base, measures: [{ fn: "count" }, { fn: "sum", column: "value", as: "value" }], dimensions: ["status"], filters: scope }),
       queryDataset({ ...base, measures: [{ fn: "sum", column: "weighted", as: "weighted" }], filters: [...scope, { column: "status", op: "eq", value: "open" }] }),
-      queryDataset({ ...base, measures: [{ fn: "sum", column: "value", as: "value" }, { fn: "count" }], filters: [...scope, { column: "status", op: "eq", value: "won" }, { column: "closed_at", op: "gte", value: `${quarterStart()}T00:00:00.000Z` }] }),
+      queryDataset({ ...base, measures: [{ fn: "sum", column: "value", as: "value" }, { fn: "count" }], filters: [...scope, { column: "status", op: "eq", value: "won" }, { column: "closed", op: "gte", value: `${quarterStart()}T00:00:00.000Z` }] }),
       queryDataset({ ...base, measures: [{ fn: "sum", column: "value", as: "value" }, { fn: "count" }, { fn: "min", column: "stage_position", as: "position" }], dimensions: ["stage"], filters: [...scope, { column: "status", op: "eq", value: "open" }], sort: [{ column: "position", dir: "asc" }] }),
       queryDataset({ ...base, measures: [{ fn: "count" }], dimensions: ["status"], timeBucket: "month", filters: [...scope, { column: "status", op: "in", value: ["won", "lost"] }] }),
       book && pipelineIds.length
-        ? queryDataset({ dataset: "crm.deal_stage_changes", tz, measures: [{ fn: "count_distinct", column: "deal_id", as: "deals" }, { fn: "min", column: "to_stage_position", as: "position" }], dimensions: ["to_stage"], filters: [{ column: "pipeline_id", op: "in", value: pipelineIds }], sort: [{ column: "position", dir: "asc" }] })
+        ? queryDataset({ dataset: "crm.deal_stage_changes", tz, measures: [{ fn: "count_distinct", column: "deal_id", as: "deals" }, { fn: "min", column: "to_stage_position", as: "position" }], dimensions: ["to_stage"], filters: [{ column: "pipeline_key", op: "in", value: pipelineIds }], sort: [{ column: "position", dir: "asc" }] })
         : Promise.resolve(null),
-      queryDataset({ dataset: "crm.interactions", tz, measures: [{ fn: "count" }], dimensions: ["kind"], timeBucket: "week", filters: book ? [{ column: "book", op: "eq", value: book.name }] : [], timeRange: { from: new Date(Date.now() - 84 * 86_400_000).toISOString().slice(0, 10) } })
+      queryDataset({ dataset: "crm.interactions", tz, measures: [{ fn: "count" }], dimensions: ["interaction_kind"], timeBucket: "week", filters: book ? [{ column: "book", op: "eq", value: book.name }] : [], timeRange: { from: new Date(Date.now() - 84 * 86_400_000).toISOString().slice(0, 10) } })
     ]).then(([status, weighted, quarter, byStage, byMonth, conversion, interactions]) => {
       if (!live) return;
       setData({ status, weighted, quarter, byStage, byMonth, conversion, interactions });

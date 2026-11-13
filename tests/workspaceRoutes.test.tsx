@@ -76,7 +76,8 @@ describe("the stubs (D800, D832)", () => {
   test("seven modules, in Settings order, all registered and none ready", () => {
     expect(workspaceModules().map((module) => module.id)).toEqual([...WORKSPACE_MODULE_IDS]);
     expect(WORKSPACE_MODULE_IDS).toEqual(["forms", "time", "goals", "checkins", "crm", "bookings", "townhall"]);
-    expect(readyWorkspaceModules()).toEqual([]);
+    // A lane flips its module to ready when it ships (D800); a ready module always has its app.
+    for (const module of workspaceModules()) expect({ id: module.id, ready: module.ready }).toEqual({ id: module.id, ready: module.app !== null });
     // Product owner names (§G.1): Contacts at /contacts, Standups at /standups.
     expect(workspaceModules().map((module) => [module.id, module.label, module.segment])).toEqual([
       ["forms", "Forms", "forms"], ["time", "Time", "time"], ["goals", "Goals", "goals"], ["checkins", "Standups", "standups"],
@@ -85,13 +86,15 @@ describe("the stubs (D800, D832)", () => {
   });
 
   test("a stub is a planned module: not in Settings, no launcher, its URLs open Home", () => {
+    const shipped = new Set(readyWorkspaceModules().map((module) => module.id as string));
     for (const id of WORKSPACE_MODULE_IDS) {
       const def = MODULES.find((module) => module.id === id)!;
-      expect(def.planned).toBe(true);
+      expect({ id, planned: def.planned === true }).toEqual({ id, planned: !shipped.has(id) });
       expect(def.routeApps).toEqual([id]);
     }
-    expect(settingsModulesFor("admin").some((module) => isWorkspaceModuleId(module.id))).toBe(false);
-    for (const path of ["/forms", "/contacts/ana-silva-9xk2mm0a1b", "/standups", "/goals/x"]) expect(parseRoute(path)).toEqual({ app: "home" });
+    expect(settingsModulesFor("admin").filter((module) => isWorkspaceModuleId(module.id) && !shipped.has(module.id)).length).toBe(0);
+    const stubPaths: Array<[string, string]> = [["forms", "/forms"], ["crm", "/contacts/ana-silva-9xk2mm0a1b"], ["checkins", "/standups"], ["goals", "/goals/x"]];
+    for (const [id, path] of stubPaths) if (!shipped.has(id)) expect(parseRoute(path)).toEqual({ app: "home" });
     expect(renderToStaticMarkup(<TopBarItems />)).toBe("");
   });
 
@@ -130,13 +133,16 @@ describe("a ready module (the throwaway test module)", () => {
     expect(TODAY_SECTIONS.goalsCheckin?.module).toBe("goals");
     expect(DEFAULT_SECTION_ORDER).toContain("goalsCheckin");
     expect(groupTodaySections(["tasksDue", "goalsCheckin", "notesRecent"]).map((group) => [group.id, group.names])).toEqual([["today", ["tasksDue", "goalsCheckin"]], ["recent", ["notesRecent"]]]);
-    expect(visibleQuickActions([], "member").map((action) => action.id)).toEqual(["checkin", "admin-only"]);
-    expect(visibleQuickActions([], "guest").map((action) => action.id)).toEqual(["checkin"]);
-    expect(visibleQuickActions(["goals"], "member")).toEqual([]);
+    // Shipped modules' own quick actions are left out here (each lane tests its own).
+    const shipped = readyWorkspaceModules().filter((module) => module.id !== "goals").map((module) => module.id as string);
+    const ids = (disabled: string[], role: "member" | "guest") => visibleQuickActions([...disabled, ...shipped], role).map((action) => action.id);
+    expect(ids([], "member")).toEqual(["checkin", "admin-only"]);
+    expect(ids([], "guest")).toEqual(["checkin"]);
+    expect(ids(["goals"], "member")).toEqual([]);
     const markup = renderToStaticMarkup(<QuickActions onOpenRoute={() => undefined} />);
     expect(markup).toContain('<ul class="today-quick-actions" aria-label="Quick actions">');
     expect(markup).toContain('<a class="today-quick-action" href="/goals">');
-    expect(renderToStaticMarkup(<ModulesContext.Provider value={["goals"]}><QuickActions onOpenRoute={() => undefined} /></ModulesContext.Provider>)).toBe("");
+    expect(renderToStaticMarkup(<ModulesContext.Provider value={["goals", ...shipped]}><QuickActions onOpenRoute={() => undefined} /></ModulesContext.Provider>)).toBe("");
   });
 
   test("its card slots render in the dialog, face, header, and Timeline, and hide while it is off", () => {

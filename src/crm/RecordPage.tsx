@@ -165,7 +165,7 @@ export function RecordPage({ kind, refId, books, canWriteRole, onOpen, onBack, o
 
   const entries: Array<{ at: string; key: string; node: ReactNode; type: "interactions" | "activity" | "links" }> = [];
   for (const interaction of timeline?.interactions ?? []) entries.push({ at: interaction.occurredAt, key: `i:${interaction.id}`, type: "interactions", node: <InteractionRow interaction={interaction} onDelete={() => void removeInteraction(interaction)} self={kind} /> });
-  for (const entry of timeline?.activity ?? []) if (entry.kind !== "crm_interaction") entries.push({ at: entry.createdAt, key: `a:${entry.id}`, type: "activity", node: <p className="crm-activity"><strong>{entry.actorName}</strong> {CRM_ACTIVITY_RENDERERS[entry.kind]?.(entry) ?? activityPlain(entry)} <time dateTime={entry.createdAt}>{relative(entry.createdAt)}</time></p> });
+  for (const entry of timeline?.activity ?? []) if (!["crm_interaction", "linked", "unlinked"].includes(entry.kind)) entries.push({ at: entry.createdAt, key: `a:${entry.id}`, type: "activity", node: <p className="crm-activity"><strong>{entry.actorName}</strong> {CRM_ACTIVITY_RENDERERS[entry.kind]?.(entry) ?? activityPlain(entry)} <time dateTime={entry.createdAt}>{relative(entry.createdAt)}</time></p> });
   for (const link of timeline?.links ?? []) if (link.createdAt) entries.push({ at: link.createdAt, key: `l:${link.id}`, type: "links", node: <p className="crm-activity">Linked {"hidden" in link.other ? "an item you can't open" : <a href={link.other.href} onClick={(event) => { event.preventDefault(); onOpen((link.other as { href: string }).href); }}>{link.other.title}</a>} <time dateTime={link.createdAt}>{relative(link.createdAt)}</time></p> });
   entries.sort((a, b) => b.at.localeCompare(a.at));
   const shown = entries.filter((entry) => show === "all" || entry.type === show);
@@ -181,7 +181,7 @@ export function RecordPage({ kind, refId, books, canWriteRole, onOpen, onBack, o
         {timeline && timeline.followups.length > 0 && <section className="crm-panel-mini" aria-label="Your follow-ups">
           <h3><BellRing aria-hidden="true" />Your follow-ups</h3>
           <ul className="crm-followups">{timeline.followups.map((followup) => <li key={followup.id} className={isPast(followup.dueAt.slice(0, 10)) ? "overdue" : undefined}>
-            <span><CalendarClock aria-hidden="true" />{dateTime(followup.dueAt)}{followup.note && <small>{followup.note}</small>}</span>
+            <span><span className="crm-followup-when"><CalendarClock aria-hidden="true" />{dateTime(followup.dueAt)}</span>{followup.note && <small>{followup.note}</small>}</span>
             <button type="button" className="ui-small-button secondary-button" onClick={() => void updateFollowup(followup.id, { done: true }).then(refresh)}><Check aria-hidden="true" />Done</button>
           </li>)}</ul>
         </section>}

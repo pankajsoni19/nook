@@ -47,7 +47,9 @@ describe("vocabulary and stubs (D800)", () => {
   test("the seven module stubs are registered on the server and hidden in the app", () => {
     for (const id of WORKSPACE_MODULE_IDS) expect(registeredWorkspaceModules()).toContain(id);
     for (const id of WORKSPACE_MODULE_IDS) expect(MODULE_IDS).toContain(id);
-    expect(MODULES.filter((module) => (WORKSPACE_MODULE_IDS as readonly string[]).includes(module.id)).map((module) => [module.id, module.planned])).toEqual(WORKSPACE_MODULE_IDS.map((id) => [id, true]));
+    // Hidden until the lane ships it (D800): Contacts (crm) is ready.
+    const shipped = new Set(["crm"]);
+    expect(MODULES.filter((module) => (WORKSPACE_MODULE_IDS as readonly string[]).includes(module.id)).map((module) => [module.id, module.planned === true])).toEqual(WORKSPACE_MODULE_IDS.map((id) => [id, !shipped.has(id)]));
     expect(MODULES.find((module) => module.id === "crm")!.label).toBe("Contacts");
     expect(MODULES.find((module) => module.id === "checkins")!.label).toBe("Standups");
   });

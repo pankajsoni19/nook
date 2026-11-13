@@ -267,6 +267,16 @@ describe("search, datasets, progress, Bin", () => {
     expect(changes.rows.length).toBeGreaterThan(0);
   });
 
+  test("every dimension of every Contacts dataset groups without SQL errors", async () => {
+    const { listDatasets } = await import("../server/datasets/registry");
+    for (const info of listDatasets("member").filter((item) => item.module === "crm")) {
+      for (const column of info.columns.filter((item) => item.dimension)) {
+        const result = runDatasetQuery({ dataset: info.id, measures: [{ fn: "count" }], dimensions: [column.name], ...(info.timeColumn ? { timeBucket: "month" as const } : {}) }, { userId: owner.userId, role: "member" });
+        expect({ dataset: info.id, column: column.name, ok: Array.isArray(result.rows) }).toEqual({ dataset: info.id, column: column.name, ok: true });
+      }
+    }
+  });
+
   test("goal progress sources: won value and open pipeline value", async () => {
     const won = await progressSource("crm_won_value")!.compute({ bookId }, { ownerId: owner.userId, period: null, tz: "UTC", nowMs: Date.now() });
     expect(won?.value).toBe(120000);

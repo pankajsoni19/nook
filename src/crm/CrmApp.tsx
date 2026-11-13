@@ -96,7 +96,15 @@ export default function CrmApp({ route, navigate, onOpenPath, role, displayName,
   }, [books, params]);
 
   const tabRoute = (tab: string) => go(tab === "contacts" ? [] : [tab], { book: requested });
-  const openHref = (href: string) => onOpenPath(href.startsWith("/contacts") ? `${href}${requested ? `?book=${encodeURIComponent(requested)}` : ""}` : href);
+  // In-module paths go through the host's navigate (its route state follows only its own moves and Back/Forward); others open as app paths.
+  const openHref = (href: string) => {
+    if (!href.startsWith("/contacts")) { onOpenPath(href); return; }
+    const [path, query = ""] = href.split("?");
+    const search = new URLSearchParams(query);
+    if (requested && !search.has("book")) search.set("book", requested);
+    const text = search.toString();
+    navigate({ app: "crm", path: path!.split("/").filter(Boolean).slice(1), search: text ? `?${text}` : "" } as Route);
+  };
   const created = (entity: string) => (item: { href: string; name: string }) => { setSheet(null); setRefresh((value) => value + 1); notify.success(`Added ${item.name}`); if (entity !== "deal") openHref(item.href); };
 
   const primary: ModulePrimaryAction | undefined = !bookWritable ? undefined

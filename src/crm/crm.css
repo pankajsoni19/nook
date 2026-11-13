@@ -191,3 +191,13 @@
   .crm-check { width: 20px; height: 20px; }
   .crm-mini-cards { grid-template-columns: 1fr; }
 }
+
+/* Board headers: the money totals take their own line so a stage name is never cut short. */
+.crm-deals .ui-kanban-column-header { flex-wrap: wrap; row-gap: 2px; }
+.crm-deals .ui-kanban-column-header h3 { min-width: 0; flex: 1 1 auto; }
+.crm-deals .ui-kanban-total { flex: 1 1 100%; order: 5; margin-left: 0; text-align: left; }
+.crm-toolbar .ui-segmented > button { display: inline-flex; align-items: center; gap: 6px; }
+.crm-toolbar .ui-segmented .crm-seg-icon { margin: 0; }
+/* Money in the fields column: a narrow currency, a wide amount. */
+.crm-fields .ui-money-input > :first-child { flex: 0 0 92px; min-width: 0; }
+.crm-fields .ui-money-input input { flex: 1 1 auto; min-width: 0; }

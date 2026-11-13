@@ -252,36 +252,36 @@ const bookScope = () => ({ sql: readableBooksSql("b") });
 export const crmDatasets: DatasetDef[] = [
   {
     id: "crm.contacts", module: "crm", label: "Contacts", description: "Contacts in books you can read: book, lifecycle, owner, source, created, last interaction.", readScope: "crm:read",
-    from: "contacts c JOIN contact_books b ON b.id = c.book_id LEFT JOIN users u ON u.id = c.owner_id", scope: () => ({ sql: `c.deleted_at IS NULL AND ${readableBooksSql("b")}` }), timeColumn: "created_at",
+    from: "contacts c JOIN contact_books b ON b.id = c.book_id LEFT JOIN users u ON u.id = c.owner_id", scope: () => ({ sql: `c.deleted_at IS NULL AND ${readableBooksSql("b")}` }), timeColumn: "created",
     columns: [
       { name: "book", sql: "b.name", type: "string", label: "Book", dimension: true },
       { name: "lifecycle", sql: "COALESCE(c.lifecycle, 'None')", type: "string", label: "Lifecycle", dimension: true },
       { name: "owner", sql: "COALESCE(u.display_name, 'No owner')", type: "string", label: "Owner", dimension: true },
       { name: "source", sql: "c.source", type: "string", label: "Source", dimension: true },
-      { name: "created_at", sql: "c.created_at", type: "datetime", label: "Created", dimension: true, measures: ["min", "max"] },
-      { name: "last_interaction_at", sql: "c.last_interaction_at", type: "datetime", label: "Last interaction", dimension: true, measures: ["min", "max"] },
+      { name: "created", sql: "c.created_at", type: "datetime", label: "Created", dimension: true, measures: ["min", "max"] },
+      { name: "last_interaction", sql: "c.last_interaction_at", type: "datetime", label: "Last interaction", dimension: true, measures: ["min", "max"] },
       { name: "contact_id", sql: "c.id", type: "string", label: "Contact", measures: ["count_distinct"] }
     ]
   },
   {
     id: "crm.deals", module: "crm", label: "Deals", description: "Deals in books you can read: pipeline, stage, status, value (minor units), owner, expected close, created, closed.", readScope: "crm:read",
     from: "deals d JOIN contact_books b ON b.id = d.book_id JOIN pipelines p ON p.id = d.pipeline_id JOIN pipeline_stages s ON s.id = d.stage_id LEFT JOIN users u ON u.id = d.owner_id",
-    scope: () => ({ sql: `d.deleted_at IS NULL AND ${readableBooksSql("b")}` }), timeColumn: "created_at",
+    scope: () => ({ sql: `d.deleted_at IS NULL AND ${readableBooksSql("b")}` }), timeColumn: "created",
     columns: [
       { name: "book", sql: "b.name", type: "string", label: "Book", dimension: true },
       { name: "pipeline", sql: "p.name", type: "string", label: "Pipeline", dimension: true },
-      { name: "pipeline_id", sql: "p.id", type: "string", label: "Pipeline id", dimension: true },
+      { name: "pipeline_key", sql: "p.id", type: "string", label: "Pipeline id", dimension: true },
       { name: "stage", sql: "s.name", type: "string", label: "Stage", dimension: true },
       { name: "stage_position", sql: "s.position", type: "number", label: "Stage order", dimension: true, measures: ["min", "max"] },
       { name: "probability", sql: "s.probability", type: "number", label: "Probability", dimension: true, measures: ["avg", "min", "max"] },
       { name: "status", sql: "d.status", type: "string", label: "Status", dimension: true },
-      { name: "currency", sql: "d.currency", type: "string", label: "Currency", dimension: true },
+      { name: "deal_currency", sql: "d.currency", type: "string", label: "Currency", dimension: true },
       { name: "value", sql: "COALESCE(d.value_minor, 0)", type: "money", label: "Value", measures: ["sum", "avg", "min", "max"] },
       { name: "weighted", sql: "COALESCE(d.value_minor, 0) * s.probability / 100", type: "money", label: "Weighted value", measures: ["sum", "avg"] },
       { name: "owner", sql: "COALESCE(u.display_name, 'No owner')", type: "string", label: "Owner", dimension: true },
-      { name: "expected_close_on", sql: "d.expected_close_on", type: "date", label: "Expected close", dimension: true, measures: ["min", "max"] },
-      { name: "created_at", sql: "d.created_at", type: "datetime", label: "Created", dimension: true, measures: ["min", "max"] },
-      { name: "closed_at", sql: "d.closed_at", type: "datetime", label: "Closed", dimension: true, measures: ["min", "max"] },
+      { name: "expected_close", sql: "d.expected_close_on", type: "date", label: "Expected close", dimension: true, measures: ["min", "max"] },
+      { name: "created", sql: "d.created_at", type: "datetime", label: "Created", dimension: true, measures: ["min", "max"] },
+      { name: "closed", sql: "d.closed_at", type: "datetime", label: "Closed", dimension: true, measures: ["min", "max"] },
       { name: "deal_id", sql: "d.id", type: "string", label: "Deal", measures: ["count_distinct"] }
     ]
   },
@@ -289,31 +289,31 @@ export const crmDatasets: DatasetDef[] = [
     id: "crm.deal_stage_changes", module: "crm", label: "Deal stage changes", description: "Every move of a deal into a stage (funnel and velocity): to and from stage, pipeline, value then, who, when.", readScope: "crm:read",
     from: `deal_stage_changes x JOIN deals d ON d.id = x.deal_id JOIN contact_books b ON b.id = d.book_id JOIN pipelines p ON p.id = d.pipeline_id
       JOIN pipeline_stages ts ON ts.id = x.to_stage_id LEFT JOIN pipeline_stages fs ON fs.id = x.from_stage_id LEFT JOIN users u ON u.id = x.actor_id`,
-    scope: () => ({ sql: `d.deleted_at IS NULL AND ${readableBooksSql("b")}` }), timeColumn: "at",
+    scope: () => ({ sql: `d.deleted_at IS NULL AND ${readableBooksSql("b")}` }), timeColumn: "changed",
     columns: [
       { name: "pipeline", sql: "p.name", type: "string", label: "Pipeline", dimension: true },
-      { name: "pipeline_id", sql: "p.id", type: "string", label: "Pipeline id", dimension: true },
+      { name: "pipeline_key", sql: "p.id", type: "string", label: "Pipeline id", dimension: true },
       { name: "to_stage", sql: "ts.name", type: "string", label: "To stage", dimension: true },
-      { name: "to_stage_position", sql: "ts.position", type: "number", label: "To stage order", dimension: true },
+      { name: "to_stage_position", sql: "ts.position", type: "number", label: "To stage order", dimension: true, measures: ["min", "max"] },
       { name: "to_kind", sql: "ts.kind", type: "string", label: "To stage kind", dimension: true },
       { name: "from_stage", sql: "COALESCE(fs.name, 'New')", type: "string", label: "From stage", dimension: true },
       { name: "value", sql: "COALESCE(x.value_minor, 0)", type: "money", label: "Value", measures: ["sum", "avg"] },
       { name: "actor", sql: "COALESCE(u.display_name, 'Nook')", type: "string", label: "Who", dimension: true },
-      { name: "at", sql: "x.at", type: "datetime", label: "When", dimension: true, measures: ["min", "max"] },
+      { name: "changed", sql: "x.at", type: "datetime", label: "When", dimension: true, measures: ["min", "max"] },
       { name: "deal_id", sql: "x.deal_id", type: "string", label: "Deal", measures: ["count_distinct"] }
     ]
   },
   {
     id: "crm.interactions", module: "crm", label: "Interactions", description: "Notes, calls, meetings, and emails logged in books you can read: kind, author, when, and what they were about.", readScope: "crm:read",
-    from: "interactions i JOIN contact_books b ON b.id = i.book_id LEFT JOIN users u ON u.id = i.author_id", scope: bookScope, timeColumn: "occurred_at",
+    from: "interactions i JOIN contact_books b ON b.id = i.book_id LEFT JOIN users u ON u.id = i.author_id", scope: bookScope, timeColumn: "occurred",
     columns: [
       { name: "book", sql: "b.name", type: "string", label: "Book", dimension: true },
-      { name: "kind", sql: "i.kind", type: "string", label: "Kind", dimension: true },
+      { name: "interaction_kind", sql: "i.kind", type: "string", label: "Kind", dimension: true },
       { name: "source", sql: "i.source", type: "string", label: "Source", dimension: true },
       { name: "author", sql: "COALESCE(u.display_name, 'Nook')", type: "string", label: "Author", dimension: true },
       { name: "subject_kinds", sql: "(SELECT group_concat(DISTINCT s.subject_kind) FROM interaction_subjects s WHERE s.interaction_id = i.id)", type: "string", label: "About", dimension: true },
       { name: "duration", sql: "COALESCE(i.duration_s, 0)", type: "duration", label: "Duration", measures: ["sum", "avg"] },
-      { name: "occurred_at", sql: "i.occurred_at", type: "datetime", label: "When", dimension: true, measures: ["min", "max"] }
+      { name: "occurred", sql: "i.occurred_at", type: "datetime", label: "When", dimension: true, measures: ["min", "max"] }
     ]
   }
 ];
