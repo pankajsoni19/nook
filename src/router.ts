@@ -2,6 +2,7 @@
 import { formatBoardSearch, formatBoardViewSearch, hasFilterParam, isDefaultBoardQuery, parseBoardSearch, type BoardQuery } from "./tasks/boardUrl";
 import { formatHomeSearch, NEW_VIEW, parseMyWorkSearch, parseViewSearch, type TasksHome } from "./tasks/home/homeUrl";
 import { appName } from "./appName";
+import { parseCardKey } from "../shared/boardKeys";
 
 /**
  * Lane I: the Reports home's view: Unfiled, Shared with me, Favorites (phase 1), one of the person's folders (its id),
@@ -98,7 +99,9 @@ export type Route =
   // `sprints`: the board's Sprints sheet (/tasks/:boardId/sprints), over the board in its view.
   // `viewId` (lane VIEWS, D636): a saved view on its board (/tasks/:b/views/:v), the board engine with
   // the view's filter; `unsaved`: the URL's `q` is an unsaved change to that filter (even when empty).
-  | { app: "tasks"; boardId: string | null; cardId: string | null; full?: true; query?: BoardQuery; home?: TasksHome; sprints?: true; viewId?: string; unsaved?: true }
+  // `cardKey` (lane KEYS, D713): the short link /tasks/MYT-12, without a board; Tasks resolves it to the
+  // card's own URL and replaces the entry.
+  | { app: "tasks"; boardId: string | null; cardId: string | null; full?: true; query?: BoardQuery; home?: TasksHome; sprints?: true; viewId?: string; unsaved?: true; cardKey?: string }
   | { app: "collections"; collectionId: string | null; viewId: string | null; rowId: string | null }
   | { app: "calendar"; view: "agenda" | "month"; month: string | null; eventId: string | null }
   | { app: "notifications" }
@@ -202,6 +205,9 @@ function parseCollection(segments: string[]): { folder: string; itemId: string |
 function parseTasks(allSegments: string[], search: string): Route {
   const home = parseTasksHome(allSegments, search);
   if (home) return { app: "tasks", boardId: null, cardId: null, home };
+  // /tasks/MYT-12 (D713): a card's short link, kept in upper case.
+  const key = allSegments.length === 1 && allSegments[0] !== undefined ? parseCardKey(allSegments[0]) : null;
+  if (key) return { app: "tasks", boardId: null, cardId: null, cardKey: `${key.code}-${key.number}` };
   // /tasks/:b/views/:v[/card/:k[/full] | /sprints] (D636): the same board routes under a saved view.
   const savedView = allSegments[1] === "views" && allSegments[2] !== undefined && isRouteId(allSegments[2]) && allSegments[0] !== undefined && isRouteId(allSegments[0])
     ? allSegments[2].toLowerCase() : null;
@@ -419,6 +425,8 @@ export function formatRoute(route: Route): string {
   if (route.app === "files") return formatCollection("/files", route.folder, route.documentId);
   if (route.app === "tasks") {
     if (!route.boardId && route.home) return formatTasksHome(route.home);
+    const key = !route.boardId && route.cardKey ? parseCardKey(route.cardKey) : null;
+    if (key) return `/tasks/${key.code}-${key.number}`;
     if (!route.boardId || !isRouteId(route.boardId)) return "/tasks";
     const board = `/tasks/${route.boardId.toLowerCase()}${route.viewId && isRouteId(route.viewId) ? `/views/${route.viewId.toLowerCase()}` : ""}`;
     const search = route.viewId ? formatBoardViewSearch(route.query, route.unsaved === true) : route.query ? formatBoardSearch(route.query) : "";

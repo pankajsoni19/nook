@@ -71,9 +71,9 @@ const auditRows = (actorId: string, eventType: string) => (db.query("SELECT meta
 
 // Uploads everywhere U0 (D402): the generic attachment reads come with every host module's read scope.
 const ATTACHMENT_READS = ["list_attachments", "read_attachment_text"];
-const TASK_READ_TOOLS = ["get_card", "list_boards", "list_cards", "list_children", "list_sprints", "list_views", "query_cards", "search_cards"];
+const TASK_READ_TOOLS = ["get_card", "get_card_activity", "list_boards", "list_cards", "list_children", "list_sprints", "list_views", "query_cards", "search_cards"];
 // archive_card and unarchive_card (D627) hide and restore; neither deletes.
-const TASK_WRITE_TOOLS = ["archive_card", "comment_on_card", "create_card", "create_sprint", "link_attachment", "link_cards", "manage_tags", "move_card", "save_view", "set_wip_limit", "start_sprint", "unarchive_card", "update_card"];
+const TASK_WRITE_TOOLS = ["archive_card", "comment_on_card", "create_card", "create_sprint", "link_attachment", "link_cards", "manage_tags", "move_card", "move_card_to_board", "save_view", "set_wip_limit", "start_sprint", "unarchive_card", "update_card"];
 
 describe("MCP task tools", () => {
   test("task tools appear only for task scopes, write implies read, and there is nothing that deletes", async () => {
@@ -370,7 +370,7 @@ describe("MCP card relations and search (WAVE_13 §5.5, T90, T91, T95, T99)", ()
     const key = makeKey(s.member, ["tasks:read"]);
     const found = await callTool(key, "search_cards", { query: "owner CARD" });
     expect(found.isError).toBe(false);
-    expect(found.value.results).toContainEqual({ id: s.cardId, board_id: s.boardId, board_name: "MCP find board", title: "Owner card", column_name: "To do", is_done: 0, is_archived: 0 });
+    expect(found.value.results).toContainEqual({ id: s.cardId, board_id: s.boardId, board_name: "MCP find board", title: "Owner card", column_name: "To do", is_done: 0, is_archived: 0, key: expect.stringMatching(/^MFB[0-9]*-1$/) });
     expect(found.value.truncated).toBe(false);
     // Private cards never appear; the owner's own key finds them.
     expect(((await callTool(key, "search_cards", { query: "Secret" })).value.results as Array<{ id: string }>).map((hit) => hit.id)).not.toContain(s.privateCardId);

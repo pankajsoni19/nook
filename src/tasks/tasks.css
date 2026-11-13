@@ -625,6 +625,8 @@ svg.task-column-status.done { color: #6fbf85; }
 /* The card ⋯ sheet's actions (Copy link, Archive, Set parent) keep their own height on phones, so
    the column list sits right under them; the shared sheet rule lets every .move-list grow. */
 .file-dialog-sheet .move-list.task-move-parent { flex: none; }
+/* The move-to-board heading wraps (up to three lines) so "to another board" stays readable after a long title. */
+.task-move-board-sheet .file-dialog-header h2 { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; white-space: normal; overflow-wrap: anywhere; line-height: 1.3; }
 .task-tree-toggle { width: 28px; height: 28px; flex: none; }
 .task-tree-toggle svg { width: 15px; }
 .task-tree-spacer { flex: none; width: 28px; }
@@ -768,3 +770,77 @@ svg.task-column-status.done { color: #6fbf85; }
   .task-card-title-display { font-size: 1rem; }
 }
 .task-card-title-static { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+
+/* Card keys and board codes (lane KEYS, D710–D714): quiet monospace text on faces, list rows, and
+   the board list; a copy button in the card header's eyebrow and the table's title cell. */
+.task-card-key-face, .task-board-code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .7rem; font-weight: 600; letter-spacing: .02em; color: #85858c; white-space: nowrap; }
+.task-board-code { color: #a8a8ae; }
+.task-card-key { display: inline-flex; align-items: center; min-height: 24px; padding: 0 4px; border: 0; border-radius: 4px; background: transparent; color: inherit;
+  font: inherit; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: .02em; text-transform: none; cursor: copy; white-space: nowrap; }
+.task-card-key:hover, .task-card-key:focus-visible { background: rgba(255, 255, 255, .08); color: #ededee; }
+/* Phones: the eyebrow shares the top row with the header's actions and the title gets the full width
+   underneath, instead of a narrow column squeezed beside five icons. */
+@media (max-width: 760px) {
+  .task-card-view-header { flex-wrap: wrap; align-items: center; row-gap: 0; gap: 0; }
+  .task-card-view-header .task-card-dialog-heading { display: contents; }
+  .task-card-view-header .task-card-dialog-heading > * { order: 1; flex: 1 0 100%; min-width: 0; }
+  .task-card-view-header .task-card-dialog-heading > .task-card-eyebrow { order: 0; flex: 1 1 0; display: flex; align-items: center; min-width: 0; white-space: nowrap; }
+  .task-card-eyebrow-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: pre; }
+  .task-card-view-header .task-card-key-eyebrow { flex: none; }
+}
+.task-card-eyebrow .task-card-key-eyebrow { min-height: 20px; margin-left: -4px; padding: 0 4px; font-size: .72rem; font-weight: 700; color: inherit; vertical-align: baseline; }
+.task-table-key { flex: none; font-size: .72rem; color: #85858c; }
+.task-board-code-input { max-width: 14ch; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; }
+.task-settings-code { display: grid; gap: 6px; }
+.task-settings-code-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+@media (pointer: coarse) {
+  .task-card-key { min-height: 44px; }
+  .task-card-eyebrow .task-card-key-eyebrow { min-height: 32px; }
+}
+/* Card history in the comments timeline (lane ACTIVITY, D746): the header's switch and order button,
+   and compact rows between the comment boxes. Colours come from the app's tokens where it has them. */
+.task-timeline-controls { display: flex; align-items: center; gap: 2px; margin-left: auto; }
+.task-activity-switch { min-height: 34px; display: inline-flex; align-items: center; gap: 8px; border: 0; border-radius: 17px; padding: 0 6px; background: transparent; color: var(--muted); font-size: .78rem; font-weight: 600; cursor: pointer; }
+.task-activity-switch:hover { color: #e4e4e6; }
+.task-activity-switch-track { position: relative; width: 32px; height: 18px; flex: none; border-radius: 9px; background: #34343a; transition: background-color .15s ease; }
+.task-activity-switch-thumb { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #d6d6db; transition: transform .15s ease; }
+.task-activity-switch[aria-checked="true"] .task-activity-switch-track { background: var(--yellow); }
+.task-activity-switch[aria-checked="true"] .task-activity-switch-thumb { transform: translateX(14px); background: #2a210e; }
+.task-timeline-order { width: 34px; height: 34px; }
+.task-timeline-order svg { width: 16px; height: 16px; }
+.task-activity { display: grid; grid-template-columns: 24px minmax(0, 1fr); align-items: start; gap: 8px; padding: 0 12px; color: var(--muted); font-size: .8rem; line-height: 1.45; }
+.task-activity-icon { width: 24px; height: 24px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 50%; background: var(--panel-raised); color: #a1a1a8; }
+.task-activity-icon svg { width: 12px; height: 12px; }
+.task-activity-text { margin: 0; padding-top: 2px; overflow-wrap: anywhere; }
+.task-activity-actor, .task-activity-value { color: #e4e4e6; font-weight: 600; }
+.task-activity-actor .integration-badge { margin-left: 4px; }
+.task-activity time { color: #7c7c84; white-space: nowrap; }
+.task-activity-via { font-style: italic; }
+@media (max-width: 760px) {
+  .task-activity-switch { min-height: 44px; }
+  .task-timeline-order { width: 44px; height: 44px; }
+  .task-activity { padding: 0 4px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .task-activity-switch-track, .task-activity-switch-thumb { transition: none; }
+}
+/* Lane ESTIMATES (D754, D755): the estimate chip on faces and rows, the column total, the card field, and the sprint total. */
+.task-estimate-chip { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 22px; border-radius: 999px; padding: 0 7px; background: #1a2232; color: #a9c2ee; font-size: .72rem; font-weight: 600; white-space: nowrap; }
+.task-estimate-chip svg { width: 12px; height: 12px; }
+.task-column-estimate { flex: none; margin: -4px 0 6px; padding: 0 14px; color: #a9c2ee; font-size: .72rem; font-weight: 600; }
+.task-estimate-scale { display: flex; flex-wrap: wrap; gap: 6px; }
+.task-estimate-option { min-width: 40px; min-height: 34px; border: 1px solid #303035; border-radius: 999px; padding: 0 10px; background: transparent; color: #b7b7bd; font: inherit; font-size: .84rem; font-weight: 600; cursor: pointer; }
+.task-estimate-option:hover { border-color: #45454b; color: #ededee; }
+.task-estimate-option:focus-visible { outline: 2px solid #6b582f; outline-offset: 1px; }
+.task-estimate-option:disabled { opacity: .5; cursor: not-allowed; }
+.task-estimate-option.active { border-color: #34507f; background: #1a2640; color: #f2f2f3; }
+.task-estimate-input { display: inline-flex; align-items: center; gap: 6px; }
+.task-estimate-input input { width: 96px; min-height: 36px; border: 1px solid #333338; border-radius: 9px; padding: 0 10px; background: #0b0b0d; color: #ededee; font: inherit; font-size: .88rem; }
+.task-estimate-input input[aria-invalid="true"] { border-color: #7a3a33; }
+.task-estimate-unit { color: #85858c; font-size: .82rem; font-weight: 600; }
+.task-sprint-estimate { color: #a9c2ee; font-weight: 600; }
+.task-settings-note.task-estimate-warning { color: #d9bf7e; }
+.task-table-estimate { white-space: nowrap; }
+@media (max-width: 760px) {
+  .task-estimate-option, .task-estimate-input input { min-height: 44px; }
+}

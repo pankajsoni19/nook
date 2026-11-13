@@ -72,6 +72,10 @@ export function mergeCardDetail(item: CardSummary, card: CardDetail): CardSummar
     due_time: card.due_time,
     due_tz: card.due_tz,
     due_at: card.due_at,
+    start_on: card.start_on,
+    start_time: card.start_time,
+    start_tz: card.start_tz,
+    start_at: card.start_at,
     assignees: card.assignees,
     tag_ids: card.tag_ids ?? item.tag_ids,
     flags: card.flags ?? item.flags,
@@ -84,6 +88,8 @@ export function mergeCardDetail(item: CardSummary, card: CardDetail): CardSummar
     // Auto-archive (D605): restoring from the dialog clears it.
     archived_at: card.archived_at !== undefined ? card.archived_at : item.archived_at,
     done_at: card.done_at !== undefined ? card.done_at : item.done_at,
+    // Lane ESTIMATES (D754): the dialog's Estimate field.
+    estimate: card.estimate !== undefined ? card.estimate : item.estimate,
     updated_at: card.updated_at
   };
 }

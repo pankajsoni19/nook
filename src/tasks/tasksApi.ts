@@ -3,7 +3,9 @@ import { uploadForHost } from "../ui/attachments";
 import { TASK_FLAGS, type TaskFlag } from "../../shared/taskQuery";
 import type { BoardStructure, BoardTemplateId } from "../../shared/boardStructure";
 import type { ReactionAggregate, ReactionKey } from "../../shared/reactions";
+import { cardKey } from "../../shared/boardKeys";
 import type { ItemLevel } from "../access/accessLevels";
+import type { EstimateKind, EstimateScale } from "../../shared/estimates";
 
 export type BoardVisibility = "private" | "selected" | "all_users";
 
@@ -26,6 +28,11 @@ export type BoardSummary = {
   auto_archive_days?: number | null;
   /** Level names, work level, and sprints (migration 019); older servers omit it (Flat). */
   structure?: BoardStructure;
+  /** The board's short code (lane KEYS, D710): cards' keys are `<code>-<number>`; older servers omit it. */
+  code?: string | null;
+  /** Lane ESTIMATES (D750, D751): what card estimates mean here, and the points scale; older servers omit them (off). */
+  estimate_kind?: EstimateKind;
+  estimate_scale?: EstimateScale;
   created_at: string;
   updated_at: string;
 };
@@ -67,6 +74,11 @@ export type CardSummary = {
   due_tz?: string | null;
   /** The UTC instant when `due_time` is set. */
   due_at?: string | null;
+  /** The optional start (D720), shaped like the due fields; older servers omit it. */
+  start_on?: string | null;
+  start_time?: string | null;
+  start_tz?: string | null;
+  start_at?: string | null;
   /** In assignment order, at most 20 (D102). The board payload sends ids; `getBoard` fills these in. */
   assignees?: CardAssignee[];
   /** Plain text of the description, at most 160 characters, '' without one (D111). */
@@ -93,6 +105,12 @@ export type CardSummary = {
   done_at?: string | null;
   /** When the auto-archive sweep archived it (D605), or null. The board lists archived cards only when the viewer shows them. */
   archived_at?: string | null;
+  /** Its number on its board (D713); with the board's code it makes the key. Older servers omit it. */
+  number?: number | null;
+  /** The key, such as MYT-12 (D710): `GET /cards/:k` and query results send it; on a board, build it from `board.code`. */
+  key?: string | null;
+  /** Lane ESTIMATES (D750, D752): points or hours as the board says; null without one or while the board has estimates off. */
+  estimate?: number | null;
   created_at: string;
   updated_at: string;
 };
@@ -125,9 +143,26 @@ export type SprintSummary = {
 const json = (method: string, body: unknown): RequestInit => ({ method, body: JSON.stringify(body) });
 
 export const listBoards = () => api<{ boards: BoardSummary[] }>("/tasks/boards");
-/** `tz` (the browser's zone) dates a template's first sprint from the viewer's today, not UTC's. */
-export const createBoard = (name: string, template?: BoardTemplateId, tz?: string) =>
-  api<{ board: BoardSummary; columns: BoardColumn[] }>("/tasks/boards", json("POST", { name, ...(template ? { template } : {}), ...(tz ? { tz } : {}) }));
+/**
+ * `tz` (the browser's zone) dates a template's first sprint from the viewer's today, not UTC's.
+ * `code` (D711): the board's short code; omitted, the server picks a free one from the name.
+ */
+export const createBoard = (name: string, template?: BoardTemplateId, tz?: string, code?: string) =>
+  api<{ board: BoardSummary; columns: BoardColumn[] }>("/tasks/boards", json("POST", { name, ...(template ? { template } : {}), ...(tz ? { tz } : {}), ...(code ? { code } : {}) }));
+/** A free code for a board name (D711). */
+export const suggestBoardCode = (name: string, signal?: AbortSignal) =>
+  api<{ code: string }>(`/tasks/board-codes/suggest?name=${encodeURIComponent(name.slice(0, 120))}`, signal ? { signal } : {});
+/** Owner only (D712): 400 `CODE_INVALID`, 409 `CODE_TAKEN` (with a free `suggestion`). Old keys keep working (D714). */
+export const setBoardCode = (boardId: string, code: string) => api<{ board: BoardSummary }>(`/tasks/boards/${boardId}`, json("PATCH", { code }));
+/** A card key (MYT-12; an old one too) to the card, when the caller can read it (D713); 404 otherwise. */
+export const lookupCardKey = (key: string) =>
+  api<{ cardId: string; boardId: string; key: string | null; moved: boolean }>(`/tasks/keys/${encodeURIComponent(key)}`);
+/**
+ * Moves a card to another board (D716): Can edit on both; the bottom of `columnId`, or of the board's
+ * first column that is not done. Tags without a namesake there are dropped (`droppedTags`).
+ */
+export const moveCardToBoard = (cardId: string, boardId: string, columnId?: string | null) =>
+  api<{ card: CardDetail; fromBoardId: string; previousKey: string | null; droppedTags: string[]; parentDetached?: true }>(`/tasks/cards/${cardId}/move-board`, json("POST", { boardId, ...(columnId ? { columnId } : {}) }));
 /** Owner only (D122): 409 `LEVEL_IN_USE` or `SPRINTS_IN_USE` when the change would hide cards. */
 export const updateBoardStructure = (boardId: string, structure: BoardStructure) =>
   api<{ board: BoardSummary }>(`/tasks/boards/${boardId}`, json("PATCH", { structure }));
@@ -138,13 +173,17 @@ export const updateBoardStructure = (boardId: string, structure: BoardStructure)
 export type BoardPayloadCard = Omit<CardSummary, "board_id" | "assignees"> & { assignee_ids: string[] };
 export type BoardPayload = Omit<BoardDetail, "cards"> & { cards: BoardPayloadCard[]; users: Record<string, { display_name: string; can_read: 0 | 1; avatar_url?: string | null; is_integration?: boolean }> };
 
-/** Rebuilds the in-memory card shape (`board_id`, `assignees[]`) from the trimmed payload. */
+/**
+ * Rebuilds the in-memory card shape (`board_id`, `assignees[]`) from the trimmed payload, and each
+ * card's `key` from the board's code and its number (D710; the payload sends only the number).
+ */
 export function hydrateBoard(payload: BoardPayload): BoardDetail {
   const { users, cards, ...rest } = payload;
   return {
     ...rest,
     cards: cards.map(({ assignee_ids, ...card }) => ({
       ...card,
+      ...(cardKey(payload.board.code, card.number) ? { key: cardKey(payload.board.code, card.number) } : {}),
       board_id: payload.board.id,
       assignees: assignee_ids.map((id) => ({ id, display_name: users[id]?.display_name ?? "Former member", can_read: users[id]?.can_read ?? 0, avatar_url: users[id]?.avatar_url ?? null, ...(users[id]?.is_integration ? { is_integration: true } : {}) }))
     }))
@@ -152,15 +191,20 @@ export function hydrateBoard(payload: BoardPayload): BoardDetail {
 }
 
 export const getBoard = (boardId: string) => api<BoardPayload>(`/tasks/boards/${boardId}`).then(hydrateBoard);
+/** A board's columns in board order, without its cards (Move to another board, D716). */
+export const getBoardColumns = (boardId: string) => api<{ columns: BoardColumn[] }>(`/tasks/boards/${boardId}/columns`).then((result) => result.columns);
 /** The next page of archived cards (D634), hydrated like the board's. */
-export async function getArchivedCards(boardId: string, before: string) {
+export async function getArchivedCards(boardId: string, before: string, code?: string | null) {
   const page = await api<Pick<BoardPayload, "cards" | "users"> & { archivedPage: ArchivedPage }>(`/tasks/boards/${boardId}/archived?before=${encodeURIComponent(before)}`);
-  const { cards } = hydrateBoard({ board: { id: boardId } as BoardSummary, columns: [], cards: page.cards, users: page.users });
+  const { cards } = hydrateBoard({ board: { id: boardId, code } as BoardSummary, columns: [], cards: page.cards, users: page.users });
   return { cards, archivedPage: page.archivedPage };
 }
 export const renameBoard = (boardId: string, name: string) => api<{ board: BoardSummary }>(`/tasks/boards/${boardId}`, json("PATCH", { name }));
 /** Owner or manager (D604): 1–365 days, or null to turn auto-archive off. */
 export const setAutoArchiveDays = (boardId: string, autoArchiveDays: number | null) => api<{ board: BoardSummary }>(`/tasks/boards/${boardId}`, json("PATCH", { autoArchiveDays }));
+/** Owner or manager (lane ESTIMATES, D750–D752): what card estimates mean on the board; stored values are kept. */
+export const setBoardEstimates = (boardId: string, change: { estimateKind?: EstimateKind; estimateScale?: EstimateScale }) =>
+  api<{ board: BoardSummary }>(`/tasks/boards/${boardId}`, json("PATCH", change));
 /** Any reader (D602, D606): replaces the fields sent of the caller's own view of the board. */
 export const saveBoardView = (boardId: string, change: Partial<BoardView>) => api<{ view: BoardView }>(`/tasks/boards/${boardId}/view`, json("PUT", change));
 /** Archives a card by hand (D610), in any column: hidden from the board, never deleted. */
@@ -209,6 +253,8 @@ export type CardCreate = {
   level?: number;
   /** A planned or active sprint of this board (17B); work-level cards only. */
   sprintId?: string | null;
+  /** Points or hours (D753); 400 `ESTIMATES_OFF` while the board has estimates off. */
+  estimate?: number | null;
 };
 export const createCard = (boardId: string, body: CardCreate) =>
   api<{ card: CardDetail; renormalized?: boolean }>(`/tasks/boards/${boardId}/cards`, json("POST", body));
@@ -255,7 +301,7 @@ export type CardRelation =
   | { id: string; type: RelationType; restricted: false; created_at: string; creator_name: string | null; card: RelatedCard }
   | { id: string; type: RelationType; restricted: true; created_at: string };
 /** `is_archived` (D607): an archived card is still found, marked; older servers omit it. */
-export type CardSearchResult = { id: string; board_id: string; board_name: string; title: string; column_name: string | null; is_done: 0 | 1; is_archived?: 0 | 1 };
+export type CardSearchResult = { id: string; board_id: string; board_name: string; title: string; column_name: string | null; is_done: 0 | 1; is_archived?: 0 | 1; /** D710: MYT-12; older servers omit it. */ key?: string | null };
 
 export const getCard = (cardId: string) => api<CardView>(`/tasks/cards/${cardId}`);
 /**
@@ -264,12 +310,16 @@ export const getCard = (cardId: string) => api<CardView>(`/tasks/cards/${cardId}
  */
 export type CardChange = {
   title?: string; description?: string; dueOn?: string | null; dueTime?: string | null; dueTz?: string; assigneeIds?: string[]; tagIds?: string[]; flags?: CardFlag[];
+  /** The start (D720), as the due fields: `startTime` with `startTz`; on or before the due date (400 `START_AFTER_DUE`). */
+  startOn?: string | null; startTime?: string | null; startTz?: string;
   /** Reparent (D128): a card one level up on this board, or null to detach. */
   parentId?: string | null;
   /** Change level (D128): refused with 409 `HAS_CHILDREN` while the card has live children. */
   level?: number;
   /** Plan the card in a sprint, or null for the backlog (17B); work-level cards only. */
   sprintId?: string | null;
+  /** Points or hours, or null to clear (D753); 400 `ESTIMATE_INVALID` off the board's scale or range. */
+  estimate?: number | null;
 };
 export const updateCard = (cardId: string, change: CardChange & { revision: number }) =>
   api<{ card: CardDetail }>(`/tasks/cards/${cardId}`, json("PATCH", change));

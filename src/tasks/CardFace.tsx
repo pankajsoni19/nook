@@ -2,8 +2,10 @@ import { AlignLeft, Archive, CalendarDays, Link2, ListChecks, MessageSquare, Oct
 import { cardTags, FLAG_LABELS, visibleItems } from "./cardTags";
 import { FlagIcon } from "./TagPicker";
 import { Avatar } from "../ui/Avatar";
-import { assigneeSentence, attachmentCountLabel, cardAssignees, commentCountLabel, dueStatus } from "./taskActions";
+import { assigneeSentence, attachmentCountLabel, cardAssignees, cardDateStatus, commentCountLabel } from "./taskActions";
 import type { BoardTag, CardSummary } from "./tasksApi";
+import { EstimateBadge } from "./EstimateField";
+import { estimateBadge, estimateWords, type EstimateKind } from "../../shared/estimates";
 
 /** At most this many tag chips and avatars on a lane card, then "+N" (§4.4). */
 export const FACE_TAGS = 3;
@@ -59,6 +61,8 @@ type FaceInput = {
   rollup?: { done: number; total: number } | null;
   /** What the children are called, lower case ("subtasks"). */
   childLabel?: string;
+  /** The board's estimate kind (lane ESTIMATES, D754): with points or hours the face shows "5 pts" or "3h". */
+  estimateKind?: EstimateKind;
 };
 
 /** "Asha", "Asha and Ben", "Asha, Ben, and Chen": every name, for screen readers. */
@@ -91,14 +95,17 @@ export function avatarTone(id: string) {
  * tomorrow at 17:00, tags Backend, assigned to Asha and Ben, 2 comments". The excerpt is its
  * description instead.
  */
-export function cardFaceLabel({ card, tags, done, today, parentTitle, rollup, childLabel = "subtasks" }: FaceInput) {
+export function cardFaceLabel({ card, tags, done, today, parentTitle, rollup, childLabel = "subtasks", estimateKind = "none" }: FaceInput) {
   const parts = [card.title];
+  if (card.key) parts.push(card.key);
   if (card.archived_at) parts.push("archived");
   if (parentTitle) parts.push(`in ${parentTitle}`);
   if (rollup?.total) parts.push(`${rollup.done} of ${rollup.total} ${childLabel} done`);
   for (const flag of card.flags ?? []) parts.push(FLAG_LABELS[flag].toLowerCase());
-  const due = dueStatus(card.due_on, today, done, { dueAt: card.due_at });
+  const due = cardDateStatus(card, today, done);
   if (due) parts.push(lowerFirst(due.description));
+  const estimate = estimateWords(estimateKind, card.estimate);
+  if (estimate) parts.push(`estimate ${estimate}`);
   const names = cardTags(card.tag_ids, tags).map((tag) => tag.name);
   if (names.length) parts.push(`${names.length === 1 ? "tag" : "tags"} ${listSentence(names)}`);
   const people = cardAssignees(card).map((person) => person.display_name);
@@ -120,17 +127,23 @@ export function cardFaceLabel({ card, tags, done, today, parentTitle, rollup, ch
  * (`cardFaceLabel`), so the face itself is hidden from screen readers; `excerptId` lets the card
  * point its description at the excerpt.
  */
-export function CardFace({ card, tags, done, today, excerptId, rollup, childLabel = "subtasks" }: FaceInput & { excerptId: string }) {
+export function CardFace({ card, tags, done, today, excerptId, rollup, childLabel = "subtasks", estimateKind = "none" }: FaceInput & { excerptId: string }) {
   const flags = card.flags ?? [];
   const excerpt = card.description_excerpt?.trim() ?? "";
-  const due = dueStatus(card.due_on, today, done, { dueAt: card.due_at });
+  const due = cardDateStatus(card, today, done);
   const allTags = cardTags(card.tag_ids, tags);
   const people = cardAssignees(card);
   const children = rollup && rollup.total > 0 ? rollup : null;
   const archived = Boolean(card.archived_at);
+  // The card's key (lane KEYS, D710), quietly first on the footer line; the dialog's copies it.
+  const key = card.key ?? null;
+  const estimate = estimateBadge(estimateKind, card.estimate);
   const countTexts = [
+    ...(key ? [key] : []),
     // The Archived chip (D605) takes footer room like a count.
     ...(archived ? ["Archived"] : []),
+    // So does the estimate chip (D754).
+    ...(estimate ? [estimate] : []),
     ...(card.has_description === 1 && !excerpt ? [""] : []),
     ...(card.comment_count > 0 ? [String(card.comment_count)] : []),
     ...(card.attachment_count > 0 ? [String(card.attachment_count)] : []),
@@ -142,9 +155,9 @@ export function CardFace({ card, tags, done, today, excerptId, rollup, childLabe
   const shownPeople = visibleItems(people, FACE_PEOPLE);
   const assigned = people.length ? `Assigned to ${assigneeSentence(people.map((person) => person.display_name))}` : "";
   const counts = (card.has_description === 1 && !excerpt) || card.comment_count > 0 || card.attachment_count > 0 || Boolean(card.relation_count) || Boolean(card.open_blockers);
-  const meta = archived || due || allTags.length > 0 || counts || people.length > 0 || children;
+  const meta = key || archived || due || estimate || allTags.length > 0 || counts || people.length > 0 || children;
   const subtasks = children && <span className={`task-subtask-chip${children.done === children.total ? " complete" : ""}`} title={`${children.done} of ${children.total} ${childLabel} done`}><ListChecks />{children.done}/{children.total}</span>;
-  const main = archived || due || allTags.length > 0 || counts || children;
+  const main = key || archived || due || estimate || allTags.length > 0 || counts || children;
 
   return <div className="task-card-face" aria-hidden="true">
     <span className="task-card-title">
@@ -156,8 +169,10 @@ export function CardFace({ card, tags, done, today, excerptId, rollup, childLabe
     {excerpt && <span id={excerptId} className="task-card-excerpt">{excerpt}</span>}
     {meta && <span className="task-card-meta">
       {main && <span className="task-card-meta-main">
+        {key && <span className="task-card-key-face">{key}</span>}
         {archived && <ArchivedChip at={card.archived_at!} />}
         {due && <span className={`task-due-chip ${due.tone}`} title={due.description}><CalendarDays />{due.label}</span>}
+        {estimate && <EstimateBadge kind={estimateKind} value={card.estimate} />}
         {allTags.length > 0 && <span className="task-card-tags">
           {tagList.shown.map((tag) => <span key={tag.id} className={`task-tag color-${tag.color}`} title={tag.name}>{tag.name}</span>)}
           {tagList.more > 0 && <span className="task-card-more-tags" title={allTags.slice(tagList.shown.length).map((tag) => tag.name).join(", ")}>+{tagList.more}</span>}

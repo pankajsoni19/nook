@@ -4,6 +4,7 @@ import { purgeAfterFrom } from "../bin";
 import { sourceAccessChangedHook } from "../knowledge/hooks";
 import { HOSTS, type HostKind, type HostSpec, type LinkRow } from "./hosts";
 import { linkChanged, recordRemovedLink } from "./undoTickets";
+import { recordCardFileWithdrawn } from "../tasks/activity";
 
 /**
  * The attachment service (uploads everywhere plan D390–D396, D408, D409, T340–T342, T351): the
@@ -237,6 +238,9 @@ export function unlinkAttachment(userId: string, kind: HostKind, hostId: string,
       if (!removed) throw new AttachmentError(404, "NOT_FOUND", "Attachment not found");
       linkChanged(kind, hostId, documentId);
       audit(userId, null, "attachment.unlink", { hostKind: kind, hostId, documentId, asOwner: true });
+      // A card's history records its owner withdrawing a file too (lane ACTIVITY), but not a comment's
+      // file (part_id is its comment), whose attach is not recorded either.
+      if (kind === "card" && before && !before.part_id) recordCardFileWithdrawn(userId, hostId, documentId);
       const documentBinned = binIfOrphanedAttachment(documentId, userId, { notify: false });
       // The Undo record commits with the removal (undoTickets.ts).
       if (before) rememberRemoval(userId, before, documentBinned);

@@ -3,6 +3,7 @@ import { ATTACHMENTS_FOLDER_KIND, binIfOrphanedAttachment, relinkableDocument, r
 import { linkChanged, recordRemovedLink } from "../attachments/undoTickets";
 import { sourceAccessChangedHook } from "../knowledge/hooks";
 import { LIMITS, limitReached, requireCardAt, requireReadableCard, TaskError, withBoardLock } from "./service";
+import { activityValue, recordCardActivity } from "./activity";
 
 /**
  * Card attachments (WAVES_7-9.md D42/D43 as revised by the director's §7 review). An attachment is
@@ -157,6 +158,8 @@ export async function attachToCard(userId: string, cardId: string, input: { docu
       const document = linkableCardDocument(documentId, userId);
       linkAttachments({ userId, cardId, documentIds: [documentId], commentId: input.commentId ?? null, confirmed: input.confirmed });
       db.query("UPDATE cards SET updated_at = ? WHERE id = ?").run(now(), cardId);
+      // Card history (lane ACTIVITY): files on the card itself; a comment's files show in the comment.
+      if (!input.commentId) recordCardActivity({ cardId, boardId: board.id, actorId: userId, kind: "attachment_added", payload: { item: activityValue.document(documentId) } });
       audit(userId, null, "task.attachment_link", {
         boardId: board.id, cardId, documentId,
         ...(input.commentId ? { commentId: input.commentId } : {}),
@@ -192,6 +195,8 @@ export async function detachFromCard(userId: string, cardId: string, documentId:
       linkChanged("card", cardId, documentId);
       binned = binUnlinkedAttachments([documentId], userId, binnedFiles);
       db.query("UPDATE cards SET updated_at = ? WHERE id = ?").run(now(), cardId);
+      // A comment's files are not in the card's history (their attach is not recorded either).
+      if (!link.comment_id) recordCardActivity({ cardId, boardId: current.id, actorId: userId, kind: "attachment_removed", payload: { item: activityValue.document(documentId) } });
       audit(userId, null, "task.attachment_unlink", { boardId: current.id, cardId, documentId });
       // The Undo record commits with the removal (undoTickets.ts).
       recordRemovedLink(userId, "card", cardId, documentId, { partId: link.comment_id, position: 0, linkedBy: link.linked_by, createdAt: link.created_at, binned: binned > 0 });
@@ -242,6 +247,7 @@ export async function relinkToCard(userId: string, cardId: string, documentId: s
         .run(cardId, document.id, commentId, removed?.linkedBy ?? userId, removed?.createdAt ?? now());
       linkChanged("card", cardId, document.id);
       db.query("UPDATE cards SET updated_at = ? WHERE id = ?").run(now(), cardId);
+      if (!commentId) recordCardActivity({ cardId, boardId: current.id, actorId: userId, kind: "attachment_added", payload: { item: activityValue.document(document.id) } });
       audit(userId, null, "task.attachment_relink", { boardId: current.id, cardId, documentId: document.id, ...(commentId ? { commentId } : {}), ...(restored ? { restored: true } : {}) });
       return { relinked: true, restored };
     })();

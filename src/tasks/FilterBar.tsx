@@ -28,6 +28,7 @@ const DATE_OPERATORS = [{ value: "<", label: "Before" }, { value: "", label: "On
 type DateOperator = typeof DATE_OPERATORS[number]["value"];
 
 const DUE_PHRASES: Record<string, string> = { overdue: "Overdue", today: "Due today", week: "Due in the next 7 days", "next-week": "Due in the 7 days after", none: "No due date" };
+const START_PHRASES: Record<string, string> = { today: "Starts today", week: "Starts in the next 7 days", "next-week": "Starts in the 7 days after", none: "No start date" };
 const HAS_PHRASES: Record<string, [string, string]> = { relation: ["Has relations", "No relations"], blocked: ["Blocked by a card", "Not blocked by a card"] };
 
 /** A chip's words: "Assignee is Asha, Me", "Flag is not Urgent", "Due before Oct 1, 2026 or No due date", "Text contains “login”". */
@@ -36,6 +37,10 @@ export function chipLabel(term: TaskQuery["terms"][number], board: BoardData, co
   if (term.key === "has") return term.values.map((value) => HAS_PHRASES[value]?.[term.negate ? 1 : 0] ?? value).join(" or ");
   if (term.key === "due") {
     const phrases = term.values.map((value) => DUE_PHRASES[value] ?? `Due ${termValueLabel("due", value, board, context)}`).join(" or ");
+    return term.negate ? `Not: ${phrases}` : phrases;
+  }
+  if (term.key === "start") {
+    const phrases = term.values.map((value) => START_PHRASES[value] ?? `Starts ${termValueLabel("start", value, board, context)}`).join(" or ");
     return term.negate ? `Not: ${phrases}` : phrases;
   }
   const values = term.values.map((value) => termValueLabel(term.key, value, board, context)).join(", ");
@@ -138,10 +143,10 @@ export function FilterBar({ board, context, filter, onChange, shown, total, acti
         options={options} selectedOptions={selectedOptions} maxSelected={20} onChange={setValues} emptyText="Nothing to choose"
         // Phones: the sheet is the editor, so closing it finishes the edit instead of leaving a focused
         // field (and the keyboard) behind. The due filter keeps its editor for the date row.
-        onSheetClose={editing === "due" ? undefined : finishSheetEdit} />
-      {editing === "due" && <span className="task-filter-date">
+        onSheetClose={editing === "due" || editing === "start" ? undefined : finishSheetEdit} />
+      {(editing === "due" || editing === "start") && <span className="task-filter-date">
         <Select<DateOperator> variant="chip" label="Date comparison" value={dateOperator} onChange={setDateOperator} searchable={false} options={DATE_OPERATORS.map((item) => ({ value: item.value, label: item.label }))} />
-        <input type="date" value={date} onChange={(event) => setDate(event.target.value)} aria-label="Due date" min="1900-01-01" max="2999-12-31"
+        <input type="date" value={date} onChange={(event) => setDate(event.target.value)} aria-label={editing === "start" ? "Start date" : "Due date"} min="1900-01-01" max="2999-12-31"
           onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addDate(); } }} />
         <button type="button" className="secondary-button" onClick={addDate} disabled={!committableDueDate(date, null)}>Add date</button>
       </span>}

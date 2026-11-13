@@ -5,6 +5,7 @@ import { GROUP_DIMENSIONS, type BoardCard, type BoardData, type BoardGroup } fro
 import { BOARD_GROUPS, type BoardGroupId } from "./boardUrl";
 import { assigneeNames, Avatars, DueChip, FlagIcons, TagChips } from "./boardViewParts";
 import { ArchivedChip } from "./CardFace";
+import { EstimateBadge } from "./EstimateField";
 import { cardCountLabel } from "./taskActions";
 
 type BoardGroupedListProps = {
@@ -62,11 +63,12 @@ export function BoardGroupedList({ board, groups, group, today, onGroup, onOpenC
               const names = assigneeNames(card);
               return <li key={card.id} className={`task-group-row${column?.is_done === 1 ? " done" : ""}`} data-card-id={card.id}>
                 <button type="button" className="task-group-open" onClick={() => onOpenCard(card)} data-open-card={card.id}>
-                  <span className="task-group-title"><FlagIcons flags={card.flags} /><span>{card.title}</span>{card.archived_at && <ArchivedChip at={card.archived_at} />}</span>
+                  <span className="task-group-title">{card.key && <span className="task-card-key-face">{card.key}</span>}<FlagIcons flags={card.flags} /><span>{card.title}</span>{card.archived_at && <ArchivedChip at={card.archived_at} />}</span>
                   {card.description_excerpt && <span className="task-group-excerpt">{card.description_excerpt}</span>}
                   <span className="task-group-meta">
                     {group !== "column" && <span className="task-group-column">{column?.name}</span>}
                     <DueChip card={card} today={today} done={column?.is_done === 1} />
+                    <EstimateBadge kind={board.estimates?.kind ?? "none"} value={card.estimate} />
                     <TagChips tagIds={card.tag_ids} board={board} max={2} />
                     {names.length > 0 && group !== "assignee" && <span className="task-group-people" title={names.join(", ")}><Avatars card={card} /><span className="sr-only">Assigned to {names.join(", ")}</span></span>}
                     {also.length > 0 && <span className="task-group-also">also in {also.join(", ")}</span>}

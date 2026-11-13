@@ -78,19 +78,25 @@
 
 @media (max-width: 760px) {
   /*
-   * v0.31 follow-up: two rows, not three. The title row (Back, the name, New card, Board settings)
-   * never wraps; the view switch leads the filter row (.task-board-controls, BoardView), which
-   * scrolls sideways while no filter is being edited.
+   * Phones: two rows under the title, nothing hidden (supersedes v0.31's sideways-scrolling row,
+   * where Swimlanes, View, and the filters sat past the right edge, and the wrap that followed it,
+   * which took three lines at 375 px). The title row (Back, the name, New card, Board settings) never
+   * wraps. Under it, .task-board-controls (BoardView):
+   *   row 1: the view switch (5 × 44 px) and the per-view controls as 44 px icon chips (Swimlanes on
+   *          Columns, the saved view), each named by its value ("View: All cards") and lit when on;
+   *   row 2: the filter bar: + Filter, the search (it takes the rest), and a saved view's ⋯ and Save.
+   * 375 − 2 × 16 = 343 px ≥ switch 234 + 2 × (4 + 48). Narrower phones wrap a chip; nothing scrolls.
    */
   .task-board-header { flex-wrap: nowrap; }
   .task-board-header .task-board-heading { min-width: 0; }
   .task-view-switch .icon-button { width: 44px; height: 44px; }
-  .task-board-controls { flex: none; display: flex; align-items: center; gap: 6px; min-width: 0; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; padding: 0 16px 8px; scrollbar-width: none; }
-  .task-board-controls::-webkit-scrollbar { display: none; }
-  .task-board-controls > .ui-select-root { flex: none; }
-  .task-board-controls > .task-filter-bar { flex: none; flex-wrap: nowrap; padding: 0; }
-  .task-board-controls .task-filter-text { flex: 0 0 180px; }
-  /* Editing a filter: the editor needs the width, so the row wraps instead of scrolling. */
+  .task-board-controls { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 4px; min-width: 0; padding: 0 16px 8px; }
+  .task-board-controls > .ui-select-root, .task-board-controls > .task-saved-view-picker { flex: none; max-width: 100%; }
+  .task-board-controls .ui-select-icon-only { min-height: 44px; min-width: 44px; }
+  .task-board-controls .ui-select-icon-only.active { border-color: #6b572c; background: #2b261b; color: #f5cf79; }
+  .task-board-controls > .task-filter-bar { flex: 1 1 100%; flex-wrap: wrap; padding: 0; }
+  .task-board-controls .task-filter-text { flex: 1 1 160px; }
+  /* Editing a filter: the editor takes the filter row's width. */
   .task-board-controls:has(.task-filter-editor) { flex-wrap: wrap; overflow-x: visible; }
   .task-board-controls:has(.task-filter-editor) > .task-filter-bar { flex: 1 1 100%; flex-wrap: wrap; }
   .task-view-body { padding: 4px 16px calc(24px + env(safe-area-inset-bottom)); }
@@ -181,6 +187,8 @@ span.task-filter-chip-body { cursor: default; }
 .task-cal-chip:focus-visible { outline: 2px solid var(--yellow); outline-offset: 1px; }
 .task-cal-chip.done { border-left-color: #55555c; color: #8d8d94; }
 .task-cal-chip.done .task-cal-title { text-decoration: line-through; text-decoration-color: #55555c; }
+/* A day of a card's range before its due day (D724): the same chip, quieter, so the due day stands out. */
+.task-cal-chip.continued { border-left-style: dashed; background: #18181b; color: #a9a9b0; }
 .task-cal-flag { width: 6px; height: 6px; flex: none; border-radius: 999px; background: #ff8f86; }
 .task-cal-time { flex: none; color: #9a9aa1; font-variant-numeric: tabular-nums; }
 .task-cal-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; }

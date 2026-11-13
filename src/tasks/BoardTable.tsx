@@ -5,6 +5,9 @@ import { parentTitleOf, structureOfData, treeRows, type BoardCard, type BoardDat
 import type { BoardSort, BoardSortField } from "./boardUrl";
 import { assigneeNames, Avatars, DueChip, FlagIcons, shortTimestamp, TagChips } from "./boardViewParts";
 import { ArchivedChip } from "./CardFace";
+import { CardKeyButton } from "./cardLink";
+import { notifier } from "../ui/notify";
+import { EstimateBadge } from "./EstimateField";
 
 type BoardTableProps = {
   board: BoardData;
@@ -27,7 +30,8 @@ const COLUMNS: Array<{ field: BoardSortField; label: string }> = [
   { field: "tags", label: "Tags" },
   { field: "flags", label: "Flags" },
   { field: "created", label: "Created" },
-  { field: "updated", label: "Updated" }
+  { field: "updated", label: "Updated" },
+  { field: "estimate", label: "Estimate" }
 ];
 
 /** Ascending, then descending, then back to board order. */
@@ -46,6 +50,9 @@ export function BoardTable({ board, cards, sort, today, onSort, onOpenCard, onCa
   // Hierarchy (17A): unsorted, rows form a tree (children under their parent, ▸ to collapse); Level and Parent columns.
   const structure = structureOfData(board);
   const levels = structure.levels.length > 1;
+  // Lane ESTIMATES (D754): an Estimate column, sortable, on boards with estimates on.
+  const estimateKind = board.estimates?.kind ?? "none";
+  const headers = estimateKind === "none" ? COLUMNS.filter((column) => column.field !== "estimate") : COLUMNS;
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const tree = levels && !sort;
   const rows = tree ? treeRows(cards, collapsed) : cards.map((card) => ({ card, depth: 0, childCount: 0, descendantCount: 0 }));
@@ -59,7 +66,7 @@ export function BoardTable({ board, cards, sort, today, onSort, onOpenCard, onCa
     <table className="task-table">
       <thead>
         <tr>
-          {COLUMNS.map((column) => {
+          {headers.map((column) => {
             const active = sort?.field === column.field ? sort.direction : null;
             const Icon = active === "asc" ? ArrowUp : active === "desc" ? ArrowDown : ArrowUpDown;
             return <th key={column.field} scope="col" aria-sort={active === "asc" ? "ascending" : active === "desc" ? "descending" : "none"} className={`task-table-${column.field}`}>
@@ -87,6 +94,7 @@ export function BoardTable({ board, cards, sort, today, onSort, onOpenCard, onCa
                     {collapsed.has(card.id) ? <ChevronRight /> : <ChevronDown />}
                   </button>
                   : <span className="task-tree-spacer" aria-hidden="true" />)}
+                {card.key && <CardKeyButton cardKey={card.key} notify={notifier} className="task-table-key" />}
                 <button type="button" className="task-table-open" onClick={() => onOpenCard(card)} data-open-card={card.id} title={card.description_excerpt || undefined}>{card.title}</button>
                 <button type="button" className="icon-button task-table-more" onClick={(event) => onCardMenu(card, event.currentTarget)} aria-haspopup="dialog" aria-label={`More actions for “${card.title}”`} title="More actions"><Ellipsis /></button>
               </span>
@@ -98,6 +106,7 @@ export function BoardTable({ board, cards, sort, today, onSort, onOpenCard, onCa
             <td><FlagIcons flags={card.flags} /></td>
             <td className="task-table-date">{shortTimestamp(card.created_at)}</td>
             <td className="task-table-date">{shortTimestamp(card.updated_at)}</td>
+            {estimateKind !== "none" && <td className="task-table-estimate">{card.estimate === null || card.estimate === undefined ? <span className="task-table-empty">—</span> : <EstimateBadge kind={estimateKind} value={card.estimate} />}</td>}
             {levels && <td>{levelName(structure, card.level ?? 0)}</td>}
             {levels && <td className="task-table-parent-cell" title={parentTitleOf(card, board) ?? undefined}>{parentTitleOf(card, board) ?? <span className="task-table-empty">—</span>}</td>}
           </tr>;

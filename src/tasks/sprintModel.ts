@@ -4,6 +4,7 @@ import type { FilterTerm, TaskState } from "../../shared/taskQuery";
 import type { BoardStructure } from "../../shared/boardStructure";
 import { carryOverPlan, newSprintPlan, sprintDaysBetween, type SprintDefaults, type SprintStartRule } from "../../shared/sprintPlan";
 import type { BoardColumn, CardSummary, SprintSummary } from "./tasksApi";
+import { estimateBadge, estimateTotal, estimateWords, type EstimateKind } from "../../shared/estimates";
 
 /** What the switcher shows: one sprint, the backlog (no sprint), or every card. */
 export type SprintSelection = { kind: "sprint"; sprint: SprintSummary } | { kind: "backlog" } | { kind: "all" };
@@ -114,7 +115,8 @@ const columnState = (column: BoardColumn): TaskState => (column as BoardColumn &
 
 /**
  * The progress strip's counts (§7.3, D134): the work-level cards of a sprint (or of the backlog, for
- * null), by their column's state. Subtasks are not counted, and there are no points (Q4).
+ * null), by their column's state. Subtasks are not counted. Estimates are summed by
+ * `sprintEstimates` (lane ESTIMATES, D755, which superseded Q4 and D134).
  */
 export function sprintProgress(cards: ReadonlyArray<SprintCard & Pick<CardSummary, "column_id">>, columns: readonly BoardColumn[], sprintId: string | null, workLevel: number): SprintProgress {
   const states = new Map(columns.map((column) => [column.id, columnState(column)]));
@@ -125,6 +127,34 @@ export function sprintProgress(cards: ReadonlyArray<SprintCard & Pick<CardSummar
     progress[states.get(card.column_id) ?? "doing"] += 1;
   }
   return progress;
+}
+
+/** Estimate totals of a sprint (D755): the work-level cards' estimates, in done columns and not; `counted` cards had one. */
+export type SprintEstimate = { total: number; done: number; remaining: number; counted: number };
+
+/**
+ * The estimate totals for the progress strip (D755): the same cards `sprintProgress` counts (work
+ * level only, so a story's subtasks never add to its points twice), summed by their column's state.
+ */
+export function sprintEstimates(cards: ReadonlyArray<SprintCard & Pick<CardSummary, "column_id" | "estimate">>, columns: readonly BoardColumn[], sprintId: string | null, workLevel: number): SprintEstimate {
+  const states = new Map(columns.map((column) => [column.id, columnState(column)]));
+  const listed = cards.filter((card) => (card.level ?? 0) === workLevel && (card.sprint_id ?? null) === sprintId);
+  const total = estimateTotal(listed.map((card) => card.estimate));
+  const done = estimateTotal(listed.filter((card) => states.get(card.column_id) === "done").map((card) => card.estimate));
+  return { total: total.sum, done: done.sum, remaining: Math.round((total.sum - done.sum) * 100) / 100, counted: total.counted };
+}
+
+/**
+ * "13 of 21 pts done · 8 pts left" for a sprint, "21 pts" for the backlog (D755); null with
+ * estimates off or when no card has one. `label` is the same in words for screen readers.
+ */
+export function estimateProgressLabel(kind: EstimateKind, estimate: SprintEstimate, inSprint: boolean) {
+  if (kind === "none" || !estimate.counted) return null;
+  if (!inSprint) return { text: estimateBadge(kind, estimate.total), label: `${estimateWords(kind, estimate.total)} estimated` };
+  return {
+    text: `${estimate.done} of ${estimateBadge(kind, estimate.total)} done · ${estimateBadge(kind, estimate.remaining)} left`,
+    label: `${estimateWords(kind, estimate.done)} of ${estimateWords(kind, estimate.total)} done, ${estimateWords(kind, estimate.remaining)} left`
+  };
 }
 
 /** The sprints with `card_count` and `done_count` from the loaded cards, so they follow local changes at once. */

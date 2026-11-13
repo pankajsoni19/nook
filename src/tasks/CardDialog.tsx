@@ -17,6 +17,8 @@ import { attachCapReason, attachmentsFor, binConfirmMessage, canRetryTitle, canU
 import { CardFields } from "./CardFields";
 import { CardBreadcrumb, CardParentFields, SubtasksSection } from "./CardHierarchySection";
 import { CardSprintField } from "./SprintField";
+import { CardEstimateField } from "./EstimateField";
+import type { EstimateSettings } from "../../shared/estimates";
 import { childrenOf, levelEyebrow, levelOf } from "./hierarchyModel";
 import type { CardHierarchyContext } from "./useBoardHierarchy";
 import type { TagChange } from "./cardTags";
@@ -47,13 +49,15 @@ import {
   type SprintSummary
 } from "./tasksApi";
 import { useHistoryDialogGuard } from "./useHistoryDialogGuard";
-import { CopyCardLinkButton } from "./cardLink";
+import { CardKeyButton, CopyCardLinkButton } from "./cardLink";
 import { CommentReactions } from "./CommentReactions";
 import type { TaskNotify } from "./taskActions";
 import { ReadOnlyBanner, useRole } from "../team/roleAccess";
 import { levelAtLeast, type ItemLevel } from "../access/accessLevels";
 import { appName } from "../appName";
 import { FormError } from "../ui/FormError";
+import { ActivityRow, TimelineControls, useCardTimeline } from "./cardActivity";
+import { activityRefreshKey, buildTimeline } from "./cardActivityModel";
 
 type CardDialogProps = {
   userId: string;
@@ -71,6 +75,12 @@ type CardDialogProps = {
   onMove: (card: CardDetail) => void;
   /** Moves the card to the Bin (the dialog confirms first) and closes it. */
   onDelete: (cardId: string) => Promise<void>;
+  /**
+   * The board this dialog is over (lane KEYS): a card that loads on another board (it moved there,
+   * D716, while an old link or a notification still names this one) is handed to `onElsewhere`.
+   */
+  boardId?: string;
+  onElsewhere?: (card: CardDetail) => void;
   notify: TaskNotify;
   /** The board's tags for the Tags field, and how the board hears of a tag change (13C). */
   tags?: BoardTag[];
@@ -94,6 +104,8 @@ type CardDialogProps = {
   boardLevel?: ItemLevel;
   /** The board's sprints (17B), for the Sprint field; only on boards with sprints on. */
   sprints?: SprintSummary[];
+  /** The board's estimate settings (lane ESTIMATES, D754), for the Estimate field; none or off hides it. */
+  estimates?: EstimateSettings;
   /**
    * The card's data when the caller already has it (render tests); the dialog still loads the
    * current version on open.
@@ -117,7 +129,7 @@ const payloadCard = (reason: unknown) => reason instanceof ApiError && reason.pa
  * The description is Markdown shown through the notes renderer read-only (D44) and edited with
  * an explicit Save; a revision conflict offers Reload or Copy my text.
  */
-export function CardDialog({ userId, cardId, columns, columnId, boardOwner, boardLevel, onClose, onMissing, onChanged, onArchive, onMove, onDelete, notify, tags, onTagsChange, onOpenRelated, onRelationsChanged, layout = "dialog", onExpand, onCollapse, hierarchy, sprints, initialView }: CardDialogProps) {
+export function CardDialog({ userId, cardId, columns, columnId, boardOwner, boardLevel, onClose, onMissing, onChanged, onArchive, onMove, onDelete, boardId, onElsewhere, notify, tags, onTagsChange, onOpenRelated, onRelationsChanged, layout = "dialog", onExpand, onCollapse, hierarchy, sprints, estimates, initialView }: CardDialogProps) {
   const page = layout === "page";
   // Viewers and guests read the card: every write control is left out or shown as text, since the
   // server's write gate refuses those writes (403 ROLE_READ_ONLY), comments included. Members below
@@ -164,11 +176,24 @@ export function CardDialog({ userId, cardId, columns, columnId, boardOwner, boar
   const cardRef = useRef<CardDetail | null>(null);
   cardRef.current = card;
   const titleId = useId();
+  // Lane ACTIVITY: the card's history interleaved with its comments, re-read when the card changes.
+  const timeline = useCardTimeline(userId, cardId, activityRefreshKey(card, { columnId, relations: relations.length, attachments: attachments.length }));
 
+  // The parent's callbacks are read through refs: callers pass them inline, and a new function on
+  // every parent render must not re-run `load` (a refetch would overwrite an unsaved title edit).
+  const onElsewhereRef = useRef(onElsewhere);
+  onElsewhereRef.current = onElsewhere;
+  const onMissingRef = useRef(onMissing);
+  onMissingRef.current = onMissing;
   const load = useCallback(async () => {
     setLoadError(null);
     try {
       const view = await getCard(cardId);
+      const elsewhere = onElsewhereRef.current;
+      if (boardId && elsewhere && view.card.board_id !== boardId) {
+        elsewhere(view.card);
+        return;
+      }
       setCard(view.card);
       setTitle(view.card.title);
       setComments(view.comments);
@@ -176,10 +201,10 @@ export function CardDialog({ userId, cardId, columns, columnId, boardOwner, boar
       setAttachments(view.attachments);
       setRelations(view.relations ?? []);
     } catch (reason) {
-      if (reason instanceof ApiError && reason.status === 404) onMissing();
+      if (reason instanceof ApiError && reason.status === 404) onMissingRef.current();
       else setLoadError(taskErrorMessage(reason, "Could not load this card"));
     }
-  }, [cardId, onMissing]);
+  }, [cardId, boardId]);
   useEffect(() => { void load(); }, [load]);
 
   const closeSubDialog = useCallback(() => { setDeletingComment(null); setUnlinking(null); setConfirmDelete(false); setDiscardPrompt(false); }, []);
@@ -628,6 +653,15 @@ export function CardDialog({ userId, cardId, columns, columnId, boardOwner, boar
     discardStaged([file]);
   };
 
+  // Comments and (when switched on) history in one list; "Load earlier" pages whichever list is behind,
+  // at the top when oldest first and at the bottom when newest first.
+  const timelineItems = buildTimeline({ comments, hasMoreComments: hasMore, activity: timeline.activity, hasMoreActivity: timeline.hasMoreActivity, showActivity: timeline.prefs.showActivity, order: timeline.prefs.order });
+  const loadingEarlier = loadingMore || timeline.loadingOlder;
+  const loadEarlierButton = (timelineItems.loadComments || timelineItems.loadActivity) && <button className="task-load-earlier" disabled={loadingEarlier} onClick={() => {
+    if (timelineItems.loadComments) void loadEarlier();
+    if (timelineItems.loadActivity) void timeline.loadOlder();
+  }}>{loadingEarlier ? "Loading…" : timeline.prefs.showActivity ? "Load earlier" : "Load earlier comments"}</button>;
+
   const column = card ? columns.find((item) => item.id === (columnId ?? card.column_id)) : undefined;
   const composerKey = (event: ReactKeyboardEvent<HTMLTextAreaElement>, submit: () => void) => {
     if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
@@ -641,9 +675,13 @@ export function CardDialog({ userId, cardId, columns, columnId, boardOwner, boar
     <section ref={sectionRef} className={`${page ? "task-card-dialog task-card-page" : "task-card-dialog task-card-modal"}${drop.dragging ? " task-card-dragging" : ""}`} role={page ? undefined : "dialog"} aria-modal={page ? undefined : true} aria-labelledby={titleId} onKeyDown={page ? undefined : trapTabKey}
       {...drop.bind} onDropCapture={(event) => { dropZone.current = attachZoneOf(event.target); }}>
       {drop.dragging && <div className="task-card-drop" aria-hidden="true"><Paperclip />Drop files to attach them</div>}
-      <header className="task-card-dialog-header">
+      <header className="task-card-dialog-header task-card-view-header">
         <div className="task-card-dialog-heading">
-          <span className="eyebrow">{[card && hierarchy ? levelEyebrow(hierarchy.structure, levelOf(card)) : null, column ? columnEyebrow(column.name) : "Card"].filter(Boolean).join(" · ")}</span>
+          {/* On phones the eyebrow sits on one line beside the actions (the column name truncates, the key
+              stays whole) and the title takes the full width below them: tasks.css, .task-card-view-header. */}
+          <span className="eyebrow task-card-eyebrow"><span className="task-card-eyebrow-text">{[card && hierarchy ? levelEyebrow(hierarchy.structure, levelOf(card)) : null, column ? columnEyebrow(column.name) : "Card"].filter(Boolean).join(" · ")}{card?.key && " · "}</span>
+            {/* The card's key (D713), click to copy: "IN DOING · MYT-12". */}
+            {card?.key && <CardKeyButton cardKey={card.key} notify={notify} className="task-card-key-eyebrow" />}</span>
           {card && hierarchy && <CardBreadcrumb card={card} context={hierarchy} />}
           {card && readOnly
             ? <h2 id={titleId} className="task-card-title-static">{card.title}</h2>
@@ -665,7 +703,7 @@ export function CardDialog({ userId, cardId, columns, columnId, boardOwner, boar
             : <h2 id={titleId}>Loading…</h2>}
           <FormError message={titleError} className="file-dialog-error" />
         </div>
-        {card && <CopyCardLinkButton boardId={card.board_id} cardId={card.id} notify={notify} />}
+        {card && <CopyCardLinkButton boardId={card.board_id} cardId={card.id} cardKey={card.key} notify={notify} />}
         {card && !readOnly && <button className="icon-button" onClick={() => onMove(card)} aria-haspopup="dialog" aria-label="Move card" title="Move to…"><ArrowRightLeft /></button>}
         {card && !readOnly && onArchive && !card.archived_at && <button className="icon-button" onClick={() => onArchive(card)} aria-label="Archive card" title="Archive: hide it from the board"><Archive /></button>}
         {card && !readOnly && <button className="icon-button" onClick={() => setConfirmDelete(true)} aria-haspopup="dialog" aria-label="Delete card" title="Move to the Bin"><Trash2 /></button>}
@@ -691,6 +729,7 @@ export function CardDialog({ userId, cardId, columns, columnId, boardOwner, boar
             {!readOnly && <button type="button" className="secondary-button task-small-button" disabled={restoring} onClick={() => { void restoreArchived(); }}><ArchiveRestore />{restoring ? "Restoring…" : "Restore to board"}</button>}
           </p>}
           <CardFields card={card} userId={userId} idPrefix={titleId} done={column?.is_done === 1} saving={savingDetails} onSave={saveDetails} tags={tags} owner={boardOwner} onTagsChange={onTagsChange} readOnly={readOnly} />
+          {estimates && estimates.kind !== "none" && <div className="task-card-details"><CardEstimateField card={card} settings={estimates} idPrefix={titleId} saving={savingDetails} onSave={saveDetails} readOnly={readOnly} /></div>}
           {hierarchy && <div className="task-card-details"><CardParentFields card={card} context={hierarchy} idPrefix={titleId} saving={savingDetails} onSave={saveDetails} readOnly={readOnly} />
             {sprints && <CardSprintField card={card} structure={hierarchy.structure} cards={hierarchy.cards} sprints={sprints} idPrefix={titleId} saving={savingDetails} onSave={saveDetails} readOnly={readOnly} />}</div>}
           <FormError message={detailsConflict} className="file-dialog-error" />
@@ -748,10 +787,13 @@ export function CardDialog({ userId, cardId, columns, columnId, boardOwner, boar
           </section>
 
           <section className="task-card-section" aria-labelledby={`${titleId}-comments`}>
-            <header><h3 id={`${titleId}-comments`}><MessageSquare aria-hidden="true" />Comments</h3></header>
-            {hasMore && <button className="task-load-earlier" onClick={() => { void loadEarlier(); }} disabled={loadingMore}>{loadingMore ? "Loading…" : "Load earlier comments"}</button>}
-            <ol className="task-comments">
-              {comments.map((comment) => {
+            <header><h3 id={`${titleId}-comments`}><MessageSquare aria-hidden="true" />Comments</h3>
+              <TimelineControls prefs={timeline.prefs} onChange={timeline.setPrefs} idPrefix={titleId} /></header>
+            {timeline.prefs.order === "asc" && loadEarlierButton}
+            <ol className="task-comments" aria-label={timeline.prefs.showActivity ? "Comments and activity" : "Comments"}>
+              {timelineItems.items.map((timelineItem) => {
+                if (timelineItem.type === "activity") return <ActivityRow key={timelineItem.id} entry={timelineItem.entry} />;
+                const comment = timelineItem.comment;
                 const commentFiles = attachmentsFor(attachments, comment.id);
                 const filesOnly = commentFilesOnly(comment.body, commentFiles);
                 return <li key={comment.id} className="task-comment">
@@ -784,8 +826,9 @@ export function CardDialog({ userId, cardId, columns, columnId, boardOwner, boar
                 <CommentReactions commentId={comment.id} reactions={comment.reactions ?? []} readOnly={commentReadOnly} onUpdate={updateReactions} notify={notify} />
               </li>;
               })}
-              {!comments.length && <li className="task-comment-empty">No comments yet.</li>}
+              {!timelineItems.items.length && <li className="task-comment-empty">No comments yet.</li>}
             </ol>
+            {timeline.prefs.order === "desc" && loadEarlierButton}
             {commentReadOnly
               ? <p className="task-comment-empty" role="note">{roleReadOnly ? "View only: your Team role can read comments but not post them." : "View only: you can read this board's comments but not post them."}</p>
               : <div className="task-comment-composer" data-attach-zone="comment">

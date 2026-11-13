@@ -16,6 +16,8 @@ export type QueriedCard = {
   column_name: string;
   column_state: TaskState;
   is_done: 0 | 1;
+  /** The key, such as MYT-12 (lane KEYS, D710); older servers omit it. */
+  key?: string | null;
   /** Archived (D605, D610): still listed, marked; older servers omit it. */
   archived_at?: string | null;
   position: number;
@@ -28,6 +30,11 @@ export type QueriedCard = {
   due_time: string | null;
   due_tz: string | null;
   due_at: string | null;
+  /** The optional start (D720); older servers omit it. */
+  start_on?: string | null;
+  start_time?: string | null;
+  start_tz?: string | null;
+  start_at?: string | null;
   assignees: CardAssignee[];
   tags: Array<{ id: string; name: string; color: TagColor | string }>;
   flags: string[];
@@ -72,7 +79,8 @@ const json = (method: string, body: unknown): RequestInit => ({ method, body: JS
 export const queryTaskCards = (body: QueryRequest, signal?: AbortSignal) =>
   api<QueryPage>("/tasks/query", { ...json("POST", body), ...(signal ? { signal } : {}) });
 
-export type ViewDisplay = { layout: HomeLayout; group: HomeGroup; sort: HomeSort; lanes?: LaneMode; /** A board view's swimlanes (D655); null clears them. */ swimlanes?: SwimlaneMode | null };
+/** `timeline` is a board layout (D760): the cross-board view page shows such a view as the list. */
+export type ViewDisplay = { layout: HomeLayout | "timeline"; group: HomeGroup; sort: HomeSort; lanes?: LaneMode; /** A board view's swimlanes (D655); null clears them. */ swimlanes?: SwimlaneMode | null };
 
 export type TaskView = {
   id: string;

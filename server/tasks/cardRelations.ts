@@ -1,10 +1,23 @@
 import { audit, db, now } from "../db";
-import { relationTypeFor, storedRelation, type RelationKind, type RelationType, type StoredRelation } from "./relations";
+import { inverseType, relationTypeFor, storedRelation, type RelationKind, type RelationType, type StoredRelation } from "./relations";
 import { ARCHIVED_PAGE, encodeArchivedCursor, getBoard, limitReached, requireCardAt, requireReadableBoard, requireReadableCard, TaskError, withBoardLock, type ArchivedCursor } from "./service";
 import { readViewPrefs } from "./archive";
 import { AUDIENCE_ALL_USERS } from "../team/roles";
 import { groupGrantExists } from "../access/groups";
 import { avatarUrlsFor, integrationIdsAmong } from "../avatars";
+import { activityValue, recordCardActivity } from "./activity";
+
+/**
+ * Card history (lane ACTIVITY): a relation added or removed is recorded on both cards, each with the type
+ * as it sees it. A reader who cannot open the other card sees the entry without its title (activity.ts).
+ */
+function recordRelationActivity(userId: string, kind: "relation_added" | "relation_removed", cardId: string, otherCardId: string, type: RelationType) {
+  const boardOf = (id: string) => (db.query("SELECT board_id FROM cards WHERE id = ?").get(id) as { board_id: string } | null)?.board_id;
+  for (const [card, other, seen] of [[cardId, otherCardId, type], [otherCardId, cardId, inverseType(type)]] as const) {
+    const boardId = boardOf(card);
+    if (boardId) recordCardActivity({ cardId: card, boardId, actorId: userId, kind, payload: { item: { ...activityValue.card(other)!, detail: seen } } });
+  }
+}
 
 /**
  * Typed card relations (WAVE_13_TASK_CARD_UX.md D104–D107, §3.2, T90, T91).
@@ -125,6 +138,7 @@ export function insertRelation(userId: string, cardId: string, otherCardId: stri
     if (isUniqueViolation(error)) throw new TaskError(409, "These cards are already related", "RELATION_EXISTS");
     throw error;
   }
+  recordRelationActivity(userId, "relation_added", cardId, otherCardId, type);
   return { id, kind: row.kind, otherBoardId: other.board.id };
 }
 
@@ -151,11 +165,12 @@ export async function deleteRelation(userId: string, cardId: string, relationId:
   const { board } = requireCardAt(cardId, userId, "edit");
   return withBoardLock(board.id, () => {
     requireCardAt(cardId, userId, "edit");
-    const row = db.query("SELECT id, kind FROM card_relations WHERE id = ?1 AND (source_card_id = ?2 OR target_card_id = ?2)").get(relationId, cardId) as
-      { id: string; kind: RelationKind } | null;
+    const row = db.query("SELECT id, kind, source_card_id AS source, target_card_id AS target FROM card_relations WHERE id = ?1 AND (source_card_id = ?2 OR target_card_id = ?2)").get(relationId, cardId) as
+      ({ id: string } & StoredRelation) | null;
     if (!row) throw new TaskError(404, "Relation not found");
     db.transaction(() => {
       db.query("DELETE FROM card_relations WHERE id = ?").run(relationId);
+      recordRelationActivity(userId, "relation_removed", cardId, row.source === cardId ? row.target : row.source, relationTypeFor(row, cardId));
       audit(userId, null, "task.relation_delete", { boardId: board.id, cardId, relationId, kind: row.kind });
     })();
     return { ok: true as const };
@@ -242,9 +257,18 @@ export function archivedPage(cards: Array<{ id: string; archived_at: string | nu
 function trimCards(list: ReturnType<typeof getBoardWithRelationCounts>["cards"]) {
   const users: Record<string, BoardPayloadUser> = {};
   // Lane TASKS (D605): `done_at` is left out and `archived_at` sent only when set, so the trim holds.
-  const cards = list.map(({ board_id: _board, assignees, assignee_id: _id, assignee_name: _name, done_at: _done, archived_at: archivedAt, ...card }) => {
+  // D720: the start fields are sent only on a card with a start (most have none), so the trim holds too.
+  // Lane ESTIMATES (D752): `estimate` likewise only when set (a missing one reads as none), so the keys
+  // lane's per-card `number` still fits under the 1.2 MB ceiling (tasksBoardPayload).
+  const cards = list.map(({ board_id: _board, assignees, assignee_id: _id, assignee_name: _name, done_at: _done, archived_at: archivedAt,
+    start_on: startOn, start_time: startTime, start_tz: startTz, start_at: startAt, estimate, ...card }) => {
     for (const assignee of assignees) users[assignee.id] ??= { display_name: assignee.display_name, can_read: assignee.can_read };
-    return { ...card, ...(archivedAt ? { archived_at: archivedAt } : {}), assignee_ids: assignees.map((assignee) => assignee.id) };
+    return {
+      ...card, ...(archivedAt ? { archived_at: archivedAt } : {}),
+      ...(startOn ? { start_on: startOn, start_time: startTime, start_tz: startTz, start_at: startAt } : {}),
+      ...(estimate !== null && estimate !== undefined ? { estimate } : {}),
+      assignee_ids: assignees.map((assignee) => assignee.id)
+    };
   });
   // Wave 35 (D299): each assignee's picture, beside the name the map already carries.
   const avatars = avatarUrlsFor(Object.keys(users));

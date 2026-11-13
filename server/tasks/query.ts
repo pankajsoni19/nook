@@ -1,13 +1,14 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { db } from "../db";
 import { dateInZone } from "../today/registry";
-import { addQueryDays, dueWindow, parse, format, SPRINT_VALUES, type FilterTerm, type TaskQuery } from "../../shared/taskQuery";
+import { addQueryDays, dueWindow, parse, format, SPRINT_VALUES, type FilterTerm, type QuerySort, type TaskQuery } from "../../shared/taskQuery";
 import { EFFECTIVE_SPRINT_SQL } from "./sprintData";
 import { boardLevel, readableBoard, readableBoardPredicate } from "./access";
 import type { ItemLevel } from "../access/levels";
 import { assigneesForCards, type CardAssignee } from "./assignees";
-import { dueAt } from "./dueTime";
+import { dueAt, startAt } from "./dueTime";
 import { TaskError } from "./service";
+import { visibleEstimateSql } from "./estimateSql";
 import { AUDIENCE_ALL_USERS, audienceAllUsersFor, can } from "../team/roles";
 import { userRole } from "../team/userRole";
 import { groupGrantExists } from "../access/groups";
@@ -41,6 +42,9 @@ import { parseStructure } from "../../shared/boardStructure";
 export type Binding = string | number;
 export type CompiledFilter = { where: string; params: Record<string, Binding> };
 export type CompileContext = { userId: string; today: string; nowTime: string };
+
+/** A card's estimate as readers see it (lane ESTIMATES, D752, D756): null while its board `b` has estimates off. */
+const HAS_ESTIMATE_VALUE = visibleEstimateSql("b.estimate_kind");
 
 /** The normalized column state (migration 020, D141), kept equal to `is_done` by the service. */
 export const COLUMN_STATE = "col.state";
@@ -154,6 +158,29 @@ function termSql(term: FilterTerm, compiler: Compiler): string {
         }
       }
       break;
+    case "start":
+      // The civil start date (D722), as `due:` reads `due_on`; `start:` has no overdue.
+      for (const value of values) {
+        const window = dueWindow(value, compiler.context.today);
+        switch (window.kind) {
+          case "none":
+            parts.push("k.start_on IS NULL");
+            break;
+          case "overdue":
+            parts.push("0");
+            break;
+          case "range":
+            parts.push(window.from === window.to ? `k.start_on = ${compiler.bind(window.from)}` : `k.start_on BETWEEN ${compiler.bind(window.from)} AND ${compiler.bind(window.to)}`);
+            break;
+          case "before":
+            parts.push(`k.start_on < ${compiler.bind(window.date)}`);
+            break;
+          case "after":
+            parts.push(`k.start_on > ${compiler.bind(window.date)}`);
+            break;
+        }
+      }
+      break;
     case "parent": {
       // Parents are on the card's own board (D133), so another board's card id simply matches nothing.
       const ids = values.filter((value) => value !== "none");
@@ -181,7 +208,7 @@ function termSql(term: FilterTerm, compiler: Compiler): string {
       break;
     }
     case "has":
-      for (const value of values) parts.push(value === "blocked" ? hasOpenBlocker : value === "subtasks" ? hasSubtasks : hasRelation);
+      for (const value of values) parts.push(value === "blocked" ? hasOpenBlocker : value === "subtasks" ? hasSubtasks : value === "estimate" ? `${HAS_ESTIMATE_VALUE} IS NOT NULL` : hasRelation);
       break;
     case "text": {
       const text = compiler.bind(values[0]!);
@@ -209,8 +236,8 @@ export function compileTaskQuery(query: TaskQuery, context: CompileContext): Com
 // ---------------------------------------------------------------------------
 // Running a query.
 
-export const QUERY_SORTS = ["due", "updated", "created", "title", "board"] as const;
-export type QuerySort = typeof QUERY_SORTS[number];
+// One list with the client's Sort menu (src/tasks/home/homeUrl.ts).
+export { QUERY_SORTS, type QuerySort } from "../../shared/taskQuery";
 /** Server-side groups: single-valued dimensions only, so a group is one contiguous run across pages. Multi-valued ones (assignee, tag) group on the client. */
 export const QUERY_GROUPS = ["none", "board", "state", "due"] as const;
 export type QueryGroup = typeof QUERY_GROUPS[number];
@@ -224,6 +251,8 @@ type KeyPart = { sql: string; desc: boolean };
 const SORT_PARTS: Record<QuerySort, KeyPart[]> = {
   // Dates are 1900–2999 and times ≤ 23:59, so the sentinels put undated cards and date-only cards last.
   due: [{ sql: "COALESCE(k.due_on, '9999-12-31')", desc: false }, { sql: "COALESCE(k.due_time, '99:99')", desc: false }],
+  // The start (D722), like due: cards without a start last, date-only starts after timed ones that day.
+  start: [{ sql: "COALESCE(k.start_on, '9999-12-31')", desc: false }, { sql: "COALESCE(k.start_time, '99:99')", desc: false }],
   updated: [{ sql: "k.updated_at", desc: true }],
   created: [{ sql: "k.created_at", desc: true }],
   title: [{ sql: "lower(k.title)", desc: false }],
@@ -248,6 +277,8 @@ export type QueriedCard = {
   is_done: 0 | 1;
   /** When the card was archived (D605, D610), or null; archived cards still match. */
   archived_at: string | null;
+  /** The card's key on its board, such as MYT-12 (lane KEYS, D710). */
+  key: string | null;
   position: number;
   title: string;
   description_excerpt: string;
@@ -258,6 +289,11 @@ export type QueriedCard = {
   due_time: string | null;
   due_tz: string | null;
   due_at: string | null;
+  /** The optional start (D720), shaped like the due fields. */
+  start_on: string | null;
+  start_time: string | null;
+  start_tz: string | null;
+  start_at: string | null;
   assignees: CardAssignee[];
   tags: Array<{ id: string; name: string; color: string }>;
   flags: string[];
@@ -270,6 +306,9 @@ export type QueriedCard = {
   /** The card's sprint (17B): stored on the work level, the parent's below it; and its name. */
   sprint_id: string | null;
   sprint_name: string | null;
+  /** Lane ESTIMATES (D756): the card's estimate (null without one or with its board's estimates off) and what it means there. */
+  estimate: number | null;
+  estimate_kind: "none" | "points" | "hours";
 };
 
 /** What a query's ids mean to this caller (T116): names only for what they can read. */
@@ -371,8 +410,10 @@ function keysetAfter(parts: KeyPart[], names: string[]) {
   return `(${alternatives.join(" OR ")})`;
 }
 
+/** A page cursor is bound to the viewer's zone and day when the results move with "today": the due
+ *  group, or a `due:` or `start:` keyword (D722), so a later page never continues another day's query. */
 const dependsOnToday = (query: TaskQuery, group: QueryGroup) =>
-  group === "due" || query.terms.some((term) => term.key === "due" && term.values.some((value) => ["overdue", "today", "week", "next-week"].includes(value)));
+  group === "due" || query.terms.some((term) => (term.key === "due" || term.key === "start") && term.values.some((value) => ["overdue", "today", "week", "next-week"].includes(value)));
 
 /**
  * Runs a query as `userId` over live cards on boards they can read. Keyset
@@ -411,10 +452,12 @@ export function runQuery(userId: string, query: TaskQuery, input: Omit<QueryInpu
     WHERE k.deleted_at IS NULL AND ${readableBoardPredicate} AND (${compiled.where}) AND ${boardScope}`;
   const rows = db.query(`SELECT k.id, k.board_id, b.name AS board_name, k.column_id, col.name AS column_name, ${COLUMN_STATE} AS column_state, col.is_done,
       k.position, k.title, k.description_excerpt, k.revision, k.created_by, cu.display_name AS creator_name,
-      k.due_on, k.due_time, k.due_tz, k.archived_at, k.created_at, k.updated_at, k.parent_card_id, k.level,
+      k.due_on, k.due_time, k.due_tz, k.start_on, k.start_time, k.start_tz, k.archived_at, k.created_at, k.updated_at, k.parent_card_id, k.level,
+      CASE WHEN b.code IS NOT NULL AND k.number IS NOT NULL THEN b.code || '-' || k.number END AS "key",
       (SELECT p.title FROM cards p WHERE p.id = k.parent_card_id AND p.board_id = k.board_id AND p.deleted_at IS NULL) AS parent_title,
       ${EFFECTIVE_SPRINT_SQL} AS sprint_id,
       (SELECT s.name FROM board_sprints s WHERE s.board_id = k.board_id AND s.id = ${EFFECTIVE_SPRINT_SQL}) AS sprint_name,
+      ${HAS_ESTIMATE_VALUE} AS estimate, b.estimate_kind,
       ${parts.map((part, index) => `${part.sql} AS sk${index}`).join(", ")}
     FROM cards k JOIN boards b ON b.id = k.board_id JOIN board_columns col ON col.id = k.column_id LEFT JOIN users cu ON cu.id = k.created_by
     WHERE k.deleted_at IS NULL AND ${readableBoardPredicate} AND (${compiled.where}) AND ${boardScope} AND ${after}
@@ -565,10 +608,11 @@ function withCardDetails(rows: Array<Record<string, unknown>>): QueriedCard[] {
     flags.set(row.card_id, list);
   }
   return rows.map((row) => {
-    const card = Object.fromEntries(Object.entries(row).filter(([name]) => !/^sk\d+$/.test(name))) as Omit<QueriedCard, "due_at" | "assignees" | "tags" | "flags">;
+    const card = Object.fromEntries(Object.entries(row).filter(([name]) => !/^sk\d+$/.test(name))) as Omit<QueriedCard, "due_at" | "start_at" | "assignees" | "tags" | "flags">;
     return {
       ...card,
       due_at: dueAt(card),
+      start_at: startAt(card),
       assignees: assignees.get(card.id) ?? [],
       tags: tags.get(card.id) ?? [],
       flags: (flags.get(card.id) ?? []).sort((a, b) => FLAG_ORDER.indexOf(a) - FLAG_ORDER.indexOf(b))

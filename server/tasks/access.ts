@@ -13,6 +13,9 @@ export type BoardRow = {
   visibility: BoardVisibility;
   /** The `all_users` audience level (migration 025, D272); `edit` keeps D38 for existing boards. */
   share_role: "view" | "comment" | "edit";
+  /** Migration 082 (lane ESTIMATES, D750, D751): what card estimates mean here, and the points scale. */
+  estimate_kind: "none" | "points" | "hours";
+  estimate_scale: "fibonacci" | "free";
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
@@ -88,6 +91,10 @@ export type CardRow = {
   /** Migration 015 (D100). */
   due_time: string | null;
   due_tz: string | null;
+  /** Migration 080 (D720): the optional start, shaped like the due fields. */
+  start_on: string | null;
+  start_time: string | null;
+  start_tz: string | null;
   /** Legacy mirror of the first assignee (D102); read `card_assignees` instead. */
   assignee_id: string | null;
   /** Migration 074 (D603, D605). */

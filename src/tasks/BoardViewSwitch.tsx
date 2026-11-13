@@ -1,5 +1,5 @@
 import { useRef, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
-import { CalendarDays, Columns3, List, Table2 } from "lucide-react";
+import { CalendarDays, ChartGantt, Columns3, List, Table2 } from "lucide-react";
 import type { BoardViewId } from "./boardUrl";
 
 type ViewChoice = { id: BoardViewId; label: string; icon: ReactNode };
@@ -8,7 +8,8 @@ export const VIEW_CHOICES: ViewChoice[] = [
   { id: "board", label: "Columns", icon: <Columns3 /> },
   { id: "table", label: "Table", icon: <Table2 /> },
   { id: "list", label: "List", icon: <List /> },
-  { id: "calendar", label: "Calendar", icon: <CalendarDays /> }
+  { id: "calendar", label: "Calendar", icon: <CalendarDays /> },
+  { id: "timeline", label: "Timeline", icon: <ChartGantt /> }
 ];
 
 type BoardViewSwitchProps = {

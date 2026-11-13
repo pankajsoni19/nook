@@ -44,7 +44,7 @@ export const NOOK_AGENT_TOOLS: ReadonlySet<string> = new Set([
   // Files
   "list_documents", "get_document_metadata", "read_document_text", "search_documents", "create_text_file", "rename_file", "move_file",
   // Tasks
-  "list_boards", "list_cards", "get_card", "list_children", "list_sprints", "search_cards", "create_card", "update_card", "move_card", "link_cards", "comment_on_card",
+  "list_boards", "list_cards", "get_card", "get_card_activity", "list_children", "list_sprints", "search_cards", "create_card", "update_card", "move_card", "link_cards", "comment_on_card",
   "manage_tags", "set_wip_limit", "create_sprint", "start_sprint", "link_attachment", "list_views", "query_cards",
   // Calendar
   "list_calendars", "list_events", "get_event", "create_event", "update_event", "create_reminder",
@@ -70,6 +70,9 @@ export const NOOK_NEVER_TOOLS: ReadonlySet<string> = new Set([
   "attach_file_to_row",
   // Lane VIEWS2 (D660): a saved view is a person's own organisation of Tasks and has no proposal kind.
   "save_view",
+  // Lane KEYS (D716): moving a card to another board shows its comments and files to that board's
+  // readers; it has no proposal kind, so it stays with people and keys.
+  "move_card_to_board",
   // Analytics reports (Wave 45, Wave 48; C2): agents read reports (NOOK_AGENT_TOOLS) but never the data
   // sources, and never change a report: its queries (`update_report_query`, an open SQL proxy, T383),
   // schedule, instructions, or proposals. A report's own edit agent works through its instructions.

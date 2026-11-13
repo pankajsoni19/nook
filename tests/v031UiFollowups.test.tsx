@@ -21,23 +21,46 @@ const rule = (sheet: string, selector: string) => {
 const phoneRules = (sheet: string) => sheet.split("@media (max-width: 760px)").slice(1).join("\n");
 
 describe("phone sizing at 390 px", () => {
-  test("Tasks: the board header is two rows; the view switch leads a filter row that scrolls sideways", async () => {
+  test("Tasks: two rows under the board title at 375 px, nothing hidden", async () => {
     const view = await read("tasks/BoardView.tsx");
     // A computer keeps the switch in the header; a phone moves it into the controls row with the filters.
     expect(view).toContain("{detail && !phone && viewSwitch}");
     // Lane VIEWS (D638): the saved-view picker rides in the same row, after the view switch.
     expect(view).toContain('{detail && (phone ? <div className="task-board-controls">{viewSwitch}{swimSelect}{savedViewPicker}{filterBar}</div> : filterBar)}');
+    // Supersedes v0.31's sideways-scrolling row (Swimlanes, View, and the filters past the right edge)
+    // and the wrap after it (three lines at 375 px): on a phone Swimlanes and the saved view are icon
+    // chips beside the switch, named by their value; the saved view's ⋯ joins the filter row.
+    expect(view).toContain('iconOnly={phone} icon={<Rows3 />}');
+    expect(view).toContain("savedViews.showPicker ? phone ? savedViews.compactPicker : savedViews.picker : null");
+    expect(view).toContain("actions={phone ? <>{savedViews.filterActions}{savedViews.more}</> : savedViews.filterActions}");
+    const views = await Bun.file(join(root, "tasks/views/BoardSavedViews.tsx")).text();
+    expect(views).toContain("iconOnly icon={<Bookmark />}");
     const phone = phoneRules(await read("tasks/boardViews.css"));
+    expect(phone).toContain("two rows under the title, nothing hidden");
     expect(rule(phone, "  .task-board-header")).toContain("flex-wrap: nowrap");
     const controls = rule(phone, "  .task-board-controls");
-    for (const declaration of ["overflow-x: auto", "flex: none", "min-width: 0"]) expect(controls).toContain(declaration);
-    expect(rule(phone, "  .task-board-controls > .task-filter-bar")).toContain("flex-wrap: nowrap");
-    // Every control in the row stays 44 px tall (the switch's buttons and the filter chips).
+    for (const declaration of ["flex-wrap: wrap", "flex: none", "min-width: 0"]) expect(controls).toContain(declaration);
+    expect(controls).not.toContain("overflow-x: auto");
+    // Row two: the filter bar takes a line of its own and the search fills it.
+    expect(rule(phone, "  .task-board-controls > .task-filter-bar")).toContain("flex: 1 1 100%");
+    expect(rule(phone, "  .task-board-controls .task-filter-text")).toContain("flex: 1 1 160px");
+    // Every control in the row stays 44 px (the switch's buttons, the icon chips, the filter chips).
     expect(rule(phone, "  .task-view-switch .icon-button")).toContain("height: 44px");
+    expect(rule(phone, "  .task-board-controls .ui-select-icon-only")).toContain("min-height: 44px");
+    // Row one fits 375 − 2 × 16 px: the switch (5 × 44 + 4 × 2 gaps + 2 × 2 padding + 2 × 1 border)
+    // and two 48 px icon chips with 4 px gaps.
+    expect((5 * 44 + 4 * 2 + 4 + 2) + 2 * (4 + 48)).toBeLessThanOrEqual(375 - 2 * 16);
     // Editing a filter needs the width: the row wraps then.
     expect(phone).toContain(".task-board-controls:has(.task-filter-editor) { flex-wrap: wrap; overflow-x: visible; }");
     // The old third row (the switch on a line of its own) is gone.
     expect(phone).not.toContain(".task-view-switch { order: 5; }");
+  });
+
+  test("an icon-only Select names itself by its value and keeps the label for the sheet", async () => {
+    const select = await read("ui/Select.tsx");
+    expect(select).toContain("const name = iconOnly ? current?.label ?? label ?? placeholder : label ?? current?.label ?? placeholder;");
+    expect(select).toContain("title={iconOnly ? name : undefined}");
+    expect(select).toContain('swatchOnly || iconOnly ? " ui-visually-hidden" : ""');
   });
 
   test("Collections: the actions follow the toolbar in one scrolling row under the title", async () => {

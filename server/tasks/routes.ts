@@ -8,12 +8,16 @@ import { attachToCard, detachFromCard, listAttachments } from "./attachments";
 import { archivedCardsPage, boardPayload, listRelations, MAX_RELATIONS_PER_CARD } from "./cardRelations";
 import { RELATION_TYPES, type RelationType } from "./relations";
 import { registerCardRelationRoutes } from "./relationRoutes";
+import { registerCardActivityRoutes } from "./activityRoutes";
 import { CARD_FLAGS, createTag, deleteTag, MAX_TAGS_PER_CARD, TAG_COLORS, TAG_NAME_MAX, updateTag } from "./tags";
 import { registerTaskQueryRoutes } from "./queryRoutes";
 import { cardHierarchy } from "./hierarchy";
 import { COMMENT_MAX_BYTES, COMMENT_PAGE_SIZE, createComment, deleteComment, listComments, updateComment } from "./comments";
 import { avatarUrlsFor, integrationIdsAmong } from "../avatars";
 import { archiveCard, AUTO_ARCHIVE_MAX_DAYS, unarchiveCard, writeViewPrefs } from "./archive";
+import { freeBoardCode, readableCardForKey } from "./keys";
+import { moveCardToBoard } from "./moveBoard";
+import { BOARD_CODE_MAX, boardCodeMessage, CARD_KEY_PATTERN } from "../../shared/boardKeys";
 
 /** Web payloads only (MCP output unchanged): each comment author's picture, beside the name (QA U4). */
 function withAuthorAvatars<T extends { author_id: string | null }>(comments: T[]) {
@@ -42,12 +46,15 @@ import {
   getSharing,
   listBoardReaders,
   listBoards,
+  listColumns,
   patchColumn,
+  requireReadableBoard,
   putSharing,
   updateBoard,
   TaskError
 } from "./service";
 import { BOARD_TEMPLATES, validateStructure } from "../../shared/boardStructure";
+import { ESTIMATE_KINDS, ESTIMATE_SCALES } from "../../shared/estimates";
 import { validTimeZone } from "../today/registry";
 
 // C0/C1 controls and bidi overrides never belong in a board, column, or card name.
@@ -57,8 +64,12 @@ const label = (max: number) => z.string().trim().min(1).max(max).refine((value) 
 export const boardNameSchema = z.object({ name: label(120) }).strict();
 /** `POST /boards`: a name and an optional template (D136). */
 /** `tz`: the creator's IANA zone, so a template's first sprint starts on their today (QA 0.9.0). */
+/** A board code as typed (D710): the service upper-cases it and answers 400 CODE_INVALID or 409 CODE_TAKEN. */
+const boardCodeSchema = z.string().trim().min(1).max(BOARD_CODE_MAX, boardCodeMessage);
 export const boardCreateSchema = z.object({
   name: label(120), template: z.enum(BOARD_TEMPLATES).optional(),
+  /** The board's short code (D711); omitted, the name suggests a free one. */
+  code: boardCodeSchema.optional(),
   tz: z.string().max(64).refine((value) => validTimeZone(value) !== null, "Unknown time zone").optional()
 }).strict();
 /**
@@ -68,9 +79,16 @@ export const boardCreateSchema = z.object({
 export const boardPatchSchema = z.object({
   name: label(120).optional(),
   structure: z.unknown().optional(),
-  autoArchiveDays: z.number().int().min(1).max(AUTO_ARCHIVE_MAX_DAYS).nullable().optional()
+  autoArchiveDays: z.number().int().min(1).max(AUTO_ARCHIVE_MAX_DAYS).nullable().optional(),
+  /** The board's short code (owner only, D712); the old code keeps resolving (D714). */
+  code: boardCodeSchema.optional(),
+  /** Lane ESTIMATES (D750, D751): what card estimates mean on this board, and the points scale. */
+  estimateKind: z.enum(ESTIMATE_KINDS).optional(),
+  estimateScale: z.enum(ESTIMATE_SCALES).optional()
 }).strict()
-  .refine((value) => value.name !== undefined || value.structure !== undefined || value.autoArchiveDays !== undefined, "Provide a name, a structure, or autoArchiveDays");
+  .refine((value) => value.name !== undefined || value.structure !== undefined || value.autoArchiveDays !== undefined || value.code !== undefined
+    || value.estimateKind !== undefined || value.estimateScale !== undefined,
+    "Provide a name, a structure, autoArchiveDays, code, estimateKind, or estimateScale");
 /** `PUT /boards/:b/view` (D602, D606): the caller's own collapsed columns and archived-card choice. */
 export const boardViewSchema = z.object({
   collapsedColumnIds: z.array(uuid).max(40).optional(),
@@ -130,6 +148,12 @@ const flagsSchema = z.array(z.enum(CARD_FLAGS)).max(CARD_FLAGS.length).refine((f
 const createRelationsSchema = z.array(z.object({ targetCardId: uuid, type: z.enum(RELATION_TYPES as [RelationType, ...RelationType[]]) }).strict())
   .max(MAX_RELATIONS_PER_CARD)
   .refine((relations) => new Set(relations.map((relation) => relation.targetCardId.toLowerCase())).size === relations.length, "Each card can be related once");
+/**
+ * An estimate (lane ESTIMATES, D753): any JSON number or null here; the service checks it against the
+ * board (400 ESTIMATES_OFF while estimates are off, ESTIMATE_INVALID out of 0–999, past two
+ * decimals, or off a Fibonacci scale), so REST and MCP get the same coded errors.
+ */
+const estimateSchema = z.number().nullable();
 /** A card level (migration 019): 0–2; the service also checks the board's level count (D121). */
 const levelSchema = z.number().int().min(0).max(2);
 export const tagCreateSchema = z.object({ name: label(TAG_NAME_MAX), color: z.enum(TAG_COLORS).optional() }).strict();
@@ -142,6 +166,10 @@ export const cardCreateSchema = z.object({
   dueOn: dueOnSchema.nullable().optional(),
   dueTime: dueTimeSchema.nullable().optional(),
   dueTz: dueTzSchema.nullable().optional(),
+  /** The optional start (D720): the due fields' shapes and rules; on or before the due date (D721). */
+  startOn: dueOnSchema.nullable().optional(),
+  startTime: dueTimeSchema.nullable().optional(),
+  startTz: dueTzSchema.nullable().optional(),
   assigneeIds: assigneeIdsSchema.optional(),
   tagIds: tagIdsSchema.optional(),
   flags: flagsSchema.optional(),
@@ -155,6 +183,8 @@ export const cardCreateSchema = z.object({
   level: levelSchema.optional(),
   /** A planned or active sprint of this board (17B); work-level cards only. */
   sprintId: uuid.nullable().optional(),
+  /** Points or hours as the board's estimate kind says (D753). */
+  estimate: estimateSchema.optional(),
   afterCardId: uuid.nullable().optional()
 }).strict();
 export const cardPatchSchema = z.object({
@@ -163,6 +193,10 @@ export const cardPatchSchema = z.object({
   dueOn: dueOnSchema.nullable().optional(),
   dueTime: dueTimeSchema.nullable().optional(),
   dueTz: dueTzSchema.nullable().optional(),
+  /** The start (D720): startOn null clears it and its time; startTime null clears only the time. */
+  startOn: dueOnSchema.nullable().optional(),
+  startTime: dueTimeSchema.nullable().optional(),
+  startTz: dueTzSchema.nullable().optional(),
   /** Legacy (D103), kept for the Wave 10 client and MCP; 400 together with assigneeIds. */
   assigneeId: uuid.nullable().optional(),
   assigneeIds: assigneeIdsSchema.optional(),
@@ -174,13 +208,15 @@ export const cardPatchSchema = z.object({
   level: levelSchema.optional(),
   /** Plan the card in a sprint of its board, or null for the backlog (17B); work-level cards only. */
   sprintId: uuid.nullable().optional(),
+  /** Points or hours (D753), or null to clear. */
+  estimate: estimateSchema.optional(),
   revision: z.number().int().positive()
 }).strict()
   .refine((value) => value.assigneeId === undefined || value.assigneeIds === undefined, "Send assigneeIds or the legacy assigneeId, not both")
   .refine((value) => value.title !== undefined || value.description !== undefined || value.dueOn !== undefined || value.dueTime !== undefined
-    || value.dueTz !== undefined || value.assigneeId !== undefined || value.assigneeIds !== undefined || value.tagIds !== undefined || value.flags !== undefined
-    || value.parentId !== undefined || value.level !== undefined || value.sprintId !== undefined,
-  "Provide a title, description, dueOn, dueTime, assigneeIds, tagIds, flags, parentId, level, or sprintId");
+    || value.dueTz !== undefined || value.startOn !== undefined || value.startTime !== undefined || value.startTz !== undefined || value.assigneeId !== undefined || value.assigneeIds !== undefined || value.tagIds !== undefined || value.flags !== undefined
+    || value.parentId !== undefined || value.level !== undefined || value.sprintId !== undefined || value.estimate !== undefined,
+  "Provide a title, description, dueOn, dueTime, startOn, startTime, assigneeIds, tagIds, flags, parentId, level, sprintId, or estimate");
 // A blank body is allowed only with files (files-only comments, uploads everywhere D397): the server
 // stores a generated body then (shared/commentFiles.ts).
 const commentBody = z.string().refine((value) => Buffer.byteLength(value, "utf8") <= COMMENT_MAX_BYTES, `Comments can be at most ${COMMENT_MAX_BYTES} bytes`);
@@ -197,6 +233,8 @@ export const attachmentSchema = z.object({ documentId: uuid, commentId: uuid.nul
 export const commentPatchSchema = z.object({ body: commentBody.optional(), attachmentIds: commentFiles.optional(), confirmed: z.boolean().optional() }).strict()
   .refine((value) => value.body !== undefined || (value.attachmentIds?.length ?? 0) > 0, "Provide a body or attachmentIds");
 export const cardMoveSchema = z.object({ columnId: uuid, afterCardId: uuid.nullable() }).strict();
+/** `POST /cards/:k/move-board` (D716): the destination board and, optionally, its column (default: its first column that is not done). */
+export const cardMoveBoardSchema = z.object({ boardId: uuid, columnId: uuid.nullable().optional() }).strict();
 
 const id = (c: Context<AppEnv>, name: string) => uuid.parse(c.req.param(name));
 const invalid = (detail: string) => ({ error: "Invalid request", details: [detail] });
@@ -245,17 +283,44 @@ async function respond(c: Context<AppEnv>, operation: () => unknown, status: 200
 export function registerTaskRoutes(app: Hono<AppEnv>) {
   // First, so GET /cards/search is not taken for a card id.
   registerCardRelationRoutes(app);
+  // Lane ACTIVITY: GET /cards/:k/activity, the card's history.
+  registerCardActivityRoutes(app);
 
   app.get("/api/tasks/boards", (c) => c.json({ boards: listBoards(c.get("user").id) }));
 
   app.post("/api/tasks/boards", async (c) => {
     const body = await parseJson(c.req.raw, boardCreateSchema);
-    return respond(c, () => createBoard(c.get("user").id, body.name, body.template, body.tz), 201);
+    return respond(c, () => createBoard(c.get("user").id, body.name, body.template, body.tz, body.code), 201);
+  });
+
+  // D711: the code New board suggests for a name, already free (codes are workspace-wide, T461).
+  app.get("/api/tasks/board-codes/suggest", (c) => {
+    const name = (c.req.query("name") ?? "").slice(0, 120);
+    return c.json({ code: freeBoardCode(name) });
+  });
+
+  // D713: a card key (MYT-12, any case; old codes and keys of moved cards too) to the card, for the
+  // short link /tasks/MYT-12. A card the caller cannot read is 404 like an unknown key (T460).
+  app.get("/api/tasks/keys/:key", (c) => {
+    const key = c.req.param("key");
+    if (!CARD_KEY_PATTERN.test(key)) return c.json(invalid("key must look like ABC-12"), 400);
+    const found = readableCardForKey(c.get("user").id, key);
+    return found ? c.json(found) : c.json({ error: "Card not found" }, 404);
   });
 
   app.get("/api/tasks/boards/:boardId", (c) => {
     const boardId = id(c, "boardId");
     return respond(c, () => boardPayload(c.get("user").id, boardId));
+  });
+
+  // A board's columns alone, in board order, for anyone who can read it (Move to another board lists
+  // a target board's columns without loading its cards).
+  app.get("/api/tasks/boards/:boardId/columns", (c) => {
+    const boardId = id(c, "boardId");
+    return respond(c, () => {
+      requireReadableBoard(boardId, c.get("user").id);
+      return { columns: listColumns(boardId) };
+    });
   });
 
   // D634: the next page of archived cards after `before` (the last page's `archivedPage.next`), newest archived first.
@@ -279,7 +344,9 @@ export function registerTaskRoutes(app: Hono<AppEnv>) {
     return respond(c, () => updateBoard(userId, boardId, {
       ...(body.name !== undefined ? { name: body.name } : {}),
       ...(structure?.ok ? { structure: structure.structure, keepSprintDefaults } : {}),
-      ...(body.autoArchiveDays !== undefined ? { autoArchiveDays: body.autoArchiveDays } : {})
+      ...(body.autoArchiveDays !== undefined ? { autoArchiveDays: body.autoArchiveDays } : {}),
+      ...(body.code !== undefined ? { code: body.code } : {}),
+      ...(body.estimateKind !== undefined || body.estimateScale !== undefined ? { estimates: { kind: body.estimateKind, scale: body.estimateScale } } : {})
     }));
   });
 
@@ -462,6 +529,12 @@ export function registerTaskRoutes(app: Hono<AppEnv>) {
     const cardId = id(c, "cardId");
     const body = await parseJson(c.req.raw, cardMoveSchema);
     return respond(c, () => moveCard(c.get("user").id, cardId, body));
+  });
+
+  app.post("/api/tasks/cards/:cardId/move-board", async (c) => {
+    const cardId = id(c, "cardId");
+    const body = await parseJson(c.req.raw, cardMoveBoardSchema);
+    return respond(c, async () => withAssigneeAvatars(await moveCardToBoard(c.get("user").id, cardId, body)));
   });
 
   app.delete("/api/tasks/cards/:cardId", (c) => {

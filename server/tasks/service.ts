@@ -6,7 +6,7 @@ import { boardLevel, boardLevels, readableBoard, readableBoardPredicate, readabl
 import { atLeast, type ItemLevel } from "../access/levels";
 import { assigneesForBoard, assigneesForCard, MAX_ASSIGNEES, newAssignees, replaceAssignees, type CardAssignee } from "./assignees";
 import { planInsert, type Positioned } from "./boardOrder";
-import { dueAt, resolveDue, type DueInput } from "./dueTime";
+import { dueAt, resolveDue, resolveStart, startAfterDue, startAt, type DueFields, type DueInput, type StartFields, type StartInput } from "./dueTime";
 import { linkableCardDocument, linkAttachments, needsLinkConfirm } from "./attachments";
 import { insertRelation } from "./cardRelations";
 import { descriptionExcerpt } from "./excerpt";
@@ -22,6 +22,11 @@ import { mailShared, shareMembers } from "../mail/triggers";
 import { GUEST_SHARE_DISABLED, legacyGuestShareBlocked, legacyShareLevels, writeDirectShares } from "../access/shares";
 import { groupGrantExists } from "../access/groups";
 import { foldText } from "../../shared/taskQuery";
+import { boardCodeMessage, normalizeBoardCode } from "../../shared/boardKeys";
+import { boardCodeTaken, freeBoardCode, keyOfCard, writeBoardCode } from "./keys";
+import { visibleEstimateSql } from "./estimateSql";
+import { activityValue, cardActivitySnapshot, recordCardActivity, recordCardChange, recordCardItems, recordSnapshotChanges } from "./activity";
+import { checkEstimate, estimateSettingsOf, type EstimateKind, type EstimateScale, type EstimateSettings } from "../../shared/estimates";
 
 /**
  * Task Boards services (WAVES_7-9.md §3). Routes are thin adapters over these
@@ -99,6 +104,12 @@ export type BoardSummary = {
   auto_archive_days: number | null;
   /** Level names, work level, and sprints (migration 019, D122). */
   structure: BoardStructure;
+  /** The board's short code (migration 079, D710): cards' keys are `<code>-<number>`. */
+  code: string | null;
+  /** What card estimates mean on this board (migration 082, D750): none (off), points, or hours. */
+  estimate_kind: EstimateKind;
+  /** The points scale (D751): fibonacci or free; kept but unused for hours and none. */
+  estimate_scale: EstimateScale;
   created_at: string;
   updated_at: string;
 };
@@ -111,7 +122,7 @@ const boardSummarySelect = `
          b.visibility, b.share_role,
          (SELECT COUNT(*) FROM cards k WHERE k.board_id = b.id AND k.deleted_at IS NULL) AS card_count,
          (SELECT COUNT(*) FROM cards k WHERE k.board_id = b.id AND k.deleted_at IS NULL AND k.archived_at IS NOT NULL) AS archived_count,
-         b.auto_archive_days, b.structure_json, b.created_at, b.updated_at
+         b.auto_archive_days, b.structure_json, b.code, b.estimate_kind, b.estimate_scale, b.created_at, b.updated_at
   FROM boards b JOIN users u ON u.id = b.owner_id
 `;
 
@@ -166,6 +177,12 @@ export type CardSummary = {
   due_tz: string | null;
   /** The computed UTC instant when `due_time` is set, else null. */
   due_at: string | null;
+  /** The optional start (D720, migration 080), shaped like the due fields: a civil date, an optional `HH:MM` in `start_tz`. */
+  start_on: string | null;
+  start_time: string | null;
+  start_tz: string | null;
+  /** The computed UTC instant when `start_time` is set, else null. */
+  start_at: string | null;
   /** Every assignee, in assignment order, at most 20 (D102). */
   assignees: CardAssignee[];
   /** Deprecated (D103): the first assignee's id, kept for one release. */
@@ -194,32 +211,37 @@ export type CardSummary = {
   done_at: string | null;
   /** When the auto-archive sweep archived it, or null (D605). Archived cards are live, not binned. */
   archived_at: string | null;
+  /** Its number on its board (migration 079, D713); the key is the board's code, a hyphen, and this. */
+  number: number | null;
+  /** Points or hours as the board's `estimate_kind` says (migration 082, D750); null without one and on a board with estimates off (D752). */
+  estimate: number | null;
   created_at: string;
   updated_at: string;
 };
+
 
 const cardSelect = (extraColumns = "") => `
   SELECT k.id, k.board_id, k.column_id, k.position, k.title,
          CASE WHEN k.description <> '' THEN 1 ELSE 0 END AS has_description,
          k.description_excerpt, k.revision, k.created_by, cu.display_name AS creator_name, CASE WHEN cu.kind = 'service' THEN 1 ELSE 0 END AS creator_is_integration,
-         k.due_on, k.due_time, k.due_tz,
+         k.due_on, k.due_time, k.due_tz, k.start_on, k.start_time, k.start_tz,
          (SELECT COUNT(*) FROM card_comments cc WHERE cc.card_id = k.id) AS comment_count,
          (SELECT COUNT(*) FROM card_attachments ca WHERE ca.card_id = k.id) AS attachment_count,
          k.parent_card_id, k.level, ${EFFECTIVE_SPRINT_SQL} AS sprint_id,
-         k.done_at, k.archived_at, k.created_at, k.updated_at${extraColumns}
-  FROM cards k LEFT JOIN users cu ON cu.id = k.created_by
+         k.done_at, k.archived_at, k.number, ${visibleEstimateSql("eb.estimate_kind")} AS estimate, k.created_at, k.updated_at${extraColumns}
+  FROM cards k JOIN boards eb ON eb.id = k.board_id LEFT JOIN users cu ON cu.id = k.created_by
 `;
 const cardSummarySelect = cardSelect();
 const cardDetailSelect = cardSelect(", k.description");
 
 /** A selected card row before its computed and grouped fields (due instant, assignees) are attached. */
-type SelectedCard = Omit<CardSummary, "due_at" | "assignees" | "assignee_id" | "assignee_name" | "tag_ids" | "flags" | "child_count" | "done_child_count">;
+type SelectedCard = Omit<CardSummary, "due_at" | "start_at" | "assignees" | "assignee_id" | "assignee_name" | "tag_ids" | "flags" | "child_count" | "done_child_count">;
 type GroupedFields = { assignees: CardAssignee[]; tagIds: string[]; flags: CardFlag[]; rollup: Rollup };
 
 /** Adds the computed and grouped fields; the deprecated `assignee_id`/`assignee_name` are the first assignee (D103). */
 function withCardFields<T extends SelectedCard>(card: T, { assignees, tagIds, flags, rollup }: GroupedFields, instant: typeof dueAt = dueAt) {
   const first = assignees[0];
-  return { ...card, due_at: instant(card), assignees, assignee_id: first?.id ?? null, assignee_name: first?.display_name ?? null, tag_ids: tagIds, flags, ...rollup };
+  return { ...card, due_at: instant(card), start_at: card.start_time ? startAt(card) : null, assignees, assignee_id: first?.id ?? null, assignee_name: first?.display_name ?? null, tag_ids: tagIds, flags, ...rollup };
 }
 const NO_CHILDREN: Rollup = { child_count: 0, done_child_count: 0 };
 
@@ -228,6 +250,18 @@ function requireDue(current: Parameters<typeof resolveDue>[0], input: DueInput) 
   const resolved = resolveDue(current, input);
   if ("error" in resolved) throw new TaskError(400, resolved.error);
   return resolved;
+}
+
+/** The start fields after a change, or 400 with the rule that failed (D720, the due rules). */
+function requireStart(current: StartFields, input: StartInput) {
+  const resolved = resolveStart(current, input);
+  if ("error" in resolved) throw new TaskError(400, resolved.error);
+  return resolved;
+}
+
+/** 400 START_AFTER_DUE when the card's start, as it will be saved, comes after its due date (D721). */
+function requireStartNotAfterDue(start: StartFields, due: DueFields) {
+  if (startAfterDue(start, due)) throw new TaskError(400, "The start must be on or before the due date", "START_AFTER_DUE");
 }
 
 /**
@@ -331,15 +365,17 @@ export function requireOwnedBoard(boardId: string, userId: string) {
 }
 
 /** Creates a board from a template (D136; default Simple kanban): its columns and states, its structure, and any tags. Never cards. */
-export function createBoard(userId: string, name: string, templateId: BoardTemplateId = "kanban", tz?: string) {
+export function createBoard(userId: string, name: string, templateId: BoardTemplateId = "kanban", tz?: string, requestedCode?: string) {
   const template = TEMPLATES[templateId];
   return db.transaction(() => {
     const owned = (db.query("SELECT COUNT(*) AS count FROM boards WHERE owner_id = ? AND deleted_at IS NULL").get(userId) as { count: number }).count;
     if (owned >= LIMITS.boardsPerOwner) throw limitReached(`You can have up to ${LIMITS.boardsPerOwner} boards`);
+    // A code asked for must be free (409 CODE_TAKEN); without one the name suggests a free code (D711).
+    const code = requestedCode === undefined ? freeBoardCode(name) : requireFreeCode(requestedCode, null);
     const id = crypto.randomUUID();
     const timestamp = now();
-    db.query("INSERT INTO boards (id, owner_id, name, structure_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
-      .run(id, userId, name, JSON.stringify(template.structure), timestamp, timestamp);
+    db.query("INSERT INTO boards (id, owner_id, name, structure_json, code, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run(id, userId, name, JSON.stringify(template.structure), code, timestamp, timestamp);
     const insertColumn = db.query("INSERT INTO board_columns (id, board_id, name, position, is_done, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
     // A done column is a done column (D53), as the 011 backfill does for existing boards; states follow D141.
     template.columns.forEach((column, index) => {
@@ -358,6 +394,20 @@ export function createBoard(userId: string, name: string, templateId: BoardTempl
     audit(userId, null, "task.board_create", { boardId: id, ...(templateId !== "kanban" ? { template: templateId } : {}) });
     return { board: boardSummary(id, userId)!, columns: listColumns(id) };
   })();
+}
+
+/**
+ * The code as stored, or 400 CODE_INVALID for a malformed one and 409 CODE_TAKEN for one another
+ * board has or had (D712, D714). Codes are workspace-wide, so CODE_TAKEN says a code is in use
+ * without naming the board (T461).
+ */
+function requireFreeCode(value: string, boardId: string | null) {
+  const code = normalizeBoardCode(value);
+  if (!code) throw new TaskError(400, boardCodeMessage, "CODE_INVALID");
+  if (boardCodeTaken(code, boardId)) {
+    throw new TaskError(409, `The code ${code} is already used by another board`, "CODE_TAKEN", { suggestion: freeBoardCode(code, boardId) });
+  }
+  return code;
 }
 
 export function renameBoard(userId: string, boardId: string, name: string) {
@@ -407,9 +457,12 @@ function checkStructureChange(boardId: string, structure: BoardStructure) {
  * then written in one transaction under the board lock, so a refused structure never leaves the
  * name changed and a failed write leaves neither.
  */
-export function updateBoard(userId: string, boardId: string, input: { name?: string; structure?: BoardStructure; keepSprintDefaults?: boolean; autoArchiveDays?: number | null }) {
+export function updateBoard(userId: string, boardId: string, input: { name?: string; structure?: BoardStructure; keepSprintDefaults?: boolean; autoArchiveDays?: number | null; code?: string; estimates?: Partial<EstimateSettings> }) {
   return withBoardLock(boardId, () => {
     requireBoardAt(boardId, userId, "manage");
+    // The code changes every card's key, so only the owner changes it (D712); old keys keep working (D714).
+    if (input.code !== undefined) requireOwnedBoard(boardId, userId);
+    const code = input.code === undefined ? undefined : requireFreeCode(input.code, boardId);
     const { name } = input;
     // A structure sent without `sprintDefaults` keeps the stored ones; `null` clears them.
     const kept = input.structure && input.keepSprintDefaults ? boardStructure(boardId).sprintDefaults : undefined;
@@ -430,9 +483,41 @@ export function updateBoard(userId: string, boardId: string, input: { name?: str
         db.query("UPDATE boards SET auto_archive_days = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL").run(input.autoArchiveDays, timestamp, boardId);
         audit(userId, null, "task.board_auto_archive", { boardId, days: input.autoArchiveDays });
       }
+      if (code !== undefined) {
+        const before = (db.query("SELECT code FROM boards WHERE id = ?").get(boardId) as { code: string | null }).code;
+        if (writeBoardCode(boardId, code, timestamp)) audit(userId, null, "task.board_code", { boardId, code, previous: before });
+      }
+      if (input.estimates) writeEstimateSettings(userId, boardId, input.estimates, timestamp);
     })();
     return { board: boardSummary(boardId, userId)! };
   });
+}
+
+/** The board's estimate settings (D750, D751); `none` for a missing board. */
+export function boardEstimateSettings(boardId: string): EstimateSettings {
+  return estimateSettingsOf(db.query("SELECT estimate_kind, estimate_scale FROM boards WHERE id = ?").get(boardId) as { estimate_kind: string; estimate_scale: string } | null);
+}
+
+/**
+ * Board settings → Estimates (D752): a new kind and/or scale. Stored card values are never
+ * rewritten: off hides them, on shows them again, and points ↔ hours keeps the numbers (the
+ * settings say they are not converted). Audited `task.board_estimates` with before and after, and
+ * how many live cards hold a value, so a change that reinterprets them is traceable.
+ */
+function writeEstimateSettings(userId: string, boardId: string, change: Partial<EstimateSettings>, timestamp: string) {
+  const before = boardEstimateSettings(boardId);
+  const after = { kind: change.kind ?? before.kind, scale: change.scale ?? before.scale };
+  if (after.kind === before.kind && after.scale === before.scale) return;
+  db.query("UPDATE boards SET estimate_kind = ?, estimate_scale = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL").run(after.kind, after.scale, timestamp, boardId);
+  const estimated = (db.query("SELECT COUNT(*) AS count FROM cards WHERE board_id = ? AND deleted_at IS NULL AND estimate IS NOT NULL").get(boardId) as { count: number }).count;
+  audit(userId, null, "task.board_estimates", { boardId, kind: after.kind, scale: after.scale, kindBefore: before.kind, scaleBefore: before.scale, estimatedCards: estimated });
+}
+
+/** The estimate a write stores (D753), or 400 ESTIMATES_OFF / ESTIMATE_INVALID. */
+function requireEstimate(boardId: string, value: number | null) {
+  const checked = checkEstimate(boardEstimateSettings(boardId), value);
+  if (!checked.ok) throw new TaskError(400, checked.error, checked.code);
+  return checked.value;
 }
 
 /**
@@ -621,13 +706,14 @@ export async function deleteColumn(userId: string, columnId: string) {
 // ---------------------------------------------------------------------------
 // Cards (readers). Every change runs under the board lock.
 
-export type CardDetail = CardSummary & { description: string };
+/** `key` (D710): the card's key on its board now, such as MYT-12. */
+export type CardDetail = CardSummary & { description: string; key: string | null };
 
 export const cardNotFound = () => new TaskError(404, "Card not found");
 
 export function cardDetail(cardId: string): CardDetail | null {
   const card = db.query(`${cardDetailSelect} WHERE k.id = ? AND k.deleted_at IS NULL`).get(cardId) as (SelectedCard & { description: string }) | null;
-  return card ? withCardFields(card, { assignees: assigneesForCard(cardId), tagIds: tagIdsForCard(cardId), flags: flagsForCard(cardId), rollup: rollupFor(cardId) }) : null;
+  return card ? { ...withCardFields(card, { assignees: assigneesForCard(cardId), tagIds: tagIdsForCard(cardId), flags: flagsForCard(cardId), rollup: rollupFor(cardId) }), key: keyOfCard(cardId) } : null;
 }
 
 export function liveCardsIn(columnId: string) {
@@ -643,7 +729,7 @@ function stalePosition(columnId: string) {
 }
 
 /** A column of this board (path and body ids are joined to their board, T39). */
-function requireBoardColumn(boardId: string, columnId: string) {
+export function requireBoardColumn(boardId: string, columnId: string) {
   const column = db.query("SELECT id, wip_limit, state FROM board_columns WHERE id = ? AND board_id = ?").get(columnId, boardId) as { id: string; wip_limit: number | null; state: ColumnState } | null;
   if (!column) throw columnNotFound();
   return column;
@@ -656,7 +742,7 @@ function requireBoardColumn(boardId: string, columnId: string) {
  * restore are always allowed. Every live card in the column counts, except archived ones (hidden
  * from the board, D605).
  */
-function requireColumnRoom(column: { id: string; wip_limit: number | null }) {
+export function requireColumnRoom(column: { id: string; wip_limit: number | null }) {
   if (column.wip_limit === null) return;
   const cardCount = (db.query("SELECT COUNT(*) AS count FROM cards WHERE column_id = ? AND deleted_at IS NULL AND archived_at IS NULL").get(column.id) as { count: number }).count;
   if (cardCount >= column.wip_limit) {
@@ -673,6 +759,8 @@ export function requireReadableCard(cardId: string, userId: string) {
 export type CardCreateInput = {
   columnId: string; title: string; description?: string; dueOn?: string | null; afterCardId?: string | null;
   dueTime?: string | null; dueTz?: string | null;
+  /** The optional start (D720), with the due date's rules; on or before the due date (D721). */
+  startOn?: string | null; startTime?: string | null; startTz?: string | null;
   assigneeIds?: string[];
   /** Tags of this board (D109), at most 10 after deduplication. */
   tagIds?: string[];
@@ -696,6 +784,8 @@ export type CardCreateInput = {
    * active sprint when there is one (Friction 3: routines and MCP clients rarely pass it).
    */
   sprintId?: string | null;
+  /** Points or hours as the board's estimate kind says (D750, D753); null or omitted for none. */
+  estimate?: number | null;
 };
 
 /**
@@ -774,6 +864,8 @@ export function createCard(userId: string, boardId: string, input: CardCreateInp
     for (const assigneeId of assignees ?? []) requireAssignableUser(boardId, assigneeId);
     const tagIds = input.tagIds === undefined ? undefined : requireCardTags(boardId, input.tagIds);
     const due = requireDue({ due_on: null, due_time: null, due_tz: null }, input).value;
+    const start = requireStart({ start_on: null, start_time: null, start_tz: null }, input).value;
+    requireStartNotAfterDue(start, due);
     requireBoardRoom(boardId, { active: 1, total: 1 });
     const attachmentIds = input.attachmentIds === undefined ? [] : [...new Set(input.attachmentIds.map((documentId) => documentId.toLowerCase()))];
     const placement = resolvePlacement(boardId, { parentId: input.parentId ? input.parentId.toLowerCase() : null, level: input.level });
@@ -781,6 +873,7 @@ export function createCard(userId: string, boardId: string, input: CardCreateInp
     const sprintId = input.sprintId === undefined
       ? defaultSprint(boardId, placement.structure, placement.level)
       : resolveSprint(boardId, placement.structure, placement.level, input.sprintId);
+    const estimate = input.estimate === undefined ? null : requireEstimate(boardId, input.estimate);
     const plan = planInsert(liveCardsIn(input.columnId), input.afterCardId);
     if (!plan) throw stalePosition(input.columnId);
     const id = crypto.randomUUID();
@@ -788,14 +881,19 @@ export function createCard(userId: string, boardId: string, input: CardCreateInp
       applyRenumber("cards", plan.renumbered);
       const timestamp = now();
       const description = input.description ?? "";
-      db.query(`INSERT INTO cards (id, board_id, column_id, position, title, description, description_excerpt, due_on, due_time, due_tz, parent_card_id, level, sprint_id, done_at, created_by, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      db.query(`INSERT INTO cards (id, board_id, column_id, position, title, description, description_excerpt, due_on, due_time, due_tz, start_on, start_time, start_tz, parent_card_id, level, sprint_id, done_at, created_by, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(id, boardId, input.columnId, plan.position, input.title, description, descriptionExcerpt(description), due.due_on, due.due_time, due.due_tz,
+          start.start_on, start.start_time, start.start_tz,
           placement.parentId, placement.level, sprintId, column.state === "done" ? timestamp : null, userId, timestamp, timestamp);
+      // Its own statement, so the insert above stays as it was for the parallel lanes (D753).
+      if (estimate !== null) db.query("UPDATE cards SET estimate = ? WHERE id = ?").run(estimate, id);
       if (assignees?.length) replaceAssignees(id, assignees, userId, timestamp);
       if (tagIds?.length) replaceCardTags(id, tagIds, timestamp);
       if (input.flags?.length) replaceCardFlags(id, input.flags, timestamp);
       db.query("UPDATE boards SET updated_at = ? WHERE id = ?").run(timestamp, boardId);
+      // Card history (lane ACTIVITY): "created this card in <column>"; the fields it starts with are part of it.
+      recordCardActivity({ cardId: id, boardId, actorId: userId, kind: "created", payload: { from: null, to: activityValue.column(input.columnId) }, at: timestamp });
       audit(userId, null, "task.card_create", {
         boardId, cardId: id,
         ...(assignees?.length ? { assigneesAdded: assignees.length } : {}),
@@ -803,7 +901,8 @@ export function createCard(userId: string, boardId: string, input: CardCreateInp
         ...(input.flags?.length ? { flags: input.flags } : {}),
         ...(placement.parentId ? { parentId: placement.parentId } : {}),
         ...(placement.level !== 0 ? { level: placement.level } : {}),
-        ...(sprintId ? { sprintId } : {})
+        ...(sprintId ? { sprintId } : {}),
+        ...(estimate !== null ? { estimate } : {})
       });
       // Same checks as POST /cards/:k/relations: the target must be readable (404 like a missing id), one per pair, 50 per card.
       for (const relation of input.relations ?? []) {
@@ -839,6 +938,10 @@ export type CardPatchInput = {
   /** `HH:MM` with `dueTz`, or null to clear the time (D100). */
   dueTime?: string | null;
   dueTz?: string | null;
+  /** The start (D720): `startOn` null clears it and its time; `startTime` comes with `startTz`, null clears the time. */
+  startOn?: string | null;
+  startTime?: string | null;
+  startTz?: string | null;
   /** Legacy (D103): `id` means `[id]`, `null` means `[]`. Not together with `assigneeIds`. */
   assigneeId?: string | null;
   /** Replaces the whole set; `[]` clears it. */
@@ -853,6 +956,8 @@ export type CardPatchInput = {
   level?: number;
   /** Plan the card in a sprint of its board, or null for the backlog (17B); work-level cards only. */
   sprintId?: string | null;
+  /** Points or hours (D753); null clears it, also on a board with estimates off. */
+  estimate?: number | null;
   revision: number;
 };
 
@@ -937,6 +1042,10 @@ export async function patchCard(userId: string, cardId: string, input: CardPatch
     const tagIds = input.tagIds === undefined ? undefined : requireCardTags(board.id, input.tagIds);
     const setDue = input.dueOn !== undefined || input.dueTime !== undefined || input.dueTz !== undefined;
     const due = setDue ? requireDue(card, input) : null;
+    const setStart = input.startOn !== undefined || input.startTime !== undefined || input.startTz !== undefined;
+    const start = setStart ? requireStart(card, input) : null;
+    // Checked whenever either side changes, against the other side as saved (D721).
+    if (setDue || setStart) requireStartNotAfterDue(start?.value ?? card, due?.value ?? card);
     const current = db.query("SELECT parent_card_id, level, sprint_id FROM cards WHERE id = ?").get(cardId) as { parent_card_id: string | null; level: number; sprint_id: string | null };
     const hierarchyChange = input.parentId !== undefined || input.level !== undefined;
     // A card with children keeps its level, whatever else the change says (D128).
@@ -969,8 +1078,10 @@ export async function patchCard(userId: string, cardId: string, input: CardPatch
       ? { set: true, id: resolveSprint(board.id, structure, finalLevel, input.sprintId) }
       : releveled && current.sprint_id && finalLevel !== structure.workLevel ? { set: true, id: null } : { set: false, id: null };
     const sprintChanged = sprint.set && sprint.id !== current.sprint_id;
+    const estimate = input.estimate === undefined ? undefined : requireEstimate(board.id, input.estimate);
     db.transaction(() => {
       const timestamp = now();
+      const before = cardActivitySnapshot(cardId)!;
       if (releveled) {
         // Children binned on their own keep their Bin entry and come back detached (D130).
         db.query("UPDATE cards SET parent_card_id = NULL WHERE parent_card_id = ? AND deleted_at IS NOT NULL").run(cardId);
@@ -980,9 +1091,13 @@ export async function patchCard(userId: string, cardId: string, input: CardPatch
           due_on = CASE WHEN $setDue THEN $dueOn ELSE due_on END,
           due_time = CASE WHEN $setDue THEN $dueTime ELSE due_time END,
           due_tz = CASE WHEN $setDue THEN $dueTz ELSE due_tz END,
+          start_on = CASE WHEN $setStart THEN $startOn ELSE start_on END,
+          start_time = CASE WHEN $setStart THEN $startTime ELSE start_time END,
+          start_tz = CASE WHEN $setStart THEN $startTz ELSE start_tz END,
           parent_card_id = CASE WHEN $setPlacement THEN $parentId ELSE parent_card_id END,
           level = CASE WHEN $setPlacement THEN $level ELSE level END,
           sprint_id = CASE WHEN $setSprint THEN $sprintId ELSE sprint_id END,
+          estimate = CASE WHEN $setEstimate THEN $estimate ELSE estimate END,
           revision = revision + 1, updated_at = $timestamp
         WHERE id = $cardId AND revision = $revision AND deleted_at IS NULL`).run({
         title: input.title ?? null,
@@ -993,11 +1108,17 @@ export async function patchCard(userId: string, cardId: string, input: CardPatch
         dueOn: due?.value.due_on ?? null,
         dueTime: due?.value.due_time ?? null,
         dueTz: due?.value.due_tz ?? null,
+        setStart: start ? 1 : 0,
+        startOn: start?.value.start_on ?? null,
+        startTime: start?.value.start_time ?? null,
+        startTz: start?.value.start_tz ?? null,
         setPlacement: placement ? 1 : 0,
         parentId: placement?.parentId ?? null,
         level: placement?.level ?? 0,
         setSprint: sprint.set ? 1 : 0,
         sprintId: sprint.id,
+        setEstimate: estimate === undefined ? 0 : 1,
+        estimate: estimate ?? null,
         timestamp,
         cardId,
         revision: input.revision
@@ -1005,17 +1126,26 @@ export async function patchCard(userId: string, cardId: string, input: CardPatch
       if (updated.changes !== 1) throw new Error("Concurrent card update detected");
       const changed = assignees ? replaceAssignees(cardId, assignees, userId, timestamp) : null;
       const tagsChanged = tagIds ? replaceCardTags(cardId, tagIds, timestamp) : null;
-      if (input.flags) replaceCardFlags(cardId, input.flags, timestamp);
+      const flagsChanged = input.flags ? replaceCardFlags(cardId, input.flags, timestamp) : null;
       db.query("UPDATE boards SET updated_at = ? WHERE id = ?").run(timestamp, board.id);
+      // Card history (lane ACTIVITY): every field this patch changed, in the same transaction.
+      recordSnapshotChanges(cardId, userId, before, cardActivitySnapshot(cardId)!, timestamp);
+      if (input.description !== undefined && input.description !== card.description) recordCardActivity({ cardId, boardId: board.id, actorId: userId, kind: "description", at: timestamp });
+      if (changed) recordCardItems(cardId, board.id, userId, { added: "assignee_added", removed: "assignee_removed" }, changed, activityValue.user, timestamp);
+      if (tagsChanged) recordCardItems(cardId, board.id, userId, { added: "tag_added", removed: "tag_removed" }, tagsChanged, activityValue.tag, timestamp);
+      if (flagsChanged) recordCardItems(cardId, board.id, userId, { added: "flag_set", removed: "flag_cleared" }, flagsChanged, activityValue.flag, timestamp);
       audit(userId, null, "task.card_update", {
         boardId: board.id, cardId,
         ...(input.dueOn !== undefined ? { dueOn: input.dueOn } : {}),
         ...(due?.timeChange ? { dueTime: due.timeChange } : {}),
+        ...(input.startOn !== undefined ? { startOn: input.startOn } : {}),
+        ...(start?.timeChange ? { startTime: start.timeChange } : {}),
         ...(input.assigneeId !== undefined ? { assigneeId: input.assigneeId } : {}),
         ...(changed ? { assigneesAdded: changed.added.length, assigneesRemoved: changed.removed.length } : {}),
         ...(tagsChanged ? { tagsAdded: tagsChanged.added.length, tagsRemoved: tagsChanged.removed.length } : {}),
         ...(input.flags ? { flags: input.flags } : {}),
-        ...(sprintChanged ? { sprintId: sprint.id } : {})
+        ...(sprintChanged ? { sprintId: sprint.id } : {}),
+        ...(estimate !== undefined ? { estimate } : {})
       });
       if (reparented) audit(userId, null, "task.card_reparent", { boardId: board.id, cardId, parentId: placement.parentId });
       if (releveled) audit(userId, null, "task.card_level", { boardId: board.id, cardId, level: placement.level });
@@ -1054,6 +1184,7 @@ export async function moveCard(userId: string, cardId: string, input: { columnId
         db.query(`UPDATE cards SET column_id = $columnId, position = $position, updated_at = $timestamp, archived_at = NULL,
             done_at = CASE WHEN NOT $toDone THEN NULL WHEN $fromDone AND done_at IS NOT NULL THEN done_at ELSE $timestamp END
           WHERE id = $cardId AND deleted_at IS NULL`).run({ columnId: input.columnId, position: plan.position, timestamp, cardId, toDone: column.state === "done" ? 1 : 0, fromDone: fromDone ? 1 : 0 });
+        recordCardChange(cardId, board.id, userId, "column", activityValue.column(card.column_id), activityValue.column(column.id), timestamp);
       }
       db.query("UPDATE boards SET updated_at = ? WHERE id = ?").run(timestamp, board.id);
       audit(userId, null, "task.card_move", { boardId: board.id, cardId, columnId: input.columnId });
@@ -1104,6 +1235,7 @@ export async function deleteCard(userId: string, cardId: string) {
       let count = descendants.run({ deletedAt: deletedAt.toISOString(), userId, purgeAfter, cardId, boardId: board.id }).changes;
       count += descendants.run({ deletedAt: deletedAt.toISOString(), userId, purgeAfter, cardId, boardId: board.id }).changes;
       db.query("UPDATE boards SET updated_at = ? WHERE id = ?").run(deletedAt.toISOString(), board.id);
+      recordCardActivity({ cardId, boardId: board.id, actorId: userId, kind: "binned", payload: count ? { count } : {}, at: deletedAt.toISOString() });
       audit(userId, null, "task.card_delete", { boardId: board.id, cardId, ...(count ? { descendantCount: count } : {}) });
       return count;
     })();

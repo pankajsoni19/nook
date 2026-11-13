@@ -39,6 +39,8 @@ export function tasksHomeRoute(home: TasksHome): TasksRoute {
  */
 export function parentTasksRoute(route: TasksRoute): TasksRoute | null {
   if (!route.boardId && route.home) return route.home.section === "view" ? tasksHomeRoute({ section: "views" }) : tasksRoute();
+  // A short link still resolving (D713) steps up to the board list, never out of Tasks.
+  if (!route.boardId && route.cardKey) return tasksRoute();
   const view = savedViewOf(route);
   if (route.cardId && route.full) return tasksRoute(route.boardId, route.cardId, false, route.query, view);
   if (route.cardId || (route.boardId && route.sprints)) return tasksRoute(route.boardId, null, false, route.query, view);

@@ -1,6 +1,7 @@
 import { audit, db } from "../db";
 import { normalizeCollapsedRows } from "../../shared/swimlanes";
 import { listColumns, requireBoardRoom, requireCardAt, requireReadableBoard, withBoardLock, cardDetail } from "./service";
+import { recordCardActivity } from "./activity";
 
 /**
  * Auto-archived cards and each person's view of a board (lane TASKS, migration 074, D602–D609).
@@ -106,6 +107,7 @@ export async function archiveCard(userId: string, cardId: string) {
         const timestamp = new Date().toISOString();
         db.query("UPDATE cards SET archived_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL").run(timestamp, timestamp, cardId);
         db.query("UPDATE boards SET updated_at = ? WHERE id = ?").run(timestamp, board.id);
+        recordCardActivity({ cardId, boardId: board.id, actorId: userId, kind: "archived", at: timestamp });
         audit(userId, null, "task.card_archive", { boardId: board.id, cardId });
       })();
     }
@@ -131,6 +133,7 @@ export async function unarchiveCard(userId: string, cardId: string) {
             done_at = CASE WHEN (SELECT state FROM board_columns WHERE id = cards.column_id) = 'done' THEN $timestamp ELSE NULL END
           WHERE id = $cardId AND deleted_at IS NULL`).run({ timestamp, cardId });
         db.query("UPDATE boards SET updated_at = ? WHERE id = ?").run(timestamp, board.id);
+        recordCardActivity({ cardId, boardId: board.id, actorId: userId, kind: "unarchived", at: timestamp });
         audit(userId, null, "task.card_unarchive", { boardId: board.id, cardId });
       })();
     }
@@ -163,6 +166,8 @@ export function sweepAutoArchive(nowMs = Date.now()) {
       const perBoard = new Map<string, { count: number; days: number }>();
       for (const row of rows) {
         if (archive.run({ now, id: row.id }).changes !== 1) continue;
+        // Card history (lane ACTIVITY): archived by Nook itself.
+        recordCardActivity({ cardId: row.id, boardId: row.board_id, actorId: null, via: "system", kind: "archived", at: now });
         const entry = perBoard.get(row.board_id) ?? { count: 0, days: row.days };
         entry.count += 1;
         perBoard.set(row.board_id, entry);

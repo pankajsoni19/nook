@@ -13,6 +13,7 @@ import type { BoardColumn, BoardDetail, BoardTag, CardAssignee, CardSummary, Spr
 import { effectiveSprints, sprintPointers, sprintStateLabel } from "./sprintModel";
 import { FLAT_STRUCTURE, levelName, type BoardStructure } from "../../shared/boardStructure";
 import { rollupMap } from "./hierarchyModel";
+import { estimateSettingsOf, type EstimateSettings } from "../../shared/estimates";
 
 export type { BoardTag } from "./tasksApi";
 
@@ -24,7 +25,7 @@ export type { BoardTag } from "./tasksApi";
 export type BoardCardInput = CardSummary & Partial<{ description_excerpt: string; tag_ids: string[]; flags: string[]; relation_count: number; open_blockers: number }>;
 export type BoardCard = CardSummary & QueryCard & { assignees: CardAssignee[]; tag_ids: string[]; flags: string[]; relation_count?: number; open_blockers?: number };
 /** `structure` (17A): the board's levels; Flat for an older payload. `sprints` (17B): open and recent sprints. */
-export type BoardData = { columns: BoardColumn[]; cards: BoardCard[]; tags: BoardTag[]; structure?: BoardStructure; sprints?: SprintSummary[] };
+export type BoardData = { columns: BoardColumn[]; cards: BoardCard[]; tags: BoardTag[]; structure?: BoardStructure; sprints?: SprintSummary[]; /** Lane ESTIMATES (D754): off when unknown. */ estimates?: EstimateSettings };
 
 /** The viewer: `today` is their local date, `now` their clock, `timeZone` their zone (for timed cards). */
 export type BoardContext = { userId: string; today: string; now: number; timeZone: string };
@@ -33,7 +34,7 @@ export type BoardContext = { userId: string; today: string; now: number; timeZon
  * Fills the optional payload fields, so every view reads one shape. Roll-ups (17A) are recounted
  * from the loaded cards, so `has:subtasks` and the chips follow local moves at once.
  */
-export function boardData(detail: Pick<BoardDetail, "columns" | "cards"> & { tags?: BoardTag[]; board?: Pick<BoardDetail["board"], "structure">; sprints?: SprintSummary[] }): BoardData {
+export function boardData(detail: Pick<BoardDetail, "columns" | "cards"> & { tags?: BoardTag[]; board?: Pick<BoardDetail["board"], "structure" | "estimate_kind" | "estimate_scale">; sprints?: SprintSummary[] }): BoardData {
   const rollups = rollupMap(detail.cards, detail.columns);
   const structure = detail.board?.structure ?? FLAT_STRUCTURE;
   return {
@@ -41,6 +42,7 @@ export function boardData(detail: Pick<BoardDetail, "columns" | "cards"> & { tag
     tags: detail.tags ?? [],
     structure,
     sprints: detail.sprints ?? [],
+    estimates: estimateSettingsOf(detail.board),
     // Subtasks take their parent's sprint from the loaded cards (17B, D124), so they follow a local change at once.
     cards: (effectiveSprints(detail.cards, structure.workLevel) as BoardCardInput[]).map((card) => ({
       ...card,
@@ -249,6 +251,16 @@ export const FILTER_FIELDS: Record<string, FilterField> = {
     ],
     labelFor: (value) => dueValueLabel(value)
   },
+  start: {
+    // D722: the card's start, with the due field's windows and dates (no Overdue).
+    label: "Start",
+    key: "start",
+    optionsFor: () => [
+      { value: "today", label: "Today" }, { value: "week", label: "Next 7 days" },
+      { value: "next-week", label: "The 7 days after" }, { value: "none", label: "No start date" }
+    ],
+    labelFor: (value) => dueValueLabel(value)
+  },
   column: {
     label: "Column",
     key: "column",
@@ -358,6 +370,17 @@ export function sortBoardCards(cards: readonly BoardCard[], board: BoardData, so
   const inBoardOrder = sortCards(cards, board.columns);
   const rank = new Map(inBoardOrder.map((card, index) => [card.id, index]));
   const sign = sort.direction === "desc" ? -1 : 1;
+  if (sort.field === "estimate") {
+    // By number (D754); cards without an estimate sort last both ways, like an empty due date.
+    return [...inBoardOrder].sort((a, b) => {
+      const left = a.estimate ?? null;
+      const right = b.estimate ?? null;
+      if (left === right) return rank.get(a.id)! - rank.get(b.id)!;
+      if (left === null) return 1;
+      if (right === null) return -1;
+      return sign * (left - right) || rank.get(a.id)! - rank.get(b.id)!;
+    });
+  }
   // The first value of a multi-valued field; empty cards sort last both ways.
   const first = (card: BoardCard): string | null => {
     if (sort.field === "assignees") return card.assignees[0] ? foldText(card.assignees[0].display_name) : null;

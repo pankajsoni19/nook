@@ -14,7 +14,9 @@ import { BoardView } from "./BoardView";
 import { DEFAULT_BOARD_QUERY, withBoardQuery, type BoardQuery, type BoardViewId } from "./boardUrl";
 import type { TaskQuery } from "../../shared/taskQuery";
 import type { TaskView } from "./home/homeApi";
-import { boardLayoutOf, boardViewFilter, displayLayoutOf } from "./views/boardViewModel";
+import { boardLayoutOf, boardViewFilter, homeLayoutOf } from "./views/boardViewModel";
+import { lookupCardKey } from "./tasksApi";
+import { ApiError } from "../api";
 import "../bin/bin.css";
 import "../files/files.css";
 import "./tasks.css";
@@ -150,7 +152,7 @@ export function TasksApp({ userId, displayName, navigate, onHome, onSettings, on
    * as a filter edit replaces.
    */
   const leaveSavedView = useCallback((viewId: string, change?: { filter: TaskQuery; layout: BoardViewId }) => {
-    const query = change ? { layout: displayLayoutOf(change.layout, undefined), group: "none" as const, sort: "due" as const, filter: change.filter } : undefined;
+    const query = change ? { layout: homeLayoutOf(change.layout), group: "none" as const, sort: "due" as const, filter: change.filter } : undefined;
     go(tasksHomeRoute({ section: "view", viewId, ...(query ? { query } : {}) }), true);
   }, [go]);
   /** A view on one board opens as that board (D635, D636), with an unsaved filter carried over when it has one. */
@@ -195,6 +197,24 @@ export function TasksApp({ userId, displayName, navigate, onHome, onSettings, on
     go(tasksRoute(), true);
   }, [notify, go]);
 
+  // A short link, /tasks/MYT-12 (lane KEYS, D713): the card's own URL replaces the entry, so Back
+  // never lands on the short link again. A key this person cannot read is "Card not found" (T460).
+  const cardKey = route.cardKey ?? null;
+  useEffect(() => {
+    if (!cardKey) return;
+    let live = true;
+    lookupCardKey(cardKey).then((found) => {
+      if (live) go(tasksRoute(found.boardId, found.cardId), true);
+    }, (reason) => {
+      if (!live) return;
+      notify.warning(reason instanceof ApiError && (reason.status === 404 || reason.status === 400) ? `Card ${cardKey} not found` : "Could not open that card");
+      go(tasksRoute(), true);
+    });
+    return () => { live = false; };
+  }, [cardKey, go, notify]);
+  // The open card moved to another board (D716), or an old link named the wrong board: follow it there.
+  const followCard = useCallback((boardId: string, cardId: string) => go(tasksRoute(boardId, cardId), true), [go]);
+
   return <main data-read-only={readOnly ? "true" : undefined} className={`app-page tasks-app${route.boardId ? " tasks-board-open" : ""}`}>
     <header className="app-page-header">
       <button className="app-home-button" onClick={onHome}><House />Home</button>
@@ -202,8 +222,11 @@ export function TasksApp({ userId, displayName, navigate, onHome, onSettings, on
       <AccountActions displayName={displayName} onSettings={onSettings} onSignOut={onSignOut} />
     </header>
     <ReadOnlyBanner />
-    {route.boardId
+    {cardKey && !route.boardId
+      ? <p className="bin-loading" role="status">Opening {cardKey}…</p>
+      : route.boardId
       ? <BoardView key={route.boardId} userId={userId} boardId={route.boardId} openCardId={route.cardId} openCardFull={route.full === true} onExpandCard={expandCard} onCollapseCard={collapseCard} onOpenCard={openCard} onCloseCard={closeCard} onBack={back} onMissing={onMissing} notify={notify} onBoardDeleted={() => go(tasksRoute(), true)} onOpenBoard={(boardId) => go(tasksRoute(boardId))}
+        onCardElsewhere={followCard}
         onOpenCardRoute={(boardId, cardId) => go(boardId === routeRef.current.boardId ? tasksRoute(boardId, cardId, false, routeRef.current.query, savedViewOf(routeRef.current)) : tasksRoute(boardId, cardId))}
         query={route.query ?? DEFAULT_BOARD_QUERY} onQueryChange={changeQuery} sprintsOpen={route.sprints === true} onOpenSprints={openSprints} onCloseSprints={closeSprints}
         savedViewId={route.viewId ?? null} viewUnsaved={route.unsaved === true} onSavedView={showSavedView} onLeaveSavedView={leaveSavedView} displayName={displayName} />

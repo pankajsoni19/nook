@@ -2,6 +2,43 @@
 
 Release notes for Nook, newest first. Upgrade steps for each release are in [docs/OPERATIONS.md](docs/OPERATIONS.md#upgrades).
 
+## Unreleased
+
+**Tasks: card keys and moving cards between boards**
+
+- **Card keys.** Every board has a short code (MYT) and every card a key (MYT-12), shown in the card header (click to copy), on cards, and in the list and table views. New board suggests a code from the name; the owner changes it in Board settings, and old keys keep working.
+- **Short links.** `/tasks/MYT-12` opens the card; Copy link copies it. Card search finds a card by its key, and MCP tools take a key wherever they take a card id.
+- **Move to another board…** from a card's Move sheet: the card keeps its comments, files, people, and links, takes the new board's tags by name, leaves its sprint and parent, and gets a new key (the old one still finds it). MCP: `move_card_to_board`.
+
+**Tasks: start dates**
+
+- **Start dates**: a card can have a start date, with an optional time, next to its due date (the same picker, same time zone rules). The start must be on or before the due date.
+- Cards, lists and tables show the range ("Nov 12 → Nov 15"); the board calendar spans a card from its start to its due date, and dragging it moves the whole range.
+- Filter by start (`start:`, or **Start** in + Filter) and sort by start. MCP `create_card` / `update_card` take `startOn`, `startTime`, `startTz`; cards carry `start_on`, `start_time`, `start_tz`, `start_at`.
+- **Timeline view**: a board's cards as bars from start to due date over a scrolling day grid, with Week / Month / Quarter zoom, Today, weekends and today marked, and grouping by column, assignee, tag, flag, parent or due. Drag a bar to move it, drag its ends to change the start or due date (the start can't pass the due date), Alt+arrows from the keyboard, or click an empty row to schedule a card. Saved views can open in it (MCP `save_view` takes `layout: "timeline"`).
+
+**Tasks: card activity**
+
+- **Card activity history**: who created a card, renamed it, edited the description, moved it, changed assignees, due date, tags, flags, parent, level, relations, sprint, or files, and when it was archived, binned, or restored, shown between the comments ("Ann moved this from **To do** to **Done** · 10 days ago"). Changes made through MCP, the REST API, or an agent are recorded too and say so; quick repeat edits of one field are one entry.
+- The Comments header has an **Activity** switch and a **Newest first / Oldest first** button, remembered per person in this browser.
+- MCP and REST: `get_card_activity` reads a card's history, paged.
+- The history also records start date and estimate changes, and a move to another board ("moved this card from **My tasks (MYT-2)** to **Roadmap (ROA-2)**", with any tags it lost); a moved card keeps its history.
+
+**Tasks: card estimates**
+
+- **Estimates on task cards**, chosen per board in **Board settings → Estimates**: Off (the default), Story points (Fibonacci 0, 1, 2, 3, 5, 8, 13, 21, or any number), or Hours (like 1.5). The board's owner or a manager sets it.
+- The card shows an **Estimate** field (chips for Fibonacci, a number with "pts" or "h" otherwise); cards, list rows, and a sortable table column show "5 pts" or "3h"; column headers show the total of their cards; the sprint bar adds "13 of 21 pts done · 8 pts left".
+- Changing the setting never rewrites estimates: Off hides them, turning it back on shows them, and points ↔ hours keeps the numbers (Board settings warns that they are not converted).
+- `has:estimate` in task filters. API, REST v1, and MCP (`create_card`, `update_card`, `list_cards`, `get_card`) carry `estimate`; refusals are `ESTIMATES_OFF` and `ESTIMATE_INVALID`.
+
+**Upgrading**
+
+- **Back up first** (`./scripts/backup.sh --force`). Four migrations run once on the first boot, all quick:
+- Migration **079** (`board_keys`) gives every board a code from its name and numbers every card in creation order.
+- Migration **080** (`card_start_dates`) adds the start date columns.
+- Migration **081** (`card_activity`) creates an empty table. Cards changed before the upgrade have no history from before it.
+- Migration **082** (`card_estimates`) adds three columns. Every board starts with estimates off.
+
 ## v0.47.0 — 2026-10-24
 
 **Task views**

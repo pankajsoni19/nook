@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, ChevronLeft, ChevronsLeftRight, ChevronsRightLeft, CircleCheck, Gauge, Pencil, Plus, RotateCcw, Settings2, Trash2, TriangleAlert } from "lucide-react";
+import { ArrowLeft, ArrowRight, ChevronLeft, ChevronsLeftRight, ChevronsRightLeft, CircleCheck, Gauge, Pencil, Plus, RotateCcw, Rows3, Settings2, Trash2, TriangleAlert } from "lucide-react";
 import { BoardSettingsSheet } from "./BoardSettingsSheet";
+import { keyedSendQueue } from "./keyedSendQueue";
 import { useBoardHierarchy } from "./useBoardHierarchy";
 import { useBoardSprints } from "./useBoardSprints";
 import { SprintBar } from "./SprintBar";
@@ -54,8 +55,10 @@ import { FilterBar } from "./FilterBar";
 import { KeyboardMoveHint } from "./boardViewParts";
 import { useTasksTitle } from "./home/HomeSegments";
 import { BoardCalendar } from "./BoardCalendar";
-import { displayedDay, displayedTime, dueAnnouncement, shiftedDueAt } from "./calendarPlacement";
+import { displayedDay, displayedTime, dueAnnouncement, shiftedDueAt, shiftedStartOn } from "./calendarPlacement";
 import { daysBetween } from "../calendarRoute";
+import { BoardTimeline } from "./BoardTimeline";
+import { barLabel, barOf, type DateChange } from "./timelinePlacement";
 import "./boardViews.css";
 import { applyCardDetail, applyTagChange, recountTags } from "./cardTags";
 import {
@@ -76,12 +79,16 @@ import {
   taskErrorCode,
   taskErrorMessage,
   updateColumn,
+  moveCardToBoard,
   type BoardDetail,
+  type BoardSummary,
   type CardDetail,
   type CardSummary
 } from "./tasksApi";
+import { cardKey } from "../../shared/boardKeys";
 import { useHistoryDialogGuard } from "./useHistoryDialogGuard";
 import { useLayerOpener } from "../historyDialogs";
+import { estimateSettingsOf } from "../../shared/estimates";
 
 type BoardViewProps = {
   userId: string;
@@ -102,6 +109,11 @@ type BoardViewProps = {
   onOpenBoard: (boardId: string) => void;
   /** Opens a card on any board (a relation link): pushes its route. */
   onOpenCardRoute?: (boardId: string, cardId: string) => void;
+  /**
+   * The open card is on another board now (lane KEYS, D716: it moved, or an old link named this
+   * board): the host replaces the entry with the card on its board.
+   */
+  onCardElsewhere?: (boardId: string, cardId: string) => void;
   /** The Sprints sheet (/tasks/:b/sprints) is open over the board; the host opens and closes its route. */
   sprintsOpen?: boolean;
   onOpenSprints?: () => void;
@@ -135,7 +147,7 @@ type BoardDialog =
 
 export const MAX_COLUMNS = 20;
 
-export function BoardView({ userId, boardId, openCardId, openCardFull = false, onExpandCard, onCollapseCard, onOpenCard, onCloseCard, onBack, onMissing, notify, onBoardDeleted, onOpenBoard, onOpenCardRoute, query: routeQuery, onQueryChange: routeQueryChange, sprintsOpen = false, onOpenSprints, onCloseSprints,
+export function BoardView({ userId, boardId, openCardId, openCardFull = false, onExpandCard, onCollapseCard, onOpenCard, onCloseCard, onBack, onMissing, notify, onBoardDeleted, onOpenBoard, onOpenCardRoute, onCardElsewhere, query: routeQuery, onQueryChange: routeQueryChange, sprintsOpen = false, onOpenSprints, onCloseSprints,
   savedViewId = null, viewUnsaved = false, onSavedView, onLeaveSavedView, displayName = "Me" }: BoardViewProps) {
   const focusCardId = openCardId;
   const [boardDetail, setDetail] = useState<BoardDetail | null>(null);
@@ -306,6 +318,8 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
 
   const board = detail?.board ?? null;
   const owner = board?.is_owner === 1;
+  // Lane ESTIMATES (D754, D755): what card estimates mean here; off hides them everywhere.
+  const estimates = estimateSettingsOf(board);
   const readOnly = cardsReadOnly(roleReadOnly, board?.level);
   // Managers (Wave 32, D273) change the structure, columns, tags, sprints, and sharing up to Can edit.
   const canManage = !roleReadOnly && (owner || board?.level === "manage");
@@ -334,7 +348,10 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
   const sprints = useBoardSprints({ detail, setDetail, query, onQueryChange, notify, load, defaultAll: savedViewId !== null });
   const sprintScoped = sprints.term !== null;
   const scopedQuery = sprints.term ? { ...query, filter: { terms: [...query.filter.terms, sprints.term] } } : query;
-  const result = data ? applyBoardQuery(data, scopedQuery, viewContext) : null;
+  // The timeline groups by the list's dimensions when one is picked (D768); it is not grouped by default.
+  const timelineGrouped = query.view === "timeline" && query.group !== null;
+  const result = data ? applyBoardQuery(data, timelineGrouped ? { ...scopedQuery, view: "list" } : scopedQuery, viewContext) : null;
+  const timelineGroups = timelineGrouped ? result?.groups ?? null : null;
   const scopedTotal = data && sprints.term ? filterBoardCards(data, { terms: [sprints.term] }, viewContext).length : cards.length;
   const filtered = hasBoardFilter(query);
   const view = query.view;
@@ -614,7 +631,7 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
     if (!next || loadingArchived) return;
     setLoadingArchived(true);
     try {
-      const page = await getArchivedCards(boardId, next);
+      const page = await getArchivedCards(boardId, next, detailRef.current?.board.code);
       setDetail((current) => {
         if (!current) return current;
         const listed = new Set(current.cards.map((card) => card.id));
@@ -643,19 +660,22 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
    * server keeps the time and zone; `null` clears the date and time. The card moves at once; on
    * CARD_CHANGED (or any failure) it moves back and the board reloads. WIP limits do not apply.
    */
-  async function setDue(cardId: string, dueOn: string | null) {
+  async function setDue(cardId: string, dueOn: string | null, keepSpan = false) {
     const current = detailRef.current;
     const card = current?.cards.find((item) => item.id === cardId);
     if (!current || !card || card.due_on === dueOn) return;
     const before = current.cards;
     const shift = dueOn && card.due_on ? daysBetween(card.due_on, dueOn) : 0;
+    // A drag or Alt+Arrow moves a card's whole range (D724): its start shifts by as many days.
+    const startOn = keepSpan ? shiftedStartOn(card, dueOn) : undefined;
     setCards((items) => items.map((item) => item.id !== cardId ? item : dueOn === null
       ? { ...item, due_on: null, due_time: null, due_tz: null, due_at: null }
-      : { ...item, due_on: dueOn, due_at: shiftedDueAt(item.due_at, shift) }));
+      : { ...item, due_on: dueOn, due_at: shiftedDueAt(item.due_at, shift), ...(startOn ? { start_on: startOn, start_at: shiftedDueAt(item.start_at, shift) } : {}) }));
     try {
-      const { card: saved } = await updateCard(cardId, { dueOn, revision: card.revision });
+      const { card: saved } = await updateCard(cardId, { dueOn, ...(startOn ? { startOn } : {}), revision: card.revision });
       setCards((items) => items.map((item) => item.id === cardId
-        ? { ...item, revision: saved.revision, due_on: saved.due_on, due_time: saved.due_time, due_tz: saved.due_tz, due_at: saved.due_at, updated_at: saved.updated_at }
+        ? { ...item, revision: saved.revision, due_on: saved.due_on, due_time: saved.due_time, due_tz: saved.due_tz, due_at: saved.due_at,
+          start_on: saved.start_on, start_time: saved.start_time, start_tz: saved.start_tz, start_at: saved.start_at, updated_at: saved.updated_at }
         : item));
       const zone = viewerTimeZone();
       setAnnouncement(`${card.title}: ${dueAnnouncement(displayedDay(saved, zone), displayedTime(saved, zone))}`);
@@ -665,6 +685,53 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
       notify.error(taskErrorCode(reason) === "CARD_CHANGED" ? "Someone else changed this card. It was reloaded." : taskErrorMessage(reason, "Could not change the due date"));
       void load();
     }
+  }
+
+  /**
+   * The timeline's date change (D764, D765): `startOn` and/or `dueOn`, one PATCH with the card's
+   * revision; the server keeps each side's time and zone when only its date changes. The bar moves at
+   * once; on CARD_CHANGED, START_AFTER_DUE, or any failure it moves back, says so, and the board reloads.
+   */
+  // Date changes to one card are sent in order (D764): quick Alt+Arrow presses each wait for the
+  // revision the one before them saved, while every bar move shows at once.
+  // A failed send drops the ones queued behind it (keyedSendQueue): the board reloads instead.
+  const datesQueueRef = useRef(keyedSendQueue());
+  function setDates(cardId: string, change: DateChange) {
+    const current = detailRef.current;
+    const card = current?.cards.find((item) => item.id === cardId);
+    if (!current || !card) return;
+    const startOn = change.startOn !== undefined && change.startOn !== card.start_on ? change.startOn : undefined;
+    const dueOn = change.dueOn !== undefined && change.dueOn !== card.due_on ? change.dueOn : undefined;
+    if (startOn === undefined && dueOn === undefined) return;
+    const shift = (from: string | null | undefined, to: string | null | undefined) => from && to ? daysBetween(from, to) : 0;
+    const prior = { start_on: card.start_on, start_at: card.start_at, due_on: card.due_on, due_at: card.due_at };
+    setCards((items) => items.map((item) => item.id !== cardId ? item : {
+      ...item,
+      ...(dueOn !== undefined ? { due_on: dueOn, due_at: shiftedDueAt(item.due_at, shift(item.due_on, dueOn)) } : {}),
+      ...(startOn !== undefined ? { start_on: startOn, start_at: shiftedDueAt(item.start_at, shift(item.start_on, startOn)) } : {})
+    }));
+    void datesQueueRef.current(cardId, async (isLast) => {
+      const latest = detailRef.current?.cards.find((item) => item.id === cardId);
+      if (!latest) return;
+      const { card: saved } = await updateCard(cardId, { ...(startOn !== undefined ? { startOn } : {}), ...(dueOn !== undefined ? { dueOn } : {}), revision: latest.revision });
+      const last = isLast();
+      // A later change already shows on screen: take only the revision, so the bar does not step back.
+      setCards((items) => items.map((item) => item.id !== cardId ? item : last
+        ? { ...item, revision: saved.revision, due_on: saved.due_on, due_time: saved.due_time, due_tz: saved.due_tz, due_at: saved.due_at,
+          start_on: saved.start_on, start_time: saved.start_time, start_tz: saved.start_tz, start_at: saved.start_at, updated_at: saved.updated_at }
+        : { ...item, revision: saved.revision, updated_at: saved.updated_at }));
+      if (detailRef.current) detailRef.current = { ...detailRef.current, cards: detailRef.current.cards.map((item) => item.id === cardId ? { ...item, revision: saved.revision } : item) };
+      const bar = barOf(saved, viewerTimeZone());
+      if (last) setAnnouncement(`${card.title}: ${bar ? barLabel(bar) : "no dates"}`);
+    }, async (reason) => {
+      const code = taskErrorCode(reason);
+      notify.error(code === "CARD_CHANGED" ? "Someone else changed this card. It was reloaded."
+        : code === "START_AFTER_DUE" ? "The start must be on or before the due date"
+        : taskErrorMessage(reason, "Could not change the dates"));
+      // The bar goes back at once (with any moves queued behind this one, which are dropped), then to what the server has.
+      setCards((items) => items.map((item) => item.id === cardId ? { ...item, ...prior } : item));
+      await load();
+    });
   }
 
   /** The composer created a card: it joins the board, then closes, opens, or starts another (§4.3). */
@@ -804,15 +871,17 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
     }
   }
 
-  // Phones (v0.31 follow-up): the view switch leads the filter row, which scrolls sideways, so the
-  // board's header is two rows (title and actions; views and filters), not three.
+  // Phones: two rows under the title, nothing hidden. Row one is the view switch with the
+  // per-view controls as icon chips (Swimlanes, the saved view); row two is + Filter and the search
+  // (with the saved view's ⋯ and Save). boardViews.css, .task-board-controls.
   const viewSwitch = <BoardViewSwitch value={view} onChange={(next) => onQueryChange(withBoardQuery(query, { view: next }), { push: true })} />;
   // Swimlanes (lane VIEWS2, D655): rows by assignee, or by parent on a board with levels.
   const parentLevel = hierarchy.structure.levels.length > 1 ? hierarchy.structure.levels[Math.max(0, hierarchy.structure.workLevel - 1)] : undefined;
   // The URL's choice, else (in a saved view) the view's own, else none.
   const swimChoice = query.swim === "none" ? null : isSwimlaneMode(query.swim) ? query.swim : savedViewId ? savedViews.view?.display.swimlanes ?? null : null;
   const swimMode: SwimlaneMode | null = swimChoice && (swimChoice === "assignee" || (swimChoice === "parent" && parentLevel)) ? swimChoice : null;
-  const swimSelect = view === "board" ? <Select<string> variant="chip" label="Swimlanes" value={swimMode ?? "none"} searchable={false} className="task-swim-select"
+  const swimSelect = view === "board" ? <Select<string> variant="chip" label="Swimlanes" value={swimMode ?? "none"} searchable={false}
+    className={`task-swim-select${phone && swimMode ? " active" : ""}`} iconOnly={phone} icon={<Rows3 />}
     options={[{ value: "none", label: "Swimlanes: None" }, { value: "assignee", label: "Swimlanes: Assignee" }, ...(parentLevel ? [{ value: "parent", label: `Swimlanes: ${parentLevel.name}` }] : [])]}
     onChange={(value) => onQueryChange(withBoardQuery(query, { swim: isSwimlaneMode(value) ? value : savedViewId ? "none" : null }))} /> : null;
   // A saved view's Board field (D661): more boards make it a cross-board view.
@@ -822,13 +891,33 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
     labelFor: (value) => otherBoards.find((item) => item.id === value)?.name ?? "Board"
   } } : undefined;
   const filterBar = data && result ? <FilterBar board={data} context={viewContext} filter={query.filter} shown={result.cards.length} total={scopedTotal}
-    onChange={(filter) => onQueryChange(withBoardQuery(query, { filter }))} actions={savedViews.filterActions} extraFields={boardField} /> : null;
-  const savedViewPicker = savedViews.showPicker ? savedViews.picker : null;
+    onChange={(filter) => onQueryChange(withBoardQuery(query, { filter }))} actions={phone ? <>{savedViews.filterActions}{savedViews.more}</> : savedViews.filterActions} extraFields={boardField} /> : null;
+  const savedViewPicker = savedViews.showPicker ? phone ? savedViews.compactPicker : savedViews.picker : null;
   // New card in a saved view starts where the view looks (D637).
   const composerStart = savedViewId && detail ? composerStartFor(query.filter, {
     columns, tags: detail.tags ?? [], sprints: detail.sprints ?? [], userId, userName: displayName,
     people: cards.flatMap((card) => card.assignees ?? [])
   }) : null;
+
+  /**
+   * Move to another board (lane KEYS, D716): the card leaves this board. From its open dialog the
+   * route follows it to the other board; from the board, a toast offers to open it there.
+   */
+  async function moveToBoard(card: CardSummary, target: BoardSummary, columnId: string) {
+    const result = await moveCardToBoard(card.id, target.id, columnId);
+    setDialog(null);
+    returnFocusRef.current = null;
+    setDetail((current) => current ? { ...current, cards: current.cards.filter((item) => item.id !== card.id) } : current);
+    const dropped = result.droppedTags.length === 1 ? ` “${result.droppedTags[0]}” is not a tag there, so it was dropped.`
+      : result.droppedTags.length > 1 ? ` ${result.droppedTags.length} tags are not on that board, so they were dropped.` : "";
+    const message = `Moved to ${target.name}${result.card.key ? ` as ${result.card.key}` : ""}.${dropped}`;
+    if (openCardIdRef.current === card.id) {
+      onCardElsewhere?.(target.id, card.id);
+      notify.success(message);
+    } else {
+      notify.success(message, onOpenCardRoute ? { action: { label: "Open", onClick: () => onOpenCardRoute(target.id, card.id) } } : undefined);
+    }
+  }
 
   return <section className="task-board" data-read-only={readOnly && !roleReadOnly ? "true" : undefined} aria-labelledby={cardPage ? undefined : "task-board-title"}>
     {!cardPage && <>
@@ -851,7 +940,7 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
       name={hierarchy.structure.levels[hierarchy.structure.workLevel]?.name ?? "Card"} plural={hierarchy.structure.levels[hierarchy.structure.workLevel]?.plural ?? "Cards"}
       today={viewContext.today} owner={canManage} onSelect={sprints.select} onStart={(sprint) => { void sprints.start(sprint); }}
       onComplete={(sprint, trigger) => openDialog({ kind: "completeSprint", sprintId: sprint.id }, trigger)}
-      onNewSprint={(trigger) => openDialog({ kind: "newSprint" }, trigger)} onManage={onOpenSprints} />}
+      onNewSprint={(trigger) => openDialog({ kind: "newSprint" }, trigger)} onManage={onOpenSprints} estimateKind={estimates.kind} />}
     <KeyboardMoveHint id="task-card-keys">Press Alt with an arrow key to move a card up, down, or to the next column.</KeyboardMoveHint>
     <p className="sr-only" aria-live="polite">{announcement}</p>
 
@@ -886,7 +975,15 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
       <BoardCalendar board={data} cards={result.cards} layout={query.cal} month={query.month} today={viewContext.today} viewerZone={viewContext.timeZone} filtered={filtered}
         onMonth={(month) => onQueryChange(withBoardQuery(query, { month }))}
         onLayout={(cal) => onQueryChange(withBoardQuery(query, { cal }), { push: true })}
-        onOpenCard={(card) => onOpenCard(card.id)} onSetDue={(card, dueOn) => { void setDue(card.id, dueOn); }} readOnly={readOnly} />
+        onOpenCard={(card) => onOpenCard(card.id)} onSetDue={(card, dueOn, keepSpan) => { void setDue(card.id, dueOn, keepSpan); }} readOnly={readOnly} />
+    </div>}
+    {detail && data && result && view === "timeline" && <div className="task-view-body task-view-body-timeline">
+      <BoardTimeline board={data} cards={result.cards} groups={timelineGroups} group={query.group} scale={query.zoom ?? "month"}
+        today={viewContext.today} viewerZone={viewContext.timeZone} filtered={filtered} readOnly={readOnly}
+        onGroup={(group) => onQueryChange(withBoardQuery(query, { group }))}
+        onScale={(zoom) => onQueryChange(withBoardQuery(query, { zoom: zoom === "month" ? null : zoom }))}
+        onOpenCard={(card) => onOpenCard(card.id)} onChangeDates={(card, change) => setDates(card.id, change)}
+        onAddCard={readOnly ? undefined : () => setComposer({ columnId: null })} />
     </div>}
     {detail && view === "board" && <nav className="task-column-tabs" aria-label="Columns">
       {columns.map((column, index) => {
@@ -901,7 +998,7 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
       })}
       {canManage && columns.length < MAX_COLUMNS && <button className="task-tab-add" onClick={(event) => openDialog({ kind: "addColumn" }, event.currentTarget)} aria-haspopup="dialog" aria-label="Add column"><Plus /></button>}
     </nav>}
-    {detail && view === "board" && swimMode && <BoardSwimlanes mode={swimMode} columns={columns} statuses={statuses} cards={shownLane} allCards={cards} tags={detail.tags ?? []}
+    {detail && view === "board" && swimMode && <BoardSwimlanes mode={swimMode} columns={columns} statuses={statuses} cards={shownLane} allCards={cards} tags={detail.tags ?? []} estimateKind={estimates.kind}
       today={viewContext.today} noneLabel={swimMode === "parent" ? `No ${(parentLevel?.name ?? "parent").toLowerCase()}` : "No assignee"}
       collapsedColumns={collapsed} onToggleColumn={(columnId) => { void toggleCollapsed(columnId); }} collapsedRows={collapsedRows} onToggleRow={(row) => { void toggleRow(row); }}
       readOnly={readOnly} phone={phone} trackRef={trackRef} onTrackScroll={onTrackScroll}
@@ -934,6 +1031,7 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
         onToggleCollapsed={() => { void toggleCollapsed(column.id); }}
         phone={phone}
         tags={detail.tags}
+        estimateKind={estimates.kind}
         owner={owner}
         isFirst={index === 0}
         isLast={index === columns.length - 1}
@@ -974,6 +1072,8 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
       boardLevel={board?.level}
       onClose={cardPage && onCollapseCard ? onCollapseCard : onCloseCard}
       onMissing={onCardMissing}
+      boardId={boardId}
+      onElsewhere={(card) => onCardElsewhere?.(card.board_id, card.id)}
       notify={notify}
       onMove={(card) => openDialog({ kind: "moveCard", cardId: card.id })}
       onDelete={removeCard}
@@ -990,6 +1090,7 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
       onRelationsChanged={(id, counts) => setCards((items) => items.map((item) => item.id === id ? { ...item, ...counts } : item))}
       hierarchy={hierarchy.dialog}
       sprints={sprints.enabled ? sprints.sprints : undefined}
+      estimates={estimates}
     /></CardPage>}
     {composer && !readOnly && detail && board && <CardComposer
       boardId={boardId}
@@ -1014,7 +1115,11 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
     {savedViews.dialogs}
     {(dialog?.kind === "settings" || overSettings) && board && <BoardSettingsSheet board={board} owner={canManage} isOwner={owner} showAllLevels={hierarchy.showAll} onShowAllLevels={hierarchy.setShowAll}
       showArchived={showArchived} onShowArchived={(value) => { void setShowArchived(value); }}
-      onBoardSaved={(saved) => setDetail((current) => current ? { ...current, board: saved } : current)}
+      onBoardSaved={(saved) => {
+        setDetail((current) => current ? withBoardKeys({ ...current, board: saved }) : current);
+        // Estimates turned on or changed kind (D752): the cards' kept values come with a fresh read.
+        if (estimateSettingsOf(saved).kind !== estimates.kind) void load();
+      }}
       onClose={closeDialog} notify={notify} suspended={overSettings}
       onRename={() => openOverSettings("rename")} onShare={() => openOverSettings("share")} onDelete={() => openOverSettings("deleteBoard")} onAddColumn={() => openOverSettings("addColumn")}
       onStructureSaved={(saved) => setDetail((current) => current ? { ...current, board: saved } : current)}
@@ -1085,11 +1190,17 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
     />}
     {dialog?.kind === "moveCard" && dialogCard && <MoveCardSheet card={dialogCard} columns={columns} cards={cards} onCancel={closeDialog} readOnly={readOnly} parentPicker={readOnly ? undefined : hierarchy.parentPicker(dialogCard)}
       onArchive={readOnly ? undefined : () => { void setArchived(dialogCard.id, !dialogCard.archived_at); }}
-      onCopyLink={() => { void copyCardLink(boardId, dialogCard.id, notify); }} onMove={async (columnId, place) => {
+      onCopyLink={() => { void copyCardLink(boardId, dialogCard.id, notify, undefined, dialogCard.key); }} onMove={async (columnId, place) => {
       const current = detailRef.current;
       setDialog(null);
       returnFocusRef.current = null;
       if (current) await move(dialogCard.id, columnId, sheetMoveAnchor(current.cards, dialogCard.id, columnId, place), { focus: true });
-    }} />}
+    }}
+      onMoveToBoard={readOnly ? undefined : (target, columnId) => moveToBoard(dialogCard, target, columnId)} />}
   </section>;
+}
+
+/** Each card's key from the board's code (D710), after the code changed in Board settings (D714). */
+function withBoardKeys(detail: BoardDetail): BoardDetail {
+  return { ...detail, cards: detail.cards.map((card) => ({ ...card, key: cardKey(detail.board.code, card.number) })) };
 }
