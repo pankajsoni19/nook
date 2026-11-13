@@ -2,7 +2,7 @@
 
 Only open work lives here. Remove an item once it is done. Shipped work is in [CHANGELOG.md](CHANGELOG.md), the docs site's [release notes](https://pankajsoni19.github.io/nook/releases.html), and `git log`.
 
-- Plans of record: `DEVELOPMENT_PLAN.md`, `docs/plan/research/`, [reports plan](docs/plan/WAVES_45-48_REPORTS.md), [report theme](docs/plan/REPORT_THEME.md).
+- Plans of record: `DEVELOPMENT_PLAN.md`, `docs/plan/research/`, [reports plan](docs/plan/WAVES_45-48_REPORTS.md), [report theme](docs/plan/REPORT_THEME.md), [workspace modules](docs/plan/WORKSPACE_MODULES.md).
 - Contracts: [API](docs/plan/API_CONTRACTS.md) · [Threat model](docs/plan/THREAT_MODEL.md) · [Test plan](docs/plan/TEST_PLAN.md).
 
 **Current state (2026-10-24).**
@@ -11,6 +11,8 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 - Development happens directly on `main`, pushed as each change passes its gates.
 
 ## In flight
+
+- [ ] **Workspace modules** (plan: [docs/plan/WORKSPACE_MODULES.md](docs/plan/WORKSPACE_MODULES.md), branch `feat/workspace-modules`): Wave 1 foundations (W1-CORE, W1-UI; migrations 085–089), then lanes FORMS, TIME, GOALS, CHECKINS, CRM, BOOK in parallel (090–109), then W3-WIRE and W3-REPORTS (110–114). Waiting on the product owner's answers to the plan's open questions (§G) before Wave 1. Migrations 083–084 are reserved for the friendly-URLs lane.
 
 ## Waiting on the operator
 
