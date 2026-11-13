@@ -4,6 +4,7 @@ import { hasScope, type McpScope } from "./mcpScopes";
 import type { McpKeyContext } from "./mcpToolKit";
 import { cardIdForKey } from "./tasks/keys";
 import { CARD_KEY_PATTERN } from "../shared/boardKeys";
+import { WORKSPACE_CONTAINER_KINDS, type WorkspaceContainerKind } from "../shared/workspaceModules";
 
 /**
  * Where an item sits, for chosen-item keys (access plan D281, §C.10, T203; Wave 34).
@@ -31,7 +32,13 @@ export type ItemKind =
   // Wave 44 (AC-E): a knowledge base (`search_knowledge`).
   | "knowledge_base"
   // Wave 45: an analytics report.
-  | "report";
+  | "report"
+  // Workspace modules (§B.9): containers and their contents, anchored through registerItemKind.
+  | WorkspaceItemKind;
+
+/** The workspace modules' item kinds: their containers and what sits in them (each lane registers its lookups). */
+export type WorkspaceItemKind = WorkspaceContainerKind | "response" | "time_entry" | "key_result" | "checkin_round" | "contact" | "company" | "deal" | "interaction" | "booking" | "townhall_question";
+type BuiltinItemKind = Exclude<ItemKind, WorkspaceItemKind>;
 
 export type Anchor = { kind: ResourceKind; id: string };
 
@@ -39,7 +46,7 @@ type Lookup = { sql: string; anchors: (row: Record<string, string | null>) => Ar
 
 const direct = (kind: ResourceKind) => (id: string): Anchor[] => [{ kind, id }];
 
-const LOOKUPS: Record<ItemKind, Lookup | ((id: string) => Anchor[])> = {
+const LOOKUPS: Record<BuiltinItemKind, Lookup | ((id: string) => Anchor[])> = {
   note: { sql: "SELECT id, folder_id FROM notes WHERE id = ?", anchors: (row) => [{ kind: "note", id: row.id! }, row.folder_id ? { kind: "folder", id: row.folder_id } : null] },
   folder: { sql: "SELECT id FROM folders WHERE id = ?", anchors: (row) => [{ kind: "folder", id: row.id! }] },
   // A whiteboard is a Files document too: Files grants reach it through its id or folder, whiteboard grants through its id.
@@ -75,13 +82,41 @@ export const ANCHOR_KINDS: Record<ItemKind, readonly ResourceKind[]> = {
   note: ["note", "folder"], folder: ["folder"], document: ["document", "folder", "whiteboard"], whiteboard: ["whiteboard"],
   board: ["board"], card: ["board"], column: ["board"], sprint: ["board"], task_view: ["task_view"],
   collection: ["collection"], row: ["collection"], calendar: ["calendar"], event: ["calendar"], routine: ["routine"], run: ["routine"],
-  vault: ["vault"], agent: ["agent"], knowledge_base: ["knowledge_base"], report: ["report"]
+  vault: ["vault"], agent: ["agent"], knowledge_base: ["knowledge_base"], report: ["report"],
+  // Workspace containers anchor on themselves; their contents on the container (§B.9). Lanes register
+  // the lookups (registerItemKind); these are the static kinds, for hiding tools a key can never use.
+  form: ["form"], response: ["form"], time_project: ["time_project"], time_entry: ["time_project"], goal: ["goal"], key_result: ["goal"],
+  checkin: ["checkin"], checkin_round: ["checkin"], contact_book: ["contact_book"], contact: ["contact_book"], company: ["contact_book"],
+  deal: ["contact_book"], interaction: ["contact_book"], booking_type: ["booking_type"], booking: ["booking_type"],
+  townhall_session: ["townhall_session"], townhall_question: ["townhall_session"]
+};
+
+/**
+ * Registered lookups of the workspace item kinds (§B.1, §B.9): `anchors(id)` returns the item's
+ * anchors (itself if it is a container, else its container), or null when it does not exist. A
+ * container kind with no registered lookup anchors on itself.
+ */
+const registeredLookups = new Map<WorkspaceItemKind, (id: string) => Anchor[] | null>();
+
+export function registerItemKind(kind: WorkspaceItemKind, anchors: (id: string) => Anchor[] | null) {
+  if (registeredLookups.has(kind)) throw new Error(`Item kind ${kind} is already registered`);
+  registeredLookups.set(kind, anchors);
+}
+
+/** A lookup by SQL that selects the container id (`SELECT form_id AS anchor FROM responses WHERE id = ?`). */
+export const anchorBySql = (kind: WorkspaceContainerKind, sql: string) => (id: string): Anchor[] | null => {
+  const row = db.query(sql).get(id) as { anchor: string | null } | null;
+  return row ? (row.anchor ? [{ kind, id: row.anchor }] : []) : null;
 };
 
 /** The anchors of one item, or null when it does not exist. Ids compare in lower case. */
 export function anchorsOf(kind: ItemKind, id: string): Anchor[] | null {
-  const lookup = LOOKUPS[kind];
   const lower = id.toLowerCase();
+  const registered = registeredLookups.get(kind as WorkspaceItemKind);
+  if (registered) return registered(lower);
+  if ((WORKSPACE_CONTAINER_KINDS as readonly string[]).includes(kind)) return [{ kind: kind as ResourceKind, id: lower }];
+  if (!(kind in LOOKUPS)) return null;
+  const lookup = LOOKUPS[kind as BuiltinItemKind];
   if (typeof lookup === "function") return lookup(lower);
   const row = db.query(lookup.sql).get(lower) as Record<string, string | null> | null;
   return row ? lookup.anchors(row).filter((anchor): anchor is Anchor => anchor !== null) : null;

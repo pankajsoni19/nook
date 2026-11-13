@@ -85,7 +85,7 @@ export type RoutineInput = z.infer<typeof routineCreateSchema>;
 export type RoutinePatch = z.infer<typeof routinePatchSchema>;
 
 const fold = (value: string) => value.normalize("NFKC").toLocaleLowerCase("en-US");
-const parseKinds = (json: string) => (JSON.parse(json) as string[]).filter((kind): kind is ProposalKind => (PROPOSAL_KINDS as readonly string[]).includes(kind));
+const parseKinds = (json: string) => (JSON.parse(json) as string[]).filter((kind): kind is typeof PROPOSAL_KINDS[number] => (PROPOSAL_KINDS as readonly string[]).includes(kind));
 const parseTargets = (json: string | null): RoutineTargets | null => {
   if (!json) return null;
   try { return JSON.parse(json) as RoutineTargets; } catch { return null; }

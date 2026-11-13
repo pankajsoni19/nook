@@ -14,6 +14,7 @@ import type { Migration } from "./types";
  * - `public_link_usage`: durable per-link submission counts per hour (the per-link limit).
  * - `public_submissions_log`: every public submission's outcome with a salted IP hash, kept 30 days.
  * - `public_verifications`: pending email verifications of public submissions (code hashed).
+ * - `external_mail_stops`: outside addresses that asked to hear nothing more about an item.
  * - `user_ui_prefs`: per-person unit preferences (week start, duration format), JSON; the existing
  *   `user_preferences.disabled_modules` is an array with a 512-byte cap, so they live here.
  *
@@ -106,6 +107,16 @@ export const schedulesPublicMigration: Migration = {
         created_at TEXT NOT NULL
       ) STRICT;
       CREATE INDEX IF NOT EXISTS public_verifications_expiry ON public_verifications(expires_at);
+
+      -- "Stop emails about this booking" (§B.7, T508): an outside address that asked to hear nothing more
+      -- about one item (or, with item_kind '*', about anything); checked before every external mail.
+      CREATE TABLE IF NOT EXISTS external_mail_stops (
+        address_hash TEXT NOT NULL CHECK (length(address_hash) = 64),
+        item_kind TEXT NOT NULL CHECK (length(item_kind) BETWEEN 1 AND 32),
+        item_id TEXT NOT NULL CHECK (length(item_id) BETWEEN 1 AND 64),
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (address_hash, item_kind, item_id)
+      ) STRICT, WITHOUT ROWID;
 
       CREATE TABLE IF NOT EXISTS user_ui_prefs (
         user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
