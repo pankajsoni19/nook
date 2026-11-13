@@ -179,12 +179,19 @@ export function CardDialog({ userId, cardId, columns, columnId, boardOwner, boar
   // Lane ACTIVITY: the card's history interleaved with its comments, re-read when the card changes.
   const timeline = useCardTimeline(userId, cardId, activityRefreshKey(card, { columnId, relations: relations.length, attachments: attachments.length }));
 
+  // The parent's callbacks are read through refs: callers pass them inline, and a new function on
+  // every parent render must not re-run `load` (a refetch would overwrite an unsaved title edit).
+  const onElsewhereRef = useRef(onElsewhere);
+  onElsewhereRef.current = onElsewhere;
+  const onMissingRef = useRef(onMissing);
+  onMissingRef.current = onMissing;
   const load = useCallback(async () => {
     setLoadError(null);
     try {
       const view = await getCard(cardId);
-      if (boardId && onElsewhere && view.card.board_id !== boardId) {
-        onElsewhere(view.card);
+      const elsewhere = onElsewhereRef.current;
+      if (boardId && elsewhere && view.card.board_id !== boardId) {
+        elsewhere(view.card);
         return;
       }
       setCard(view.card);
@@ -194,10 +201,10 @@ export function CardDialog({ userId, cardId, columns, columnId, boardOwner, boar
       setAttachments(view.attachments);
       setRelations(view.relations ?? []);
     } catch (reason) {
-      if (reason instanceof ApiError && reason.status === 404) onMissing();
+      if (reason instanceof ApiError && reason.status === 404) onMissingRef.current();
       else setLoadError(taskErrorMessage(reason, "Could not load this card"));
     }
-  }, [cardId, onMissing, boardId, onElsewhere]);
+  }, [cardId, boardId]);
   useEffect(() => { void load(); }, [load]);
 
   const closeSubDialog = useCallback(() => { setDeletingComment(null); setUnlinking(null); setConfirmDelete(false); setDiscardPrompt(false); }, []);
