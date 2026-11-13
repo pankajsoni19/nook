@@ -1,3 +1,4 @@
+import { notePath } from "../friendlyPaths";
 import { db, now } from "../db";
 import { DEFAULT_PROPOSAL_EXPIRE_DAYS } from "../migrations/021_agent_inbox";
 
@@ -113,4 +114,4 @@ export function resolveNoteDraftProposals(noteId: string, outcome: DraftOutcome)
     WHERE kind = 'note_draft' AND target_type = 'note' AND target_id = ? AND status = 'pending'`).run(timestamp, noteId);
 }
 
-export const noteRef = (noteId: string) => ({ type: "note" as const, id: noteId, href: `/notes/${noteId}` });
+export const noteRef = (noteId: string) => ({ type: "note" as const, id: noteId, href: notePath(noteId) });

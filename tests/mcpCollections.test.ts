@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createElement } from "react";
 import { createUser, db, origin, request, type Session } from "./support/harness";
+const { boardPath, cardPath, collectionPath, collectionRowPath, documentPath, notePath, reportPath, sprintsPath, whiteboardPath } = await import("../server/friendlyPaths");
 import { addRow, call, insertNote, newCollection, shareCollection } from "./support/collections";
 
 const { createMcpApiKey } = await import("../server/mcp");
@@ -145,7 +146,7 @@ describe("MCP collection tools", () => {
     expect(starters.value.rows.map((row: { title: string }) => row.title)).toEqual(["Salad", "Soup"]);
     expect(starters.value.total).toBe(2);
     expect(starters.value.rows[1].values).toEqual({ Name: "Soup", Servings: 4, Course: "Starter", Tags: ["Quick"] });
-    expect(starters.value.rows[1].url).toBe(`${origin}/collections/${s.editable.id}/row/${s.soup.id}`);
+    expect(starters.value.rows[1].url).toBe(`${origin}${collectionRowPath(s.editable.id, s.soup.id)}`);
     const big = await callTool(key, "query_rows", { collectionId: s.editable.id, filters: [{ field: "Servings", op: "gte", value: 6 }], sort: [{ field: s.f("Servings").id, direction: "desc" }] });
     expect(big.value.rows.map((row: { title: string }) => row.title)).toEqual(["Cake", "Stew"]);
     expect((await callTool(key, "query_rows", { collectionId: s.editable.id, q: "stew" })).value.rows.map((row: { title: string }) => row.title)).toEqual(["Stew"]);
@@ -209,7 +210,7 @@ describe("MCP collection tools", () => {
     expect((await callTool(viewer, "create_row", { collectionId: s.privateCollection.id, values: { Secret: "x" } })).value.code).toBe("NOT_FOUND");
     const created = await callTool(editor, "create_row", { collectionId: s.editable.id, values });
     expect(created.isError).toBe(false);
-    expect(created.value).toEqual({ rowId: expect.any(String), revision: 1, url: `${origin}/collections/${s.editable.id}/row/${created.value.rowId}` });
+    expect(created.value).toEqual({ rowId: expect.any(String), revision: 1, url: `${origin}${collectionRowPath(s.editable.id, created.value.rowId)}` });
     const stored = db.query("SELECT values_json, created_by, updated_via_key_id FROM collection_rows WHERE id = ?").get(created.value.rowId) as { values_json: string; created_by: string; updated_via_key_id: string };
     expect(JSON.parse(stored.values_json)).toEqual({
       [s.f("Name").id]: "Pancakes", [s.f("Servings").id]: 3, [s.f("Course").id]: s.option("Course", "Dessert"),

@@ -73,6 +73,7 @@ import { boardKeysMigration } from "./079_board_keys";
 import { cardStartDatesMigration } from "./080_card_start_dates";
 import { cardActivityMigration } from "./081_card_activity";
 import { cardEstimatesMigration } from "./082_card_estimates";
+import { shortIdsMigration } from "./083_short_ids";
 
 const migrations = [initialMigration, folderSharingMigration, totpMigration, totpRecoveryCodesMigration, mcpApiKeysMigration, documentsMigration, binMigration, noteSearchMigration, taskBoardsMigration, mcpKeyScopesMigration, taskDatesMigration, collectionsMigration, calendarMigration, eventNextOccurrenceMigration, taskCardUxMigration, userPreferencesMigration, teamRolesMigration,
   // 018 (Team invites) may reach existing installs after 019 (task hierarchy) and 020 (task views); none depends on another.
@@ -207,7 +208,10 @@ const migrations = [initialMigration, folderSharingMigration, totpMigration, tot
   // Built as 067; renumbered at integration so it follows 079 (board keys) and 080 (card start dates).
   cardActivityMigration,
   // 082 (lane ESTIMATES, D750–D753: boards.estimate_kind and estimate_scale, cards.estimate) needs only 009.
-  cardEstimatesMigration
+  cardEstimatesMigration,
+  // 083 (friendly URLs, D770–D789: short_id with a unique index and an insert trigger on notes, documents,
+  // collections, and reports) needs 001, 006, 012, and 050.
+  shortIdsMigration
 ];
 
 /** Every registered migration in order (read-only), for tests that build an older database shape. */

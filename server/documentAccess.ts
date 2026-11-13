@@ -12,6 +12,8 @@ export type Visibility = "private" | "selected" | "all_users";
 /** The only document shape returned by the API. Never includes sha256, upload_key, paths, or deletion columns. */
 export type DocumentSummary = {
   id: string;
+  /** Friendly URLs (D777). */
+  short_id?: string | null;
   owner_id: string;
   owner_name: string;
   is_owner: 0 | 1;
@@ -34,7 +36,7 @@ export type DocumentSummary = {
  * `sharing_override = 0`. `visibility` is the effective audience.
  */
 export const documentSummarySelect = `
-  SELECT d.id, d.owner_id, u.display_name AS owner_name,
+  SELECT d.id, d.short_id, d.owner_id, u.display_name AS owner_name,
          CASE WHEN d.owner_id = $userId THEN 1 ELSE 0 END AS is_owner,
          CASE WHEN d.owner_id = $userId OR (d.sharing_override = 0 AND (
            (f.visibility = 'all_users' AND ${AUDIENCE_ALL_USERS}) OR (f.visibility = 'selected' AND (EXISTS (

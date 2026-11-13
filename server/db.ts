@@ -74,6 +74,8 @@ export type TeamInviteRow = {
 
 export type NoteRow = {
   id: string;
+  /** Friendly URLs (D777). */
+  short_id?: string | null;
   owner_id: string;
   folder_id: string | null;
   title: string;

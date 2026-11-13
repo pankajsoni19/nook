@@ -1,10 +1,13 @@
 import { config } from "../config";
+import { boardPath, cardPath, collectionPath, documentPath, notePath, sprintsPath } from "../friendlyPaths";
 
 /**
  * Every URL in a mail (docs/plan/research/2026-09-28-outbound-email.md §D.7, T223): APP_ORIGIN plus
  * a path from one of the builders below. Ids are checked against the router's id pattern, so no
  * free-form path or query from user data can reach a link, and there are no redirect parameters.
  * Paths match the SPA router's `formatRoute` (tests parse every golden link back with `parseRoute`).
+ * Friendly URLs (D780): cards, boards, notes, files, and collections link by key, code, or
+ * `<slug>-<shortid>`; a slug is only [a-z0-9-] (shared/friendlyUrls.ts slugify), so T223 holds.
  */
 
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -29,23 +32,23 @@ export type SettingsSection = typeof SETTINGS_SECTIONS[number];
 /** Path builders, one per place a mail may open. */
 export const paths = {
   home: () => "/",
-  card: (boardId: string, cardId: string) => `/tasks/${id(boardId)}/card/${id(cardId)}`,
-  board: (boardId: string) => `/tasks/${id(boardId)}`,
+  card: (boardId: string, cardId: string) => cardPath(id(boardId), id(cardId)),
+  board: (boardId: string) => boardPath(id(boardId)),
   myWork: () => "/tasks/my",
   taskView: (viewId: string) => `/tasks/views/${id(viewId)}`,
-  note: (noteId: string) => `/notes/${id(noteId)}`,
+  note: (noteId: string) => notePath(id(noteId)),
   noteFolder: (folderId: string) => `/notes/folder/${id(folderId)}`,
   notesShared: () => "/notes/shared",
-  file: (documentId: string) => `/files/${id(documentId)}`,
+  file: (documentId: string) => documentPath(id(documentId)),
   filesShared: () => "/files/shared",
-  collection: (collectionId: string) => `/collections/${id(collectionId)}`,
+  collection: (collectionId: string) => collectionPath(id(collectionId)),
   vault: (vaultId: string) => `/vault/${id(vaultId)}`,
   chat: (chatId: string) => `/chat/${id(chatId)}`,
   chatWithAgent: (agentId: string) => `/chat/new?agent=${id(agentId)}`,
   calendar: () => "/calendar",
   event: (eventId: string) => `/calendar/event/${id(eventId)}`,
   notifications: () => "/notifications",
-  sprints: (boardId: string) => `/tasks/${id(boardId)}/sprints`,
+  sprints: (boardId: string) => sprintsPath(id(boardId)),
   bin: () => "/bin",
   inbox: () => "/inbox",
   proposal: (proposalId: string) => `/inbox/p/${id(proposalId)}`,
@@ -73,6 +76,17 @@ export const paths = {
   unsubscribePage: (value: string) => `/mail/unsubscribe#t=${token(value)}`,
   /** The RFC 8058 header URL cannot use a fragment; the token is low-power (T221). */
   unsubscribeApi: (value: string) => `/api/mail/unsubscribe?t=${token(value)}`
+} as const;
+
+/**
+ * Id-only paths (D780, T68): the bell's access notices keep UUID links, as `public/sw.js` lists their
+ * shapes and the bell never carries a title; the app turns them into the friendly URL once opened.
+ */
+export const idPaths = {
+  note: (noteId: string) => `/notes/${id(noteId)}`,
+  file: (documentId: string) => `/files/${id(documentId)}`,
+  board: (boardId: string) => `/tasks/${id(boardId)}`,
+  collection: (collectionId: string) => `/collections/${id(collectionId)}`
 } as const;
 
 /**

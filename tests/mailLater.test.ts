@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createUser, db, request, type Session } from "./support/harness";
+const { boardPath, cardPath, collectionPath, collectionRowPath, documentPath, notePath, reportPath, sprintsPath, whiteboardPath } = await import("../server/friendlyPaths");
 
 const mail = await import("../server/mail");
 const { runMailDispatch } = await import("../server/mail/dispatcher");
@@ -70,7 +71,7 @@ describe("sprint mail", () => {
     const started = sent.find((message) => message.to === member.email)!;
     expect(started.subject).toBe("Sprint 12 started on Launch");
     expect(started.text).toContain("2 cards assigned to you");
-    expect(started.text).toContain(`/tasks/${boardId}/sprints`);
+    expect(started.text).toContain(sprintsPath(boardId));
     expect(sent.some((message) => message.to === defaults.email)).toBe(false);
     expect(db.query("SELECT skip_reason FROM mail_outbox WHERE user_id = ?").get(defaults.userId)).toEqual({ skip_reason: "prefs_off" });
 

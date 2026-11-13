@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { createUser, db, origin, request, type Session } from "./support/harness";
+const { boardPath, cardPath, collectionPath, collectionRowPath, documentPath, notePath, reportPath, sprintsPath, whiteboardPath } = await import("../server/friendlyPaths");
 import { addRow, fieldByName, newCollection, shareCollection } from "./support/collections";
 
 const { createMcpApiKey } = await import("../server/mcp");
@@ -103,7 +104,7 @@ describe("proposals: tasks kinds", () => {
     expect(approved.status).toBe(200);
     expect(approved.body.status).toBe("applied");
     expect(approved.body.ref.type).toBe("card");
-    expect(approved.body.ref.href).toBe(`/tasks/${boardId}/card/${approved.body.ref.id}`);
+    expect(approved.body.ref.href).toBe(cardPath(boardId, approved.body.ref.id));
     const row = db.query("SELECT created_by, due_on FROM cards WHERE id = ?").get(approved.body.ref.id) as { created_by: string; due_on: string };
     expect(row).toEqual({ created_by: owner.userId, due_on: "2026-10-03" });
     // The service's own event carries the proposal provenance.
@@ -161,7 +162,7 @@ describe("proposals: tasks kinds", () => {
     expect((await api(owner, "DELETE", `/tasks/cards/${binned.id}`)).status).toBe(200);
 
     const applied = await api(owner, "POST", `/inbox/proposals/${comment.proposalId}/approve`, {});
-    expect(applied.body.ref.href).toBe(`/tasks/${boardId}/card/${target.id}`);
+    expect(applied.body.ref.href).toBe(cardPath(boardId, target.id));
     expect(db.query("SELECT author_id, body FROM card_comments WHERE card_id = ?").get(target.id)).toEqual({ author_id: owner.userId, body: "The bill arrives Friday." });
     // The binned card: the preview is restricted and approve fails NOT_FOUND.
     expect((await api(owner, "GET", `/inbox/proposals/${lost.proposalId}`)).body.proposal.preview).toEqual({ restricted: true });
@@ -224,7 +225,7 @@ describe("proposals: calendar and collections kinds", () => {
     const preview = (await api(owner, "GET", `/inbox/proposals/${update.proposalId}`)).body.proposal.preview;
     expect(preview.fields).toEqual([{ name: "Qty", before: "1", after: "3" }]);
     const created = await api(owner, "POST", `/inbox/proposals/${create.proposalId}/approve`, {});
-    expect(created.body.ref.href).toBe(`/collections/${collection.id}/row/${created.body.ref.id}`);
+    expect(created.body.ref.href).toBe(collectionRowPath(collection.id, created.body.ref.id));
     expect((await api(owner, "POST", `/inbox/proposals/${update.proposalId}/approve`, {})).body.status).toBe("applied");
     expect((await api(owner, "POST", `/inbox/proposals/${stale.proposalId}/approve`, {})).body).toMatchObject({ status: "failed", code: "ROW_CHANGED" });
   });

@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { createUser, db, origin, request, type Session } from "./support/harness";
+const { boardPath, cardPath, collectionPath, collectionRowPath, documentPath, notePath, reportPath, sprintsPath, whiteboardPath } = await import("../server/friendlyPaths");
 import { startFakeClickhouse } from "./support/fakeClickhouse";
 import { retireUsersAfterFile } from "./support/retireUsers";
 import { sampleAnswer, sampleSpec } from "./support/reportSeed";
@@ -189,7 +190,7 @@ describe("Duplicate report (D575)", () => {
     const key = (session: Session) => ({ keyId: `k-dup-${session.userId.slice(0, 6)}`, userId: session.userId, name: "k", scopes: ["reports:read", "reports:write"] as never });
     await expect(Promise.resolve(tool.handler({ reportId: sourceId }, key(outsider)))).rejects.toMatchObject({ code: "NOT_FOUND" });
     const result = await tool.handler({ reportId: sourceId, title: "From MCP" }, key(viewer)) as Json;
-    expect(result.report).toMatchObject({ title: "From MCP", folderId: null, url: expect.stringContaining(`/reports/${result.report.id}`) });
+    expect(result.report).toMatchObject({ title: "From MCP", folderId: null, url: expect.stringContaining(reportPath(result.report.id)) });
     expect(result.duplicate).toMatchObject({ sourceId, docsHidden: 2, docs: 0 });
     const audit = db.query("SELECT metadata_json FROM audit_log WHERE event_type = 'reports.report.duplicate' AND metadata_json LIKE ?").get(`%${result.report.id}%`) as { metadata_json: string };
     expect(JSON.parse(audit.metadata_json)).toMatchObject({ via: "mcp", keyId: `k-dup-${viewer.userId.slice(0, 6)}` });

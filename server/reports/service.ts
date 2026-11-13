@@ -39,7 +39,7 @@ export function parseSpec(json: string): ReportSpec {
 
 function summaryOf(row: SummaryRow, userId: string): ReportSummary {
   return {
-    id: row.id, title: row.title, datasourceId: row.datasource_id, datasourceName: row.datasource_name, status: row.status, isOwner: row.is_owner === 1,
+    id: row.id, ...(row.short_id ? { shortId: row.short_id } : {}), title: row.title, datasourceId: row.datasource_id, datasourceName: row.datasource_name, status: row.status, isOwner: row.is_owner === 1,
     ownerName: row.owner_name, blockCount: parseSpec(row.spec_json).blocks.length, lastRunAt: row.last_run_at, createdAt: row.created_at, updatedAt: row.updated_at, revision: row.revision,
     // Phase 2 (D483): folders are the workspace's, so every reader sees where a report is filed.
     folderId: row.folder_id ?? null, scheduleCadence: row.schedule_cadence ?? null,

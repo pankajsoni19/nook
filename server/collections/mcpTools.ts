@@ -1,3 +1,4 @@
+import { collectionPath, collectionRowPath } from "../friendlyPaths";
 import * as z from "zod/v4";
 import { config } from "../config";
 import { keyFilter } from "../keyResources";
@@ -31,7 +32,7 @@ import { attachDocument, CollectionError, collectionDetail, createCollection, cr
 
 export const MCP_ROW_PAGE = 50;
 
-const collectionUrl = (collectionId: string, rowId: string) => `${config.appOrigin}/collections/${collectionId}/row/${rowId}`;
+const collectionUrl = (collectionId: string, rowId: string) => `${config.appOrigin}${collectionRowPath(collectionId, rowId)}`;
 
 function errorToMcp(error: CollectionError, schema?: CollectionSchema) {
   const known: Partial<Record<string, McpErrorCode>> = {
@@ -351,7 +352,7 @@ export const collectionTools: McpToolSpec[] = [
         return {
           collectionId: collection.id, name: collection.name,
           fields: collection.fields.map((field) => ({ id: field.id, name: field.name, type: field.type })),
-          url: `${config.appOrigin}/collections/${collection.id}`
+          url: `${config.appOrigin}${collectionPath(collection.id)}`
         };
       });
     }
