@@ -195,6 +195,15 @@ describe("recording each kind", () => {
     const commentFile = await upload(owner, "photo.txt", "A photo", { attachTo: "card" });
     expect((await call(owner, "POST", `/cards/${card.id}/comments`, { body: "See this", attachmentIds: [commentFile.id] })).status).toBe(201);
     expect(kinds(card.id).at(-1)).toBe("attachment_removed");
+    // Removing a comment's file is not recorded either (its attach never was): from the card, or by
+    // its owner through /api/attachments.
+    const before = kinds(card.id).length;
+    expect((await call(owner, "DELETE", `/cards/${card.id}/attachments/${commentFile.id}`)).status).toBe(200);
+    const ownerFile = await upload(owner, "scan.txt", "A scan", { attachTo: "card" });
+    expect((await call(owner, "POST", `/cards/${card.id}/comments`, { body: "And this", attachmentIds: [ownerFile.id] })).status).toBe(201);
+    const withdrawn = await request(`/attachments/card/${card.id}/${ownerFile.id}`, { method: "DELETE", body: "{}" }, owner);
+    expect(withdrawn.status).toBe(200);
+    expect(kinds(card.id).length).toBe(before);
   });
 });
 

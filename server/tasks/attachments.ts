@@ -195,7 +195,8 @@ export async function detachFromCard(userId: string, cardId: string, documentId:
       linkChanged("card", cardId, documentId);
       binned = binUnlinkedAttachments([documentId], userId, binnedFiles);
       db.query("UPDATE cards SET updated_at = ? WHERE id = ?").run(now(), cardId);
-      recordCardActivity({ cardId, boardId: current.id, actorId: userId, kind: "attachment_removed", payload: { item: activityValue.document(documentId) } });
+      // A comment's files are not in the card's history (their attach is not recorded either).
+      if (!link.comment_id) recordCardActivity({ cardId, boardId: current.id, actorId: userId, kind: "attachment_removed", payload: { item: activityValue.document(documentId) } });
       audit(userId, null, "task.attachment_unlink", { boardId: current.id, cardId, documentId });
       // The Undo record commits with the removal (undoTickets.ts).
       recordRemovedLink(userId, "card", cardId, documentId, { partId: link.comment_id, position: 0, linkedBy: link.linked_by, createdAt: link.created_at, binned: binned > 0 });
