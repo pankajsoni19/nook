@@ -3033,6 +3033,32 @@ No migration. Wire types: `shared/backups.ts` (`BackupsView`, `BackupRun`, `Dril
 
 **CLI** (`server/backup-admin.ts`): `backup`, `list`, `status`, `restore-drill [--from latest|<name>|<path>|litestream[@<RFC 3339>]] [--strict] [--keep]`, `restore --from … --to <empty folder> [--files-from …] [--db-only]`; since 0.47.0 (D689) `--from-dir <folder>` on `restore` and `restore-drill` looks for archives (`--from`, `--files-from`) in that folder only, never BACKUP_DIR or the bucket, with `--from` defaulting to `latest` on `restore` (exit 1 when the folder is missing or not a folder). `server/litestream.ts prepare <file>` (exit 0 written, 3 off or no bucket, 1 refused) and `config`.
 
+## Bookings (lane BOOK, D1000–D1039)
+
+Module routes (session; guests 404). Errors `{ error, code }`; unreadable is `NOT_FOUND`. Wire types: `shared/bookings.ts`, `src/bookings/api.ts`.
+
+| Route | Body / query | Returns |
+| --- | --- | --- |
+| `GET/PUT /api/bookings/profile` | `{ handle?, displayName?, welcome?, tz?, enabled?, busyCalendarIds? }` | `{ profile, feeds }` / `{ profile }`; 409 `HANDLE_TAKEN` |
+| `POST /api/bookings/profile/:userId/reset-handle` | — | admins only |
+| `GET/POST /api/bookings/feeds`, `POST /api/bookings/feeds/:id/refresh`, `DELETE /api/bookings/feeds/:id` | `{ label, url }` | `{ feed: { id, label, hint, status, error, busyCount, lastFetchedAt } }` (never the URL) |
+| `GET/POST /api/bookings/schedules`, `PUT/DELETE /api/bookings/schedules/:id` | `{ name, tz, weekly: { mon: [{ from, to }] … }, isDefault? }` | `{ schedule(s) }` |
+| `PUT /api/bookings/schedules/:id/overrides`, `DELETE …/overrides/:date` | `{ date, ranges: [...] \| null, note? }` | `{ schedule }` |
+| `GET/POST /api/bookings/types`, `GET/PATCH/DELETE /api/bookings/types/:ref` | type fields (D1022), `expectedRevision` | `{ type }`; 409 `TYPE_CHANGED`; DELETE → Bin |
+| `GET/PUT /api/bookings/types/:ref/questions` | `{ set, publish? }` | draft and published sets |
+| `GET /api/bookings/types/:ref/slots` | `from, to, tz, duration` (≤ 62 days) | `{ tz, duration, days: { date: [iso] } }` |
+| `GET/POST /api/bookings/types/:ref/secret-links`, `DELETE …/:linkId` | `{ singleUse?, expiresInDays?, label? }` | `{ link: { id, path } }` (path shown once) |
+| `GET /api/bookings/types/:ref/embed`, `GET /api/bookings/contact-books` | — | embed card / editable books |
+| `GET /api/bookings` | `view=upcoming\|pending\|past\|cancelled`, `type`, `from`, `to`, `cursor`, `limit` | `{ items, nextCursor }` |
+| `POST /api/bookings` | `{ type, start, duration?, booker?, contactId? }` | internal booking; 409 `SLOT_TAKEN` |
+| `GET /api/bookings/b/:ref`, `GET …/slots` | — | `{ booking }` with answers / reschedule slots |
+| `POST /api/bookings/b/:ref/approve\|decline\|cancel\|reschedule\|no-show` | `{ message? }`, reschedule `{ start, message? }` | `{ booking }` |
+| `GET /api/bookings/insights` | `days, tz` | KPIs and series (dataset `bookings.bookings`) |
+
+Public (no session, strict headers, one 404): `GET /api/public/book/:handle`, `GET /api/public/book/:handle/:slug` and `/api/public/book/link/:token` (`{ meta: { renderNonce }, host, type, questions, verifyEmail, mail }`), `…/slots` (≤ 31 days), `POST …/bookings` (`{ start, duration, tz, name, email, guests?, location?, answers, nonce, website }` → 201 `{ status, manageUrl, mailQueued, booking }` or 202 `{ status: "verify", verificationId }`), `POST …/verify` (`{ id, code }`), `GET /api/public/bookings/manage/:token` (+ `/ics`, `/slots`), `POST …/cancel` (`{ reason?, nonce, website }`), `POST …/reschedule` (`{ start, reason?, nonce, website }` → new `manageUrl`). Pages: `/p/book/:handle`, `/p/book/:handle/:slug`, `/p/book/link/:token`, `/p/book/manage/:token`.
+
+MCP (`bookings:read` / `bookings:write`): `list_booking_types`, `get_booking_type`, `create_booking_type`, `update_booking_type`, `delete_booking_type` (+ `bin:write`), `get_availability`, `list_bookings`, `get_booking`, `create_booking`, `reschedule_booking`, `cancel_booking`, `approve_booking`, `decline_booking`, `mark_no_show`, `get_booking_link`. Agents: reads, `get_availability`, `create_booking`.
+
 ## Changes to existing note endpoints (Wave 4)
 
 - `DELETE /api/notes/:id`:

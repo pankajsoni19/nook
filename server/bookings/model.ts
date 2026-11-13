@@ -1,7 +1,7 @@
 import { db } from "../db";
 import { itemLevel, readableContainerSql } from "../access/workspaceItems";
 import { LEVEL_RANK, type ItemLevel } from "../access/levels";
-import { isShortId, slugSegment } from "../../shared/friendlyUrls";
+import { isShortId, shortIdOfSegment, slugSegment } from "../../shared/friendlyUrls";
 import { DEFAULT_REMINDERS, type Assignment, type BookingSource, type BookingStatus, type CardTemplate, type LocationKind, type ReminderSettings, type TimeRange, type WeeklyRules } from "../../shared/bookings";
 
 /** Rows, errors, and access helpers of the Bookings module (§D.6). */
@@ -50,8 +50,9 @@ export const overridesOf = (scheduleId: string): Record<string, TimeRange[] | nu
 
 /** A type by id or short id (live or binned). */
 export function typeRow(ref: string): TypeRow | null {
-  const column = isShortId(ref) ? "short_id" : "id";
-  return db.query(`SELECT * FROM booking_types WHERE ${column} = ?`).get(ref.toLowerCase()) as TypeRow | null;
+  // An id, a short id, or a friendly segment (`intro-call-k7f3q2ab01`, D825).
+  const short = isShortId(ref) ? ref : /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(ref) ? null : shortIdOfSegment(ref);
+  return db.query(`SELECT * FROM booking_types WHERE ${short ? "short_id" : "id"} = ?`).get((short ?? ref).toLowerCase()) as TypeRow | null;
 }
 export function bookingRow(ref: string): BookingRow | null {
   const column = isShortId(ref) ? "short_id" : "id";

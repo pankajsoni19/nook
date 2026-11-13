@@ -4,6 +4,8 @@ Release notes for Nook, newest first. Upgrade steps for each release are in [doc
 
 ## Unreleased
 
+**Bookings** (lane BOOK): booking pages people outside the workspace can use (`/p/book/<you>`), booking types with lengths, buffers, notice, limits and date ranges, weekly hours with date overrides in any time zone, busy times from Nook calendars and outside ICS calendars (Google/Outlook secret addresses), round robin and collective team types, manual approval, intake questions, confirmation and reminder mail with Add to calendar and a reschedule/cancel link, the booker saved as a contact, the event on your calendar, an optional prep card, Insights, and MCP tools.
+
 **Friendly, shareable URLs**
 
 - **Cards and boards**: the address bar shows `/tasks/KAN-1` for an open card (dialog or full page, `/tasks/KAN-1/full`) and `/tasks/KAN` for a board, keeping the board's view in the query when it is not the default. Old `/tasks/<id>/card/<id>` links, board ids, old card keys of moved cards, and a board's former code still open and turn into the current URL without an extra history entry.

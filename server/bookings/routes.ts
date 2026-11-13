@@ -4,10 +4,10 @@ import type { AppEnv } from "../auth";
 import { db } from "../db";
 import type { ModuleRouter } from "../workspaceRegistry";
 import { QuestionError } from "../questions/service";
-import { PeopleError, readableContact } from "../people/contacts";
+import { PeopleError, readableBookIds, readableContact } from "../people/contacts";
 import { addDays, isValidTimeZone, zonedToUtc } from "../../shared/calendarRecurrence";
 import { ASSIGNMENTS, BOOKING_STATUSES, LOCATION_KINDS, MAX_SLOT_WINDOW_DAYS, slotsByDate, windowProblem, type BookingStatus } from "../../shared/bookings";
-import { BookingError, readableBookingSql, requireBooking, requireType, type BookingRow } from "./model";
+import { BookingError, readableBookingSql, requireBooking, requireType, typeRow, type BookingRow } from "./model";
 import { createSchedule, deleteOverride, deleteSchedule, ensureProfile, listSchedules, putOverride, resetHandle, updateProfile, updateSchedule } from "./setup";
 import { createSecretLink, createType, deleteType, listSecretLinks, listTypes, revokeSecretLink, saveTypeQuestions, typeQuestions, typeView, updateType } from "./types";
 import { availability } from "./availability";
@@ -184,6 +184,21 @@ export function registerBookingRoutes(router: ModuleRouter) {
   router.get("/api/bookings/types/:id", handle((c, userId) => c.json({ type: typeView(requireType(c.req.param("id") ?? "", userId).type, userId) })));
   router.patch("/api/bookings/types/:id", handle(async (c, userId) => c.json({ type: updateType(userId, c.req.param("id") ?? "", await body(c, typePatchSchema)) })));
   router.delete("/api/bookings/types/:id", handle((c, userId) => c.json(deleteType(userId, c.req.param("id") ?? ""))));
+  // The contact books a type may upsert bookers into (books the caller can edit; the type editor's picker).
+  router.get("/api/bookings/contact-books", handle((c, userId) => {
+    const ids = readableBookIds(userId, "edit");
+    const books = ids.length ? db.query("SELECT id, name FROM contact_books WHERE id IN (SELECT value FROM json_each(?)) AND deleted_at IS NULL AND system_kind IS NULL ORDER BY name COLLATE NOCASE").all(JSON.stringify(ids)) : [];
+    return c.json({ books });
+  }));
+  // A booking-link embed in a note (§B.4.4): a public, active type shows its public card to any member
+  // (the page is public anyway); otherwise only readers of the type see it.
+  router.get("/api/bookings/types/:id/embed", handle((c, userId) => {
+    const row = typeRow(c.req.param("id") ?? "");
+    if (!row || row.deleted_at !== null) throw new BookingError(404, "NOT_FOUND", "Booking type not found");
+    const view = typeView(row, userId);
+    if (view.level === "none" && !view.publicPath) throw new BookingError(404, "NOT_FOUND", "Booking type not found");
+    return c.json({ title: view.title, publicPath: view.publicPath, durations: view.durations, ownerName: view.ownerName });
+  }));
   router.get("/api/bookings/types/:id/questions", handle((c, userId) => c.json(typeQuestions(userId, c.req.param("id") ?? ""))));
   router.put("/api/bookings/types/:id/questions", handle(async (c, userId) => {
     const input = await body(c, z.object({ set: z.unknown(), publish: z.boolean().optional() }).strict());
