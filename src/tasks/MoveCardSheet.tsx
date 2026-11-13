@@ -93,7 +93,7 @@ function MoveToBoardSheet({ card, onMoveToBoard, onBack, onCancel, loadBoards, l
     return () => { live = false; };
   }, [target, loadColumns]);
 
-  async function confirm() {
+  async function submitMove() {
     if (!target || !columnId) return;
     setBusy(true);
     setError(null);
@@ -137,7 +137,7 @@ function MoveToBoardSheet({ card, onMoveToBoard, onBack, onCancel, loadBoards, l
     <FormError message={error} className="file-dialog-error" />
     <footer className="file-dialog-actions">
       <button className="secondary-button" onClick={onCancel} disabled={busy}>Cancel</button>
-      <button className="primary-button" onClick={() => { void confirm(); }} disabled={!target || !chosenColumn || busy || hasChildren}>{busy ? "Moving…" : target && chosenColumn ? `Move to ${target.name} › ${chosenColumn.name}` : "Move"}</button>
+      <button className="primary-button" onClick={() => { void submitMove(); }} disabled={!target || !chosenColumn || busy || hasChildren}>{busy ? "Moving…" : target && chosenColumn ? `Move to ${target.name} › ${chosenColumn.name}` : "Move"}</button>
     </footer>
   </ModalDialog>;
 }
