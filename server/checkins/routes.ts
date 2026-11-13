@@ -18,7 +18,7 @@ import { canWriteContent } from "../team/userRole";
  * writes (registered as the module's read-only writes, D817); the handlers check participation.
  */
 
-const id = z.string().min(1).max(64);
+const id = z.string().min(1).max(200);
 const schedule = z.object({
   weekdays: z.array(z.number().int().min(0).max(6)).min(1).max(7),
   at: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),

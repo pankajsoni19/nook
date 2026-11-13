@@ -306,7 +306,7 @@ export function feed(userId: string, options: { checkin?: string | null; person?
     const late = (db.query("SELECT 1 FROM checkin_round_participants WHERE round_id = ? AND response_id = ? AND status = 'late'").get(round.id, entry.id)) !== null;
     const [view] = answerViews(row, [response], userId, late ? new Set([entry.id]) : new Set());
     const blockers = (db.query("SELECT COUNT(*) AS count FROM checkin_blockers WHERE response_id = ?").get(entry.id) as { count: number }).count;
-    items.push({ ...view!, checkin: { id: row.id, name: row.name, href: checkinHref(row) }, round: { id: round.id, date: round.round_date, href: `${checkinHref(row)}/${round.round_date}` }, blockers });
+    items.push({ ...view!, checkin: { id: row.id, name: row.name, href: checkinHref(row) }, round: { id: round.id, date: round.round_date, href: `${checkinHref(row)}/${round.round_date}` }, blockers, set: setVersion({ kind: "checkin", id: row.id }, response.setVersion) ?? { version: 1, questions: [], sections: [], logic: [], endings: [] } });
   }
   const last = page[page.length - 1];
   return { items, nextCursor: rows.length > limit && last ? Buffer.from(JSON.stringify([last.submitted_at, last.id])).toString("base64url") : null };

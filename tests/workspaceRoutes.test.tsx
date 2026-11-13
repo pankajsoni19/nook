@@ -27,6 +27,9 @@ import { TopBarItems } from "../src/AppShell";
  * action, card slots, an embed, a slash item, and a header item without touching a shared file.
  */
 
+/** Modules whose lanes have shipped (`ready: true`): each lane adds its id here when it flips the switch. */
+const SHIPPED = new Set<string>(["checkins"]);
+
 const notify = Object.assign(() => undefined, { success: () => undefined, info: () => undefined, warning: () => undefined, error: () => undefined }) as never;
 const card = { id: "0b7c1a52-3f5e-4d8e-9a51-0c6a7f2b9d11", board_id: "1b7c1a52-3f5e-4d8e-9a51-0c6a7f2b9d11", key: "MYT-12", title: "Ship it" };
 
@@ -73,10 +76,10 @@ afterAll(() => {
 });
 
 describe("the stubs (D800, D832)", () => {
-  test("seven modules, in Settings order, all registered and none ready", () => {
+  test("seven modules, in Settings order, all registered and none ready but the shipped ones", () => {
     expect(workspaceModules().map((module) => module.id)).toEqual([...WORKSPACE_MODULE_IDS]);
     expect(WORKSPACE_MODULE_IDS).toEqual(["forms", "time", "goals", "checkins", "crm", "bookings", "townhall"]);
-    expect(readyWorkspaceModules()).toEqual([]);
+    expect(readyWorkspaceModules().filter((module) => !SHIPPED.has(module.id))).toEqual([]);
     // Product owner names (§G.1): Contacts at /contacts, Standups at /standups.
     expect(workspaceModules().map((module) => [module.id, module.label, module.segment])).toEqual([
       ["forms", "Forms", "forms"], ["time", "Time", "time"], ["goals", "Goals", "goals"], ["checkins", "Standups", "standups"],
@@ -84,14 +87,14 @@ describe("the stubs (D800, D832)", () => {
     ]);
   });
 
-  test("a stub is a planned module: not in Settings, no launcher, its URLs open Home", () => {
-    for (const id of WORKSPACE_MODULE_IDS) {
+  test("a stub (not shipped) is a planned module: not in Settings, no launcher, its URLs open Home", () => {
+    for (const id of WORKSPACE_MODULE_IDS.filter((item) => !SHIPPED.has(item))) {
       const def = MODULES.find((module) => module.id === id)!;
       expect(def.planned).toBe(true);
       expect(def.routeApps).toEqual([id]);
     }
-    expect(settingsModulesFor("admin").some((module) => isWorkspaceModuleId(module.id))).toBe(false);
-    for (const path of ["/forms", "/contacts/ana-silva-9xk2mm0a1b", "/standups", "/goals/x"]) expect(parseRoute(path)).toEqual({ app: "home" });
+    expect(settingsModulesFor("admin").some((module) => isWorkspaceModuleId(module.id) && !SHIPPED.has(module.id))).toBe(false);
+    for (const path of ["/forms", "/contacts/ana-silva-9xk2mm0a1b", "/goals/x"]) expect(parseRoute(path)).toEqual({ app: "home" });
     expect(renderToStaticMarkup(<TopBarItems />)).toBe("");
   });
 
@@ -130,13 +133,13 @@ describe("a ready module (the throwaway test module)", () => {
     expect(TODAY_SECTIONS.goalsCheckin?.module).toBe("goals");
     expect(DEFAULT_SECTION_ORDER).toContain("goalsCheckin");
     expect(groupTodaySections(["tasksDue", "goalsCheckin", "notesRecent"]).map((group) => [group.id, group.names])).toEqual([["today", ["tasksDue", "goalsCheckin"]], ["recent", ["notesRecent"]]]);
-    expect(visibleQuickActions([], "member").map((action) => action.id)).toEqual(["checkin", "admin-only"]);
-    expect(visibleQuickActions([], "guest").map((action) => action.id)).toEqual(["checkin"]);
-    expect(visibleQuickActions(["goals"], "member")).toEqual([]);
+    expect(visibleQuickActions([...SHIPPED], "member").map((action) => action.id)).toEqual(["checkin", "admin-only"]);
+    expect(visibleQuickActions([...SHIPPED], "guest").map((action) => action.id)).toEqual(["checkin"]);
+    expect(visibleQuickActions(["goals", ...SHIPPED], "member")).toEqual([]);
     const markup = renderToStaticMarkup(<QuickActions onOpenRoute={() => undefined} />);
     expect(markup).toContain('<ul class="today-quick-actions" aria-label="Quick actions">');
     expect(markup).toContain('<a class="today-quick-action" href="/goals">');
-    expect(renderToStaticMarkup(<ModulesContext.Provider value={["goals"]}><QuickActions onOpenRoute={() => undefined} /></ModulesContext.Provider>)).toBe("");
+    expect(renderToStaticMarkup(<ModulesContext.Provider value={["goals", ...SHIPPED]}><QuickActions onOpenRoute={() => undefined} /></ModulesContext.Provider>)).toBe("");
   });
 
   test("its card slots render in the dialog, face, header, and Timeline, and hide while it is off", () => {

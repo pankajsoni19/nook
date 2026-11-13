@@ -3,7 +3,7 @@ import { avatarUrlFor } from "../avatars";
 import { capByRole, LEVEL_RANK, type ItemLevel } from "../access/levels";
 import { containerRow, itemLevel, readableContainerSql } from "../access/workspaceItems";
 import { userRole } from "../team/userRole";
-import { slugSegment, isShortId } from "../../shared/friendlyUrls";
+import { slugSegment, isShortId, shortIdOfSegment } from "../../shared/friendlyUrls";
 import type { CheckinPerson, CheckinSchedule, CheckinTemplate, ParticipationState } from "../../shared/checkins";
 
 /**
@@ -52,8 +52,11 @@ export const checkinHref = (row: Pick<CheckinRow, "name" | "short_id">) => `/sta
 
 /** A standup by id or short id, live or binned. */
 export function checkinRow(ref: string): CheckinRow | null {
-  const value = ref.toLowerCase();
-  if (value.length > 64) return null;
+  const lower = ref.toLowerCase();
+  if (lower.length > 200) return null;
+  // A UUID, a short id, or a friendly segment (`daily-standup-<sid>`, D812).
+  const value = /^[0-9a-f-]{36}$/.test(lower) ? lower : isShortId(lower) ? lower : shortIdOfSegment(lower);
+  if (!value) return null;
   return db.query(`SELECT * FROM checkins WHERE ${isShortId(value) ? "short_id" : "id"} = ?`).get(value) as CheckinRow | null;
 }
 

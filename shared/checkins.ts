@@ -192,7 +192,7 @@ export type AnswerPrefill = {
   current: { id: string; answers: Answers; revision: number } | null;
 };
 
-export type FeedEntry = AnswerView & { checkin: { id: string; name: string; href: string }; round: { id: string; date: string; href: string }; blockers: number };
+export type FeedEntry = AnswerView & { checkin: { id: string; name: string; href: string }; round: { id: string; date: string; href: string }; blockers: number; set: QuestionSet };
 
 export type CheckinStats = {
   rounds: Array<{ id: string; date: string; status: string; answered: number; late: number; skipped: number; out: number; pending: number; participants: number; mood: number | null }>;
