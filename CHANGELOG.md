@@ -2,6 +2,18 @@
 
 Release notes for Nook, newest first. Upgrade steps for each release are in [docs/OPERATIONS.md](docs/OPERATIONS.md#upgrades).
 
+## Unreleased
+
+**Tasks: card keys and moving cards between boards**
+
+- **Card keys.** Every board has a short code (MYT) and every card a key (MYT-12), shown in the card header (click to copy), on cards, and in the list and table views. New board suggests a code from the name; the owner changes it in Board settings, and old keys keep working.
+- **Short links.** `/tasks/MYT-12` opens the card; Copy link copies it. Card search finds a card by its key, and MCP tools take a key wherever they take a card id.
+- **Move to another board…** from a card's Move sheet: the card keeps its comments, files, people, and links, takes the new board's tags by name, leaves its sprint and parent, and gets a new key (the old one still finds it). MCP: `move_card_to_board`.
+
+**Upgrading**
+
+- Migration **079** (`board_keys`) gives every board a code from its name and numbers every card in creation order; quick. **Back up first** (`./scripts/backup.sh --force`).
+
 ## v0.47.0 — 2026-10-24
 
 **Task views**
