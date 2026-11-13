@@ -93,19 +93,27 @@ export function runDatasetQuery(query: StructuredQuery, viewer: { userId: string
   const outColumns: DatasetResult["columns"] = [];
   const group: string[] = [];
   const names = new Set<string>();
+  // Output columns are selected under internal aliases ("_q0", "_q1", …) that no table column can
+  // share. GROUP BY resolves a name that is both an alias and a column of a joined table as the
+  // column (ambiguous when two joined tables have it, CRM D980), so grouping by the dataset's own
+  // column names broke datasets whose joins share a column name; the aliases are mapped back below.
+  const aliases = new Map<string, string>();
+  const alias = (name: string) => { const internal = `"_q${aliases.size}"`; aliases.set(name, internal); return internal; };
   for (const name of query.dimensions ?? []) {
     const column = columns.get(name);
     if (!column?.dimension) throw new DatasetError(`${name} cannot be grouped by`);
     if (names.has(name)) throw new DatasetError(`${name} is listed twice`);
     names.add(name);
-    select.push(`${column.sql} AS "${name}"`);
-    group.push(`"${name}"`);
+    const as = alias(name);
+    select.push(`${column.sql} AS ${as}`);
+    group.push(as);
     outColumns.push({ name, type: column.type });
   }
   if (query.timeBucket) {
     if (!(TIME_BUCKETS as readonly string[]).includes(query.timeBucket) || !def.timeColumn) throw new DatasetError("This dataset has no time to bucket by");
-    select.push(`${BUCKET_FORMATS[query.timeBucket]!(zoned(columns.get(def.timeColumn)!.sql))} AS "bucket"`);
-    group.push(`"bucket"`);
+    const as = alias("bucket");
+    select.push(`${BUCKET_FORMATS[query.timeBucket]!(zoned(columns.get(def.timeColumn)!.sql))} AS ${as}`);
+    group.push(as);
     outColumns.push({ name: "bucket", type: "bucket" });
     names.add("bucket");
   }
@@ -116,14 +124,14 @@ export function runDatasetQuery(query: StructuredQuery, viewer: { userId: string
     if (!/^[a-z][a-z0-9_]{0,39}$/.test(name) || names.has(name)) throw new DatasetError(`Invalid measure name ${name}`);
     names.add(name);
     if (measure.fn === "count" && !measure.column) {
-      select.push(`COUNT(*) AS "${name}"`);
+      select.push(`COUNT(*) AS ${alias(name)}`);
       outColumns.push({ name, type: "number" });
       continue;
     }
     const column = measure.column ? columns.get(measure.column) : undefined;
     if (!column || !(column.measures ?? []).includes(measure.fn)) throw new DatasetError(`${measure.column ?? "?"} does not allow ${measure.fn}`);
     const sql = measure.fn === "count_distinct" ? `COUNT(DISTINCT ${column.sql})` : `${measure.fn.toUpperCase()}(${column.sql})`;
-    select.push(`${sql} AS "${name}"`);
+    select.push(`${sql} AS ${alias(name)}`);
     outColumns.push({ name, type: measure.fn === "count" || measure.fn === "count_distinct" ? "number" : column.type });
   }
   const where: string[] = [];
@@ -180,9 +188,9 @@ export function runDatasetQuery(query: StructuredQuery, viewer: { userId: string
   const order: string[] = [];
   for (const sort of (query.sort ?? []).slice(0, 5)) {
     if (!names.has(sort.column)) throw new DatasetError(`Sort by an output column (${sort.column} is not one)`);
-    order.push(`"${sort.column}" ${sort.dir === "asc" ? "ASC" : "DESC"}`);
+    order.push(`${aliases.get(sort.column)!} ${sort.dir === "asc" ? "ASC" : "DESC"}`);
   }
-  if (!order.length && names.has("bucket")) order.push(`"bucket" ASC`);
+  if (!order.length && names.has("bucket")) order.push(`${aliases.get("bucket")!} ASC`);
   const limit = Math.min(Math.max(1, query.limit ?? DATASET_ROW_LIMIT), DATASET_ROW_LIMIT);
   params.rowLimit = limit + 1;
   const sql = `SELECT ${select.join(", ")} FROM ${def.from} WHERE ${where.join(" AND ")}${group.length ? ` GROUP BY ${group.join(", ")}` : ""}${order.length ? ` ORDER BY ${order.join(", ")}` : ""} LIMIT $rowLimit`;
@@ -190,7 +198,7 @@ export function runDatasetQuery(query: StructuredQuery, viewer: { userId: string
   return {
     columns: outColumns,
     rows: rows.slice(0, limit).map((row) => outColumns.map((column) => {
-      const value = row[column.name] ?? null;
+      const value = row[aliases.get(column.name)!.slice(1, -1)] ?? null;
       return column.type === "bool" && typeof value === "number" ? value === 1 : value;
     })),
     truncated: rows.length > limit

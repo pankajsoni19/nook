@@ -21,6 +21,23 @@ describe("datasets", () => {
     expect(runDatasetQuery(query, { userId: other.userId, role: "member" }).rows).toEqual([]);
   });
 
+  test("a dimension named like a column that two joined tables share groups and sorts by its own expression (CRM D980)", async () => {
+    const owner = await createUser("Datasets shared names");
+    const board = await (await request("/tasks/boards", { method: "POST", body: JSON.stringify({ name: "Shared names" }) }, owner)).json() as { board: { id: string } };
+    const columnId = (db.query("SELECT id FROM board_columns WHERE board_id = ? ORDER BY position LIMIT 1").get(board.board.id) as { id: string }).id;
+    for (const title of ["One", "Two"]) await request(`/tasks/boards/${board.board.id}/cards`, { method: "POST", body: JSON.stringify({ title, columnId }) }, owner);
+    // cards, boards, and board_columns all have created_at (and boards/board_columns a name).
+    const result = runDatasetQuery({
+      dataset: "tasks.cards", measures: [{ fn: "count" }, { fn: "max", column: "created_at" }], dimensions: ["created_at", "board"],
+      filters: [{ column: "board_id", op: "eq", value: board.board.id }], sort: [{ column: "created_at", dir: "desc" }]
+    }, { userId: owner.userId, role: "member" });
+    expect(result.columns.map((column) => column.name)).toEqual(["created_at", "board", "count", "max_created_at"]);
+    expect(result.rows.reduce((sum, row) => sum + Number(row[2]), 0)).toBe(2);
+    expect(result.rows.every((row) => row[1] === "Shared names" && row[0] === row[3])).toBe(true);
+    const bucketed = runDatasetQuery({ dataset: "tasks.cards", measures: [{ fn: "count" }], timeBucket: "day", filters: [{ column: "board_id", op: "eq", value: board.board.id }], sort: [{ column: "count", dir: "desc" }] }, { userId: owner.userId, role: "member" });
+    expect(bucketed.rows).toEqual([[new Date().toISOString().slice(0, 10), 2]]);
+  });
+
   test("names, functions, and operators come from the dataset; values are bound, never spliced", async () => {
     const viewer = await createUser("Datasets fuzz");
     const run = (query: Record<string, unknown>) => runDatasetQuery(query as never, { userId: viewer.userId, role: "member" });
