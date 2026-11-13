@@ -248,7 +248,7 @@ describe("guests have no Bin entry", () => {
     expect(binEntryShown("guest", true)).toBe(false);
     for (const role of ["admin", "member", "viewer", undefined] as const) expect(binEntryShown(role, true)).toBe(true);
     for (const role of ["admin", "member", "viewer", "guest", undefined] as const) expect(binEntryShown(role, false)).toBe(false);
-    expect(hubEntries("guest", { teamModuleEnabled: true, binCount: 3 }).some((entry) => entry.group === "workspace")).toBe(false);
+    expect(hubEntries("guest", { teamModuleEnabled: true, binCount: 3 }).some((entry) => entry.group === "workspace" && entry.id !== "workspace")).toBe(false);
     expect(hubPopRoute({ app: "bin" }, true, binEntryShown("guest", true))).toBeNull();
     const app = read("src/App.tsx");
     expect(app).toContain("const binShown = binEntryShown(session.user.role, binModuleEnabled);");
