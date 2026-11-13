@@ -1,3 +1,4 @@
+import { withoutRouteNames } from "../routeNames";
 import { createContext, useContext } from "react";
 import { api } from "../api";
 import { formatRoute, parseRoute } from "../router";
@@ -28,9 +29,13 @@ const MAX_PATH = 200;
  */
 export function safeNotificationPath(href: unknown) {
   if (typeof href !== "string" || href.length > MAX_PATH || !href.startsWith("/") || href.startsWith("//") || /[\\\s#]/.test(href)) return "/notifications";
-  const route = parseRoute(href);
-  // Ids are compared without case: the router writes them lowercase, and so does the server.
-  const path = formatRoute(route);
+  // Ids are compared without case: the router writes them lowercase, and so does the server. The check
+  // runs without this tab's names (D774), so a UUID href and a friendly one (/tasks/MYT-12) both pass
+  // as written; opening it then canonicalizes the URL.
+  const { route, path } = withoutRouteNames(() => {
+    const parsed = parseRoute(href);
+    return { route: parsed, path: formatRoute(parsed) };
+  });
   if (route.app === "home" || path.toLowerCase() !== href.toLowerCase()) return "/notifications";
   return path;
 }

@@ -1,3 +1,4 @@
+import { nameItems } from "../routeNames";
 import { api } from "../api";
 import type { DocumentSummary } from "../types";
 import type { CanonicalScene } from "../../shared/whiteboardScene";
@@ -25,7 +26,8 @@ export type WhiteboardSort = "updated-desc" | "updated-asc" | "name-asc" | "name
 
 /** One page (at most 500) in `sort` order; pass `nextCursor` back for the next. */
 export const listWhiteboards = (folder: "all" | "shared" | string = "all", cursor: string | null = null, sort: WhiteboardSort = "updated-desc") =>
-  api<{ whiteboards: WhiteboardSummary[]; nextCursor: string | null }>(`/whiteboards?folder=${encodeURIComponent(folder)}&sort=${sort}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
+  api<{ whiteboards: WhiteboardSummary[]; nextCursor: string | null }>(`/whiteboards?folder=${encodeURIComponent(folder)}&sort=${sort}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`)
+    .then((result) => { nameItems("whiteboard", result.whiteboards); return result; });
 
 /** The owner's "Restore previous version": the newest safety snapshot becomes a new revision (CAS). */
 export const restorePreviousVersion = (id: string, baseRevision: number) =>
@@ -65,10 +67,12 @@ export const getWhiteboardSummary = (id: string, signal?: AbortSignal) =>
 /** The link a note embeds (D208): this instance's board URL; pasted alone on a line, it becomes a card. */
 export const whiteboardLink = (id: string, origin = window.location.origin) => `${origin}/whiteboards/${id}`;
 
-export const getWhiteboard = (id: string) => api<{ whiteboard: WhiteboardSummary; scene: CanonicalScene }>(`/whiteboards/${encodeURIComponent(id)}`);
+export const getWhiteboard = (id: string) => api<{ whiteboard: WhiteboardSummary; scene: CanonicalScene }>(`/whiteboards/${encodeURIComponent(id)}`)
+  .then((result) => { nameItems("whiteboard", [result.whiteboard]); return result; });
 
 export function createWhiteboard(name: string, folderId: string | null, idempotencyKey = crypto.randomUUID()) {
-  return api<{ whiteboard: WhiteboardSummary }>("/whiteboards", { method: "POST", headers: { "Idempotency-Key": idempotencyKey }, body: JSON.stringify({ name, ...(folderId ? { folderId } : {}) }) });
+  return api<{ whiteboard: WhiteboardSummary }>("/whiteboards", { method: "POST", headers: { "Idempotency-Key": idempotencyKey }, body: JSON.stringify({ name, ...(folderId ? { folderId } : {}) }) })
+    .then((result) => { nameItems("whiteboard", [result.whiteboard]); return result; });
 }
 
 export const saveWhiteboardScene = (id: string, baseRevision: number, scene: CanonicalScene) =>

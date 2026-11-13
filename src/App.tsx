@@ -1,3 +1,6 @@
+import { FriendlyLinkGate } from "./FriendlyLinkGate";
+import { installCanonicalizer } from "./friendlyLinks";
+import { clearRouteNames } from "./routeNames";
 import { lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
   Archive,
@@ -125,7 +128,7 @@ import { notifyBinned } from "./bin/binUndo";
 import { canPublish, DRAFT_CHANGED_MESSAGE, finalizeOpenNote, isDraftChangedError, mcpDraftBadge, shouldAutoPublish } from "./noteFinalization";
 import { confirmLaterMessage, confirmRequiredOf, publishFilesConfirm } from "./publishFilesConfirm";
 import { formatRoute, hubDocumentTitle, keysTabRoute, locationUrl, parseRoute, routeFromLocation, SETTINGS_SECTION_NAMES, settingsDocumentTitle, settingsPath, type KeysTab, type Route, type SettingsSection } from "./router";
-import { noteInFolder, notesRoute, resolveNotesPanel, resolveNotesRoute, type NotesRoute } from "./notesRoute";
+import { nameNotes, noteInFolder, notesRoute, resolveNotesPanel, resolveNotesRoute, type NotesRoute } from "./notesRoute";
 import type { BinItem, Folder, NoteDetail, NoteSummary, User, Version } from "./types";
 import { SearchResults, searchListId, searchOptionId } from "./search/SearchResults";
 import { isSearchPushedEntry, markSearchPushed, nextSearchHint, readSearchHint, sameSearchHint, withSearchHint, type SearchHint } from "./search/searchHistory";
@@ -953,6 +956,8 @@ function writeHistory(userId: string, route: Route, panel: MobilePanel, mode: "p
 
 export function App() {
   const [session, setSession] = useState<SessionResponse | null>(null);
+  // Friendly URLs (D774): the address bar follows the names the tab learns (a UUID link, a rename, a move).
+  useEffect(() => installCanonicalizer(), []);
   const [checking, setChecking] = useState(true);
   // Wave 35 (QA U4): headers and sidebar footers show the signed-in person's picture.
   useEffect(() => { setSelfAvatar(session?.user.avatarUrl ?? null); }, [session?.user.avatarUrl]);
@@ -1124,6 +1129,7 @@ export function App() {
     if (!expectedUserId || sessionUserRef.current !== expectedUserId) return { folders: [] as Folder[], notes: [] as NoteSummary[], stale: true };
     setFolders(folderRows);
     setNotes(noteRows);
+    nameNotes(folderRows, noteRows);
     return { folders: folderRows, notes: noteRows, stale: false };
   }, []);
 
@@ -1200,7 +1206,7 @@ export function App() {
         setSearchAll(searchHint?.all ?? false);
         let selection: { folder: FolderSelection; noteId: string | null };
         let panel: MobilePanel = "folders";
-        if (route.app === "notes" && (route.noteId || route.folder !== "all")) {
+        if (route.app === "notes" && (route.noteId || route.pending || route.folder !== "all")) {
           const resolved = resolveNotesRoute(route, { folders: folderRows, notes: noteRows }, { snapshot, lastFolder: "all" });
           if (resolved.missing) notify.warning(resolved.missing === "note" ? "Note not found" : "Folder not found");
           selection = resolved;
@@ -2197,6 +2203,7 @@ export function App() {
     setMarkdown("");
     setFolders([]);
     setNotes([]);
+    clearRouteNames();
     setSelectionOwner(null);
     setQuery("");
     setSearchAll(false);
@@ -2216,7 +2223,7 @@ export function App() {
 
   if (checking) return <main className="loading-page"><div className="brand-mark"><Sparkles /></div><span>Opening {appName()}…</span></main>;
   const acceptSession = (result: SessionResponse) => {
-    if (sessionUserRef.current !== result.user.id) clearCardSummaries();
+    if (sessionUserRef.current !== result.user.id) { clearCardSummaries(); clearRouteNames(); }
     sessionUserRef.current = result.user.id;
     noteLoadGenerationRef.current += 1;
     cancelPendingAutosave();
@@ -2308,7 +2315,11 @@ export function App() {
   // The Inbox opens a proposal's target as a new entry: a note through the Notes loader, anything else by its route.
   const openInboxPath = (path: string) => {
     const route = parseRoute(path);
-    if (route.app === "notes" && route.noteId) openLinkedNote(route.noteId);
+    // A friendly note URL this tab has not named yet (D773) is found in the loaded list by its short id.
+    const pendingNote = route.app === "notes" && route.pending?.kind === "note" ? route.pending.ref : null;
+    const noteId = route.app === "notes" ? route.noteId ?? (pendingNote ? notes.find((item) => item.short_id === pendingNote)?.id ?? null : null) : null;
+    if (noteId) openLinkedNote(noteId);
+    else if (pendingNote) notify.warning("Note not found");
     else openNotificationPath(path);
   };
 
@@ -2339,16 +2350,16 @@ export function App() {
 
   if (shownApp !== "notes") return <ModulesContext.Provider value={disabledModules}><RoleContext.Provider value={session.user.role}><NotificationsContext.Provider value={notificationsContext}><InboxNavContext.Provider value={inboxNav}>
     {shownApp === "home" ? <TodayHome {...account} userId={session.user.id} onOpen={(section) => { void openApp(section); }} onOpenRoute={(route) => { void openTodayRoute(route); }} />
-      : shownApp === "files" ? <FilesApp {...account} userId={session.user.id} navigate={navigate} flash={flash} onHome={() => { void openHome(); }} onOpenWhiteboard={isModuleEnabled(disabledModules, "whiteboards") ? (id) => openNotificationPath(`/whiteboards/${id}`) : undefined} />
+      : shownApp === "files" ? <FriendlyLinkGate app="files" listRoute={routeForApp("files")} navigate={navigate}><FilesApp {...account} userId={session.user.id} navigate={navigate} flash={flash} onHome={() => { void openHome(); }} onOpenWhiteboard={isModuleEnabled(disabledModules, "whiteboards") ? (id) => openNotificationPath(`/whiteboards/${id}`) : undefined} /></FriendlyLinkGate>
       : shownApp === "tasks" ? <TasksApp {...account} userId={session.user.id} navigate={navigate} flash={flash} onHome={() => { void openHome(); }} />
-      : shownApp === "collections" ? <CollectionsApp {...account} userId={session.user.id} navigate={navigate} flash={flash} onHome={() => { void openHome(); }} />
+      : shownApp === "collections" ? <FriendlyLinkGate app="collections" listRoute={routeForApp("collections")} navigate={navigate}><CollectionsApp {...account} userId={session.user.id} navigate={navigate} flash={flash} onHome={() => { void openHome(); }} /></FriendlyLinkGate>
       : shownApp === "calendar" ? <CalendarApp key={calendarKey} {...account} userId={session.user.id} navigate={navigate} flash={flash} onHome={() => { void openHome(); }} onOpenNote={openLinkedNote} />
       : shownApp === "notifications" ? <NotificationsApp {...account} onHome={() => { void openHome(); }} onOpenPath={openNotificationPath} />
       : shownApp === "inbox" ? <InboxApp {...account} navigate={navigate} flash={flash} onHome={() => { void openHome(); }} onOpenPath={openInboxPath} />
       : shownApp === "vault" ? <Suspense fallback={<main className="app-page" aria-busy="true"><p className="sr-only" role="status">Loading the vault…</p></main>}><VaultApp {...account} role={session.user.role ?? "member"} navigate={navigate} flash={flash} onHome={() => { void openHome(); }} /></Suspense>
       : shownApp === "chat" ? <Suspense fallback={<main className="app-page" aria-busy="true"><p className="sr-only" role="status">Loading chat…</p></main>}><ChatApp {...account} role={session.user.role ?? "member"} navigate={navigate} flash={flash} onHome={() => { void openHome(); }} onOpenAgents={(agentId) => { void openRoute({ app: "settings", section: "agents", ...(agentId ? { agentId } : {}) }); }} onOpenPath={openInboxPath} /></Suspense>
-      : shownApp === "reports" ? <Suspense fallback={<main className="app-page" aria-busy="true"><p className="sr-only" role="status">Loading reports…</p></main>}><ReportsApp {...account} role={session.user.role ?? "member"} navigate={navigate} flash={flash} onHome={() => { void openHome(); }} onOpenDatasources={() => { void openRoute({ app: "settings", section: "datasources" }); }} onOpenToolServers={() => { void openRoute({ app: "settings", section: "ai", aiTab: "tools" }); }} /></Suspense>
-      : shownApp === "whiteboards" ? <Suspense fallback={<main className="app-page" aria-busy="true"><p className="sr-only" role="status">Loading whiteboards…</p></main>}><WhiteboardsApp {...account} userId={session.user.id} navigate={navigate} flash={flash} onHome={() => { void openHome(); }} onOpenPath={openInboxPath} /></Suspense>
+      : shownApp === "reports" ? <FriendlyLinkGate app="reports" listRoute={{ app: "reports", reportId: null }} navigate={navigate}><Suspense fallback={<main className="app-page" aria-busy="true"><p className="sr-only" role="status">Loading reports…</p></main>}><ReportsApp {...account} role={session.user.role ?? "member"} navigate={navigate} flash={flash} onHome={() => { void openHome(); }} onOpenDatasources={() => { void openRoute({ app: "settings", section: "datasources" }); }} onOpenToolServers={() => { void openRoute({ app: "settings", section: "ai", aiTab: "tools" }); }} /></Suspense></FriendlyLinkGate>
+      : shownApp === "whiteboards" ? <FriendlyLinkGate app="whiteboards" listRoute={{ app: "whiteboards", folder: "all", boardId: null }} navigate={navigate}><Suspense fallback={<main className="app-page" aria-busy="true"><p className="sr-only" role="status">Loading whiteboards…</p></main>}><WhiteboardsApp {...account} userId={session.user.id} navigate={navigate} flash={flash} onHome={() => { void openHome(); }} onOpenPath={openInboxPath} /></Suspense></FriendlyLinkGate>
       // Settings, Team, and the Bin (Wave 38) are the hub's routes.
       : settingsPage(false)}
     {toastStatus}

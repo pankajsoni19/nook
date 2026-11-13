@@ -1,3 +1,4 @@
+import { nameDocuments } from "../routeNames";
 import { api, getCsrfToken } from "../api";
 import type { DocumentSummary } from "../types";
 
@@ -41,11 +42,11 @@ export function contentUrl(id: string, disposition: "inline" | "attachment") {
 
 export function listFiles(folderId?: string) {
   const query = folderId ? `?folderId=${encodeURIComponent(folderId)}` : "";
-  return api<{ documents: DocumentSummary[] }>(`/files${query}`);
+  return api<{ documents: DocumentSummary[] }>(`/files${query}`).then((result) => { nameDocuments(result.documents); return result; });
 }
 
 export function getFile(id: string) {
-  return api<{ document: DocumentSummary }>(`/files/${encodeURIComponent(id)}`);
+  return api<{ document: DocumentSummary }>(`/files/${encodeURIComponent(id)}`).then((result) => { nameDocuments([result.document]); return result; });
 }
 
 // Fetches the first MiB of a text document. It is rendered as React text, never navigated to.
@@ -111,7 +112,8 @@ export function uploadFile(file: File, folderId: string | null, idempotencyKey: 
 const filePath = (id: string) => `/files/${encodeURIComponent(id)}`;
 
 export function renameFile(id: string, name: string) {
-  return api<{ document: DocumentSummary }>(filePath(id), { method: "PATCH", body: JSON.stringify({ name }) });
+  // A rename changes the item's friendly URL; the open item's address bar follows (D774).
+  return api<{ document: DocumentSummary }>(filePath(id), { method: "PATCH", body: JSON.stringify({ name }) }).then((result) => { nameDocuments([result.document]); return result; });
 }
 
 export function moveFile(id: string, folderId: string | null) {

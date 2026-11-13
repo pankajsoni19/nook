@@ -2,7 +2,17 @@
 import { formatBoardSearch, formatBoardViewSearch, hasFilterParam, isDefaultBoardQuery, parseBoardSearch, type BoardQuery } from "./tasks/boardUrl";
 import { formatHomeSearch, NEW_VIEW, parseMyWorkSearch, parseViewSearch, type TasksHome } from "./tasks/home/homeUrl";
 import { appName } from "./appName";
-import { parseCardKey } from "../shared/boardKeys";
+import { normalizeBoardCode, parseCardKey } from "../shared/boardKeys";
+import { shortIdOfSegment, type LinkKind } from "../shared/friendlyUrls";
+import { boardCodeOf, boardIdForCode, cardForKey, cardKeyOf, itemFolderSlug, itemIdForShortId, itemSegment, type ItemKind } from "./routeNames";
+
+/**
+ * Friendly URLs (D773): a URL that names an item by short id, board code, or card key the tab has no
+ * name for yet. The route holds no id; its app resolves `ref` (GET /api/links/:kind/:ref, or the card
+ * key lookup), then reads the location again. `url` is the location as given, which formatRoute writes
+ * back unchanged, so nothing that rewrites the entry before the app resolves it loses the rest of the path.
+ */
+export type PendingLink = { kind: LinkKind | "card"; ref: string; url: string };
 
 /**
  * Lane I: the Reports home's view: Unfiled, Shared with me, Favorites (phase 1), one of the person's folders (its id),
@@ -91,18 +101,20 @@ export function formatReportParams(params: ReportParamsSearch | undefined) {
 
 export type Route =
   | { app: "home" }
-  | { app: "notes"; folder: "all" | "shared" | string; noteId: string | null }
-  | { app: "files"; folder: "all" | "shared" | string; documentId: string | null }
+  // `pending` (friendly URLs, D773): every app with friendly URLs may hold an unresolved link instead of an id.
+  | { app: "notes"; folder: "all" | "shared" | string; noteId: string | null; pending?: PendingLink }
+  | { app: "files"; folder: "all" | "shared" | string; documentId: string | null; pending?: PendingLink }
   // `query` (D112): a board's view, grouping, sort, and filters, carried in the URL query. It is
   // left out when it is the default, and never set without a board. `full` (13D): the card as a page.
   // `home` (17C): without a board, the My work and Views segments of the Tasks home (/tasks is Boards).
   // `sprints`: the board's Sprints sheet (/tasks/:boardId/sprints), over the board in its view.
   // `viewId` (lane VIEWS, D636): a saved view on its board (/tasks/:b/views/:v), the board engine with
   // the view's filter; `unsaved`: the URL's `q` is an unsaved change to that filter (even when empty).
-  // `cardKey` (lane KEYS, D713): the short link /tasks/MYT-12, without a board; Tasks resolves it to the
-  // card's own URL and replaces the entry.
-  | { app: "tasks"; boardId: string | null; cardId: string | null; full?: true; query?: BoardQuery; home?: TasksHome; sprints?: true; viewId?: string; unsaved?: true; cardKey?: string }
-  | { app: "collections"; collectionId: string | null; viewId: string | null; rowId: string | null }
+  // Friendly URLs (D781): /tasks/MYT is a board and /tasks/MYT-12 (/full) a card, the canonical forms once
+  // the tab knows the code or key (routeNames.ts); `pending` (a `board` code or a `card` key) until then:
+  // Tasks resolves it and replaces the entry.
+  | { app: "tasks"; boardId: string | null; cardId: string | null; full?: true; query?: BoardQuery; home?: TasksHome; sprints?: true; viewId?: string; unsaved?: true; pending?: PendingLink }
+  | { app: "collections"; collectionId: string | null; viewId: string | null; rowId: string | null; pending?: PendingLink }
   | { app: "calendar"; view: "agenda" | "month"; month: string | null; eventId: string | null }
   | { app: "notifications" }
   // Wave 38: the Bin lives in the Settings hub. Its canonical URL is /settings/bin; the old /bin
@@ -125,7 +137,7 @@ export type Route =
   | { app: "inbox"; view: "pending" | "history" | "routines"; proposalId: string | null }
   // Whiteboards (Wave 23, §10.1): /whiteboards, /whiteboards/shared, /whiteboards/folder/:id, and
   // one board at /whiteboards/:id (the canvas, a history entry of its own).
-  | { app: "whiteboards"; folder: "all" | "shared" | string; boardId: string | null }
+  | { app: "whiteboards"; folder: "all" | "shared" | string; boardId: string | null; pending?: PendingLink }
   // The Vault (Wave 25, vault plan §10): the list at /vault, one vault at /vault/:vaultId (the grid on
   // desktop, its first environment's cards on phones), one environment at /vault/:vaultId/env/:envId,
   // and one secret at /vault/:vaultId/secrets/:secretId (its values stacked per environment).
@@ -140,7 +152,7 @@ export type Route =
   // (the Schema browser, a new report) are history layers on that entry, not URLs.
   // Lane I: the list's folder: /reports/folder/:folderId, /reports/unfiled, /reports/shared (none: All).
   // Phase 1: /reports/favorites, and the list's filters in its query (`filter`, never on a report).
-  | { app: "reports"; reportId: string | null; folder?: ReportsFolderView; filter?: ReportsFilter; /** A report page's parameter values (D489). */ params?: ReportParamsSearch }
+  | { app: "reports"; reportId: string | null; folder?: ReportsFolderView; filter?: ReportsFilter; /** A report page's parameter values (D489). */ params?: ReportParamsSearch; pending?: PendingLink }
   // The Settings hub (Wave 37): a page at /settings (the section list on phones), and one account
   // section at /settings/:section. Team sections are `team` routes under /settings/team/… (above).
   // Wave 40: Settings → Agents has an editor below it at /settings/agents/:agentId (or /settings/agents/new).
@@ -187,14 +199,31 @@ export function isRouteId(value: string) {
   return idPattern.test(value);
 }
 
-function parseCollection(segments: string[]): { folder: string; itemId: string | null } {
+/**
+ * The item a friendly segment names (D773): its id when the tab knows the short id, else a pending
+ * link for the app to resolve. Null when the segment carries no short id.
+ */
+function friendlyItem(kind: ItemKind, segment: string | undefined, url: string): { itemId: string | null; pending?: PendingLink } | null {
+  const shortId = shortIdOfSegment(segment);
+  if (!shortId) return null;
+  const id = itemIdForShortId(kind, shortId);
+  return id ? { itemId: id } : { itemId: null, pending: { kind, ref: shortId, url } };
+}
+
+function parseCollection(segments: string[], kind: ItemKind, url: string): { folder: string; itemId: string | null; pending?: PendingLink } {
   // Server ids are lowercase; normalise so a pasted uppercase link still matches.
   const rest = segments.map((segment) => isRouteId(segment) ? segment.toLowerCase() : segment);
   const [first, second] = rest;
   if (first === undefined) return { folder: "all", itemId: null };
   if (first === "shared" && rest.length === 1) return { folder: "shared", itemId: null };
-  if (first === "folder") return { folder: second !== undefined && rest.length === 2 && isRouteId(second) ? second : "all", itemId: null };
+  if (first === "folder" && (rest.length !== 2 || second === undefined || isRouteId(second) || !shortIdOfSegment(second))) return { folder: second !== undefined && rest.length === 2 && isRouteId(second) ? second : "all", itemId: null };
   if (rest.length === 1 && isRouteId(first)) return { folder: "all", itemId: first };
+  // /notes/<folder-slug>/<title-slug>-<shortid> or /<kind>/<title-slug>-<shortid> (D776): the folder
+  // segment is cosmetic, so any (or none) still opens the item, and the app writes the current one.
+  if (rest.length <= 2) {
+    const item = friendlyItem(kind, rest[rest.length - 1], url);
+    if (item) return { folder: "all", ...item };
+  }
   return { folder: "all", itemId: null };
 }
 
@@ -205,19 +234,43 @@ function parseCollection(segments: string[]): { folder: string; itemId: string |
 function parseTasks(allSegments: string[], search: string): Route {
   const home = parseTasksHome(allSegments, search);
   if (home) return { app: "tasks", boardId: null, cardId: null, home };
-  // /tasks/MYT-12 (D713): a card's short link, kept in upper case.
-  const key = allSegments.length === 1 && allSegments[0] !== undefined ? parseCardKey(allSegments[0]) : null;
-  if (key) return { app: "tasks", boardId: null, cardId: null, cardKey: `${key.code}-${key.number}` };
+  const url = `/tasks/${allSegments.join("/")}${search}`;
+  const query = parseBoardSearch(search);
+  // /tasks/MYT-12 and /tasks/MYT-12/full (D713, D781): a card's canonical URL, its board's query kept.
+  const key = allSegments[0] !== undefined && (allSegments.length === 1 || (allSegments.length === 2 && allSegments[1] === "full")) ? parseCardKey(allSegments[0]) : null;
+  if (key) {
+    const normalized = `${key.code}-${key.number}`;
+    const known = cardForKey(normalized);
+    // Pending, the URL is written with the key in upper case (the form the app shares).
+    if (!known) return { app: "tasks", boardId: null, cardId: null, pending: { kind: "card", ref: normalized, url: `/tasks/${normalized}${allSegments.length === 2 ? "/full" : ""}${search}` } };
+    const card: Route = allSegments.length === 2 ? { app: "tasks", boardId: known.boardId, cardId: known.cardId, full: true } : { app: "tasks", boardId: known.boardId, cardId: known.cardId };
+    return isDefaultBoardQuery(query) ? card : { ...card, query };
+  }
+  // /tasks/MYT (D781): a board by its code (current or former), or by its id as before.
+  const boardSegment = (segment: string | undefined): { id: string } | { code: string } | null => {
+    if (segment === undefined) return null;
+    if (isRouteId(segment)) return { id: segment.toLowerCase() };
+    const code = normalizeBoardCode(segment);
+    if (!code) return null;
+    const known = boardIdForCode(code);
+    return known ? { id: known } : { code };
+  };
   // /tasks/:b/views/:v[/card/:k[/full] | /sprints] (D636): the same board routes under a saved view.
-  const savedView = allSegments[1] === "views" && allSegments[2] !== undefined && isRouteId(allSegments[2]) && allSegments[0] !== undefined && isRouteId(allSegments[0])
+  const savedView = allSegments[1] === "views" && allSegments[2] !== undefined && isRouteId(allSegments[2]) && boardSegment(allSegments[0]) !== null
     ? allSegments[2].toLowerCase() : null;
   const segments = savedView ? [allSegments[0]!, ...allSegments.slice(3)] : allSegments;
   const [board, kind, card, view] = segments;
-  if (board === undefined || !isRouteId(board)) return { app: "tasks", boardId: null, cardId: null };
-  const boardId = board.toLowerCase();
+  const named = boardSegment(board);
+  if (!named) return { app: "tasks", boardId: null, cardId: null };
+  if ("code" in named) return { app: "tasks", boardId: null, cardId: null, pending: { kind: "board", ref: named.code, url } };
+  const boardId = named.id;
   const full = segments.length === 4 && view === "full";
-  const cardId = (segments.length === 3 || full) && kind === "card" && card !== undefined && isRouteId(card) ? card.toLowerCase() : null;
-  const query = parseBoardSearch(search);
+  const cardSegment = (segments.length === 3 || full) && kind === "card" && card !== undefined ? card : null;
+  // A card by id, or by key (/tasks/MYT/views/:v/card/MYT-12), the key resolved like a short link.
+  const cardKeyed = cardSegment && !isRouteId(cardSegment) ? parseCardKey(cardSegment) : null;
+  const keyedCard = cardKeyed ? cardForKey(`${cardKeyed.code}-${cardKeyed.number}`) : null;
+  if (cardKeyed && !keyedCard) return { app: "tasks", boardId: null, cardId: null, pending: { kind: "card", ref: `${cardKeyed.code}-${cardKeyed.number}`, url } };
+  const cardId = cardSegment && isRouteId(cardSegment) ? cardSegment.toLowerCase() : keyedCard?.cardId ?? null;
   const sprints = segments.length === 2 && kind === "sprints";
   const base: Route = cardId && full ? { app: "tasks", boardId, cardId, full: true } : sprints ? { app: "tasks", boardId, cardId: null, sprints: true } : { app: "tasks", boardId, cardId };
   const route: Route = savedView ? { ...base, viewId: savedView, ...(hasFilterParam(search) ? { unsaved: true as const } : {}) } : base;
@@ -241,11 +294,15 @@ function parseTasksHome(segments: string[], search: string): TasksHome | null {
 
 // /collections, /collections/:c, /collections/:c/view/:v, and /collections/:c/row/:r. Anything
 // malformed after a valid collection id still opens that collection.
-function parseCollections(segments: string[]): Route {
+function parseCollections(segments: string[], url: string): Route {
   const [collection, kind, item] = segments;
   const none = { app: "collections" as const, collectionId: null, viewId: null, rowId: null };
-  if (collection === undefined || !isRouteId(collection)) return none;
-  const collectionId = collection.toLowerCase();
+  if (collection === undefined) return none;
+  // /collections/<name-slug>-<shortid>[/view/:v | /row/:r] (D779).
+  const friendly = isRouteId(collection) ? null : friendlyItem("collection", collection, url);
+  if (friendly?.pending) return { ...none, pending: friendly.pending };
+  if (!friendly && !isRouteId(collection)) return none;
+  const collectionId = friendly?.itemId ?? collection.toLowerCase();
   const itemId = segments.length === 3 && item !== undefined && isRouteId(item) ? item.toLowerCase() : null;
   return { ...none, collectionId, viewId: kind === "view" ? itemId : null, rowId: kind === "row" ? itemId : null };
 }
@@ -281,16 +338,17 @@ export function parseRoute(pathname: string, search = ""): Route {
   }
   const segments = pathname.split("/").filter(Boolean);
   const [app, ...rest] = segments;
+  const url = `${pathname}${search}`;
   if (app === "notes") {
-    const { folder, itemId } = parseCollection(rest);
-    return { app: "notes", folder, noteId: itemId };
+    const { folder, itemId, pending } = parseCollection(rest, "note", url);
+    return pending ? { app: "notes", folder, noteId: null, pending } : { app: "notes", folder, noteId: itemId };
   }
   if (app === "files") {
-    const { folder, itemId } = parseCollection(rest);
-    return { app: "files", folder, documentId: itemId };
+    const { folder, itemId, pending } = parseCollection(rest, "file", url);
+    return pending ? { app: "files", folder, documentId: null, pending } : { app: "files", folder, documentId: itemId };
   }
   if (app === "tasks") return parseTasks(rest, search);
-  if (app === "collections") return parseCollections(rest);
+  if (app === "collections") return parseCollections(rest, url);
   if (app === "calendar") return parseCalendar(rest);
   if (app === "notifications" && rest.length === 0) return { app: "notifications" };
   if (app === "bin" && rest.length === 0) return { app: "bin" };
@@ -298,16 +356,20 @@ export function parseRoute(pathname: string, search = ""): Route {
   if (app === "settings") return parseSettings(rest);
   if (app === "inbox") return parseInbox(rest);
   if (app === "whiteboards") {
-    const { folder, itemId } = parseCollection(rest);
-    return { app: "whiteboards", folder, boardId: itemId };
+    const { folder, itemId, pending } = parseCollection(rest, "whiteboard", url);
+    return pending ? { app: "whiteboards", folder, boardId: null, pending } : { app: "whiteboards", folder, boardId: itemId };
   }
   if (app === "vault") return parseVault(rest);
   if (app === "chat") return parseChat(rest, search);
   if (app === "reports") {
     const [reportId, folderId] = rest;
-    if (rest.length === 1 && reportId !== undefined && isRouteId(reportId)) {
+    // /reports/<title-slug>-<shortid> (D778), or the report's id as before.
+    const friendly = rest.length === 1 && reportId !== undefined && !isRouteId(reportId) ? friendlyItem("report", reportId, url) : null;
+    if (friendly?.pending) return { app: "reports", reportId: null, pending: friendly.pending };
+    const pageId = friendly?.itemId ?? (rest.length === 1 && reportId !== undefined && isRouteId(reportId) ? reportId.toLowerCase() : null);
+    if (pageId) {
       const params = parseReportParams(search);
-      return { app: "reports", reportId: reportId.toLowerCase(), ...(params ? { params } : {}) };
+      return { app: "reports", reportId: pageId, ...(params ? { params } : {}) };
     }
     const filter = parseReportsFilter(search);
     const list = (folder?: ReportsFolderView): Route => ({ app: "reports", reportId: null, ...(folder ? { folder } : {}), ...(filter ? { filter } : {}) });
@@ -412,8 +474,14 @@ function parseInbox(segments: string[]): Route {
   return { app: "inbox", view: history ? "history" : "pending", proposalId };
 }
 
-function formatCollection(base: string, folder: string, itemId: string | null) {
-  if (itemId && isRouteId(itemId)) return `${base}/${itemId.toLowerCase()}`;
+function formatCollection(base: string, kind: ItemKind, folder: string, itemId: string | null) {
+  if (itemId && isRouteId(itemId)) {
+    // D773: the item's friendly segment once the tab knows it (a note under the folder its reader sees it in, D776).
+    const segment = itemSegment(kind, itemId);
+    const folderSlug = segment && kind === "note" ? itemFolderSlug(kind, itemId) : null;
+    if (segment) return folderSlug ? `${base}/${folderSlug}/${segment}` : `${base}/${segment}`;
+    return `${base}/${itemId.toLowerCase()}`;
+  }
   if (folder === "shared") return `${base}/shared`;
   if (folder !== "all" && isRouteId(folder)) return `${base}/folder/${folder.toLowerCase()}`;
   return base;
@@ -421,21 +489,25 @@ function formatCollection(base: string, folder: string, itemId: string | null) {
 
 // An open item wins over its folder: the folder is derived from the item when the URL is parsed.
 export function formatRoute(route: Route): string {
-  if (route.app === "notes") return formatCollection("/notes", route.folder, route.noteId);
-  if (route.app === "files") return formatCollection("/files", route.folder, route.documentId);
+  // A link still resolving keeps its URL as it came (D773).
+  if ("pending" in route && route.pending) return route.pending.url;
+  if (route.app === "notes") return formatCollection("/notes", "note", route.folder, route.noteId);
+  if (route.app === "files") return formatCollection("/files", "file", route.folder, route.documentId);
   if (route.app === "tasks") {
     if (!route.boardId && route.home) return formatTasksHome(route.home);
-    const key = !route.boardId && route.cardKey ? parseCardKey(route.cardKey) : null;
-    if (key) return `/tasks/${key.code}-${key.number}`;
     if (!route.boardId || !isRouteId(route.boardId)) return "/tasks";
-    const board = `/tasks/${route.boardId.toLowerCase()}${route.viewId && isRouteId(route.viewId) ? `/views/${route.viewId.toLowerCase()}` : ""}`;
+    const boardSegment = boardCodeOf(route.boardId) ?? route.boardId.toLowerCase();
     const search = route.viewId ? formatBoardViewSearch(route.query, route.unsaved === true) : route.query ? formatBoardSearch(route.query) : "";
+    const key = route.cardId && isRouteId(route.cardId) ? cardKeyOf(route.cardId) : null;
+    // D781: a card is /tasks/MYT-12 (/full), with its board's query; under a saved view it stays below the view.
+    if (key && !route.viewId) return `/tasks/${key}${route.full ? "/full" : ""}${search}`;
+    const board = `/tasks/${boardSegment}${route.viewId && isRouteId(route.viewId) ? `/views/${route.viewId.toLowerCase()}` : ""}`;
     if (!route.cardId || !isRouteId(route.cardId)) return `${board}${route.sprints ? "/sprints" : ""}${search}`;
-    return `${board}/card/${route.cardId.toLowerCase()}${route.full ? "/full" : ""}${search}`;
+    return `${board}/card/${key ?? route.cardId.toLowerCase()}${route.full ? "/full" : ""}${search}`;
   }
   if (route.app === "collections") {
     if (!route.collectionId || !isRouteId(route.collectionId)) return "/collections";
-    const collection = `/collections/${route.collectionId.toLowerCase()}`;
+    const collection = `/collections/${itemSegment("collection", route.collectionId) ?? route.collectionId.toLowerCase()}`;
     // A row wins over a view: the row panel is the deeper entry.
     if (route.rowId && isRouteId(route.rowId)) return `${collection}/row/${route.rowId.toLowerCase()}`;
     return route.viewId && isRouteId(route.viewId) ? `${collection}/view/${route.viewId.toLowerCase()}` : collection;
@@ -461,9 +533,9 @@ export function formatRoute(route: Route): string {
     if (route.newChat) return route.agentId && isRouteId(route.agentId) ? `/chat/new?agent=${route.agentId.toLowerCase()}` : "/chat/new";
     return "/chat";
   }
-  if (route.app === "whiteboards") return formatCollection("/whiteboards", route.folder, route.boardId);
+  if (route.app === "whiteboards") return formatCollection("/whiteboards", "whiteboard", route.folder, route.boardId);
   if (route.app === "reports") {
-    if (route.reportId && isRouteId(route.reportId)) return `/reports/${route.reportId.toLowerCase()}${formatReportParams(route.params)}`;
+    if (route.reportId && isRouteId(route.reportId)) return `/reports/${itemSegment("report", route.reportId) ?? route.reportId.toLowerCase()}${formatReportParams(route.params)}`;
     const query = formatReportsFilter(route.filter);
     if (route.folder === "unfiled" || route.folder === "shared" || route.folder === "favorites") return `/reports/${route.folder}${query}`;
     const listId = reportsListId(route.folder);
@@ -589,7 +661,8 @@ export const routeFromLocation = (location: { pathname: string; search: string }
  * on Tasks URLs (the only app whose URLs carry one).
  */
 const REPORTS_LIST_PATH = /^\/reports(\/(unfiled|shared|favorites|folder\/[^/]+|lists\/[^/]+))?\/?$/;
-const REPORT_PAGE_PATH = /^\/reports\/[0-9a-f-]{36}$/i;
+// A report page: its id, or its friendly segment (D778).
+const REPORT_PAGE_PATH = /^\/reports\/(?!(?:unfiled|shared|favorites)\/?$)[^/]+$/i;
 
 export function locationUrl(location: { pathname: string; search: string }) {
   // A report page keeps only its parameter values (D489), in the order formatRoute writes them.

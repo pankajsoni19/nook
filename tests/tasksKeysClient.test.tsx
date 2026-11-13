@@ -17,7 +17,7 @@ const noop = () => undefined;
 
 test("/tasks/MYT-12 is a short-link route in upper case; Back from it is the board list; board ids still win", () => {
   const route = parseRoute("/tasks/myt-12");
-  expect(route).toEqual({ app: "tasks", boardId: null, cardId: null, cardKey: "MYT-12" });
+  expect(route).toEqual({ app: "tasks", boardId: null, cardId: null, pending: { kind: "card", ref: "MYT-12", url: "/tasks/MYT-12" } });
   expect(formatRoute(route)).toBe("/tasks/MYT-12");
   expect(parseRoute("/tasks/MYT-012")).toEqual({ app: "tasks", boardId: null, cardId: null });
   expect(parseRoute("/tasks/MYT-12/extra")).toEqual({ app: "tasks", boardId: null, cardId: null });

@@ -1,3 +1,4 @@
+import { nameBoard, nameCard } from "../routeNames";
 import { api, ApiError } from "../api";
 import { uploadForHost } from "../ui/attachments";
 import { TASK_FLAGS, type TaskFlag } from "../../shared/taskQuery";
@@ -142,7 +143,17 @@ export type SprintSummary = {
 
 const json = (method: string, body: unknown): RequestInit => ({ method, body: JSON.stringify(body) });
 
-export const listBoards = () => api<{ boards: BoardSummary[] }>("/tasks/boards");
+export const listBoards = () => api<{ boards: BoardSummary[] }>("/tasks/boards").then((result) => {
+  for (const board of result?.boards ?? []) nameBoard(board.id, board.code);
+  return result;
+});
+
+/** Friendly URLs (D781): the router learns a board's code and its cards' keys whenever they load. */
+export function nameBoardCards(boardId: string, code: string | null | undefined, cards: ReadonlyArray<{ id: string; number?: number | null }>) {
+  nameBoard(boardId, code);
+  if (!Array.isArray(cards)) return;
+  for (const card of cards) if (card) nameCard(card.id, cardKey(code, card.number), boardId);
+}
 /**
  * `tz` (the browser's zone) dates a template's first sprint from the viewer's today, not UTC's.
  * `code` (D711): the board's short code; omitted, the server picks a free one from the name.
@@ -179,6 +190,7 @@ export type BoardPayload = Omit<BoardDetail, "cards"> & { cards: BoardPayloadCar
  */
 export function hydrateBoard(payload: BoardPayload): BoardDetail {
   const { users, cards, ...rest } = payload;
+  nameBoardCards(payload.board.id, payload.board.code, cards);
   return {
     ...rest,
     cards: cards.map(({ assignee_ids, ...card }) => ({
@@ -303,7 +315,10 @@ export type CardRelation =
 /** `is_archived` (D607): an archived card is still found, marked; older servers omit it. */
 export type CardSearchResult = { id: string; board_id: string; board_name: string; title: string; column_name: string | null; is_done: 0 | 1; is_archived?: 0 | 1; /** D710: MYT-12; older servers omit it. */ key?: string | null };
 
-export const getCard = (cardId: string) => api<CardView>(`/tasks/cards/${cardId}`);
+export const getCard = (cardId: string) => api<CardView>(`/tasks/cards/${cardId}`).then((view) => {
+  if (view?.card?.key) nameCard(view.card.id, view.card.key, view.card.board_id);
+  return view;
+});
 /**
  * A card edit. `dueTime` comes with `dueTz` (the setter's browser zone, D101); `dueTime: null` clears
  * the time, and `dueOn: null` clears both. `assigneeIds` replaces the whole set (`[]` clears it).
