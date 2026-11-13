@@ -1,3 +1,4 @@
+import { WORKSPACE_MODULE_IDS } from "../shared/workspaceModules";
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MODULE_IDS as SERVER_MODULE_IDS } from "../server/moduleIds";
@@ -37,7 +38,8 @@ describe("module registry (D92)", () => {
   });
 
   test("Settings lists every module, Team included, but never shows Team to guests", () => {
-    expect(SETTINGS_MODULES.map((module) => module.id)).toEqual(["notes", "files", "tasks", "collections", "calendar", "whiteboards", "vault", "agents", "reports", "search", "bin", "notifications", "team", "inbox"]);
+    // Shipped workspace modules (Standups, …) are listed too; this pins the built-in ones.
+    expect(SETTINGS_MODULES.map((module) => module.id).filter((id) => !(WORKSPACE_MODULE_IDS as readonly string[]).includes(id))).toEqual(["notes", "files", "tasks", "collections", "calendar", "whiteboards", "vault", "agents", "reports", "search", "bin", "notifications", "team", "inbox"]);
     expect(settingsModulesFor("admin").map((module) => module.id)).toContain("team");
     expect(settingsModulesFor("viewer").map((module) => module.id)).toContain("team");
     expect(settingsModulesFor("guest").map((module) => module.id)).not.toContain("team");
@@ -128,10 +130,10 @@ describe("gating (client only)", () => {
   const launcher = (markup: string) => [...markup.matchAll(/class="today-app today-app-([a-z]+)"/g)].map(([, section]) => section);
 
   test("the launcher is derived from the registry and drops modules that are off", () => {
-    expect(TODAY_APPS.map((app) => app.section)).toEqual(["notes", "files", "tasks", "collections", "calendar", "whiteboards", "vault", "chat", "reports"]);
-    expect(enabledTodayApps(["calendar", "search"]).map((app) => app.section)).toEqual(["notes", "files", "tasks", "collections", "whiteboards", "vault", "chat", "reports"]);
-    expect(launcher(home([]))).toEqual(["notes", "files", "tasks", "collections", "calendar", "whiteboards", "vault", "chat", "reports"]);
-    expect(launcher(home(["calendar", "tasks", "vault", "agents", "reports"]))).toEqual(["notes", "files", "collections", "whiteboards"]);
+    expect(TODAY_APPS.map((app) => app.section).filter((id) => !(WORKSPACE_MODULE_IDS as readonly string[]).includes(id))).toEqual(["notes", "files", "tasks", "collections", "calendar", "whiteboards", "vault", "chat", "reports"]);
+    expect(enabledTodayApps(["calendar", "search"]).map((app) => app.section).filter((id) => !(WORKSPACE_MODULE_IDS as readonly string[]).includes(id))).toEqual(["notes", "files", "tasks", "collections", "whiteboards", "vault", "chat", "reports"]);
+    expect(launcher(home([])).filter((id) => !(WORKSPACE_MODULE_IDS as readonly string[]).includes(id!))).toEqual(["notes", "files", "tasks", "collections", "calendar", "whiteboards", "vault", "chat", "reports"]);
+    expect(launcher(home(["calendar", "tasks", "vault", "agents", "reports"])).filter((id) => !(WORKSPACE_MODULE_IDS as readonly string[]).includes(id!))).toEqual(["notes", "files", "collections", "whiteboards"]);
   });
 
   test("Wave 38: no header has a Bin or Team button, whatever the modules; Bin off removes Settings → Bin", () => {

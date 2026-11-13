@@ -64,7 +64,7 @@ describe("the route gate with hubGatesItself", () => {
     for (const role of ["admin", "member", "viewer", "guest"] as const) {
       expect(hubEntries(role, { teamModuleEnabled: false, binModuleEnabled: false }).some((entry) => entry.id === "bin")).toBe(false);
       // wave38-fixes: guests never get the entry (they can delete nothing).
-      expect(hubEntries(role, { teamModuleEnabled: false, binModuleEnabled: true }).filter((entry) => entry.group === "workspace").map((entry) => entry.id)).toEqual(role === "guest" ? [] : ["bin"]);
+      expect(hubEntries(role, { teamModuleEnabled: false, binModuleEnabled: true }).filter((entry) => entry.group === "workspace" && entry.id !== "workspace").map((entry) => entry.id)).toEqual(role === "guest" ? [] : ["bin"]);
     }
     // The Workspace group renders between Account and Team for an admin with Team off too.
     const markup = renderToStaticMarkup(<SettingsHubShell displayName="A" role="admin" entries={hubEntries("admin", { teamModuleEnabled: false, binCount: 2 })} selected="bin" listScreen={false} title="Bin" showBack={false} onBack={() => undefined} onSelect={() => undefined} account={null}>{null}</SettingsHubShell>);

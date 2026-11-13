@@ -29,7 +29,7 @@ function Switch({ checked, onChange, label, disabled }: { checked: boolean; onCh
 }
 
 export function StandupSettings({ detail, canEdit, onChanged, onDeleted, flash, role }: WorkspaceAppProps & { detail: CheckinDetail; canEdit: boolean; onChanged: (next?: CheckinDetail) => void; onDeleted: () => void }) {
-  const { ask: confirm, confirmElement } = useConfirm();
+  const { ask: askToConfirm, confirmElement } = useConfirm();
   const save = async (body: Record<string, unknown>, message: string) => {
     try {
       const { checkin } = await updateStandup(detail.id, { ...body, expectedRevision: detail.revision });
@@ -59,7 +59,7 @@ export function StandupSettings({ detail, canEdit, onChanged, onDeleted, flash, 
         <h3 id="standup-delete">Move to the Bin</h3>
         <p className="standup-muted">Rounds and answers go with it. You can restore it from the Bin for 30 days.</p>
         <button type="button" className="action-button secondary" onClick={async () => {
-          if (!await confirm({ title: `Move ${detail.name} to the Bin?`, message: "It stops running at once. Restore it from the Bin within 30 days.", confirmLabel: "Move to Bin", danger: true })) return;
+          if (!await askToConfirm({ title: `Move ${detail.name} to the Bin?`, message: "It stops running at once. Restore it from the Bin within 30 days.", confirmLabel: "Move to Bin", danger: true })) return;
           try { await deleteStandup(detail.id); flash(`${detail.name} moved to the Bin`); onDeleted(); } catch (reason) { flash(errorText(reason, "Could not delete")); }
         }}><Trash2 aria-hidden="true" />Move to Bin</button>
       </section>}

@@ -164,7 +164,7 @@ export function AnswerSheet({ detail, date, onDone, onCancel, onOpenPath }: Work
     {detail.anonymous && <p className="standup-notice"><Lock aria-hidden="true" />Anonymous: your answer is never shown with your name, and results show from 3 answers on.</p>}
     {!round.you && <p className="standup-error" role="alert">You're not taking part in this round.</p>}
     {closedFor && round.you && <p className="standup-error" role="alert">This round no longer takes answers.</p>}
-    <form ref={formRef} className="standup-form" onSubmit={(event) => { event.preventDefault(); if (phone && step < visible.length - 1) setStep(step + 1); else void submit(); }} aria-label={`Answer ${detail.name}`}>
+    <form noValidate ref={formRef} className="standup-form" onSubmit={(event) => { event.preventDefault(); if (phone && step < visible.length - 1) setStep(step + 1); else void submit(); }} aria-label={`Answer ${detail.name}`}>
       {phone ? <>
         <ol className="standup-dots" aria-label={`Question ${Math.min(step, visible.length - 1) + 1} of ${visible.length}`}>
           {visible.map((question, index) => <li key={question.id} className={index === step ? "current" : answers[question.id] !== undefined ? "done" : ""} />)}

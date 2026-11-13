@@ -1,5 +1,6 @@
 import * as z from "zod/v4";
-import { BIN_BUCKETS, BIN_DESCRIPTION, defineTool, McpToolError, type McpKeyContext } from "../mcpToolKit";
+import { BIN_BUCKETS, BIN_DESCRIPTION, defineTool, McpToolError, restoreResult, type McpKeyContext } from "../mcpToolKit";
+import { binProvider } from "./bin";
 import { keyContainerIds } from "../keyResources";
 import { CHECKIN_TEMPLATES } from "../../shared/checkins";
 import { CheckinError, checkinLevel, checkinRow, roundRow } from "./store";
@@ -166,7 +167,7 @@ export const checkinTools = [
     title: "Create a standup",
     description: `Create a standup from a template (${CHECKIN_TEMPLATES.join(", ")}): it seeds the questions, the schedule (weekdays at a time, in each person's zone by default), the deadline, and the reminder. participants are user ids (the user alone when omitted).`,
     scopes: ["checkins:write"],
-    access: { mode: "global", related: ["participants"] },
+    access: { mode: "global", related: ["participants", "groups"] },
     write: true,
     annotations: { idempotentHint: false },
     inputSchema: z.object({
@@ -205,7 +206,7 @@ export const checkinTools = [
     handler: ({ checkinId, people, groups }, key) => run(() => setParticipants(key.userId, checkinId, { people, groups: groups ?? [] }))
   }),
   defineTool({
-    name: "delete_checkin",
+    name: "bin_checkin",
     title: "Move a standup to the Bin",
     description: `Move a standup, with its rounds and answers, to the Bin (owner or manager). ${BIN_DESCRIPTION}`,
     scopes: ["checkins:write"],
@@ -216,11 +217,22 @@ export const checkinTools = [
     annotations: { destructiveHint: true },
     inputSchema: z.object({ checkinId: ref }).strict(),
     handler: ({ checkinId }, key) => run(() => deleteCheckin(key.userId, checkinId))
+  }),
+  defineTool({
+    name: "restore_checkin",
+    title: "Restore a standup from the Bin",
+    description: "Restore a standup you own or binned from the Bin, with its rounds and answers; its schedule starts again.",
+    scopes: ["checkins:write"],
+    alsoRequires: ["bin:write"],
+    access: { mode: "items", items: [{ arg: "checkinId", kind: "checkin" }] },
+    write: true,
+    inputSchema: z.object({ checkinId: z.string().uuid() }).strict(),
+    handler: async ({ checkinId }, key) => restoreResult(await binProvider.restore(checkinId.toLowerCase(), key.userId), "Standup")
   })
 ];
 
 export const CHECKIN_READ_TOOLS = ["list_checkins", "get_checkin", "list_checkin_rounds", "get_checkin_round", "summarize_checkin_round", "get_due_checkins", "get_checkin_feed", "checkin_stats"];
-export const CHECKIN_WRITE_TOOLS = ["answer_checkin", "skip_checkin", "create_checkin", "update_checkin", "set_checkin_participants", "delete_checkin"];
+export const CHECKIN_WRITE_TOOLS = ["answer_checkin", "skip_checkin", "create_checkin", "update_checkin", "set_checkin_participants", "bin_checkin", "restore_checkin"];
 
 /** `nook://checkin_round/<id>`: a round's report, through the same checks as get_checkin_round. */
 export const roundResource = {

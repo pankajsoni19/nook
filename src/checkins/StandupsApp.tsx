@@ -194,7 +194,7 @@ function NewStandup({ onClose, onCreated, flash, userId, displayName }: { onClos
     }
   };
   return <ModalDialog title="New standup" onClose={onClose} variant="sheet" busy={busy} className="standup-new">
-    <form className="file-dialog-body standup-new-form" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
+    <form noValidate className="file-dialog-body standup-new-form" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
       <fieldset className="standup-templates">
         <legend>Template</legend>
         {CHECKIN_TEMPLATES.map((key) => <label key={key} className={`standup-template${template === key ? " selected" : ""}`}>

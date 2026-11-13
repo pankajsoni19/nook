@@ -886,7 +886,9 @@ Server `server/checkins/` (store, service, rounds, views, routes, mcp, registrat
 | D949 | **Who else can read it**: the shared Access sheet does not take workspace kinds yet, so Settings offers "Participants / Everyone in the workspace" through the generic `/api/access/checkin/:id`; finer sharing is that endpoint's (W3 can wire the sheet). |
 | D950 | **Datasets** `checkins.participation` (column `state`, not `status`: the compiler groups by alias and `status` is ambiguous across the joined tables) and `checkins.answers` (numbers and choices only, question title and role from the pinned set). Progress sources `checkin_average` and `checkin_participation`. |
 | D951 | **Friendly ids everywhere**: every `:id` takes the UUID, the short id, or the whole segment (`daily-standup-9bpbp3sood`); the app corrects a stale slug with a replace. |
-| D952 | **Foundation tests count shipped modules**: `tests/workspaceRegistry.test.ts` and `tests/workspaceRoutes.test.tsx` keep a `SHIPPED` set (each lane adds its id when it sets `ready: true`) instead of expecting every stub hidden. |
+| D953 | **MCP Bin tools follow the repo's names**: `bin_checkin` and `restore_checkin` (with `bin:write`) instead of the plan's `delete_checkin` (the MCP rules refuse `delete` in a tool name). |
+| D954 | **Today order fix (foundation, one function)**: `registerTodayRenderer` now inserts a module's section after the last section of its group, as its comment always said; it appended at the end, which broke the group order once a module shipped. |
+| D952 | **Foundation tests count shipped modules**: `tests/workspaceRegistry.test.ts` and `tests/workspaceRoutes.test.tsx` keep a `SHIPPED` set (each lane adds its id when it sets `ready: true`) instead of expecting every stub hidden; the built-in lists in tests of Settings (the Workspace entry appears once a module ships, D836), the launcher, Today, `/api/today`, and the reaction registry filter out or name the shipped module's additions. |
 
 
 ### D.5 CRM (lane CRM, module `crm`)
