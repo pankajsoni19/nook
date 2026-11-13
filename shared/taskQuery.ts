@@ -70,8 +70,11 @@ export type TaskState = typeof TASK_STATES[number];
 /** The fixed card flag set (WAVE_13 D110), in display order. */
 export const TASK_FLAGS = ["urgent", "blocked", "needs_review", "on_hold"] as const;
 export type TaskFlag = typeof TASK_FLAGS[number];
-/** `has:` values. `relation`: any visible relation; `blocked`: an open `depends_on` blocker; `subtasks`: live children (17A). */
-export const HAS_VALUES = ["relation", "blocked", "subtasks"] as const;
+/**
+ * `has:` values. `relation`: any visible relation; `blocked`: an open `depends_on` blocker; `subtasks`: live children (17A);
+ * `estimate`: an estimate on a board with estimates on (lane ESTIMATES, D756).
+ */
+export const HAS_VALUES = ["relation", "blocked", "subtasks", "estimate"] as const;
 const RESERVED_HAS_VALUES: readonly string[] = [];
 /** `level:` values (17A, D137): a level number, or `work` for each board's work level. */
 export const LEVEL_VALUES = ["work", "0", "1", "2"] as const;
@@ -790,6 +793,8 @@ export type MemoryQueryCard = QueryCard & {
   child_count?: number;
   /** The card's sprint (17B): stored on the work level, the parent's below it, null in the backlog. */
   sprint_id?: string | null;
+  /** Lane ESTIMATES (D756): null without one, and on a board with estimates off (the server sends null then). */
+  estimate?: number | null;
 };
 
 export type MemoryQueryContext = {
@@ -874,7 +879,7 @@ function matchesTerm(card: MemoryQueryCard, term: FilterTerm, context: MemoryQue
     }
     case "level": return values.some((value) => (value === "work" ? context.workLevel ?? 0 : Number(value)) === (card.level ?? 0));
     case "has": return values.some((value) => value === "blocked" ? (card.open_blockers ?? 0) > 0
-      : value === "subtasks" ? (card.child_count ?? 0) > 0 : (card.relation_count ?? 0) > 0);
+      : value === "subtasks" ? (card.child_count ?? 0) > 0 : value === "estimate" ? card.estimate !== null && card.estimate !== undefined : (card.relation_count ?? 0) > 0);
     case "text": return matchesText(card, foldText(values[0] ?? ""));
   }
 }

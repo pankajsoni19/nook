@@ -42,6 +42,9 @@ export type Binding = string | number;
 export type CompiledFilter = { where: string; params: Record<string, Binding> };
 export type CompileContext = { userId: string; today: string; nowTime: string };
 
+/** A card's estimate as readers see it (lane ESTIMATES, D752, D756): null while its board `b` has estimates off. */
+const HAS_ESTIMATE_VALUE = "(CASE WHEN b.estimate_kind = 'none' THEN NULL ELSE k.estimate END)";
+
 /** The normalized column state (migration 020, D141), kept equal to `is_done` by the service. */
 export const COLUMN_STATE = "col.state";
 
@@ -204,7 +207,7 @@ function termSql(term: FilterTerm, compiler: Compiler): string {
       break;
     }
     case "has":
-      for (const value of values) parts.push(value === "blocked" ? hasOpenBlocker : value === "subtasks" ? hasSubtasks : hasRelation);
+      for (const value of values) parts.push(value === "blocked" ? hasOpenBlocker : value === "subtasks" ? hasSubtasks : value === "estimate" ? `${HAS_ESTIMATE_VALUE} IS NOT NULL` : hasRelation);
       break;
     case "text": {
       const text = compiler.bind(values[0]!);
@@ -302,6 +305,9 @@ export type QueriedCard = {
   /** The card's sprint (17B): stored on the work level, the parent's below it; and its name. */
   sprint_id: string | null;
   sprint_name: string | null;
+  /** Lane ESTIMATES (D756): the card's estimate (null without one or with its board's estimates off) and what it means there. */
+  estimate: number | null;
+  estimate_kind: "none" | "points" | "hours";
 };
 
 /** What a query's ids mean to this caller (T116): names only for what they can read. */
@@ -448,6 +454,7 @@ export function runQuery(userId: string, query: TaskQuery, input: Omit<QueryInpu
       (SELECT p.title FROM cards p WHERE p.id = k.parent_card_id AND p.board_id = k.board_id AND p.deleted_at IS NULL) AS parent_title,
       ${EFFECTIVE_SPRINT_SQL} AS sprint_id,
       (SELECT s.name FROM board_sprints s WHERE s.board_id = k.board_id AND s.id = ${EFFECTIVE_SPRINT_SQL}) AS sprint_name,
+      ${HAS_ESTIMATE_VALUE} AS estimate, b.estimate_kind,
       ${parts.map((part, index) => `${part.sql} AS sk${index}`).join(", ")}
     FROM cards k JOIN boards b ON b.id = k.board_id JOIN board_columns col ON col.id = k.column_id LEFT JOIN users cu ON cu.id = k.created_by
     WHERE k.deleted_at IS NULL AND ${readableBoardPredicate} AND (${compiled.where}) AND ${boardScope} AND ${after}

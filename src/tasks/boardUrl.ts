@@ -20,8 +20,8 @@ export type BoardViewId = typeof BOARD_VIEWS[number];
 export const BOARD_GROUPS = ["column", "assignee", "tag", "flag", "parent", "due"] as const;
 export type BoardGroupId = typeof BOARD_GROUPS[number];
 
-/** Sortable table columns (§4.5). */
-export const BOARD_SORT_FIELDS = ["title", "column", "assignees", "due", "tags", "flags", "created", "updated"] as const;
+/** Sortable table columns (§4.5); `estimate` shows only on boards with estimates on (lane ESTIMATES, D754). */
+export const BOARD_SORT_FIELDS = ["title", "column", "assignees", "due", "tags", "flags", "created", "updated", "estimate"] as const;
 export type BoardSortField = typeof BOARD_SORT_FIELDS[number];
 export type BoardSort = { field: BoardSortField; direction: "asc" | "desc" };
 

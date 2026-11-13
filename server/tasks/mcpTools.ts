@@ -31,6 +31,7 @@ import { sprintCreateSchema } from "./sprintRoutes";
 import { cardIdForKey, keyOfCard } from "./keys";
 import { moveCardToBoard } from "./moveBoard";
 import { CARD_KEY_PATTERN } from "../../shared/boardKeys";
+import { ESTIMATE_MAX, FIBONACCI_POINTS } from "../../shared/estimates";
 
 /**
  * MCP tools for Task Boards (docs/plan/WAVES_7-9.md §4.2, D38–D40, D70).
@@ -214,7 +215,9 @@ const cardFields = (card: CardSummary, tags: Map<string, string>, structure?: Bo
   ...(sprints ? { sprint_name: card.sprint_id ? sprints.get(card.sprint_id) ?? null : null } : {}),
   // Auto-archive (D607): an archived card is still a live card, hidden only on the app's board.
   archived: card.archived_at !== null,
-  archived_at: card.archived_at
+  archived_at: card.archived_at,
+  // Lane ESTIMATES (D755): points or hours as the board's estimate_kind says; null without one or with estimates off.
+  estimate: card.estimate
 });
 
 /**
@@ -287,6 +290,8 @@ const assigneeIdsInput = z.array(uuid).max(20).describe("User ids who can open t
 const tagsInput = z.array(z.string().min(1).max(64)).max(10).describe("Existing tags of the board, by name (any case) or id; replaces the whole set. Unknown tags are INVALID; tags are created in the app");
 const flagsInput = z.array(z.enum(TASK_FLAGS)).max(TASK_FLAGS.length).describe("Flags from the fixed set; replaces the whole set");
 const dateInput = z.string().refine(isCalendarDate, "Use a real date as YYYY-MM-DD");
+const estimateInput = z.number().nullable()
+  .describe(`Points or hours, as the board's estimate_kind says (see list_cards' board.estimates): 0–${ESTIMATE_MAX}, at most two decimals; on a Fibonacci board one of ${FIBONACCI_POINTS.join(", ")}; null for none. Refused (reason ESTIMATES_OFF) while the board has estimates off`);
 
 /** list_cards filters (D113, §5.5): values inside one filter are OR-ed, filters are AND-ed. */
 const listFilters = {
@@ -360,6 +365,8 @@ export const taskTools: McpToolSpec[] = [
           id: board.id, name: board.name, owner_name: board.owner_name, is_owner: board.is_owner, levels: structure.levels.map((level) => level.name), work_level: structure.workLevel,
           sprints_enabled: structure.sprints,
           auto_archive_days: board.auto_archive_days,
+          // Lane ESTIMATES (D755): what each card's estimate means here (none, points, hours) and the points scale; set in the app's Board settings.
+          estimates: { kind: board.estimate_kind, scale: board.estimate_scale },
           // Read-only here; the owner sets them in Board settings (PATCH /boards/:b {structure}).
           ...(structure.sprintDefaults ? { sprint_defaults: { days: structure.sprintDefaults.days, start: structure.sprintDefaults.start, name_pattern: structure.sprintDefaults.name ?? null } } : {})
         },
@@ -398,6 +405,7 @@ export const taskTools: McpToolSpec[] = [
           revision: card.revision,
           creator_name: card.creator_name,
           ...cardFields(card, tagNames(tags), boardStructure(board.id), sprintNames(board.id)),
+          estimate_kind: board.estimate_kind,
           parent_title: hierarchy.parent?.title ?? null,
           created_at: card.created_at,
           updated_at: card.updated_at
@@ -494,6 +502,7 @@ export const taskTools: McpToolSpec[] = [
       parentId: uuid.nullable().optional().describe("A card on the same board one level up to put this card under (see the board's levels in list_cards); its level then defaults to the parent's plus one"),
       level: z.number().int().min(0).max(2).optional().describe("0 is the top level; defaults to the parent's level plus one, else the board's work level"),
       sprintId: uuid.nullable().optional().describe("A planned or active sprint of the board (see list_sprints) to plan the card in, or null for the backlog; omitted, a work-level card joins the active sprint when there is one. Only for cards at the board's work level, since subtasks follow their parent"),
+      estimate: estimateInput.optional(),
       afterCardId: uuid.nullable().optional()
     }),
     handler: async ({ boardId, tags, ...fields }, key) => {
@@ -509,7 +518,7 @@ export const taskTools: McpToolSpec[] = [
   defineTool({
     name: "update_card",
     title: "Update a card",
-    description: "Change a card's title, due date, due time, start date, start time, assignees, tags, flags, parent, level, or sprint on a board where the user can edit cards (READ_ONLY otherwise). The description cannot be changed here. baseRevision must be the revision from get_card or list_cards; if the card changed since, the call fails with CARD_CHANGED and the current revision. dueOn null clears the date and time; dueTime null clears only the time (startOn and startTime work the same way, and the start must be on or before the due date); assigneeIds, tags, and flags each replace the whole set ([] clears it). Tags must already exist on the board (by name or id).",
+    description: "Change a card's title, due date, due time, start date, start time, assignees, tags, flags, parent, level, sprint, or estimate on a board where the user can edit cards (READ_ONLY otherwise). The description cannot be changed here. baseRevision must be the revision from get_card or list_cards; if the card changed since, the call fails with CARD_CHANGED and the current revision. dueOn null clears the date and time; dueTime null clears only the time (startOn and startTime work the same way, and the start must be on or before the due date); assigneeIds, tags, and flags each replace the whole set ([] clears it). Tags must already exist on the board (by name or id).",
     scopes: ["tasks:write"],
     access: { mode: "items", items: [{ arg: "cardId", kind: "card" }], related: ["assigneeIds", "parentId", "sprintId"] },
     write: true,
@@ -529,7 +538,8 @@ export const taskTools: McpToolSpec[] = [
       flags: flagsInput.optional(),
       parentId: uuid.nullable().optional().describe("Move the card under a card on the same board one level up, or null to take it out of its parent; the level stays unless level is also sent"),
       level: z.number().int().min(0).max(2).optional().describe("Change the card's level; refused (reason HAS_CHILDREN) while it has children"),
-      sprintId: uuid.nullable().optional().describe("Plan the card in a planned or active sprint of its board, or null for the backlog; only at the board's work level (reason SPRINT_LEVEL otherwise)")
+      sprintId: uuid.nullable().optional().describe("Plan the card in a planned or active sprint of its board, or null for the backlog; only at the board's work level (reason SPRINT_LEVEL otherwise)"),
+      estimate: estimateInput.optional()
     }).strict(),
     handler: async ({ cardId, baseRevision, tags, ...fields }, key) => {
       return service(key, async () => {

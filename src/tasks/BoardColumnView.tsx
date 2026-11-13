@@ -6,6 +6,8 @@ import { columnBadge, localDateString } from "./taskActions";
 import { ColumnStatusIcon, ColumnStatusText, columnStatusId, type ColumnStatus } from "./ColumnStatusIcon";
 import type { BoardColumn, BoardTag, CardSummary } from "./tasksApi";
 import type { ColumnNesting } from "./useBoardHierarchy";
+import { columnEstimate } from "./EstimateField";
+import type { EstimateKind } from "../../shared/estimates";
 
 type BoardColumnViewProps = {
   column: BoardColumn;
@@ -55,6 +57,8 @@ type BoardColumnViewProps = {
   phone?: boolean;
   /** The column's status icon left of its name (D629), from its state and place on the board. */
   status?: ColumnStatus;
+  /** The board's estimate kind (lane ESTIMATES, D754): cards show their estimate and the header the total of the listed cards. */
+  estimateKind?: EstimateKind;
 };
 
 const cardsWord = (count: number) => count === 1 ? "1 card" : `${count} cards`;
@@ -138,6 +142,8 @@ export function BoardColumnView(props: BoardColumnViewProps) {
   const status = props.status;
   const statusId = status ? columnStatusId(column.id) : undefined;
   const statusText = status && statusId && <ColumnStatusText id={statusId} status={status} />;
+  // The listed cards' total (D754): what the column shows, under the board's filters and sprint.
+  const estimateSum = columnEstimate(props.estimateKind ?? "none", cards);
 
   if (collapsed && !props.phone) {
     // The strip (D602): one button expands it; a card dropped on it goes to the column's top. The
@@ -198,6 +204,8 @@ export function BoardColumnView(props: BoardColumnViewProps) {
         </>}
       </span>}
     </header>
+    {/* Under the name, not beside it: a second chip in the header would cut the column's name short (D754). */}
+    {estimateSum && <p className="task-column-estimate" title={estimateSum.label}><span aria-hidden="true">{estimateSum.text}</span><span className="sr-only">{estimateSum.label}</span></p>}
     {collapsed && <p className="task-column-hidden task-column-collapsed-note">
       <span>Collapsed{count ? `, ${cardsWord(count)} hidden` : ""}</span>
       <button type="button" className="task-column-show-all" onClick={toggle}>Expand</button>
@@ -214,7 +222,7 @@ export function BoardColumnView(props: BoardColumnViewProps) {
         const slot = others.indexOf(card);
         const parent = props.nesting?.parentOf(card) ?? null;
         const rollup = props.nesting?.rollupOf(card) ?? null;
-        const face = { card, tags: props.tags ?? [], done: column.is_done === 1, today, parentTitle: parent?.title ?? null, rollup, childLabel: props.nesting?.childLabel(card) };
+        const face = { card, tags: props.tags ?? [], done: column.is_done === 1, today, parentTitle: parent?.title ?? null, rollup, childLabel: props.nesting?.childLabel(card), estimateKind: props.estimateKind };
         const archived = Boolean(card.archived_at);
         const nesting = props.nesting?.nestTarget === card.id;
         const excerptId = `task-card-excerpt-${card.id}`;

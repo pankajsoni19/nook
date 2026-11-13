@@ -72,6 +72,7 @@ import { taskViewPinsMigration } from "./078_task_view_pins";
 import { boardKeysMigration } from "./079_board_keys";
 import { cardStartDatesMigration } from "./080_card_start_dates";
 import { cardActivityMigration } from "./081_card_activity";
+import { cardEstimatesMigration } from "./082_card_estimates";
 
 const migrations = [initialMigration, folderSharingMigration, totpMigration, totpRecoveryCodesMigration, mcpApiKeysMigration, documentsMigration, binMigration, noteSearchMigration, taskBoardsMigration, mcpKeyScopesMigration, taskDatesMigration, collectionsMigration, calendarMigration, eventNextOccurrenceMigration, taskCardUxMigration, userPreferencesMigration, teamRolesMigration,
   // 018 (Team invites) may reach existing installs after 019 (task hierarchy) and 020 (task views); none depends on another.
@@ -204,7 +205,9 @@ const migrations = [initialMigration, folderSharingMigration, totpMigration, tot
   cardStartDatesMigration,
   // 081 (lane ACTIVITY, D740–D746: card_activity, a card's history shown with its comments) needs 001 and 009.
   // Built as 067; renumbered at integration so it follows 079 (board keys) and 080 (card start dates).
-  cardActivityMigration
+  cardActivityMigration,
+  // 082 (lane ESTIMATES, D750–D753: boards.estimate_kind and estimate_scale, cards.estimate) needs only 009.
+  cardEstimatesMigration
 ];
 
 /** Every registered migration in order (read-only), for tests that build an older database shape. */

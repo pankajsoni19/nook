@@ -20,6 +20,7 @@ import { setAutoArchiveDays, setBoardCode, taskErrorMessage, updateBoardStructur
 import { FormError } from "../ui/FormError";
 import { ApiError } from "../api";
 import { BOARD_CODE_MAX, boardCodeMessage, normalizeBoardCode } from "../../shared/boardKeys";
+import { EstimateSettingsSection } from "./EstimateSettingsSection";
 
 type BoardSettingsSheetProps = {
   board: BoardSummary;
@@ -258,6 +259,8 @@ export function BoardSettingsSheet({ board, owner, isOwner = owner, showAllLevel
         {saved.sprints && sprintsSection}
 
         <AutoArchiveSection board={board} owner={owner} notify={notify} onSaved={onBoardSaved} titleId={titleId} />
+
+        <EstimateSettingsSection board={board} owner={owner} notify={notify} onSaved={onBoardSaved} />
 
         {(saved.levels.length > 1 || onShowArchived) && <section className="task-settings-section" aria-labelledby={`${titleId}-display`}>
           <h3 id={`${titleId}-display`}>Display</h3>

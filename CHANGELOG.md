@@ -22,11 +22,19 @@ Release notes for Nook, newest first. Upgrade steps for each release are in [doc
 - The Comments header has an **Activity** switch and a **Newest first / Oldest first** button, remembered per person in this browser.
 - MCP and REST: `get_card_activity` reads a card's history, paged.
 
+**Tasks: card estimates**
+
+- **Estimates on task cards**, chosen per board in **Board settings → Estimates**: Off (the default), Story points (Fibonacci 0, 1, 2, 3, 5, 8, 13, 21, or any number), or Hours (like 1.5). The board's owner or a manager sets it.
+- The card shows an **Estimate** field (chips for Fibonacci, a number with "pts" or "h" otherwise); cards, list rows, and a sortable table column show "5 pts" or "3h"; column headers show the total of their cards; the sprint bar adds "13 of 21 pts done · 8 pts left".
+- Changing the setting never rewrites estimates: Off hides them, turning it back on shows them, and points ↔ hours keeps the numbers (Board settings warns that they are not converted).
+- `has:estimate` in task filters. API, REST v1, and MCP (`create_card`, `update_card`, `list_cards`, `get_card`) carry `estimate`; refusals are `ESTIMATES_OFF` and `ESTIMATE_INVALID`.
+
 **Upgrading**
 
 - Migration **079** (`board_keys`) gives every board a code from its name and numbers every card in creation order; quick. **Back up first** (`./scripts/backup.sh --force`).
 - Migration **080** (`card_start_dates`) runs once on the first boot; quick. **Back up first** (`./scripts/backup.sh --force`).
 - Migration **081** (`card_activity`) runs once on the first boot; quick (it creates an empty table). Cards changed before the upgrade have no history from before it.
+- Migration **082** (`card_estimates`) adds three columns on the first boot; quick. Every board starts with estimates off.
 
 ## v0.47.0 — 2026-10-24
 

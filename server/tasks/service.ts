@@ -25,6 +25,7 @@ import { foldText } from "../../shared/taskQuery";
 import { boardCodeMessage, normalizeBoardCode } from "../../shared/boardKeys";
 import { boardCodeTaken, freeBoardCode, keyOfCard, writeBoardCode } from "./keys";
 import { activityValue, cardActivitySnapshot, recordCardActivity, recordCardChange, recordCardItems, recordSnapshotChanges } from "./activity";
+import { checkEstimate, estimateSettingsOf, type EstimateKind, type EstimateScale, type EstimateSettings } from "../../shared/estimates";
 
 /**
  * Task Boards services (WAVES_7-9.md §3). Routes are thin adapters over these
@@ -104,6 +105,10 @@ export type BoardSummary = {
   structure: BoardStructure;
   /** The board's short code (migration 079, D710): cards' keys are `<code>-<number>`. */
   code: string | null;
+  /** What card estimates mean on this board (migration 082, D750): none (off), points, or hours. */
+  estimate_kind: EstimateKind;
+  /** The points scale (D751): fibonacci or free; kept but unused for hours and none. */
+  estimate_scale: EstimateScale;
   created_at: string;
   updated_at: string;
 };
@@ -116,7 +121,7 @@ const boardSummarySelect = `
          b.visibility, b.share_role,
          (SELECT COUNT(*) FROM cards k WHERE k.board_id = b.id AND k.deleted_at IS NULL) AS card_count,
          (SELECT COUNT(*) FROM cards k WHERE k.board_id = b.id AND k.deleted_at IS NULL AND k.archived_at IS NOT NULL) AS archived_count,
-         b.auto_archive_days, b.structure_json, b.code, b.created_at, b.updated_at
+         b.auto_archive_days, b.structure_json, b.code, b.estimate_kind, b.estimate_scale, b.created_at, b.updated_at
   FROM boards b JOIN users u ON u.id = b.owner_id
 `;
 
@@ -207,9 +212,14 @@ export type CardSummary = {
   archived_at: string | null;
   /** Its number on its board (migration 079, D713); the key is the board's code, a hyphen, and this. */
   number: number | null;
+  /** Points or hours as the board's `estimate_kind` says (migration 082, D750); null without one and on a board with estimates off (D752). */
+  estimate: number | null;
   created_at: string;
   updated_at: string;
 };
+
+/** A card's estimate as readers see it (D752): hidden (null) while its board has estimates off, the stored value kept. */
+export const ESTIMATE_SQL = "CASE WHEN (SELECT eb.estimate_kind FROM boards eb WHERE eb.id = k.board_id) = 'none' THEN NULL ELSE k.estimate END";
 
 const cardSelect = (extraColumns = "") => `
   SELECT k.id, k.board_id, k.column_id, k.position, k.title,
@@ -219,7 +229,7 @@ const cardSelect = (extraColumns = "") => `
          (SELECT COUNT(*) FROM card_comments cc WHERE cc.card_id = k.id) AS comment_count,
          (SELECT COUNT(*) FROM card_attachments ca WHERE ca.card_id = k.id) AS attachment_count,
          k.parent_card_id, k.level, ${EFFECTIVE_SPRINT_SQL} AS sprint_id,
-         k.done_at, k.archived_at, k.number, k.created_at, k.updated_at${extraColumns}
+         k.done_at, k.archived_at, k.number, ${ESTIMATE_SQL} AS estimate, k.created_at, k.updated_at${extraColumns}
   FROM cards k LEFT JOIN users cu ON cu.id = k.created_by
 `;
 const cardSummarySelect = cardSelect();
@@ -448,7 +458,7 @@ function checkStructureChange(boardId: string, structure: BoardStructure) {
  * then written in one transaction under the board lock, so a refused structure never leaves the
  * name changed and a failed write leaves neither.
  */
-export function updateBoard(userId: string, boardId: string, input: { name?: string; structure?: BoardStructure; keepSprintDefaults?: boolean; autoArchiveDays?: number | null; code?: string }) {
+export function updateBoard(userId: string, boardId: string, input: { name?: string; structure?: BoardStructure; keepSprintDefaults?: boolean; autoArchiveDays?: number | null; code?: string; estimates?: Partial<EstimateSettings> }) {
   return withBoardLock(boardId, () => {
     requireBoardAt(boardId, userId, "manage");
     // The code changes every card's key, so only the owner changes it (D712); old keys keep working (D714).
@@ -478,9 +488,37 @@ export function updateBoard(userId: string, boardId: string, input: { name?: str
         const before = (db.query("SELECT code FROM boards WHERE id = ?").get(boardId) as { code: string | null }).code;
         if (writeBoardCode(boardId, code, timestamp)) audit(userId, null, "task.board_code", { boardId, code, previous: before });
       }
+      if (input.estimates) writeEstimateSettings(userId, boardId, input.estimates, timestamp);
     })();
     return { board: boardSummary(boardId, userId)! };
   });
+}
+
+/** The board's estimate settings (D750, D751); `none` for a missing board. */
+export function boardEstimateSettings(boardId: string): EstimateSettings {
+  return estimateSettingsOf(db.query("SELECT estimate_kind, estimate_scale FROM boards WHERE id = ?").get(boardId) as { estimate_kind: string; estimate_scale: string } | null);
+}
+
+/**
+ * Board settings → Estimates (D752): a new kind and/or scale. Stored card values are never
+ * rewritten: off hides them, on shows them again, and points ↔ hours keeps the numbers (the
+ * settings say they are not converted). Audited `task.board_estimates` with before and after, and
+ * how many live cards hold a value, so a change that reinterprets them is traceable.
+ */
+function writeEstimateSettings(userId: string, boardId: string, change: Partial<EstimateSettings>, timestamp: string) {
+  const before = boardEstimateSettings(boardId);
+  const after = { kind: change.kind ?? before.kind, scale: change.scale ?? before.scale };
+  if (after.kind === before.kind && after.scale === before.scale) return;
+  db.query("UPDATE boards SET estimate_kind = ?, estimate_scale = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL").run(after.kind, after.scale, timestamp, boardId);
+  const estimated = (db.query("SELECT COUNT(*) AS count FROM cards WHERE board_id = ? AND deleted_at IS NULL AND estimate IS NOT NULL").get(boardId) as { count: number }).count;
+  audit(userId, null, "task.board_estimates", { boardId, kind: after.kind, scale: after.scale, kindBefore: before.kind, scaleBefore: before.scale, estimatedCards: estimated });
+}
+
+/** The estimate a write stores (D753), or 400 ESTIMATES_OFF / ESTIMATE_INVALID. */
+function requireEstimate(boardId: string, value: number | null) {
+  const checked = checkEstimate(boardEstimateSettings(boardId), value);
+  if (!checked.ok) throw new TaskError(400, checked.error, checked.code);
+  return checked.value;
 }
 
 /**
@@ -747,6 +785,8 @@ export type CardCreateInput = {
    * active sprint when there is one (Friction 3: routines and MCP clients rarely pass it).
    */
   sprintId?: string | null;
+  /** Points or hours as the board's estimate kind says (D750, D753); null or omitted for none. */
+  estimate?: number | null;
 };
 
 /**
@@ -834,6 +874,7 @@ export function createCard(userId: string, boardId: string, input: CardCreateInp
     const sprintId = input.sprintId === undefined
       ? defaultSprint(boardId, placement.structure, placement.level)
       : resolveSprint(boardId, placement.structure, placement.level, input.sprintId);
+    const estimate = input.estimate === undefined ? null : requireEstimate(boardId, input.estimate);
     const plan = planInsert(liveCardsIn(input.columnId), input.afterCardId);
     if (!plan) throw stalePosition(input.columnId);
     const id = crypto.randomUUID();
@@ -846,6 +887,8 @@ export function createCard(userId: string, boardId: string, input: CardCreateInp
         .run(id, boardId, input.columnId, plan.position, input.title, description, descriptionExcerpt(description), due.due_on, due.due_time, due.due_tz,
           start.start_on, start.start_time, start.start_tz,
           placement.parentId, placement.level, sprintId, column.state === "done" ? timestamp : null, userId, timestamp, timestamp);
+      // Its own statement, so the insert above stays as it was for the parallel lanes (D753).
+      if (estimate !== null) db.query("UPDATE cards SET estimate = ? WHERE id = ?").run(estimate, id);
       if (assignees?.length) replaceAssignees(id, assignees, userId, timestamp);
       if (tagIds?.length) replaceCardTags(id, tagIds, timestamp);
       if (input.flags?.length) replaceCardFlags(id, input.flags, timestamp);
@@ -859,7 +902,8 @@ export function createCard(userId: string, boardId: string, input: CardCreateInp
         ...(input.flags?.length ? { flags: input.flags } : {}),
         ...(placement.parentId ? { parentId: placement.parentId } : {}),
         ...(placement.level !== 0 ? { level: placement.level } : {}),
-        ...(sprintId ? { sprintId } : {})
+        ...(sprintId ? { sprintId } : {}),
+        ...(estimate !== null ? { estimate } : {})
       });
       // Same checks as POST /cards/:k/relations: the target must be readable (404 like a missing id), one per pair, 50 per card.
       for (const relation of input.relations ?? []) {
@@ -913,6 +957,8 @@ export type CardPatchInput = {
   level?: number;
   /** Plan the card in a sprint of its board, or null for the backlog (17B); work-level cards only. */
   sprintId?: string | null;
+  /** Points or hours (D753); null clears it, also on a board with estimates off. */
+  estimate?: number | null;
   revision: number;
 };
 
@@ -1033,6 +1079,7 @@ export async function patchCard(userId: string, cardId: string, input: CardPatch
       ? { set: true, id: resolveSprint(board.id, structure, finalLevel, input.sprintId) }
       : releveled && current.sprint_id && finalLevel !== structure.workLevel ? { set: true, id: null } : { set: false, id: null };
     const sprintChanged = sprint.set && sprint.id !== current.sprint_id;
+    const estimate = input.estimate === undefined ? undefined : requireEstimate(board.id, input.estimate);
     db.transaction(() => {
       const timestamp = now();
       const before = cardActivitySnapshot(cardId)!;
@@ -1051,6 +1098,7 @@ export async function patchCard(userId: string, cardId: string, input: CardPatch
           parent_card_id = CASE WHEN $setPlacement THEN $parentId ELSE parent_card_id END,
           level = CASE WHEN $setPlacement THEN $level ELSE level END,
           sprint_id = CASE WHEN $setSprint THEN $sprintId ELSE sprint_id END,
+          estimate = CASE WHEN $setEstimate THEN $estimate ELSE estimate END,
           revision = revision + 1, updated_at = $timestamp
         WHERE id = $cardId AND revision = $revision AND deleted_at IS NULL`).run({
         title: input.title ?? null,
@@ -1070,6 +1118,8 @@ export async function patchCard(userId: string, cardId: string, input: CardPatch
         level: placement?.level ?? 0,
         setSprint: sprint.set ? 1 : 0,
         sprintId: sprint.id,
+        setEstimate: estimate === undefined ? 0 : 1,
+        estimate: estimate ?? null,
         timestamp,
         cardId,
         revision: input.revision
@@ -1095,7 +1145,8 @@ export async function patchCard(userId: string, cardId: string, input: CardPatch
         ...(changed ? { assigneesAdded: changed.added.length, assigneesRemoved: changed.removed.length } : {}),
         ...(tagsChanged ? { tagsAdded: tagsChanged.added.length, tagsRemoved: tagsChanged.removed.length } : {}),
         ...(input.flags ? { flags: input.flags } : {}),
-        ...(sprintChanged ? { sprintId: sprint.id } : {})
+        ...(sprintChanged ? { sprintId: sprint.id } : {}),
+        ...(estimate !== undefined ? { estimate } : {})
       });
       if (reparented) audit(userId, null, "task.card_reparent", { boardId: board.id, cardId, parentId: placement.parentId });
       if (releveled) audit(userId, null, "task.card_level", { boardId: board.id, cardId, level: placement.level });

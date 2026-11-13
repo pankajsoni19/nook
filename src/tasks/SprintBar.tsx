@@ -1,7 +1,9 @@
 import { CircleCheck, Play, Plus, Timer } from "lucide-react";
 import { Select, type Option } from "../ui/Select";
 import { activeSprint, plannedSprints, progressLabel, selectionValue, sprintDateRange, sprintProgress, sprintStateLabel, sprintTiming, type SprintProgress, type SprintSelection } from "./sprintModel";
+import { estimateProgressLabel, sprintEstimates } from "./sprintModel";
 import type { BoardColumn, CardSummary, SprintSummary } from "./tasksApi";
+import type { EstimateKind } from "../../shared/estimates";
 
 /** The switcher's action entries (not sprints): they open the New sprint dialog and the Sprints sheet. */
 export const NEW_SPRINT_OPTION = "new-sprint";
@@ -11,7 +13,7 @@ type SprintBarProps = {
   sprints: readonly SprintSummary[];
   selection: SprintSelection;
   /** The board's cards with their effective sprints (boardData), for the counts. */
-  cards: ReadonlyArray<Pick<CardSummary, "id" | "column_id" | "level" | "parent_card_id" | "sprint_id">>;
+  cards: ReadonlyArray<Pick<CardSummary, "id" | "column_id" | "level" | "parent_card_id" | "sprint_id" | "estimate">>;
   columns: readonly BoardColumn[];
   workLevel: number;
   /** "Tasks": the work level's plural. */
@@ -27,6 +29,8 @@ type SprintBarProps = {
   onNewSprint?: (trigger?: HTMLElement) => void;
   /** Opens the Sprints sheet (the list, history, and lifecycle). */
   onManage?: () => void;
+  /** The board's estimate kind (lane ESTIMATES, D755): with points or hours the strip adds the estimate totals. */
+  estimateKind?: EstimateKind;
 };
 
 /**
@@ -54,11 +58,12 @@ export function sprintSwitcherOptions({ sprints, count, owner, newSprint, manage
 /**
  * The sprint switcher and progress strip under the board header (research 2026-09-26 §7.3, §9.4 B
  * and D): a Select-styled button (sprintSwitcherOptions), then "Sprint 12 · 4 days left · 8 of 14
- * done" with a bar by column state (counts only, no points, Q4). With no active sprint on the
+ * done" with a bar by column state, and on a board with estimates "13 of 21 pts done · 8 pts left"
+ * (lane ESTIMATES, D755, superseding Q4 and D134). With no active sprint on the
  * default view the strip says "No active sprint" and offers the owner Start (the next planned
  * sprint) and New sprint. On phones the switcher is a bottom sheet that Back closes (D69).
  */
-export function SprintBar({ sprints, selection, cards, columns, workLevel, plural, name, today, owner, onSelect, onStart, onComplete, onNewSprint, onManage }: SprintBarProps) {
+export function SprintBar({ sprints, selection, cards, columns, workLevel, plural, name, today, owner, onSelect, onStart, onComplete, onNewSprint, onManage, estimateKind = "none" }: SprintBarProps) {
   const count = (sprintId: string | null) => sprintProgress(cards, columns, sprintId, workLevel);
   const options = sprintSwitcherOptions({ sprints, count, owner, newSprint: Boolean(onNewSprint), manage: Boolean(onManage) });
   const shown = selection.kind === "sprint" ? selection.sprint : null;
@@ -67,6 +72,7 @@ export function SprintBar({ sprints, selection, cards, columns, workLevel, plura
   const nextPlanned = plannedSprints(sprints)[0] ?? null;
   // No sprint running and the board on its default (the backlog): say so, not "0 tasks not in a sprint".
   const idle = !active && selection.kind === "backlog";
+  const estimate = selection.kind === "all" ? null : estimateProgressLabel(estimateKind, sprintEstimates(cards, columns, shown?.id ?? null, workLevel), Boolean(shown));
   const percent = (value: number) => progress && progress.total ? `${(value / progress.total) * 100}%` : "0%";
   const choose = (value: string) => {
     if (value === NEW_SPRINT_OPTION) onNewSprint?.();
@@ -79,10 +85,12 @@ export function SprintBar({ sprints, selection, cards, columns, workLevel, plura
     {idle && <p className="task-sprint-strip task-sprint-idle" aria-live="polite">
       <span className="task-sprint-count">No active sprint</span>
       {progress && progress.total > 0 && <span>{progress.total} {(progress.total === 1 ? name : plural).toLowerCase()} not in a sprint</span>}
+      {estimate && <span className="task-sprint-estimate" aria-label={estimate.label}>{estimate.text}</span>}
     </p>}
     {!idle && progress && <p className="task-sprint-strip" aria-live="polite">
       {shown && <span className="task-sprint-timing"><Timer aria-hidden="true" />{[sprintTiming(shown, today), sprintDateRange(shown)].filter(Boolean).join(" · ") || sprintStateLabel(shown)}</span>}
       <span className="task-sprint-count">{shown ? progressLabel(progress, plural) : `${progress.total} ${(progress.total === 1 ? name : plural).toLowerCase()} not in a sprint`}</span>
+      {estimate && <span className="task-sprint-estimate" aria-label={estimate.label}>{estimate.text}</span>}
       {shown && progress.total > 0 && <span className="task-sprint-meter" role="img" aria-label={`${progress.done} done, ${progress.doing} in progress, ${progress.todo} to do`}>
         <i className="done" style={{ width: percent(progress.done) }} /><i className="doing" style={{ width: percent(progress.doing) }} /><i className="todo" style={{ width: percent(progress.todo) }} />
       </span>}
