@@ -22,6 +22,12 @@ Release notes for Nook, newest first. Upgrade steps for each release are in [doc
 
 **Time** (new module): a one-click timer in every header (Alt+T; one per person, it survives reloads and other devices), timers and worklogs on Tasks cards (time against the hours estimate on the card, its face, and the Timeline), manual entries with typed durations, a keyboard-first week timesheet with approvals that lock a week, projects with clients, rates, and budgets, reports by project, client, person, work item, or tag with rounding and CSV, reminders, and MCP tools (`start_timer`, `log_time`, `time_summary`, …).
 
+**Townhall** (new module)
+
+- All-hands and AMA sessions: people ask before and during the meeting (named, or anonymously when the host allows), upvote, and reply; hosts review, approve, hide, merge duplicates, star, pin the current question, and mark questions answered.
+- Live polls (single and multiple choice, word cloud, rating, open text) with results that update as people vote; a high-contrast presenter view with a QR code to join; an audience link for people without an account (public pages policy).
+- After the session: a recap (answered and open questions, poll results, attendance) to download or post as a note, and open questions turned into cards. Reminders, notifications, Insights, and MCP tools (`list/get/create` sessions, ask, upvote, moderate, launch and close polls, export the recap).
+
 **Friendly, shareable URLs**
 
 - **Cards and boards**: the address bar shows `/tasks/KAN-1` for an open card (dialog or full page, `/tasks/KAN-1/full`) and `/tasks/KAN` for a board, keeping the board's view in the query when it is not the default. Old `/tasks/<id>/card/<id>` links, board ids, old card keys of moved cards, and a board's former code still open and turn into the current URL without an extra history entry.
@@ -29,12 +35,6 @@ Release notes for Nook, newest first. Upgrade steps for each release are in [doc
 - **Files, whiteboards, collections, reports**: `/files/<name>-<shortid>`, `/whiteboards/<name>-<shortid>`, `/collections/<name>-<shortid>` (views and rows below it), `/reports/<title>-<shortid>`.
 - **Links in mail, the Inbox, and MCP tool results** use the friendly forms. Vault items, chats, calendar events, and Team pages keep their ids on purpose.
 - **Privacy**: a link you cannot open behaves exactly like one that does not exist; the server log records app pages without their titles. API: `GET /api/links/:kind/:ref`; `short_id` on notes, documents, collections, and reports (migration 083).
-
-**Townhall** (new module)
-
-- All-hands and AMA sessions: people ask before and during the meeting (named, or anonymously when the host allows), upvote, and reply; hosts review, approve, hide, merge duplicates, star, pin the current question, and mark questions answered.
-- Live polls (single and multiple choice, word cloud, rating, open text) with results that update as people vote; a high-contrast presenter view with a QR code to join; an audience link for people without an account (public pages policy).
-- After the session: a recap (answered and open questions, poll results, attendance) to download or post as a note, and open questions turned into cards. Reminders, notifications, Insights, and MCP tools (`list/get/create` sessions, ask, upvote, moderate, launch and close polls, export the recap).
 
 **Tasks: card keys and moving cards between boards**
 

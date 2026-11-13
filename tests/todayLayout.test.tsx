@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { TodayGroups } from "../src/today/TodayHome";
 import type { TodayResponse, TodaySection } from "../src/today/todayApi";
-import { DEFAULT_SECTION_ORDER, groupTodaySections, sectionCount, TODAY_GROUPS, TODAY_SECTIONS } from "../src/today/todaySections";
+import { DEFAULT_SECTION_ORDER, groupTodaySections, registerTodayRenderer, sectionCount, TODAY_GROUPS, TODAY_SECTIONS } from "../src/today/todaySections";
 
 const empty = (href = "/"): TodaySection => ({ items: [], more: false, href });
 const card = (id: string, title: string) => ({ cardId: id, boardId: "b1", boardName: "Home", title, dueOn: "2026-09-28" });
@@ -31,6 +31,25 @@ test("every client section names one of the three fixed groups, listed in group 
     ["recent", ["notesRecent", "files", "collectionsRecent", "whiteboardsRecent"]],
     ["housekeeping", ["drafts", "binSoon", "storage"]]
   ]);
+});
+
+test("a registered module section slots in after the last section of its group, not at the end (D836, D923)", () => {
+  const probes = [["probeToday", "today"], ["probeRecent", "recent"], ["probeHousekeeping", "housekeeping"]] as const;
+  try {
+    for (const [name, group] of probes) registerTodayRenderer(name, { title: name, group, empty: "none", app: "Test" });
+    const groupOf = (name: string) => TODAY_SECTIONS[name]!.group;
+    for (const [name, group] of probes) {
+      const at = DEFAULT_SECTION_ORDER.indexOf(name);
+      expect(groupOf(DEFAULT_SECTION_ORDER[at - 1]!)).toBe(group);
+      const next = DEFAULT_SECTION_ORDER[at + 1];
+      if (next) expect(groupOf(next)).not.toBe(group);
+    }
+  } finally {
+    for (const [name] of probes) {
+      delete TODAY_SECTIONS[name];
+      DEFAULT_SECTION_ORDER.splice(DEFAULT_SECTION_ORDER.indexOf(name), 1);
+    }
+  }
 });
 
 test("grouping ignores server order and unknown names, and drops a group with nothing shown", () => {

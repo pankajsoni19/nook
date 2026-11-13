@@ -27,6 +27,8 @@ describe("Goals client module", () => {
   });
 
   test("Today rows open the goal and say what is due", () => {
+    // In the Today group now that registered sections slot into their own group (D923).
+    expect([goals.todaySections!.goalsCheckin!.group, goals.todaySections!.goalsAtRisk!.group]).toEqual(["today", "today"]);
     const row = goals.todaySections!.goalsCheckin!.row!({ id: "g1", title: "Grow MRR", href: "/goals/grow-mrr-7k3f9x2ab0", progress: 0.42, lastCheckinAt: null }, "2027-01-05");
     expect(row).toEqual({ key: "g1", label: "Grow MRR", meta: "42% · no check-in yet", route: { app: "goals", path: ["grow-mrr-7k3f9x2ab0"], search: "" } as never, tone: "today" });
     expect(goals.todaySections!.goalsAtRisk!.row!({ id: "g1", title: "Grow MRR", href: "/goals/x-7k3f9x2ab0", progress: 0.1, health: "off_track" }, "2027-01-05").tone).toBe("overdue");
