@@ -65,7 +65,8 @@ export function BoardCalendar({ board, cards, layout, month: routeMonth, today, 
   const { byDay, unscheduled } = placeCards(cards, viewerZone);
   // A card with a start also shows on the days before its due day (D714), within the grid's six weeks.
   const spans = spanningDays(cards, viewerZone, addDays(`${month}-01`, -7), addDays(`${month}-01`, 42));
-  const dayItems = (cell: string) => [...(spans.get(cell) ?? []), ...(byDay.get(cell) ?? [])];
+  // Cards due that day first, so a long range never pushes them behind "+N more".
+  const dayItems = (cell: string) => [...(byDay.get(cell) ?? []), ...(spans.get(cell) ?? [])];
   const done = new Set(board.columns.filter((column) => column.is_done === 1).map((column) => column.id));
   const day = selected && selected.startsWith(month) ? selected : today.startsWith(month) ? today : `${month}-01`;
   const monthCount = cardsDueInMonth(byDay, month);
