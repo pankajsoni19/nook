@@ -1,6 +1,9 @@
 import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { AccountActions } from "../src/AppShell";
+import { WORKSPACE_MODULE_IDS } from "../shared/workspaceModules";
+// A shipped workspace module adds its launcher tile and Today section (D832, D836); these checks are about the built-in ones.
+const builtIn = (id: string) => !(WORKSPACE_MODULE_IDS as readonly string[]).includes(id);
 import { TodayHome } from "../src/today/TodayHome";
 import { storageText, TODAY_SECTIONS } from "../src/today/todaySections";
 import { BinSection } from "../src/bin/BinSection";
@@ -56,7 +59,7 @@ test("Today keeps the greeting and a launcher row of real links, without the Bin
   const markup = home();
   expect(markup).toContain("Good to see you, Ada.");
   const launcher = markup.match(/<nav class="today-launcher" aria-label="Apps">(.*?)<\/nav>/)?.[1] ?? "";
-  expect([...launcher.matchAll(/<a class="today-app today-app-(\w+)" href="([^"]+)"/g)].map((match) => [match[1], match[2]])).toEqual([["notes", "/notes"], ["files", "/files"], ["tasks", "/tasks"], ["collections", "/collections"], ["calendar", "/calendar"], ["whiteboards", "/whiteboards"], ["vault", "/vault"], ["chat", "/chat"], ["reports", "/reports"]]);
+  expect([...launcher.matchAll(/<a class="today-app today-app-(\w+)" href="([^"]+)"/g)].map((match) => [match[1], match[2]]).filter(([section]) => builtIn(section!))).toEqual([["notes", "/notes"], ["files", "/files"], ["tasks", "/tasks"], ["collections", "/collections"], ["calendar", "/calendar"], ["whiteboards", "/whiteboards"], ["vault", "/vault"], ["chat", "/chat"], ["reports", "/reports"]]);
   expect(launcher).not.toContain("Bin");
   expect(markup).not.toContain("app-card");
 });
@@ -65,7 +68,7 @@ test("Today starts with busy skeleton sections, each labelled by its heading", (
   const markup = home();
   expect(markup).toContain('<div class="today-groups" aria-busy="true">');
   const sections = [...markup.matchAll(/<section class="today-section today-section-(\w+)" aria-labelledby="today-(\w+)"/g)];
-  expect(sections.map((match) => match[1])).toEqual(["tasksDue", "upcoming", "tasksMine", "proposals", "notesRecent", "files", "collectionsRecent", "whiteboardsRecent", "drafts", "binSoon", "storage"]);
+  expect(sections.map((match) => match[1]).filter((name) => !TODAY_SECTIONS[name!]?.module)).toEqual(["tasksDue", "upcoming", "tasksMine", "proposals", "notesRecent", "files", "collectionsRecent", "whiteboardsRecent", "drafts", "binSoon", "storage"]);
   for (const [, name] of sections) expect(markup).toContain(`<h3 id="today-${name}">${TODAY_SECTIONS[name!]!.title}</h3>`);
   expect(markup).toContain('class="today-skeleton" aria-hidden="true"');
   expect(markup).toContain('role="status" aria-live="polite"');

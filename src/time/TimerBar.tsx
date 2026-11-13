@@ -137,7 +137,7 @@ export function TimerSheet({ entry, onClose }: { entry: TimeEntry | null; onClos
   };
 
   return <ModalDialog title={entry ? "Timer" : "Start a timer"} onClose={onClose} variant="sheet" busy={busy} className="time-sheet">
-    <form id={formId} className="time-sheet-body" onSubmit={(event) => { void save(event); }}>
+    <form noValidate id={formId} className="time-sheet-body" onSubmit={(event) => { void save(event); }}>
       <div className="ui-field">
         <label htmlFor={`${formId}-description`}>What are you working on?</label>
         <input id={`${formId}-description`} value={description} autoFocus maxLength={500} placeholder="Description" onChange={(event) => setDescription(event.target.value)} />

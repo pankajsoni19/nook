@@ -126,7 +126,7 @@ export function ProjectSheet({ project, onClose, onSaved }: { project: TimeProje
   };
 
   return <ModalDialog title={project ? "Edit project" : "New project"} onClose={onClose} variant="sheet" busy={busy} className="time-sheet">
-    <form id={formId} className="time-sheet-body" onSubmit={(event) => { void save(event); }}>
+    <form noValidate id={formId} className="time-sheet-body" onSubmit={(event) => { void save(event); }}>
       <div className="time-sheet-grid">
         <div className="ui-field"><label htmlFor={`${formId}-name`}>Name</label><input id={`${formId}-name`} value={name} maxLength={120} autoFocus onChange={(event) => setName(event.target.value)} /></div>
         <div className="ui-field"><label htmlFor={`${formId}-code`}>Code</label><input id={`${formId}-code`} value={code} maxLength={12} placeholder="ACME" onChange={(event) => setCode(event.target.value.toUpperCase())} /></div>

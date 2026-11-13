@@ -296,7 +296,7 @@ describe("MCP (time:read / time:write)", () => {
     resetMcpLimits();
     const key = makeKey(owner, ["time:write"]);
     const names = await toolNames(key);
-    for (const name of ["get_running_timer", "start_timer", "stop_timer", "log_time", "list_time_entries", "update_time_entry", "remove_time_entry", "bulk_log_time", "time_summary", "list_time_projects", "create_time_project", "update_time_project", "get_time_for_item", "suggest_time_entries"]) expect(names).toContain(name);
+    for (const name of ["get_running_timer", "start_timer", "stop_timer", "log_time", "list_time_entries", "update_time_entry", "discard_time_entry", "bulk_log_time", "time_summary", "list_time_projects", "create_time_project", "update_time_project", "get_time_for_item", "suggest_time_entries"]) expect(names).toContain(name);
     const started = await ok(key, "start_timer", { target: cardKey, description: "Over MCP" });
     expect(started.entry.target.key).toBe(cardKey);
     expect((await ok(key, "get_running_timer", {})).entry.id).toBe(started.entry.id);
@@ -336,7 +336,7 @@ describe("MCP (time:read / time:write)", () => {
 
   test("agents may read and log time (as a time_log proposal), never approve or manage", () => {
     for (const name of ["list_time_entries", "time_summary", "log_time"]) expect(NOOK_AGENT_TOOLS.has(name)).toBe(true);
-    for (const name of ["remove_time_entry", "bulk_log_time", "create_time_project"]) expect(NOOK_NEVER_TOOLS.has(name)).toBe(true);
+    for (const name of ["discard_time_entry", "bulk_log_time", "create_time_project"]) expect(NOOK_NEVER_TOOLS.has(name)).toBe(true);
   });
 
   test("a time_log proposal is applied as the approver", async () => {

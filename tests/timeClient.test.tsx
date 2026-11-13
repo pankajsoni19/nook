@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { installDom, mockApi, render } from "./support/dom";
 import { primeUnits } from "../src/ui/units";
 import { parseTimeRoute } from "../src/time/module";
@@ -12,6 +12,8 @@ import { weekStartOf, type TimeEntry, type Timesheet } from "../shared/time";
 /** Time's client (lane TIME, §D.2): routes, the header chip, the timesheet keyboard, and the card slots. */
 installDom("http://nook.test/time");
 primeUnits();
+// Later files render headers without a timer server: leave the store as a fresh tab has it.
+afterAll(() => resetTimerStoreForTests({ loaded: false }));
 
 const notify = Object.assign(() => undefined, { success: () => undefined, info: () => undefined, warning: () => undefined, error: () => undefined }) as never;
 const zone = encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");

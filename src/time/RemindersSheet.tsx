@@ -36,7 +36,7 @@ export function RemindersSheet({ onClose }: { onClose: () => void }) {
   };
 
   return <ModalDialog title="Time reminders" onClose={onClose} variant="sheet" busy={busy} className="time-sheet">
-    <form id={formId} className="time-sheet-body" onSubmit={(event) => { void save(event); }}>
+    <form noValidate id={formId} className="time-sheet-body" onSubmit={(event) => { void save(event); }}>
       {!settings && !error && <p className="time-loading" role="status">Loading…</p>}
       {settings && schedule && <>
         <button type="button" role="switch" className="ui-switch" aria-checked={settings.dailyReminder} onClick={() => setSettings({ ...settings, dailyReminder: !settings.dailyReminder })}>

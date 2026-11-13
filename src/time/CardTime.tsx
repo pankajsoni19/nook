@@ -161,7 +161,7 @@ export function CardTimeSection({ card, idPrefix }: CardSlotProps) {
           valueText={`${formatDuration(data.totalSeconds, prefs.durationFormat)} of ${formatDuration(data.estimateSeconds, prefs.durationFormat)}`}
           tone={data.estimateSeconds && data.totalSeconds > data.estimateSeconds ? "danger" : data.estimateSeconds && data.totalSeconds >= data.estimateSeconds * 0.8 ? "warning" : "accent"} />
         : <p className="time-card-total ui-tabular"><strong>{formatDuration(data.totalSeconds, prefs.durationFormat)}</strong> logged{data.mySeconds ? `, ${formatDuration(data.mySeconds, prefs.durationFormat)} by you` : ""}</p>}
-      {logging && <form className="time-card-log" onSubmit={(event) => { void log(event); }}>
+      {logging && <form noValidate className="time-card-log" onSubmit={(event) => { void log(event); }}>
         <DurationInput label="How long" value={duration} onChange={setDuration} placeholder="1h 30m" />
         <div className="ui-field">
           <label htmlFor={`${fieldId}-what`}>What did you do?</label>

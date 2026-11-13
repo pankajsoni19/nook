@@ -204,7 +204,7 @@ function TimeBar({ running, busy, onOpen, onEditRunning }: { running: TimeEntry 
       <TimerChip running={{ startedAt: running.startedAt }} onStart={() => undefined} onStop={() => { void stopTimer(); }} shortcut="Alt+T" disabled={busy} />
     </div>;
   }
-  return <form className="time-bar" onSubmit={(event) => { void submit(event); }}>
+  return <form noValidate className="time-bar" onSubmit={(event) => { void submit(event); }}>
     <div className="time-bar-row">
       <label className="time-bar-input">
         <span className="ui-visually-hidden">What are you working on?</span>

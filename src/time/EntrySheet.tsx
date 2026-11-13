@@ -136,7 +136,7 @@ export function EntrySheet({ entry, draft, onClose, onOpen }: { entry: TimeEntry
 
   const title = entry ? (running ? "Running timer" : readOnly ? "Time entry" : "Edit time entry") : "Log time";
   return <ModalDialog title={title} onClose={onClose} variant="sheet" busy={busy} className="time-sheet">
-    <form id={formId} className="time-sheet-body" onSubmit={(event) => { void save(event); }}>
+    <form noValidate id={formId} className="time-sheet-body" onSubmit={(event) => { void save(event); }}>
       {entry?.locked && <p className="time-note" role="note"><Lock aria-hidden="true" />This week is approved and locked{entry.canEdit ? "; you can still change it as a project manager." : "."}</p>}
       {entry && entry.user && !entry.canEdit && <p className="time-note" role="note">Logged by {entry.user.name}.</p>}
       <div className="ui-field">

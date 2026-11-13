@@ -129,7 +129,7 @@ export const timeTools: McpToolSpec[] = [
     handler: ({ entryId, ...patch }, key) => run(() => ({ entry: updateEntry(actorOf(key), entryId, patch) }))
   }),
   defineTool({
-    name: "remove_time_entry", title: "Delete a time entry",
+    name: "discard_time_entry", title: "Delete a time entry",
     description: "Deletes an entry (your own unlocked one, or one on a project you manage). The person can undo it in the app for 10 minutes.",
     scopes: ["time:write"], access: { mode: "items", items: [{ arg: "entryId", kind: "time_entry" }] }, write: true, annotations: { destructiveHint: true },
     inputSchema: z.object({ entryId: z.string().max(64) }),
@@ -232,6 +232,6 @@ export const timeTools: McpToolSpec[] = [
 ];
 
 export const TIME_AGENT_ALLOWED = ["get_running_timer", "list_time_entries", "time_summary", "list_time_projects", "get_time_for_item", "suggest_time_entries", "log_time"] as const;
-export const TIME_AGENT_NEVER = ["start_timer", "stop_timer", "update_time_entry", "remove_time_entry", "bulk_log_time", "create_time_project", "update_time_project"] as const;
+export const TIME_AGENT_NEVER = ["start_timer", "stop_timer", "update_time_entry", "discard_time_entry", "bulk_log_time", "create_time_project", "update_time_project"] as const;
 
 export { entryRow, projectView, notFound };
