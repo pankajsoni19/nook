@@ -38,7 +38,8 @@ import { GUEST_SHARE_DISABLED, legacyGuestShareBlocked } from "../access/shares"
  */
 
 export const VIEW_LIMITS = { perOwner: 50, members: 100, listed: 200 } as const;
-export const VIEW_LAYOUTS = ["list", "table", "board"] as const;
+/** `timeline` (D760) is a board layout: a view on one board opens in it; the cross-board page shows it as the list. */
+export const VIEW_LAYOUTS = ["list", "table", "board", "timeline"] as const;
 /** Group-by options. `board`, `state`, and `due` group on the server; `assignee` and `tag` group on the client (multi-valued). */
 export const VIEW_GROUPS = [...QUERY_GROUPS, "assignee", "tag"] as const;
 export const VIEW_FIELDS = ["board", "column", "state", "assignees", "due", "tags", "flags", "updated"] as const;

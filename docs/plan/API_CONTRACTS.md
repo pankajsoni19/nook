@@ -760,7 +760,7 @@ type TaskView = {
   id; name /* 1–80, trimmed, no control characters */; owner_id; owner_name; is_owner: 0 | 1;
   visibility: "private" | "selected" | "all_users";
   query: string;                                   // canonical grammar
-  display: { layout: "list" | "table" | "board"; group: "none" | "board" | "state" | "due" | "assignee" | "tag";
+  display: { layout: "list" | "table" | "board" | "timeline"; group: "none" | "board" | "state" | "due" | "assignee" | "tag";
              sort: "due" | "updated" | "created" | "title" | "board";
              lanes?: "columns" | "state" | "assignee" | "tag" | "sprint" | "due" | "board";   // the board layout's lanes (lane VIEWS, D640; VIEWS2, D650)
              swimlanes?: "assignee" | "parent" | "board" | null;   // swimlanes (lane VIEWS2): a board view's by assignee or parent (D655), a cross-board view's by assignee or board (D665); null clears them
