@@ -44,7 +44,7 @@ export const NOOK_AGENT_TOOLS: ReadonlySet<string> = new Set([
   // Files
   "list_documents", "get_document_metadata", "read_document_text", "search_documents", "create_text_file", "rename_file", "move_file",
   // Tasks
-  "list_boards", "list_cards", "get_card", "list_children", "list_sprints", "search_cards", "create_card", "update_card", "move_card", "link_cards", "comment_on_card",
+  "list_boards", "list_cards", "get_card", "get_card_activity", "list_children", "list_sprints", "search_cards", "create_card", "update_card", "move_card", "link_cards", "comment_on_card",
   "manage_tags", "set_wip_limit", "create_sprint", "start_sprint", "link_attachment", "list_views", "query_cards",
   // Calendar
   "list_calendars", "list_events", "get_event", "create_event", "update_event", "create_reminder",
