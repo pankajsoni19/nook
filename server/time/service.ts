@@ -690,7 +690,8 @@ export function listEntries(viewerId: string, filters: EntryFilters): { entries:
 export function recentEntries(userId: string, limit = 8): TimeEntry[] {
   const rows = db.query(`${entrySelect()} WHERE e.id IN (
       SELECT id FROM (SELECT id, ROW_NUMBER() OVER (PARTITION BY description, IFNULL(project_id, ''), IFNULL(target_id, '') ORDER BY started_at DESC) AS n
-        FROM time_entries WHERE user_id = $userId AND ended_at IS NOT NULL ORDER BY started_at DESC LIMIT 200) WHERE n = 1)
+        FROM time_entries WHERE user_id = $userId AND ended_at IS NOT NULL AND (description <> '' OR project_id IS NOT NULL OR target_id IS NOT NULL)
+        ORDER BY started_at DESC LIMIT 200) WHERE n = 1)
     ORDER BY e.started_at DESC LIMIT $limit`).all({ userId, limit }) as EntryViewRow[];
   return toEntries(rows, userId);
 }

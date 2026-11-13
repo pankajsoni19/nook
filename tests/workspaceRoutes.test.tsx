@@ -27,6 +27,13 @@ import { TopBarItems } from "../src/AppShell";
  * action, card slots, an embed, a slash item, and a header item without touching a shared file.
  */
 
+// Modules whose lanes have shipped (ready) are set aside while these tests run, so they see only the
+// stubs and the throwaway module; afterAll puts them back.
+const shipped = workspaceModules().filter((module) => module.ready);
+const shippedIds: readonly string[] = shipped.map((module) => module.id);
+for (const module of shipped) registerWorkspaceClientModule({ ...module, ready: false });
+clearCardSlotsForTests();
+
 const notify = Object.assign(() => undefined, { success: () => undefined, info: () => undefined, warning: () => undefined, error: () => undefined }) as never;
 const card = { id: "0b7c1a52-3f5e-4d8e-9a51-0c6a7f2b9d11", board_id: "1b7c1a52-3f5e-4d8e-9a51-0c6a7f2b9d11", key: "MYT-12", title: "Ship it" };
 
@@ -70,6 +77,7 @@ afterAll(() => {
   registerWorkspaceClientModule(goalsStub);
   clearCardSlotsForTests();
   clearModuleEmbedsForTests();
+  for (const module of shipped) registerWorkspaceClientModule(module);
 });
 
 describe("the stubs (D800, D832)", () => {
@@ -85,12 +93,12 @@ describe("the stubs (D800, D832)", () => {
   });
 
   test("a stub is a planned module: not in Settings, no launcher, its URLs open Home", () => {
-    for (const id of WORKSPACE_MODULE_IDS) {
+    for (const id of WORKSPACE_MODULE_IDS.filter((id) => !shippedIds.includes(id))) {
       const def = MODULES.find((module) => module.id === id)!;
       expect(def.planned).toBe(true);
       expect(def.routeApps).toEqual([id]);
     }
-    expect(settingsModulesFor("admin").some((module) => isWorkspaceModuleId(module.id))).toBe(false);
+    expect(settingsModulesFor("admin").some((module) => isWorkspaceModuleId(module.id) && !shippedIds.includes(module.id))).toBe(false);
     for (const path of ["/forms", "/contacts/ana-silva-9xk2mm0a1b", "/standups", "/goals/x"]) expect(parseRoute(path)).toEqual({ app: "home" });
     expect(renderToStaticMarkup(<TopBarItems />)).toBe("");
   });
