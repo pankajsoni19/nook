@@ -678,6 +678,27 @@ Details and decisions in [WORKSPACE_MODULES.md §D.7 Townhall](WORKSPACE_MODULES
 | T618 | **Export injection** | CSV cells neutralized (T514); Markdown escaped. | Required (built) |
 | T619 | **Notification href/body injection** | Server-built relative hrefs (T509); clipped text bodies. | Required (built) |
 
+### Bookings (lane BOOK, migrations 106–107, T575–T594)
+
+Plan: `docs/plan/WORKSPACE_MODULES.md` §D.6 (decisions as built D1009–D1026). Public booking pages are an anonymous write surface (§B.8).
+
+| ID | Threat | Mitigation | Status |
+| --- | --- | --- | --- |
+| T575 | Public slot scraping reveals calendar patterns | Slots only (instants), never event titles; 31-day windows; 120 page requests/min per address; a 30 s cache; the feed cache stores intervals without titles | Mitigated |
+| T576 | Double booking under concurrent requests | Slot recomputed inside an IMMEDIATE transaction; `bookings_host_slot` partial unique index; tested with three concurrent HTTP bookings and four in-process ones | Mitigated |
+| T577 | Spam bookings / mail bombing third parties | Per-email upcoming cap (3 per type), per-type hourly cap, honeypot, 5 s fill time, single-use signed nonce, optional email verification, outside-mail caps and stop links | Mitigated |
+| T578 | Manage token leakage | `no-referrer`; token in the path on our origin only; one booking per token; expires at the booking's end; revoked on reschedule | Mitigated |
+| T579 | Handle squatting / impersonation | Reserved words; admin reset (`POST /api/bookings/profile/:userId/reset-handle`); old handles kept as aliases 90 days only | Mitigated |
+| T580 | Intake answers injected into event descriptions | Stored and rendered as plain text | Mitigated |
+| T581 | Time zone manipulation to bypass notice | All checks in UTC on the server; the booker's zone only labels | Mitigated |
+| T582 | Private details on a shared calendar | Default target is the owner's own first calendar; the editor warns when the target is shared | Mitigated |
+| T583 | Enumerating bookings across teams (MCP, search, datasets) | `readableBookingSql`: host, co-hosts, internal booker, type managers; applied before LIMIT in lists, search, Today, digest, dataset | Mitigated |
+| T584 | ICS secret address leakage | Sealed at rest (AES-256-GCM, HKDF key from AGENT_SECRETS_KEY or the workspace key); only a hint is returned; never logged or audited | Mitigated (key in DATA_DIR without AGENT_SECRETS_KEY: accepted) |
+| T585 | SSRF through a feed URL | `egressFetch` on every fetch: https only, private ranges refused unless allowlisted, pinned address, no redirects, Nook's own origin refused | Mitigated |
+| T586 | Hostile or huge ICS | 2 MiB, 10 s, 5000 events and intervals, bounded recurrence expansion, malformed lines ignored | Mitigated |
+| T587 | Manage-page CSRF or replay | Signed single-use render nonce and honeypot on cancel/reschedule; no session on public routes | Mitigated |
+| T588 | A single-use secret link used twice | The use is counted in the booking's own transaction | Mitigated |
+
 ## Notes on shipped behaviour (v0.3.0–v0.4.0)
 
 Deliberate deviations and accepted low findings from the Wave 3–5 reviews. The mitigations above still hold.

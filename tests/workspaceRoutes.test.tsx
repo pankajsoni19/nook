@@ -33,6 +33,7 @@ const shipped = workspaceModules().filter((module) => module.ready);
 const shippedIds: readonly string[] = shipped.map((module) => module.id);
 for (const module of shipped) registerWorkspaceClientModule({ ...module, ready: false });
 clearCardSlotsForTests();
+clearModuleEmbedsForTests();
 
 const notify = Object.assign(() => undefined, { success: () => undefined, info: () => undefined, warning: () => undefined, error: () => undefined }) as never;
 const card = { id: "0b7c1a52-3f5e-4d8e-9a51-0c6a7f2b9d11", board_id: "1b7c1a52-3f5e-4d8e-9a51-0c6a7f2b9d11", key: "MYT-12", title: "Ship it" };

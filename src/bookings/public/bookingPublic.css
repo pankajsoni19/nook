@@ -1,0 +1,60 @@
+/* Public booking pages (§E.6): inside PublicPageShell's light card (dark with the visitor's system). */
+.bk-pub-host { display: flex; align-items: center; gap: 14px; }
+.bk-pub-avatar { width: 52px; height: 52px; flex: none; display: grid; place-items: center; border-radius: 50%; background: var(--public-accent); color: var(--public-on-accent); font-size: 1.3rem; font-weight: 800; }
+.bk-pub-host .ui-public-text { margin-top: 4px; white-space: pre-line; }
+.bk-pub-types { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
+.bk-pub-types a { display: grid; gap: 6px; height: 100%; padding: 16px 16px 14px; border: 1px solid var(--public-border); border-left: 4px solid var(--type-color, var(--public-accent)); border-radius: 10px; color: var(--public-text); text-decoration: none; }
+.bk-pub-types a:hover { border-color: var(--public-accent); border-left-color: var(--type-color, var(--public-accent)); }
+.bk-pub-types strong { font-size: 1.02rem; }
+.bk-pub-desc { color: var(--public-muted); font-size: .88rem; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.bk-pub-meta { display: inline-flex; align-items: center; gap: 6px; color: var(--public-muted); font-size: .84rem; }
+.bk-pub-meta svg { width: 15px; height: 15px; }
+.bk-pub-meta svg + svg { margin-left: 6px; }
+.bk-pub-layout { display: grid; grid-template-columns: minmax(200px, 260px) minmax(0, 1fr); gap: 28px; }
+.bk-pub-summary { display: grid; gap: 10px; align-content: start; padding-right: 24px; border-right: 1px solid var(--public-border); }
+.bk-pub-summary .ui-public-title { font-size: 1.35rem; }
+.bk-pub-hostname { margin: 0; color: var(--public-muted); font-size: .9rem; font-weight: 600; }
+.bk-pub-facts { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; color: var(--public-text); font-size: .92rem; }
+.bk-pub-facts li { display: flex; align-items: flex-start; gap: 8px; overflow-wrap: anywhere; }
+.bk-pub-facts svg { width: 17px; height: 17px; flex: none; margin-top: 2px; color: var(--public-muted); }
+.bk-pub-chosen { color: var(--public-accent-text); font-weight: 650; }
+.bk-pub-chosen svg { color: var(--public-accent-text); }
+.bk-pub-description { white-space: pre-line; }
+.bk-pub-note { margin: 0; padding: 8px 10px; border-radius: 8px; background: color-mix(in srgb, var(--public-accent) 10%, transparent); color: var(--public-text); font-size: .84rem; }
+.bk-pub-main { display: grid; gap: 16px; min-width: 0; align-content: start; }
+.bk-pub-durations { display: flex; flex-wrap: wrap; gap: 8px; }
+.bk-pub-durations button { min-height: 36px; padding: 0 14px; border: 1px solid var(--public-border); border-radius: 999px; background: transparent; color: var(--public-text); font: inherit; font-size: .88rem; cursor: pointer; }
+.bk-pub-durations button.selected { border-color: var(--public-accent); background: var(--public-accent); color: var(--public-on-accent); font-weight: 650; }
+.bk-pub-fields { display: grid; gap: 14px; }
+.bk-pub-field { display: grid; gap: 6px; color: var(--public-text); font-size: .9rem; font-weight: 600; }
+.bk-pub-field input, .bk-pub-field textarea { width: 100%; min-height: 42px; border: 1px solid var(--public-border); border-radius: 8px; padding: 0 12px; background: var(--public-card); color: var(--public-text); font: inherit; font-weight: 400; }
+.bk-pub-field textarea { padding: 10px 12px; resize: vertical; }
+.bk-pub-field input:focus, .bk-pub-field textarea:focus { outline: 2px solid var(--public-accent); outline-offset: 0; border-color: var(--public-accent); }
+.bk-pub-field input[aria-invalid="true"] { border-color: var(--public-error); }
+.bk-pub-field small { color: var(--public-muted); font-size: .8rem; font-weight: 400; }
+.bk-pub-error { margin: 0; color: var(--public-error) !important; font-size: .86rem; font-weight: 500; }
+.bk-pub-trap { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; }
+.bk-pub-back, .bk-pub-link { justify-self: start; display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0; border: 0; background: none; color: var(--public-accent-text); font: inherit; font-size: .9rem; font-weight: 600; cursor: pointer; text-decoration: none; }
+.bk-pub-back svg { width: 16px; height: 16px; }
+.bk-pub-h2 { margin: 0; font-size: 1.15rem; }
+.bk-pub-done { display: grid; gap: 6px; justify-items: center; }
+.bk-pub-done p { margin: 0; }
+.bk-pub-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px 16px; margin-top: 10px; }
+.bk-pub-manage .bk-pub-actions { justify-content: flex-start; }
+.bk-pub-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 0 18px; border: 1px solid var(--public-accent-text); border-radius: 8px; background: var(--public-accent-text); color: #fff; font: inherit; font-weight: 650; text-decoration: none; cursor: pointer; }
+.bk-pub-button svg { width: 17px; height: 17px; }
+.bk-pub-button.secondary { background: transparent; color: var(--public-accent-text); }
+.bk-pub-button.danger { border-color: var(--public-error); background: transparent; color: var(--public-error); }
+.bk-pub-button:disabled { opacity: .5; cursor: default; }
+@media (prefers-color-scheme: dark) { .bk-pub-button:not(.secondary, .danger) { color: var(--public-on-accent); } }
+.bk-pub-manage { display: grid; gap: 14px; }
+.bk-pub-status { justify-self: start; margin: 0; padding: 4px 10px; border-radius: 999px; background: color-mix(in srgb, var(--public-accent) 14%, transparent); color: var(--public-text); font-size: .82rem; font-weight: 650; }
+.bk-pub-status.cancelled, .bk-pub-status.declined, .bk-pub-status.expired { background: color-mix(in srgb, var(--public-error) 12%, transparent); color: var(--public-error); }
+.bk-pub-reschedule { display: grid; gap: 14px; padding-top: 6px; border-top: 1px solid var(--public-border); }
+@media (max-width: 760px) {
+  .bk-pub-layout { grid-template-columns: 1fr; gap: 18px; }
+  .bk-pub-summary { padding: 0 0 16px; border-right: 0; border-bottom: 1px solid var(--public-border); }
+  .bk-pub-layout.details .bk-pub-description, .bk-pub-layout.verify .bk-pub-description { display: none; }
+  .bk-pub-button { width: 100%; }
+  .bk-pub-actions { flex-direction: column; align-items: stretch; }
+}
