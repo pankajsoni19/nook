@@ -294,6 +294,23 @@ describe("POST /api/tasks/query: paging, sorting, grouping, limits", () => {
     expect(await query(owner, { q: "", sort: "title", cursor: Buffer.from("[1,\"x\",1]").toString("base64url") })).toMatchObject({ status: 400, body: { code: "CURSOR_INVALID" } });
   });
 
+  test("a due: or start: keyword binds the cursor to the time zone and day it was made in", async () => {
+    const owner = await createUser("Cursor zone");
+    const target = await board(owner, "Cursor zone board");
+    const today = new Date().toISOString().slice(0, 10);
+    for (let index = 0; index < 3; index += 1) {
+      const made = await card(owner, target, `Z${index}`);
+      db.query("UPDATE cards SET start_on = ?, due_on = ? WHERE id = ?").run(today, today, made.id);
+    }
+    for (const q of [`board:${target.id} start:week`, `board:${target.id} due:week`]) {
+      const first = await query(owner, { q, sort: "title", limit: 1, tz: "UTC" });
+      const cursor = first.body.nextCursor as string;
+      expect(cursor, q).toBeTruthy();
+      expect((await query(owner, { q, sort: "title", limit: 1, tz: "UTC", cursor })).status, q).toBe(200);
+      expect(await query(owner, { q, sort: "title", limit: 1, tz: "Pacific/Kiritimati", cursor }), q).toMatchObject({ status: 400, body: { code: "CURSOR_INVALID" } });
+    }
+  });
+
   test("a cursor is signed and bound to its user: another user's or a tampered one is CURSOR_INVALID", async () => {
     const owner = await createUser("Signed cursor");
     const other = await createUser("Signed cursor other");

@@ -409,8 +409,10 @@ function keysetAfter(parts: KeyPart[], names: string[]) {
   return `(${alternatives.join(" OR ")})`;
 }
 
+/** A page cursor is bound to the viewer's zone and day when the results move with "today": the due
+ *  group, or a `due:` or `start:` keyword (D722), so a later page never continues another day's query. */
 const dependsOnToday = (query: TaskQuery, group: QueryGroup) =>
-  group === "due" || query.terms.some((term) => term.key === "due" && term.values.some((value) => ["overdue", "today", "week", "next-week"].includes(value)));
+  group === "due" || query.terms.some((term) => (term.key === "due" || term.key === "start") && term.values.some((value) => ["overdue", "today", "week", "next-week"].includes(value)));
 
 /**
  * Runs a query as `userId` over live cards on boards they can read. Keyset
