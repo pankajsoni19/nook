@@ -699,6 +699,17 @@ Plan: `docs/plan/WORKSPACE_MODULES.md` §D.6 (decisions as built D1009–D1026).
 | T587 | Manage-page CSRF or replay | Signed single-use render nonce and honeypot on cancel/reschedule; no session on public routes | Mitigated |
 | T588 | A single-use secret link used twice | The use is counted in the booking's own transaction | Mitigated |
 
+| T560 | **Contact details reach people without the book** (lane CRM) | Every Contacts read joins the reader's books (`readableContainerSql('contact_book')`, system books excluded) before LIMIT; search joins the live rows and the books; chips redact (T503); notifications go only to readers of the book (`notifyReaders`). `tests/crm.test.ts` (other user 404, viewer read-only). | Required (built) |
+| T561 | **CSV import abuse or formula injection** | CSV only, 5 MiB, 10,000 rows, 60 columns, the Collections parser's limits; export cells neutralized (`'=`), import cells restored. `tests/crm.test.ts`. | Required (built) |
+| T562 | **Merge across books** | Refused (`OTHER_BOOK`); both records must be readable and the target's book editable. | Required (built) |
+| T563 | **Upserts overwrite people's edits** | Edits mark fields (`markContactEdited`); upserts fill empty fields only (D806). Tested. | Required (built) |
+| T564 | **Mass export by a compromised session** | 30 exports a day per person, ≤ 10,000 rows, `crm.export` audited with counts only. | Required (built) |
+| T565 | **vCard / CSV header injection** | vCard values escape `\ , ;` and drop line breaks; filenames are slugged. | Required (built) |
+| T566 | **Agents or keys pull channels in bulk** | List tools omit emails and phones; only `get_contact` returns them; chosen-book keys narrow lists before LIMIT and item tools anchor on the book. Agents get read tools only. | Required (built) |
+| T567 | **A merge rewrites another lane's table** | Only fixed `(table, column)` pairs, only when the table and column exist. | Required (built) |
+| T568 | **Import jobs keep personal data** | The CSV stays only on a preview job (deleted after a day) and is cleared on commit; undo data is the changed rows only, cleared on undo. | Accepted (24 h undo window) |
+| T569 | **Dataset alias collisions return 500s** | Dimension names never equal a joined column; a test groups by every dimension. | Required (built) |
+
 ## Notes on shipped behaviour (v0.3.0–v0.4.0)
 
 Deliberate deviations and accepted low findings from the Wave 3–5 reviews. The mitigations above still hold.

@@ -95,7 +95,7 @@ describe("collection query builder", () => {
     rejects({ sort: [{ fieldId: name!.id, direction: "asc" }, { fieldId: name!.id, direction: "desc" }] });
     // Lenient mode (saved views) drops clauses that no longer apply.
     expect(run({ filters: [{ fieldId: "f_zzzzzzzz", op: "empty" }], sort: [{ fieldId: "f_zzzzzzzz", direction: "asc" }] }, "lenient")).toEqual(["r1", "r2", "r3", "r4"]);
-    expect(Object.keys(OPERATORS).sort()).toEqual(["checkbox", "date", "file", "multi_select", "note", "number", "select", "text", "url"]);
+    expect(Object.keys(OPERATORS).sort()).toEqual(["checkbox", "contact", "date", "file", "multi_select", "note", "number", "person", "select", "text", "url"]);
   });
 
   test("never interpolates values or paths into SQL", () => {
