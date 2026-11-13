@@ -20,7 +20,10 @@ export const OPERATORS = {
   select: ["is", "is_not", "in"],
   multi_select: ["has_any", "has_all"],
   note: ["empty", "not_empty"],
-  file: ["empty", "not_empty"]
+  file: ["empty", "not_empty"],
+  // Contacts lane (D961): relation fields filter by presence until Wave 3 adds pickers here.
+  person: ["empty", "not_empty"],
+  contact: ["empty", "not_empty"]
 } as const satisfies Record<FieldType, readonly string[]>;
 export type Operator = typeof OPERATORS[FieldType][number];
 

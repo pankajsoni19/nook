@@ -12,7 +12,13 @@ import { z } from "zod";
  *   read as empty and are dropped on the row's next write.
  */
 
-export const FIELD_TYPES = ["text", "number", "date", "checkbox", "select", "multi_select", "url", "note", "file"] as const;
+export const FIELD_TYPES = ["text", "number", "date", "checkbox", "select", "multi_select", "url", "note", "file", "person", "contact"] as const;
+/**
+ * Relation types (Contacts lane, D961): `person` holds a team member's id, `contact` a contact's id.
+ * Contacts' custom fields use them; Collections refuses to create them (`buildSchema`'s
+ * `allowRelations`) and reads them read-only until Wave 3 adds editors there.
+ */
+export const RELATION_FIELD_TYPES = ["person", "contact"] as const;
 export type FieldType = typeof FIELD_TYPES[number];
 export const OPTION_COLORS = ["gray", "red", "orange", "yellow", "green", "teal", "blue", "purple", "pink"] as const;
 export type OptionColor = typeof OPTION_COLORS[number];
@@ -131,7 +137,7 @@ const fold = (value: string) => value.normalize("NFC").toLowerCase();
  * (PUT /schema), ids name existing fields and options; fields and options
  * without an id are new and get fresh ids. Throws SchemaError.
  */
-export function buildSchema(input: FieldInput[], previous: CollectionSchema | null = null): CollectionSchema {
+export function buildSchema(input: FieldInput[], previous: CollectionSchema | null = null, options: { allowRelations?: boolean } = {}): CollectionSchema {
   const parsed = fieldsInput.safeParse(input);
   if (!parsed.success) throw new SchemaError("INVALID_SCHEMA", parsed.error.issues[0]?.message ?? "Invalid fields");
   const fields = parsed.data;
@@ -165,6 +171,7 @@ export function buildSchema(input: FieldInput[], previous: CollectionSchema | nu
     const selectLike = field.type === "select" || field.type === "multi_select";
     if (field.options && !selectLike) throw new SchemaError("INVALID_SCHEMA", `“${field.name}” can't have options`);
     if (field.required && field.type === "file") throw new SchemaError("INVALID_SCHEMA", "File fields can't be required");
+    if (!options.allowRelations && (RELATION_FIELD_TYPES as readonly string[]).includes(field.type) && before?.type !== field.type) throw new SchemaError("INVALID_SCHEMA", `“${field.name}”: team member and contact fields are not available here yet`);
 
     const definition: FieldDefinition = { id, name: field.name, type: field.type };
     if (field.required) definition.required = true;
@@ -257,6 +264,8 @@ export function readValue(field: FieldDefinition, raw: unknown): FieldValue | un
       return known.length ? known.slice(0, SCHEMA_LIMITS.multiSelect) : undefined;
     }
     case "note":
+    case "person":
+    case "contact":
       return typeof raw === "string" && uuidPattern.test(raw) ? raw : undefined;
     default:
       return undefined;
@@ -278,6 +287,10 @@ export function readValues(schema: CollectionSchema, stored: unknown): RowValues
 export type ValueContext = {
   /** Whether the writer can read note `id` now (D58: only readable notes can be linked). */
   canLinkNote: (id: string) => boolean;
+  /** `person` fields (D961): whether `id` is a team member the writer may name. Absent: refused. */
+  canUsePerson?: (id: string) => boolean;
+  /** `contact` fields (D961): whether the writer can read contact `id`. Absent: refused. */
+  canUseContact?: (id: string) => boolean;
 };
 
 type Parsed = { ok: true; value: FieldValue | null } | { ok: false; error: string };
@@ -324,6 +337,14 @@ export function parseValue(field: FieldDefinition, input: unknown, context: Valu
     }
     case "file":
       return { ok: false, error: "Attach files to this field instead" };
+    case "person":
+    case "contact": {
+      if (input === "") return { ok: true, value: null };
+      const check = field.type === "person" ? context.canUsePerson : context.canUseContact;
+      if (typeof input !== "string" || !uuidPattern.test(input.toLowerCase())) return { ok: false, error: field.type === "person" ? "Choose a team member" : "Choose a contact" };
+      const id = input.toLowerCase();
+      return check?.(id) ? { ok: true, value: id } : { ok: false, error: field.type === "person" ? "Choose a team member" : "You can't link this contact" };
+    }
   }
 }
 
