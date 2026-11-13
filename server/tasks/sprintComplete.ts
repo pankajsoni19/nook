@@ -5,6 +5,7 @@ import { insertSprint, openCount, ownedSprint, requireDateOrder, sprintNotFound 
 import { openSprintRows, SPRINT_LIMITS, sprintById, sprintCounts, sprintNames, sprintOfBoard, toSummary, type SprintRow, type SprintSummary } from "./sprintData";
 import { boardStructure } from "./hierarchy";
 import { carryOverPlan } from "../../shared/sprintPlan";
+import { activityValue, recordCardChange } from "./activity";
 
 /** `next`: the first planned sprint; `backlog`: no sprint; `new`: a sprint created in the same call; or a planned sprint's id. */
 export type CarryTo = "next" | "backlog" | "new" | string;
@@ -58,9 +59,12 @@ export async function completeSprint(userId: string, sprintId: string, input: Co
       const doneCount = (db.query(`SELECT COUNT(*) AS count FROM cards WHERE ${inSprint}
         AND column_id IN (SELECT id FROM board_columns WHERE board_id = $boardId AND is_done = 1)`).get(params) as { count: number }).count;
       // Unfinished: live, stored in this sprint, in a column that is not done at this moment.
-      const carried = db.query(`UPDATE cards SET sprint_id = $target, revision = revision + 1, updated_at = $timestamp
-        WHERE ${inSprint} AND column_id IN (SELECT id FROM board_columns WHERE board_id = $boardId AND is_done = 0)`)
+      const unfinished = `${inSprint} AND column_id IN (SELECT id FROM board_columns WHERE board_id = $boardId AND is_done = 0)`;
+      const carriedIds = (db.query(`SELECT id FROM cards WHERE ${unfinished}`).all(params) as Array<{ id: string }>).map((row) => row.id);
+      const carried = db.query(`UPDATE cards SET sprint_id = $target, revision = revision + 1, updated_at = $timestamp WHERE ${unfinished}`)
         .run({ ...params, target: destination?.id ?? null, timestamp }).changes;
+      // Card history (lane ACTIVITY): each carried card's sprint change.
+      for (const cardId of carriedIds) recordCardChange(cardId, board.id, userId, "sprint", activityValue.sprint(sprint.id), activityValue.sprint(destination?.id), timestamp);
       db.query("UPDATE board_sprints SET state = 'closed', closed_at = ?, updated_at = ? WHERE id = ?").run(timestamp, timestamp, sprint.id);
       db.query("UPDATE boards SET updated_at = ? WHERE id = ?").run(timestamp, board.id);
       mailSprint(userId, board.id, sprint.id, "completed", assignees, { done: doneCount, carried });

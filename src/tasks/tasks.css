@@ -785,3 +785,30 @@ svg.task-column-status.done { color: #6fbf85; }
   .task-card-key { min-height: 44px; }
   .task-card-eyebrow .task-card-key-eyebrow { min-height: 32px; }
 }
+/* Card history in the comments timeline (lane ACTIVITY, D746): the header's switch and order button,
+   and compact rows between the comment boxes. Colours come from the app's tokens where it has them. */
+.task-timeline-controls { display: flex; align-items: center; gap: 2px; margin-left: auto; }
+.task-activity-switch { min-height: 34px; display: inline-flex; align-items: center; gap: 8px; border: 0; border-radius: 17px; padding: 0 6px; background: transparent; color: var(--muted); font-size: .78rem; font-weight: 600; cursor: pointer; }
+.task-activity-switch:hover { color: #e4e4e6; }
+.task-activity-switch-track { position: relative; width: 32px; height: 18px; flex: none; border-radius: 9px; background: #34343a; transition: background-color .15s ease; }
+.task-activity-switch-thumb { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #d6d6db; transition: transform .15s ease; }
+.task-activity-switch[aria-checked="true"] .task-activity-switch-track { background: var(--yellow); }
+.task-activity-switch[aria-checked="true"] .task-activity-switch-thumb { transform: translateX(14px); background: #2a210e; }
+.task-timeline-order { width: 34px; height: 34px; }
+.task-timeline-order svg { width: 16px; height: 16px; }
+.task-activity { display: grid; grid-template-columns: 24px minmax(0, 1fr); align-items: start; gap: 8px; padding: 0 12px; color: var(--muted); font-size: .8rem; line-height: 1.45; }
+.task-activity-icon { width: 24px; height: 24px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 50%; background: var(--panel-raised); color: #a1a1a8; }
+.task-activity-icon svg { width: 12px; height: 12px; }
+.task-activity-text { margin: 0; padding-top: 2px; overflow-wrap: anywhere; }
+.task-activity-actor, .task-activity-value { color: #e4e4e6; font-weight: 600; }
+.task-activity-actor .integration-badge { margin-left: 4px; }
+.task-activity time { color: #7c7c84; white-space: nowrap; }
+.task-activity-via { font-style: italic; }
+@media (max-width: 760px) {
+  .task-activity-switch { min-height: 44px; }
+  .task-timeline-order { width: 44px; height: 44px; }
+  .task-activity { padding: 0 4px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .task-activity-switch-track, .task-activity-switch-thumb { transition: none; }
+}

@@ -16,10 +16,17 @@ Release notes for Nook, newest first. Upgrade steps for each release are in [doc
 - Cards, lists and tables show the range ("Nov 12 → Nov 15"); the board calendar spans a card from its start to its due date, and dragging it moves the whole range.
 - Filter by start (`start:`, or **Start** in + Filter) and sort by start. MCP `create_card` / `update_card` take `startOn`, `startTime`, `startTz`; cards carry `start_on`, `start_time`, `start_tz`, `start_at`.
 
+**Tasks: card activity**
+
+- **Card activity history**: who created a card, renamed it, edited the description, moved it, changed assignees, due date, tags, flags, parent, level, relations, sprint, or files, and when it was archived, binned, or restored, shown between the comments ("Ann moved this from **To do** to **Done** · 10 days ago"). Changes made through MCP, the REST API, or an agent are recorded too and say so; quick repeat edits of one field are one entry.
+- The Comments header has an **Activity** switch and a **Newest first / Oldest first** button, remembered per person in this browser.
+- MCP and REST: `get_card_activity` reads a card's history, paged.
+
 **Upgrading**
 
 - Migration **079** (`board_keys`) gives every board a code from its name and numbers every card in creation order; quick. **Back up first** (`./scripts/backup.sh --force`).
 - Migration **080** (`card_start_dates`) runs once on the first boot; quick. **Back up first** (`./scripts/backup.sh --force`).
+- Migration **081** (`card_activity`) runs once on the first boot; quick (it creates an empty table). Cards changed before the upgrade have no history from before it.
 
 ## v0.47.0 — 2026-10-24
 

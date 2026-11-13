@@ -544,6 +544,42 @@ type CardComment = {
 
 Comments on binned cards, binned boards, or boards the caller can no longer read return 404.
 
+### Card activity (lane ACTIVITY, D740–D746, migration 081)
+
+A card's history, shown interleaved with its comments. Entries are written by the task services in the same transaction as the change, so every surface (web app, MCP, REST, agents, approved proposals) is recorded and a refused change records nothing. Kinds and payloads are in `shared/cardActivity.ts`:
+
+| Kind | Payload | Recorded by |
+| --- | --- | --- |
+| `created` | `to`: first column | create |
+| `title`, `column`, `due`, `parent`, `level`, `sprint` | `from`, `to` (null = unset) | PATCH, move (another column), sprint completion's carry-over |
+| `description` | none ("updated the description", no diff) | PATCH when the text changed |
+| `assignee_added` / `_removed`, `tag_added` / `_removed`, `flag_set` / `_cleared` | `item` | PATCH |
+| `relation_added` / `_removed` | `item` (the other card, `detail` = the type as this card sees it) | relation create and delete, on both cards |
+| `attachment_added` / `_removed` | `item` (the file) | files linked to the card itself (not a comment's files), removals, Undo |
+| `binned` (`count` subtasks), `restored` (`to`, `count`), `archived`, `unarchived` | as noted | Bin, archive; the auto-archive sweep records `archived` with `actor_id` null and `via: "system"` |
+
+```ts
+type ActivityValue = { id?: string; label: string; detail?: string }; // label: the name when it happened
+type CardActivityEntry = {
+  id: string; card_id: string; kind: CardActivityKind;
+  actor_id: string | null;              // null for Nook itself or a deleted account
+  actor_name: string;                   // the current display name, else the one kept with the entry
+  actor_is_integration?: 1; actor_avatar_url?: string | null;   // the avatar in web payloads only
+  via: "mcp" | "rest" | "agent" | "proposal" | "system" | null; // null: the web app
+  payload: { from?: ActivityValue | null; to?: ActivityValue | null; item?: ActivityValue; count?: number };
+  created_at: string;
+};
+```
+
+| Endpoint | Who | Success | Errors |
+| --- | --- | --- | --- |
+| `GET /cards/:k/activity?order=asc\|desc&limit=1–100&cursor=<next>` | reader (any level) | 200 `{ activity, next }`: up to `limit` (default 50) entries in `order` (default `desc`, newest first), keyset-paged on `(created_at, id)`; `next` is null on the last page | 400 (order, limit, or a cursor that is not a `next`), 404 (unknown, unreadable, or binned card) |
+
+- **Coalescing (D743):** a `title`, `description`, `column`, `due`, `parent`, `level`, or `sprint` change folds into the card's latest entry when that entry is the same kind, by the same person through the same `via`, less than two minutes old: the entry keeps its first `from`, takes the new `to` and time, and is deleted when they meet again.
+- **Related cards (T90):** a relation entry whose other card the reader cannot open (or an MCP key may not read) has `item: { label: "a card you can't open", detail }` with no id or title.
+- **Retention (D744):** entries go with the card when it is purged (Bin, board purge); binning keeps them.
+- MCP and REST: `get_card_activity { cardId, order?, limit?, cursor? }` (`tasks:read`) returns the same page without avatars.
+
 ### Reactions (Wave 20, D182–D190, migration 022)
 
 People who may comment may react to a comment with one of 12 fixed emoji. Keys, not glyphs, are stored and sent (`shared/reactions.ts`): `thumbs_up` 👍, `thumbs_down` 👎, `heart` ❤️, `laugh` 😂, `tada` 🎉, `eyes` 👀, `rocket` 🚀, `check` ✅, `fire` 🔥, `thinking` 🤔, `pray` 🙏, `sad` 😢.

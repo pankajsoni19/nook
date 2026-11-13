@@ -170,6 +170,15 @@ export function withSurfaceAuditContext<T>(extra: Record<string, unknown> | null
   return extra ? surfaceAuditContext.run(extra, operation) : operation();
 }
 
+/**
+ * The `via` the current call's audit rows carry (mcp, rest, agent, proposal), or null for the web app:
+ * the same merge as `audit` below, so a card's history names the same surface as the audit log.
+ */
+export function auditVia(): string | null {
+  const via = { ...auditContext.getStore(), ...surfaceAuditContext.getStore(), ...proposalAuditContext.getStore() }.via;
+  return typeof via === "string" ? via : null;
+}
+
 export function audit(actorId: string | null, noteId: string | null, eventType: string, metadata?: unknown) {
   const extra = auditContext.getStore();
   const surface = surfaceAuditContext.getStore();

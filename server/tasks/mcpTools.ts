@@ -21,6 +21,7 @@ import { archiveCard, unarchiveCard } from "./archive";
 import { ARCHIVED_PAGE, cardDetail, columnForMove, createCard, decodeArchivedCursor, deleteCard, getBoard, getCard, listBoards, moveCard, patchCard, patchColumn, requireOwnedBoard, TaskError, type CardSummary } from "./service";
 import { createTag, listBoardTags, TAG_COLORS, updateTag, type BoardTag } from "./tags";
 import { taskViewTools } from "./viewMcpTools";
+import { cardActivityTool } from "./activityRoutes";
 import { boardStructure, cardHierarchy } from "./hierarchy";
 import { levelName, type BoardStructure } from "../../shared/boardStructure";
 import { SPRINT_STATES } from "../../shared/sprintPlan";
@@ -811,6 +812,8 @@ export const taskTools: McpToolSpec[] = [
       });
     }
   }),
+  // A card's history (lane ACTIVITY, D745).
+  cardActivityTool,
   // Saved views and the cross-board query (17C, D145): list_views and query_cards.
   ...taskViewTools
 ];
