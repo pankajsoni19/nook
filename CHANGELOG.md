@@ -10,9 +10,16 @@ Release notes for Nook, newest first. Upgrade steps for each release are in [doc
 - **Short links.** `/tasks/MYT-12` opens the card; Copy link copies it. Card search finds a card by its key, and MCP tools take a key wherever they take a card id.
 - **Move to another board…** from a card's Move sheet: the card keeps its comments, files, people, and links, takes the new board's tags by name, leaves its sprint and parent, and gets a new key (the old one still finds it). MCP: `move_card_to_board`.
 
+**Tasks: start dates**
+
+- **Start dates**: a card can have a start date, with an optional time, next to its due date (the same picker, same time zone rules). The start must be on or before the due date.
+- Cards, lists and tables show the range ("Nov 12 → Nov 15"); the board calendar spans a card from its start to its due date, and dragging it moves the whole range.
+- Filter by start (`start:`, or **Start** in + Filter) and sort by start. MCP `create_card` / `update_card` take `startOn`, `startTime`, `startTz`; cards carry `start_on`, `start_time`, `start_tz`, `start_at`.
+
 **Upgrading**
 
 - Migration **079** (`board_keys`) gives every board a code from its name and numbers every card in creation order; quick. **Back up first** (`./scripts/backup.sh --force`).
+- Migration **080** (`card_start_dates`) runs once on the first boot; quick. **Back up first** (`./scripts/backup.sh --force`).
 
 ## v0.47.0 — 2026-10-24
 

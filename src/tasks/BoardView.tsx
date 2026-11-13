@@ -54,7 +54,7 @@ import { FilterBar } from "./FilterBar";
 import { KeyboardMoveHint } from "./boardViewParts";
 import { useTasksTitle } from "./home/HomeSegments";
 import { BoardCalendar } from "./BoardCalendar";
-import { displayedDay, displayedTime, dueAnnouncement, shiftedDueAt } from "./calendarPlacement";
+import { displayedDay, displayedTime, dueAnnouncement, shiftedDueAt, shiftedStartOn } from "./calendarPlacement";
 import { daysBetween } from "../calendarRoute";
 import "./boardViews.css";
 import { applyCardDetail, applyTagChange, recountTags } from "./cardTags";
@@ -651,19 +651,22 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
    * server keeps the time and zone; `null` clears the date and time. The card moves at once; on
    * CARD_CHANGED (or any failure) it moves back and the board reloads. WIP limits do not apply.
    */
-  async function setDue(cardId: string, dueOn: string | null) {
+  async function setDue(cardId: string, dueOn: string | null, keepSpan = false) {
     const current = detailRef.current;
     const card = current?.cards.find((item) => item.id === cardId);
     if (!current || !card || card.due_on === dueOn) return;
     const before = current.cards;
     const shift = dueOn && card.due_on ? daysBetween(card.due_on, dueOn) : 0;
+    // A drag or Alt+Arrow moves a card's whole range (D724): its start shifts by as many days.
+    const startOn = keepSpan ? shiftedStartOn(card, dueOn) : undefined;
     setCards((items) => items.map((item) => item.id !== cardId ? item : dueOn === null
       ? { ...item, due_on: null, due_time: null, due_tz: null, due_at: null }
-      : { ...item, due_on: dueOn, due_at: shiftedDueAt(item.due_at, shift) }));
+      : { ...item, due_on: dueOn, due_at: shiftedDueAt(item.due_at, shift), ...(startOn ? { start_on: startOn, start_at: shiftedDueAt(item.start_at, shift) } : {}) }));
     try {
-      const { card: saved } = await updateCard(cardId, { dueOn, revision: card.revision });
+      const { card: saved } = await updateCard(cardId, { dueOn, ...(startOn ? { startOn } : {}), revision: card.revision });
       setCards((items) => items.map((item) => item.id === cardId
-        ? { ...item, revision: saved.revision, due_on: saved.due_on, due_time: saved.due_time, due_tz: saved.due_tz, due_at: saved.due_at, updated_at: saved.updated_at }
+        ? { ...item, revision: saved.revision, due_on: saved.due_on, due_time: saved.due_time, due_tz: saved.due_tz, due_at: saved.due_at,
+          start_on: saved.start_on, start_time: saved.start_time, start_tz: saved.start_tz, start_at: saved.start_at, updated_at: saved.updated_at }
         : item));
       const zone = viewerTimeZone();
       setAnnouncement(`${card.title}: ${dueAnnouncement(displayedDay(saved, zone), displayedTime(saved, zone))}`);
@@ -914,7 +917,7 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
       <BoardCalendar board={data} cards={result.cards} layout={query.cal} month={query.month} today={viewContext.today} viewerZone={viewContext.timeZone} filtered={filtered}
         onMonth={(month) => onQueryChange(withBoardQuery(query, { month }))}
         onLayout={(cal) => onQueryChange(withBoardQuery(query, { cal }), { push: true })}
-        onOpenCard={(card) => onOpenCard(card.id)} onSetDue={(card, dueOn) => { void setDue(card.id, dueOn); }} readOnly={readOnly} />
+        onOpenCard={(card) => onOpenCard(card.id)} onSetDue={(card, dueOn, keepSpan) => { void setDue(card.id, dueOn, keepSpan); }} readOnly={readOnly} />
     </div>}
     {detail && view === "board" && <nav className="task-column-tabs" aria-label="Columns">
       {columns.map((column, index) => {

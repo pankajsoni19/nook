@@ -231,6 +231,39 @@ export function dueStatus(dueOn: string | null, today: string, done = false, tim
   return { tone: days <= 7 ? "soon" : "later", label, description: `Due ${spoken}` };
 }
 
+/** The start fields a date chip reads (D720). */
+export type StartTiming = { start_on?: string | null; start_time?: string | null; start_at?: string | null };
+
+/**
+ * The start's words on a chip (D723): "Nov 12", "Today", or "Tomorrow 09:00", on the viewer's local
+ * day and time of a timed start, as the due chip reads its date. Null without a start.
+ */
+export function startChipLabel(card: StartTiming, today: string, timeZone = viewerTimeZone()) {
+  if (!card.start_on) return null;
+  const at = card.start_time && card.start_at ? Date.parse(card.start_at) : Number.NaN;
+  const local = Number.isFinite(at) ? instantParts(at, timeZone) : null;
+  const day = local?.date ?? card.start_on;
+  const days = dayNumber(day) - dayNumber(today);
+  const [year, month, date] = day.split("-").map(Number);
+  const named = days === 0 ? "Today" : days === 1 ? "Tomorrow" : days === -1 ? "Yesterday" : null;
+  const words = named ?? new Date(year!, month! - 1, date!).toLocaleDateString(undefined, { month: "short", day: "numeric", ...(day.slice(0, 4) !== today.slice(0, 4) ? { year: "numeric" } : {}) });
+  return local ? `${words} ${local.time}` : words;
+}
+
+/**
+ * The date chip on a card (D723): the due chip (`dueStatus`), with the start before it as a range,
+ * "Nov 12 → Nov 15". A card with only a start shows "Nov 12 →". Done cards show no chip, as before.
+ */
+export function cardDateStatus(card: StartTiming & { due_on: string | null; due_at?: string | null }, today: string, done = false, timing: Omit<DueTiming, "dueAt"> = {}): DueStatus | null {
+  const due = dueStatus(card.due_on, today, done, { ...timing, dueAt: card.due_at });
+  const start = done ? null : startChipLabel(card, today, timing.timeZone);
+  if (!start) return due;
+  // "Starts today 09:00", "Starts Nov 12"; then the due words: "Starts Nov 12, due Nov 15".
+  const starts = `Starts ${/^(Today|Tomorrow|Yesterday)/.test(start) ? start.charAt(0).toLowerCase() + start.slice(1) : start}`;
+  if (!due) return { tone: "later", label: `${start} →`, description: starts };
+  return { tone: due.tone, label: `${start} → ${due.label}`, description: `${starts}, ${due.description.charAt(0).toLowerCase()}${due.description.slice(1)}` };
+}
+
 /**
  * The time to save from the time field, or null when there is nothing to save: a complete
  * `HH:MM` (00:00–23:59) that differs from the saved time or zone. Seconds of `:00` are dropped.

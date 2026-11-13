@@ -193,6 +193,11 @@ const cardFields = (card: CardSummary, tags: Map<string, string>, structure?: Bo
   due_time: card.due_time,
   due_tz: card.due_tz,
   due_at: card.due_at,
+  // The optional start (D720), shaped like the due fields.
+  start_on: card.start_on,
+  start_time: card.start_time,
+  start_tz: card.start_tz,
+  start_at: card.start_at,
   assignees: card.assignees.map((assignee) => assignee.display_name),
   assignee_name: card.assignee_name,
   tags: card.tag_ids.map((id) => tags.get(id)).filter((name): name is string => name !== undefined),
@@ -275,6 +280,8 @@ const mcpChild = (child: ReturnType<typeof cardHierarchy>["children"][number], s
 
 const dueTimeInput = z.string().describe("Due time as HH:MM (24-hour), in dueTz; needs a due date");
 const dueTzInput = z.string().describe("IANA time zone of dueTime, for example Europe/Berlin");
+const startTimeInput = z.string().describe("Start time as HH:MM (24-hour), in startTz; needs a start date");
+const startTzInput = z.string().describe("IANA time zone of startTime, for example Europe/Berlin");
 const assigneeIdsInput = z.array(uuid).max(20).describe("User ids who can open the board (see the board's readers); replaces the whole set");
 const tagsInput = z.array(z.string().min(1).max(64)).max(10).describe("Existing tags of the board, by name (any case) or id; replaces the whole set. Unknown tags are INVALID; tags are created in the app");
 const flagsInput = z.array(z.enum(TASK_FLAGS)).max(TASK_FLAGS.length).describe("Flags from the fixed set; replaces the whole set");
@@ -477,6 +484,9 @@ export const taskTools: McpToolSpec[] = [
       dueOn: z.string().optional().describe("Due date as YYYY-MM-DD"),
       dueTime: dueTimeInput.optional(),
       dueTz: dueTzInput.optional(),
+      startOn: z.string().optional().describe("Start date as YYYY-MM-DD; on or before the due date (reason START_AFTER_DUE otherwise)"),
+      startTime: startTimeInput.optional(),
+      startTz: startTzInput.optional(),
       assigneeIds: assigneeIdsInput.optional(),
       tags: tagsInput.optional(),
       flags: flagsInput.optional(),
@@ -498,7 +508,7 @@ export const taskTools: McpToolSpec[] = [
   defineTool({
     name: "update_card",
     title: "Update a card",
-    description: "Change a card's title, due date, due time, assignees, tags, flags, parent, level, or sprint on a board where the user can edit cards (READ_ONLY otherwise). The description cannot be changed here. baseRevision must be the revision from get_card or list_cards; if the card changed since, the call fails with CARD_CHANGED and the current revision. dueOn null clears the date and time; dueTime null clears only the time; assigneeIds, tags, and flags each replace the whole set ([] clears it). Tags must already exist on the board (by name or id).",
+    description: "Change a card's title, due date, due time, start date, start time, assignees, tags, flags, parent, level, or sprint on a board where the user can edit cards (READ_ONLY otherwise). The description cannot be changed here. baseRevision must be the revision from get_card or list_cards; if the card changed since, the call fails with CARD_CHANGED and the current revision. dueOn null clears the date and time; dueTime null clears only the time (startOn and startTime work the same way, and the start must be on or before the due date); assigneeIds, tags, and flags each replace the whole set ([] clears it). Tags must already exist on the board (by name or id).",
     scopes: ["tasks:write"],
     access: { mode: "items", items: [{ arg: "cardId", kind: "card" }], related: ["assigneeIds", "parentId", "sprintId"] },
     write: true,
@@ -510,6 +520,9 @@ export const taskTools: McpToolSpec[] = [
       dueOn: z.string().nullable().optional().describe("Due date as YYYY-MM-DD, or null to clear"),
       dueTime: dueTimeInput.nullable().optional(),
       dueTz: dueTzInput.nullable().optional(),
+      startOn: z.string().nullable().optional().describe("Start date as YYYY-MM-DD, or null to clear; on or before the due date (reason START_AFTER_DUE otherwise)"),
+      startTime: startTimeInput.nullable().optional(),
+      startTz: startTzInput.nullable().optional(),
       assigneeIds: assigneeIdsInput.optional(),
       tags: tagsInput.optional(),
       flags: flagsInput.optional(),

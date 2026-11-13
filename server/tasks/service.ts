@@ -6,7 +6,7 @@ import { boardLevel, boardLevels, readableBoard, readableBoardPredicate, readabl
 import { atLeast, type ItemLevel } from "../access/levels";
 import { assigneesForBoard, assigneesForCard, MAX_ASSIGNEES, newAssignees, replaceAssignees, type CardAssignee } from "./assignees";
 import { planInsert, type Positioned } from "./boardOrder";
-import { dueAt, resolveDue, type DueInput } from "./dueTime";
+import { dueAt, resolveDue, resolveStart, startAfterDue, startAt, type DueFields, type DueInput, type StartFields, type StartInput } from "./dueTime";
 import { linkableCardDocument, linkAttachments, needsLinkConfirm } from "./attachments";
 import { insertRelation } from "./cardRelations";
 import { descriptionExcerpt } from "./excerpt";
@@ -170,6 +170,12 @@ export type CardSummary = {
   due_tz: string | null;
   /** The computed UTC instant when `due_time` is set, else null. */
   due_at: string | null;
+  /** The optional start (D720, migration 080), shaped like the due fields: a civil date, an optional `HH:MM` in `start_tz`. */
+  start_on: string | null;
+  start_time: string | null;
+  start_tz: string | null;
+  /** The computed UTC instant when `start_time` is set, else null. */
+  start_at: string | null;
   /** Every assignee, in assignment order, at most 20 (D102). */
   assignees: CardAssignee[];
   /** Deprecated (D103): the first assignee's id, kept for one release. */
@@ -208,7 +214,7 @@ const cardSelect = (extraColumns = "") => `
   SELECT k.id, k.board_id, k.column_id, k.position, k.title,
          CASE WHEN k.description <> '' THEN 1 ELSE 0 END AS has_description,
          k.description_excerpt, k.revision, k.created_by, cu.display_name AS creator_name, CASE WHEN cu.kind = 'service' THEN 1 ELSE 0 END AS creator_is_integration,
-         k.due_on, k.due_time, k.due_tz,
+         k.due_on, k.due_time, k.due_tz, k.start_on, k.start_time, k.start_tz,
          (SELECT COUNT(*) FROM card_comments cc WHERE cc.card_id = k.id) AS comment_count,
          (SELECT COUNT(*) FROM card_attachments ca WHERE ca.card_id = k.id) AS attachment_count,
          k.parent_card_id, k.level, ${EFFECTIVE_SPRINT_SQL} AS sprint_id,
@@ -219,13 +225,13 @@ const cardSummarySelect = cardSelect();
 const cardDetailSelect = cardSelect(", k.description");
 
 /** A selected card row before its computed and grouped fields (due instant, assignees) are attached. */
-type SelectedCard = Omit<CardSummary, "due_at" | "assignees" | "assignee_id" | "assignee_name" | "tag_ids" | "flags" | "child_count" | "done_child_count">;
+type SelectedCard = Omit<CardSummary, "due_at" | "start_at" | "assignees" | "assignee_id" | "assignee_name" | "tag_ids" | "flags" | "child_count" | "done_child_count">;
 type GroupedFields = { assignees: CardAssignee[]; tagIds: string[]; flags: CardFlag[]; rollup: Rollup };
 
 /** Adds the computed and grouped fields; the deprecated `assignee_id`/`assignee_name` are the first assignee (D103). */
 function withCardFields<T extends SelectedCard>(card: T, { assignees, tagIds, flags, rollup }: GroupedFields, instant: typeof dueAt = dueAt) {
   const first = assignees[0];
-  return { ...card, due_at: instant(card), assignees, assignee_id: first?.id ?? null, assignee_name: first?.display_name ?? null, tag_ids: tagIds, flags, ...rollup };
+  return { ...card, due_at: instant(card), start_at: card.start_time ? startAt(card) : null, assignees, assignee_id: first?.id ?? null, assignee_name: first?.display_name ?? null, tag_ids: tagIds, flags, ...rollup };
 }
 const NO_CHILDREN: Rollup = { child_count: 0, done_child_count: 0 };
 
@@ -234,6 +240,18 @@ function requireDue(current: Parameters<typeof resolveDue>[0], input: DueInput) 
   const resolved = resolveDue(current, input);
   if ("error" in resolved) throw new TaskError(400, resolved.error);
   return resolved;
+}
+
+/** The start fields after a change, or 400 with the rule that failed (D720, the due rules). */
+function requireStart(current: StartFields, input: StartInput) {
+  const resolved = resolveStart(current, input);
+  if ("error" in resolved) throw new TaskError(400, resolved.error);
+  return resolved;
+}
+
+/** 400 START_AFTER_DUE when the card's start, as it will be saved, comes after its due date (D721). */
+function requireStartNotAfterDue(start: StartFields, due: DueFields) {
+  if (startAfterDue(start, due)) throw new TaskError(400, "The start must be on or before the due date", "START_AFTER_DUE");
 }
 
 /**
@@ -703,6 +721,8 @@ export function requireReadableCard(cardId: string, userId: string) {
 export type CardCreateInput = {
   columnId: string; title: string; description?: string; dueOn?: string | null; afterCardId?: string | null;
   dueTime?: string | null; dueTz?: string | null;
+  /** The optional start (D720), with the due date's rules; on or before the due date (D721). */
+  startOn?: string | null; startTime?: string | null; startTz?: string | null;
   assigneeIds?: string[];
   /** Tags of this board (D109), at most 10 after deduplication. */
   tagIds?: string[];
@@ -804,6 +824,8 @@ export function createCard(userId: string, boardId: string, input: CardCreateInp
     for (const assigneeId of assignees ?? []) requireAssignableUser(boardId, assigneeId);
     const tagIds = input.tagIds === undefined ? undefined : requireCardTags(boardId, input.tagIds);
     const due = requireDue({ due_on: null, due_time: null, due_tz: null }, input).value;
+    const start = requireStart({ start_on: null, start_time: null, start_tz: null }, input).value;
+    requireStartNotAfterDue(start, due);
     requireBoardRoom(boardId, { active: 1, total: 1 });
     const attachmentIds = input.attachmentIds === undefined ? [] : [...new Set(input.attachmentIds.map((documentId) => documentId.toLowerCase()))];
     const placement = resolvePlacement(boardId, { parentId: input.parentId ? input.parentId.toLowerCase() : null, level: input.level });
@@ -818,9 +840,10 @@ export function createCard(userId: string, boardId: string, input: CardCreateInp
       applyRenumber("cards", plan.renumbered);
       const timestamp = now();
       const description = input.description ?? "";
-      db.query(`INSERT INTO cards (id, board_id, column_id, position, title, description, description_excerpt, due_on, due_time, due_tz, parent_card_id, level, sprint_id, done_at, created_by, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      db.query(`INSERT INTO cards (id, board_id, column_id, position, title, description, description_excerpt, due_on, due_time, due_tz, start_on, start_time, start_tz, parent_card_id, level, sprint_id, done_at, created_by, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(id, boardId, input.columnId, plan.position, input.title, description, descriptionExcerpt(description), due.due_on, due.due_time, due.due_tz,
+          start.start_on, start.start_time, start.start_tz,
           placement.parentId, placement.level, sprintId, column.state === "done" ? timestamp : null, userId, timestamp, timestamp);
       if (assignees?.length) replaceAssignees(id, assignees, userId, timestamp);
       if (tagIds?.length) replaceCardTags(id, tagIds, timestamp);
@@ -869,6 +892,10 @@ export type CardPatchInput = {
   /** `HH:MM` with `dueTz`, or null to clear the time (D100). */
   dueTime?: string | null;
   dueTz?: string | null;
+  /** The start (D720): `startOn` null clears it and its time; `startTime` comes with `startTz`, null clears the time. */
+  startOn?: string | null;
+  startTime?: string | null;
+  startTz?: string | null;
   /** Legacy (D103): `id` means `[id]`, `null` means `[]`. Not together with `assigneeIds`. */
   assigneeId?: string | null;
   /** Replaces the whole set; `[]` clears it. */
@@ -967,6 +994,10 @@ export async function patchCard(userId: string, cardId: string, input: CardPatch
     const tagIds = input.tagIds === undefined ? undefined : requireCardTags(board.id, input.tagIds);
     const setDue = input.dueOn !== undefined || input.dueTime !== undefined || input.dueTz !== undefined;
     const due = setDue ? requireDue(card, input) : null;
+    const setStart = input.startOn !== undefined || input.startTime !== undefined || input.startTz !== undefined;
+    const start = setStart ? requireStart(card, input) : null;
+    // Checked whenever either side changes, against the other side as saved (D721).
+    if (setDue || setStart) requireStartNotAfterDue(start?.value ?? card, due?.value ?? card);
     const current = db.query("SELECT parent_card_id, level, sprint_id FROM cards WHERE id = ?").get(cardId) as { parent_card_id: string | null; level: number; sprint_id: string | null };
     const hierarchyChange = input.parentId !== undefined || input.level !== undefined;
     // A card with children keeps its level, whatever else the change says (D128).
@@ -1010,6 +1041,9 @@ export async function patchCard(userId: string, cardId: string, input: CardPatch
           due_on = CASE WHEN $setDue THEN $dueOn ELSE due_on END,
           due_time = CASE WHEN $setDue THEN $dueTime ELSE due_time END,
           due_tz = CASE WHEN $setDue THEN $dueTz ELSE due_tz END,
+          start_on = CASE WHEN $setStart THEN $startOn ELSE start_on END,
+          start_time = CASE WHEN $setStart THEN $startTime ELSE start_time END,
+          start_tz = CASE WHEN $setStart THEN $startTz ELSE start_tz END,
           parent_card_id = CASE WHEN $setPlacement THEN $parentId ELSE parent_card_id END,
           level = CASE WHEN $setPlacement THEN $level ELSE level END,
           sprint_id = CASE WHEN $setSprint THEN $sprintId ELSE sprint_id END,
@@ -1023,6 +1057,10 @@ export async function patchCard(userId: string, cardId: string, input: CardPatch
         dueOn: due?.value.due_on ?? null,
         dueTime: due?.value.due_time ?? null,
         dueTz: due?.value.due_tz ?? null,
+        setStart: start ? 1 : 0,
+        startOn: start?.value.start_on ?? null,
+        startTime: start?.value.start_time ?? null,
+        startTz: start?.value.start_tz ?? null,
         setPlacement: placement ? 1 : 0,
         parentId: placement?.parentId ?? null,
         level: placement?.level ?? 0,
@@ -1041,6 +1079,8 @@ export async function patchCard(userId: string, cardId: string, input: CardPatch
         boardId: board.id, cardId,
         ...(input.dueOn !== undefined ? { dueOn: input.dueOn } : {}),
         ...(due?.timeChange ? { dueTime: due.timeChange } : {}),
+        ...(input.startOn !== undefined ? { startOn: input.startOn } : {}),
+        ...(start?.timeChange ? { startTime: start.timeChange } : {}),
         ...(input.assigneeId !== undefined ? { assigneeId: input.assigneeId } : {}),
         ...(changed ? { assigneesAdded: changed.added.length, assigneesRemoved: changed.removed.length } : {}),
         ...(tagsChanged ? { tagsAdded: tagsChanged.added.length, tagsRemoved: tagsChanged.removed.length } : {}),

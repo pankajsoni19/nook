@@ -18,7 +18,7 @@ import {
 import { getBoardReaders, type BoardTag, type CardAssignee, type CardChange, type CardDetail } from "./tasksApi";
 import { FLAG_LABELS, type TagChange } from "./cardTags";
 import { FlagPicker, TagPicker } from "./TagPicker";
-import { DuePicker } from "./DuePicker";
+import { DuePicker, startAsDue } from "./DuePicker";
 
 export const MAX_ASSIGNEES = 20;
 
@@ -44,13 +44,14 @@ type CardFieldsProps = {
 };
 
 /**
- * The card's fields (WAVE_13_TASK_CARD_UX.md §4.3): the due date with an optional time, the
+ * The card's fields (WAVE_13_TASK_CARD_UX.md §4.3): the start and due dates, each with an optional time (D720), the
  * assignees, the tags, and the flags. The card dialog uses it today; the composer and the full
  * page (13D) join here, so each adds a field with a small diff.
  */
 export function CardFields({ card, userId, idPrefix, done, saving, onSave, tags, owner = false, onTagsChange, readOnly = false }: CardFieldsProps) {
   if (readOnly) return <StaticCardFields card={card} idPrefix={idPrefix} done={done} tags={tags} />;
   return <div className="task-card-details">
+    <StartField card={card} idPrefix={idPrefix} done={done} saving={saving} onSave={onSave} />
     <DueField card={card} idPrefix={idPrefix} done={done} saving={saving} onSave={onSave} />
     <div className="task-card-field">
       <label htmlFor={`${idPrefix}-assignees`}><UsersRound aria-hidden="true" />Assignees</label>
@@ -76,6 +77,8 @@ export function CardFields({ card, userId, idPrefix, done, saving, onSave, tags,
 function StaticCardFields({ card, idPrefix, done, tags }: Pick<CardFieldsProps, "card" | "idPrefix" | "done" | "tags">) {
   const due = dueStatus(card.due_on, localDateString(), done, { dueAt: card.due_at });
   const note = dueTimeNote(card, viewerTimeZone());
+  const start = startAsDue(card);
+  const startNote = dueTimeNote(start, viewerTimeZone());
   const assignees = cardAssignees(card);
   const tagNames = (card.tag_ids ?? []).map((id) => tags?.find((tag) => tag.id === id)?.name).filter((name): name is string => Boolean(name));
   const flags = card.flags ?? [];
@@ -85,11 +88,20 @@ function StaticCardFields({ card, idPrefix, done, tags }: Pick<CardFieldsProps, 
     {extra}
   </div>;
   return <div className="task-card-details">
+    {field("start", <CalendarDays aria-hidden="true" />, "Start", start.due_on ? [start.due_on, start.due_time && startNote ? startNote : null].filter(Boolean).join(" · ") : "No start date")}
     {field("due", <CalendarDays aria-hidden="true" />, "Due", card.due_on ? [card.due_on, card.due_time && note ? note : null].filter(Boolean).join(" · ") : "No due date",
       <small className={due ? `task-due-text ${due.tone}` : "task-due-text"}>{due ? due.description : card.due_on ? "In a done column" : ""}</small>)}
     {field("assignees", <UsersRound aria-hidden="true" />, "Assignees", assignees.length ? assignees.map(assigneeLabel).join(", ") : "Nobody")}
     {tags && field("tags", <Tag aria-hidden="true" />, "Tags", tagNames.length ? tagNames.join(", ") : "No tags")}
     {field("flags", <Flag aria-hidden="true" />, "Flags", flags.length ? flags.map((flag) => FLAG_LABELS[flag]).join(", ") : "No flags")}
+  </div>;
+}
+
+/** The start date and optional time (D720): the same picker as Due, editing the start. */
+function StartField({ card, idPrefix, done, saving, onSave }: Omit<CardFieldsProps, "userId">) {
+  return <div className="task-card-field">
+    <label htmlFor={`${idPrefix}-start-input`}><CalendarDays aria-hidden="true" />Start</label>
+    <DuePicker kind="start" card={card} idPrefix={idPrefix} done={done} disabled={saving} onApply={(change, success) => onSave(change, success)} />
   </div>;
 }
 

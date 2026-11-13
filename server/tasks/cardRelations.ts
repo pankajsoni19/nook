@@ -242,9 +242,15 @@ export function archivedPage(cards: Array<{ id: string; archived_at: string | nu
 function trimCards(list: ReturnType<typeof getBoardWithRelationCounts>["cards"]) {
   const users: Record<string, BoardPayloadUser> = {};
   // Lane TASKS (D605): `done_at` is left out and `archived_at` sent only when set, so the trim holds.
-  const cards = list.map(({ board_id: _board, assignees, assignee_id: _id, assignee_name: _name, done_at: _done, archived_at: archivedAt, ...card }) => {
+  // D720: the start fields are sent only on a card with a start (most have none), so the trim holds too.
+  const cards = list.map(({ board_id: _board, assignees, assignee_id: _id, assignee_name: _name, done_at: _done, archived_at: archivedAt,
+    start_on: startOn, start_time: startTime, start_tz: startTz, start_at: startAt, ...card }) => {
     for (const assignee of assignees) users[assignee.id] ??= { display_name: assignee.display_name, can_read: assignee.can_read };
-    return { ...card, ...(archivedAt ? { archived_at: archivedAt } : {}), assignee_ids: assignees.map((assignee) => assignee.id) };
+    return {
+      ...card, ...(archivedAt ? { archived_at: archivedAt } : {}),
+      ...(startOn ? { start_on: startOn, start_time: startTime, start_tz: startTz, start_at: startAt } : {}),
+      assignee_ids: assignees.map((assignee) => assignee.id)
+    };
   });
   // Wave 35 (D299): each assignee's picture, beside the name the map already carries.
   const avatars = avatarUrlsFor(Object.keys(users));

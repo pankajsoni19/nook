@@ -8,8 +8,29 @@ import type { CardChange } from "./tasksApi";
 // (desktop) or a bottom sheet (≤ 760 px) with the date, an optional time, quick picks, and explicit
 // Apply and Cancel. Nothing saves until Apply, which sends one change (one PATCH with the revision);
 // Cancel, Escape, a click outside, and Back discard the draft (D69, D91).
+//
+// The same picker edits the card's Start (D720, `kind="start"`): a date with an optional time, with
+// the due date's rules. The start fields are read as due-shaped fields (`startAsDue`) so every
+// helper here serves both, and the change is renamed to `startOn`/`startTime`/`startTz` on Apply.
 
 export type DueFields = { due_on: string | null; due_time?: string | null; due_tz?: string | null; due_at?: string | null };
+export type StartFields = { start_on?: string | null; start_time?: string | null; start_tz?: string | null; start_at?: string | null };
+/** Which of the card's dates a picker edits (D720). */
+export type DateKind = "due" | "start";
+
+/** The start fields as due-shaped fields, so the start reuses every due helper (D720). */
+export function startAsDue(card: StartFields): DueFields {
+  return { due_on: card.start_on ?? null, due_time: card.start_time ?? null, due_tz: card.start_tz ?? null, due_at: card.start_at ?? null };
+}
+
+/** A due-shaped change as the start's: `dueOn`, `dueTime`, `dueTz` become `startOn`, `startTime`, `startTz`. */
+export function changeAsStart(change: CardChange): CardChange {
+  const renamed: CardChange = {};
+  if (change.dueOn !== undefined) renamed.startOn = change.dueOn;
+  if (change.dueTime !== undefined) renamed.startTime = change.dueTime;
+  if (change.dueTz !== undefined) renamed.startTz = change.dueTz;
+  return renamed;
+}
 export type DueDraft = { date: string; time: string; withTime: boolean };
 export type QuickPick = "today" | "tomorrow" | "next-week";
 
@@ -66,6 +87,23 @@ export function dueChange(card: DueFields, draft: DueDraft, zone: string): { cha
   return { change, success };
 }
 
+/** The one change Apply sends for the start (D720), worded for it; `dueChange`'s rules. */
+export function startChange(card: StartFields, draft: DueDraft, zone: string): { change: CardChange; success: string } | null {
+  const pending = dueChange(startAsDue(card), draft, zone);
+  return pending && { change: changeAsStart(pending.change), success: pending.success.replace(/^Due/, "Start") };
+}
+
+/**
+ * Why the draft would put the start after the due date (D721), or null. Civil dates compare here;
+ * the server also compares the instants when both have a time (400 START_AFTER_DUE).
+ */
+export function dateOrderError(kind: DateKind, card: DueFields & StartFields, draft: DueDraft) {
+  if (!draft.date) return null;
+  if (kind === "start" && card.due_on && draft.date > card.due_on) return "The start must be on or before the due date.";
+  if (kind === "due" && card.start_on && draft.date < card.start_on) return "The due date must be on or after the start.";
+  return null;
+}
+
 /** The trigger's words: "No due date", "3 Oct", or "3 Oct at 18:45" (the viewer's local day and time). */
 export function dueTriggerLabel(card: DueFields, today: string, zone = viewerTimeZone()) {
   if (!card.due_on) return "No due date";
@@ -78,8 +116,15 @@ export function dueTriggerLabel(card: DueFields, today: string, zone = viewerTim
   return time ? `${words} at ${time}` : words;
 }
 
+/** The Start trigger's words (D720): "No start date", "3 Oct", or "3 Oct at 09:00". */
+export function startTriggerLabel(card: StartFields, today: string, zone = viewerTimeZone()) {
+  return card.start_on ? dueTriggerLabel(startAsDue(card), today, zone) : "No start date";
+}
+
 type DuePickerProps = {
-  card: DueFields;
+  card: DueFields & StartFields;
+  /** The due date (the default) or the start (D720). */
+  kind?: DateKind;
   idPrefix: string;
   /** The card sits in a done column: no due status. */
   done: boolean;
@@ -91,26 +136,32 @@ type DuePickerProps = {
   defaultOpen?: boolean;
 };
 
-export function DuePicker({ card, idPrefix, done, disabled, onApply, presentation = "auto", defaultOpen = false }: DuePickerProps) {
+export function DuePicker({ card, kind = "due", idPrefix, done, disabled, onApply, presentation = "auto", defaultOpen = false }: DuePickerProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const timeRef = useRef<HTMLInputElement>(null);
   const sheet = useSheet(presentation);
   const [open, setOpen] = useState(defaultOpen);
-  const [draft, setDraft] = useState<DueDraft>(() => initialDueDraft(card));
+  const start = kind === "start";
+  // The start reads as due-shaped fields, so the rest of the picker is the same for both (D720).
+  const fields = start ? startAsDue(card) : card;
+  const [draft, setDraft] = useState<DueDraft>(() => initialDueDraft(fields));
   const [applying, setApplying] = useState(false);
   const [focusTime, setFocusTime] = useState(false);
   const zone = viewerTimeZone();
   const today = localDateString();
-  const due = dueStatus(card.due_on, today, done, { dueAt: card.due_at });
-  const note = dueTimeNote(card, zone);
-  const otherZone = Boolean(card.due_time) && card.due_tz !== zone;
-  const pending = dueChange(card, draft, zone);
-  const valid = draftDateValid(draft);
+  const due = start ? null : dueStatus(fields.due_on, today, done, { dueAt: fields.due_at });
+  const note = dueTimeNote(fields, zone);
+  const otherZone = Boolean(fields.due_time) && fields.due_tz !== zone;
+  const pending = start ? startChange(card, draft, zone) : dueChange(card, draft, zone);
+  const orderError = dateOrderError(kind, card, draft);
+  const valid = draftDateValid(draft) && !orderError;
+  const noun = start ? "Start date" : "Due date";
+  const ids = { date: `${idPrefix}-${kind}-date`, time: `${idPrefix}-${kind}-time`, input: `${idPrefix}-${kind}-input`, text: `${idPrefix}-${kind}` };
 
   function show() {
     if (disabled) return;
-    setDraft(initialDueDraft(card));
+    setDraft(initialDueDraft(fields));
     setOpen(true);
   }
 
@@ -142,10 +193,10 @@ export function DuePicker({ card, idPrefix, done, disabled, onApply, presentatio
   useEffect(() => {
     if (!open) return undefined;
     const frame = window.requestAnimationFrame(() => {
-      rootRef.current?.querySelector<HTMLElement>(sheet ? ".task-due-quick-pick" : `#${CSS.escape(`${idPrefix}-due-date`)}`)?.focus({ preventScroll: true });
+      rootRef.current?.querySelector<HTMLElement>(sheet ? ".task-due-quick-pick" : `#${CSS.escape(ids.date)}`)?.focus({ preventScroll: true });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [open, sheet, idPrefix]);
+  }, [open, sheet, ids.date]);
   useEffect(() => {
     if (!focusTime) return;
     timeRef.current?.focus();
@@ -164,7 +215,7 @@ export function DuePicker({ card, idPrefix, done, disabled, onApply, presentatio
     }
   };
 
-  const editor = <div className="task-due-editor" role={sheet ? undefined : "dialog"} aria-label={sheet ? undefined : "Due date"} onKeyDown={onKey}>
+  const editor = <div className="task-due-editor" role={sheet ? undefined : "dialog"} aria-label={sheet ? undefined : noun} onKeyDown={onKey}>
     <div className="task-due-quick" role="group" aria-label="Quick picks">
       {QUICK_PICKS.map((pick) => {
         const value = quickPickDate(pick.kind, today);
@@ -175,20 +226,21 @@ export function DuePicker({ card, idPrefix, done, disabled, onApply, presentatio
     </div>
     <label className="task-due-editor-row">
       <span><CalendarDays aria-hidden="true" />Date</span>
-      <input id={`${idPrefix}-due-date`} type="date" value={draft.date} min="1900-01-01" max="2999-12-31"
+      <input id={ids.date} type="date" value={draft.date} min="1900-01-01" max="2999-12-31"
         aria-invalid={valid ? undefined : true} onChange={(event) => setDraft({ ...draft, date: event.target.value, ...(event.target.value ? {} : { withTime: false, time: "" }) })} />
     </label>
     {draft.withTime
       ? <div className="task-due-editor-row">
-        <label htmlFor={`${idPrefix}-due-time`}><Clock aria-hidden="true" />Time</label>
+        <label htmlFor={ids.time}><Clock aria-hidden="true" />Time</label>
         <span className="task-due-editor-control">
-          <input ref={timeRef} id={`${idPrefix}-due-time`} type="time" step={60} value={draft.time} onChange={(event) => setDraft({ ...draft, time: event.target.value })} />
+          <input ref={timeRef} id={ids.time} type="time" step={60} value={draft.time} onChange={(event) => setDraft({ ...draft, time: event.target.value })} />
           <button type="button" className="secondary-button task-small-button" onClick={() => setDraft({ ...draft, withTime: false, time: "" })}><X aria-hidden="true" />Remove time</button>
         </span>
       </div>
       : <button type="button" className="task-add-time" disabled={!draft.date} onClick={() => { setDraft({ ...draft, withTime: true }); setFocusTime(true); }}><Clock aria-hidden="true" />Add time</button>}
     {otherZone && note && <p className="task-due-text">{`Set as ${note}. Changing the time uses your zone (${zone}).`}</p>}
-    {!valid && <p className="file-dialog-error" role="alert">Use a real date between 1900 and 2999.</p>}
+    {!draftDateValid(draft) ? <p className="file-dialog-error" role="alert">Use a real date between 1900 and 2999.</p>
+      : orderError && <p className="file-dialog-error" role="alert">{orderError}</p>}
     {!sheet && footer()}
   </div>;
 
@@ -200,15 +252,16 @@ export function DuePicker({ card, idPrefix, done, disabled, onApply, presentatio
   }
 
   return <div ref={rootRef} className="task-due-picker">
-    <button ref={triggerRef} id={`${idPrefix}-due-input`} type="button" className={`task-due-trigger${card.due_on ? "" : " empty"}`} disabled={disabled}
-      aria-haspopup="dialog" aria-expanded={open} aria-describedby={`${idPrefix}-due`} onClick={() => { if (open) cancel(); else show(); }}>
-      <CalendarDays aria-hidden="true" /><span>{dueTriggerLabel(card, today, zone)}</span>
+    <button ref={triggerRef} id={ids.input} type="button" className={`task-due-trigger${fields.due_on ? "" : " empty"}`} disabled={disabled}
+      aria-haspopup="dialog" aria-expanded={open} aria-describedby={ids.text} onClick={() => { if (open) cancel(); else show(); }}>
+      <CalendarDays aria-hidden="true" /><span>{start ? startTriggerLabel(card, today, zone) : dueTriggerLabel(card, today, zone)}</span>
     </button>
-    <small id={`${idPrefix}-due`} className={due ? `task-due-text ${due.tone}` : "task-due-text"}>
-      {due ? due.description : card.due_on ? "In a done column" : "No due date"}
+    <small id={ids.text} className={due ? `task-due-text ${due.tone}` : "task-due-text"}>
+      {start ? fields.due_on ? `Starts ${dueTriggerLabel(fields, today, zone)}` : "No start date"
+        : due ? due.description : card.due_on ? "In a done column" : "No due date"}
       {otherZone && note && <><br />{`Set as ${note}.`}</>}
     </small>
-    {open && <DropdownSurface sheet={sheet} anchorRef={triggerRef} title="Due date" onClose={() => cancel()}
+    {open && <DropdownSurface sheet={sheet} anchorRef={triggerRef} title={noun} onClose={() => cancel()}
       footer={sheet ? <div className="ui-sheet-footer task-due-sheet-footer" onKeyDown={onKey}>{footer()}</div> : undefined}>
       {editor}
     </DropdownSurface>}

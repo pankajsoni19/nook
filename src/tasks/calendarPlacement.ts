@@ -2,13 +2,17 @@
 //
 // - A date-only card sits on its `due_on` day.
 // - A timed card sits on the viewer-local date of its `due_at` and shows the viewer-local time.
-// - A card without `due_on` is Unscheduled.
+// - A card without `due_on` is Unscheduled (a start alone does not schedule it).
+// - A card with a start before its due day also spans the days from its start up to the day before
+//   its due day (D724, `spanningDays`), clipped to the days the month grid shows. It still counts,
+//   sorts, and moves by its due day; the agenda lists it on its due day only.
 // The board pipeline (filters) runs before placement; the list grouping does not apply here.
 import { addDays, daysBetween, monthOf } from "../calendarRoute";
 import { monthHeading } from "../calendar/calendarFormat";
 import { instantParts } from "./taskActions";
 
 type DueCard = { id: string; due_on: string | null; due_time?: string | null; due_tz?: string | null; due_at?: string | null };
+type StartCard = { start_on?: string | null; start_time?: string | null; start_at?: string | null };
 
 /** The day a card shows on for the viewer, or null when it has no due date. */
 export function displayedDay(card: DueCard, viewerZone: string) {
@@ -23,6 +27,35 @@ export function displayedTime(card: DueCard, viewerZone: string) {
 }
 
 export type Placement<T> = { byDay: Map<string, T[]>; unscheduled: T[] };
+
+/** The day a card's start shows on for the viewer (its local date when timed), or null without one (D724). */
+export function displayedStartDay(card: StartCard, viewerZone: string) {
+  if (!card.start_on) return null;
+  if (card.start_time && card.start_at && Number.isFinite(Date.parse(card.start_at))) return instantParts(card.start_at, viewerZone).date;
+  return card.start_on;
+}
+
+/**
+ * The days before its due day a scheduled card also shows on (D724): from its start day up to the
+ * day before its due day, clipped to `[from, to]` (the days the grid shows, so a long span costs
+ * no more than the grid). Keyed by day, cards in the given order. A card without a start, or
+ * whose start is on (or after) its due day, spans nothing.
+ */
+export function spanningDays<T extends DueCard & StartCard>(cards: readonly T[], viewerZone: string, from: string, to: string) {
+  const spans = new Map<string, T[]>();
+  for (const card of cards) {
+    const due = displayedDay(card, viewerZone);
+    const start = displayedStartDay(card, viewerZone);
+    if (!due || !start || start >= due) continue;
+    const last = addDays(due, -1) < to ? addDays(due, -1) : to;
+    for (let day = start > from ? start : from; day <= last; day = addDays(day, 1)) {
+      const list = spans.get(day) ?? [];
+      list.push(card);
+      spans.set(day, list);
+    }
+  }
+  return spans;
+}
 
 /** Cards by displayed day (date-only cards first, then by time, then in the given order), and the rest. */
 export function placeCards<T extends DueCard>(cards: readonly T[], viewerZone: string): Placement<T> {
@@ -61,6 +94,15 @@ export function dropDueOn(card: DueCard, day: string, viewerZone: string): strin
   if (!shown || !card.due_on) return day;
   const delta = daysBetween(shown, day);
   return delta === 0 ? null : addDays(card.due_on, delta);
+}
+
+/**
+ * The `startOn` that keeps a card's span when its due date moves from `dueOn` to `nextDueOn`
+ * (D724: a drag or Alt+Arrow moves the whole range), or undefined when there is no start to move.
+ */
+export function shiftedStartOn(card: StartCard & { due_on: string | null }, nextDueOn: string | null) {
+  if (!card.start_on || !card.due_on || !nextDueOn) return undefined;
+  return addDays(card.start_on, daysBetween(card.due_on, nextDueOn));
 }
 
 /** Alt+←/→ move a day, Alt+↑/↓ a week (mirroring the board's Alt+Arrow). */
