@@ -107,7 +107,7 @@ function MoveToBoardSheet({ card, onMoveToBoard, onBack, onCancel, loadBoards, l
 
   const chosenColumn = columns?.find((column) => column.id === columnId) ?? null;
   const targetStatuses = columnStatuses(columns ?? []);
-  return <ModalDialog title={`Move “${card.title}” to another board`} eyebrow="Move to" onClose={onCancel} variant="sheet" busy={busy}>
+  return <ModalDialog title={`Move “${card.title}” to another board`} eyebrow="Move to" onClose={onCancel} variant="sheet" busy={busy} className="task-move-board-sheet">
     <div className="move-list" role={target ? undefined : "radiogroup"} aria-label={target ? undefined : "Board"}>
       <button className="move-option" onClick={target ? () => { setTarget(null); setColumns(null); setError(null); } : onBack} disabled={busy}>
         <ChevronLeft aria-hidden="true" /><span>{target ? "Back to boards" : "Back to columns"}</span>

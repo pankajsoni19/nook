@@ -242,3 +242,14 @@ test("grouped rows have collapsible headers with counts", () => {
   expect(html).toContain(">To do<");
   expect(html).toContain("Group: Column");
 });
+
+test("on phones the key sits on a small second line under the title, so the narrow column shows the title", async () => {
+  const source = await Bun.file(new URL("../src/tasks/BoardTimeline.tsx", import.meta.url)).text();
+  expect(source).toContain('<span className="task-tl-stack"><span className="task-tl-name">{card.title}</span>{key && <span className="task-tl-key">{key}</span>}</span>');
+  const css = await Bun.file(new URL("../src/tasks/timeline.css", import.meta.url)).text();
+  const phone = css.slice(css.indexOf("@media (max-width: 767px)"));
+  expect(phone).toContain(".task-tl-stack { flex: 1; min-width: 0; display: flex; flex-direction: column;");
+  expect(phone).toContain(".task-tl-stack .task-tl-key {");
+  // A computer keeps the key before the title on one line.
+  expect(render()).not.toContain("task-tl-stack");
+});

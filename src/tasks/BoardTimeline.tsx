@@ -602,8 +602,10 @@ function CardRow({ card, bar, top, range, dayWidth, today, status, columnName, s
       {showPane && <>
         <button type="button" className="task-tl-open" data-open-card={card.id} onClick={() => onOpen(card)} title={card.title}>
           {status && <ColumnStatusIcon status={status} />}
-          {key && <span className="task-tl-key">{key}</span>}
-          <span className="task-tl-name">{card.title}</span>
+          {/* Phones stack the key under the title so the narrow column shows the title, not the key. */}
+          {phone
+            ? <span className="task-tl-stack"><span className="task-tl-name">{card.title}</span>{key && <span className="task-tl-key">{key}</span>}</span>
+            : <>{key && <span className="task-tl-key">{key}</span>}<span className="task-tl-name">{card.title}</span></>}
           {!phone && <FlagIcons flags={card.flags} />}
           <span className="sr-only">, {columnName}</span>
         </button>

@@ -66,3 +66,26 @@ test("phone touch targets: New tag, Manage tags…, Add time, and Remove time ar
   // After the base rule, so it wins the cascade at the same specificity.
   expect(phone).toBeGreaterThan(base);
 });
+
+test("on phones the card header keeps the eyebrow on one line beside the actions and gives the title the full width", () => {
+  const start = css.indexOf("@media (max-width: 760px) {\n  .task-card-view-header");
+  expect(start).toBeGreaterThanOrEqual(0);
+  const phone = css.slice(start, css.indexOf("\n}", start));
+  expect(phone).toContain(".task-card-view-header { flex-wrap: wrap;");
+  expect(phone).toContain(".task-card-view-header .task-card-dialog-heading { display: contents; }");
+  // Everything in the heading but the eyebrow takes a full row under the actions.
+  expect(phone).toContain(".task-card-view-header .task-card-dialog-heading > * { order: 1; flex: 1 0 100%; min-width: 0; }");
+  expect(phone).toContain("> .task-card-eyebrow { order: 0; flex: 1 1 0; display: flex;");
+  // The column name truncates; the key never does.
+  expect(phone).toContain(".task-card-eyebrow-text { min-width: 0; overflow: hidden; text-overflow: ellipsis;");
+  expect(phone).toContain(".task-card-view-header .task-card-key-eyebrow { flex: none; }");
+  const dialog = readFileSync(new URL("../src/tasks/CardDialog.tsx", import.meta.url), "utf8");
+  expect(dialog).toContain('<header className="task-card-dialog-header task-card-view-header">');
+  expect(dialog).toContain('<span className="task-card-eyebrow-text">');
+});
+
+test("the move-to-board heading wraps so \"to another board\" stays readable after a long title", () => {
+  expect(css).toContain(".task-move-board-sheet .file-dialog-header h2 { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; white-space: normal;");
+  const sheet = readFileSync(new URL("../src/tasks/MoveCardSheet.tsx", import.meta.url), "utf8");
+  expect(sheet).toContain('variant="sheet" busy={busy} className="task-move-board-sheet">');
+});

@@ -668,11 +668,13 @@ export function CardDialog({ userId, cardId, columns, columnId, boardOwner, boar
     <section ref={sectionRef} className={`${page ? "task-card-dialog task-card-page" : "task-card-dialog task-card-modal"}${drop.dragging ? " task-card-dragging" : ""}`} role={page ? undefined : "dialog"} aria-modal={page ? undefined : true} aria-labelledby={titleId} onKeyDown={page ? undefined : trapTabKey}
       {...drop.bind} onDropCapture={(event) => { dropZone.current = attachZoneOf(event.target); }}>
       {drop.dragging && <div className="task-card-drop" aria-hidden="true"><Paperclip />Drop files to attach them</div>}
-      <header className="task-card-dialog-header">
+      <header className="task-card-dialog-header task-card-view-header">
         <div className="task-card-dialog-heading">
-          <span className="eyebrow task-card-eyebrow">{[card && hierarchy ? levelEyebrow(hierarchy.structure, levelOf(card)) : null, column ? columnEyebrow(column.name) : "Card"].filter(Boolean).join(" · ")}
+          {/* On phones the eyebrow sits on one line beside the actions (the column name truncates, the key
+              stays whole) and the title takes the full width below them: tasks.css, .task-card-view-header. */}
+          <span className="eyebrow task-card-eyebrow"><span className="task-card-eyebrow-text">{[card && hierarchy ? levelEyebrow(hierarchy.structure, levelOf(card)) : null, column ? columnEyebrow(column.name) : "Card"].filter(Boolean).join(" · ")}{card?.key && " · "}</span>
             {/* The card's key (D713), click to copy: "IN DOING · MYT-12". */}
-            {card?.key && <>{" · "}<CardKeyButton cardKey={card.key} notify={notify} className="task-card-key-eyebrow" /></>}</span>
+            {card?.key && <CardKeyButton cardKey={card.key} notify={notify} className="task-card-key-eyebrow" />}</span>
           {card && hierarchy && <CardBreadcrumb card={card} context={hierarchy} />}
           {card && readOnly
             ? <h2 id={titleId} className="task-card-title-static">{card.title}</h2>

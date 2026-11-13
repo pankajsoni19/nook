@@ -235,6 +235,8 @@
   .task-tl-pane-cell { padding: 0 2px 0 4px; }
   .task-tl-open { gap: 6px; padding: 0 4px; font-size: .8rem; height: calc(var(--tl-row) - 4px); }
   .task-tl-open svg.task-column-status { width: 12px; height: 12px; }
+  .task-tl-stack { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; line-height: 1.2; }
+  .task-tl-stack .task-tl-key { overflow: hidden; font-size: .64rem; text-overflow: ellipsis; white-space: nowrap; }
   .task-tl-bar-label { max-width: 160px; }
   .task-tl-bar { touch-action: auto; }
 }

@@ -21,7 +21,7 @@ const rule = (sheet: string, selector: string) => {
 const phoneRules = (sheet: string) => sheet.split("@media (max-width: 760px)").slice(1).join("\n");
 
 describe("phone sizing at 390 px", () => {
-  test("Tasks: the board header is two rows; the view switch leads a filter row that scrolls sideways", async () => {
+  test("Tasks: the board header is two rows; the view switch leads a filter row that wraps", async () => {
     const view = await read("tasks/BoardView.tsx");
     // A computer keeps the switch in the header; a phone moves it into the controls row with the filters.
     expect(view).toContain("{detail && !phone && viewSwitch}");
@@ -30,8 +30,11 @@ describe("phone sizing at 390 px", () => {
     const phone = phoneRules(await read("tasks/boardViews.css"));
     expect(rule(phone, "  .task-board-header")).toContain("flex-wrap: nowrap");
     const controls = rule(phone, "  .task-board-controls");
-    for (const declaration of ["overflow-x: auto", "flex: none", "min-width: 0"]) expect(controls).toContain(declaration);
-    expect(rule(phone, "  .task-board-controls > .task-filter-bar")).toContain("flex-wrap: nowrap");
+    // The row wraps at 375 px instead of scrolling sideways, so the chips after the switch (Swimlanes,
+    // View) and the filters are on screen rather than past the right edge.
+    for (const declaration of ["flex-wrap: wrap", "flex: none", "min-width: 0"]) expect(controls).toContain(declaration);
+    expect(controls).not.toContain("overflow-x: auto");
+    expect(rule(phone, "  .task-board-controls > .task-filter-bar")).toContain("flex: 1 1 100%");
     // Every control in the row stays 44 px tall (the switch's buttons and the filter chips).
     expect(rule(phone, "  .task-view-switch .icon-button")).toContain("height: 44px");
     // Editing a filter needs the width: the row wraps then.
