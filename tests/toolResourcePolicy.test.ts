@@ -111,6 +111,8 @@ describe("tool resource policy", () => {
         const isArray = schema?.def?.type === "array" || schema?.def?.innerType?.def?.type === "array";
         return [item.arg, isArray ? [outside] : outside];
       }));
+      // Each tool starts with fresh rate windows: the owner's per-user write and Bin budgets would otherwise run out as modules add tools.
+      resetMcpLimits();
       for (const surface of ["mcp", "rest"] as const) {
         const result = await invokeMcpToolForTests(spec.name, args, created.id, surface);
         const text = result.content[0]!.text;
