@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { MODULE_IDS, type ModuleId } from "../server/moduleIds";
+import { WORKSPACE_MODULE_IDS } from "../shared/workspaceModules";
 
 // The docs site (GitHub Pages, .github/workflows/pages.yml): index.html leads with the apps and keeps
 // only the latest release; every "What's new in vX" lives on releases.html. Links between the two
@@ -90,7 +91,8 @@ test.skipIf(!sitePresent)("old index.html#whats-new-x-y-z links redirect to rele
 test.skipIf(!sitePresent)("every module a person can turn on has a section and a nav entry on index.html", () => {
   const { "index.html": index } = pages();
   const section: Partial<Record<ModuleId, string>> = { notes: "editor", agents: "chat" };
-  const missing = MODULE_IDS.map((id) => section[id] ?? id).filter((id) => !index.html.includes(`<section id="${id}"`) || !index.nav.includes(`#${id}`));
+  // Workspace modules get their sections when Wave 3 finalizes the docs (docs/plan/WORKSPACE_MODULES.md §F.3).
+  const missing = MODULE_IDS.filter((id) => !(WORKSPACE_MODULE_IDS as readonly string[]).includes(id)).map((id) => section[id] ?? id).filter((id) => !index.html.includes(`<section id="${id}"`) || !index.nav.includes(`#${id}`));
   expect(missing).toEqual([]);
   // Knowledge and the provider setup behind Chat, Knowledge, and Reports.
   for (const id of ["knowledge", "ai-providers", "vault-key"]) expect(index.nav).toContain(`#${id}`);

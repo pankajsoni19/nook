@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { registeredMigrationIds, runMigrations } from "../server/migrations";
 import { agentChatMigration, GRANT_WORDS, rebuildApiKeyGrants } from "../server/migrations/039_agent_chat";
+// Workspace modules (085 onward) are listed by server/migrations/workspace/*.ts, which each lane appends to.
+const workspaceMigrationIds = (await import("../server/migrations/workspace")).workspaceMigrations.map((migration) => migration.id);
 
 /**
  * Migration 039 (agent chat plan §10, T326): every table of the module exists, and the
@@ -71,7 +73,7 @@ const schemaOf = (db: Database, type: "index" | "trigger") => (db.query(`SELECT 
 describe("migration 039 agent chat", () => {
   test("is registered last, as 39, and creates every table of the plan", () => {
     // Wave 42: 040 (the Audit log guards) follows it; 046 (attachments, which triggers on chat_messages) comes after 044, and 047 (legacy attachments) after it.
-    expect(registeredMigrationIds.slice(registeredMigrationIds.indexOf(39))).toEqual([39, 40, 41, 42, 43, 44, 46, 47, 48, 49, 50, 51, 52, 53, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 68, 69, 73, 74, 76, 77, 78, 79, 80, 81, 82, 83]);
+    expect(registeredMigrationIds.slice(registeredMigrationIds.indexOf(39))).toEqual([39, 40, 41, 42, 43, 44, 46, 47, 48, 49, 50, 51, 52, 53, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 68, 69, 73, 74, 76, 77, 78, 79, 80, 81, 82, 83, ...workspaceMigrationIds]);
     expect(agentChatMigration.name).toBe("agent_chat");
     const db = openDb();
     const tables = (db.query("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all() as Array<{ name: string }>).map((row) => row.name);

@@ -5,7 +5,10 @@
  */
 export type McpScope = "notes:read" | "notes:write-draft" | "notes:publish" | "files:read" | "files:write" | "tasks:read" | "tasks:write" | "today:read"
   | "calendar:read" | "calendar:write" | "collections:read" | "collections:write" | "bin:write" | "team:read"
-  | "inbox:read" | "inbox:write" | "whiteboards:read" | "whiteboards:write" | "agents:read" | "agents:run" | "reports:read" | "reports:write";
+  | "inbox:read" | "inbox:write" | "whiteboards:read" | "whiteboards:write" | "agents:read" | "agents:run" | "reports:read" | "reports:write"
+  | WorkspaceScope;
+
+import type { WorkspaceScope } from "../shared/workspaceModules";
 
 /** `warning` is an extra line Settings shows under the help, for permissions with a wider reach. */
 export type McpPermission = { scope: McpScope; label: string; help: string; implies?: McpScope; warning?: string };
@@ -35,7 +38,23 @@ export const MCP_PERMISSIONS: readonly McpPermission[] = [
     warning: "Each run spends this Nook's model budget and may call the agent's tools; set it to chosen agents where you can." },
   // Analytics reports (Wave 45). No permission ever runs SQL through a key.
   { scope: "reports:read", label: "Read reports", help: "Your reports' titles, status, and data source names, and the names of the data sources reports can use; never runs SQL." },
-  { scope: "reports:write", label: "Change reports", help: "Reserved for refreshing and changing your reports from a key in a later release; today it reads like Read reports. Never runs SQL.", implies: "reports:read" }
+  { scope: "reports:write", label: "Change reports", help: "Reserved for refreshing and changing your reports from a key in a later release; today it reads like Read reports. Never runs SQL.", implies: "reports:read" },
+  // Workspace modules (docs/plan/WORKSPACE_MODULES.md D800), pre-registered by Wave 1; each module's lane
+  // gives them tools and may sharpen the help text.
+  { scope: "forms:read", label: "Read forms", help: "Forms and polls you can open, and the results you may see." },
+  { scope: "forms:write", label: "Write forms", help: "Create and change your forms and polls, and respond to forms shared with you.", implies: "forms:read" },
+  { scope: "time:read", label: "Read time", help: "Your time entries, timers, and the time projects you can open." },
+  { scope: "time:write", label: "Log time", help: "Start and stop your timer and add or change your time entries.", implies: "time:read" },
+  { scope: "goals:read", label: "Read goals", help: "Goals and key results you can open, and their check-ins." },
+  { scope: "goals:write", label: "Write goals", help: "Check in on goals and change the goals you can edit.", implies: "goals:read" },
+  { scope: "checkins:read", label: "Read standups", help: "Standups you take part in or can open, and their answers." },
+  { scope: "checkins:write", label: "Answer standups", help: "Answer standups you take part in, and change the ones you can edit.", implies: "checkins:read" },
+  { scope: "crm:read", label: "Read contacts", help: "Contacts, companies, deals, and interactions in the contact books you can open." },
+  { scope: "crm:write", label: "Write contacts", help: "Add and change contacts, companies, deals, and interactions where you can edit.", implies: "crm:read" },
+  { scope: "bookings:read", label: "Read bookings", help: "Your booking types and the bookings made with you." },
+  { scope: "bookings:write", label: "Write bookings", help: "Change your booking types and manage your bookings; never cancels a booking for you.", implies: "bookings:read" },
+  { scope: "townhall:read", label: "Read townhalls", help: "Townhall sessions you can open, their questions, and recaps." },
+  { scope: "townhall:write", label: "Ask in townhalls", help: "Ask and upvote questions, and moderate the sessions you can edit.", implies: "townhall:read" }
 ];
 
 /** The permissions offered when creating a key: every scope that has tools. */
@@ -62,7 +81,8 @@ export function offeredMcpPermissions(role: string | undefined) {
  * Explicit: `bin:write` implies no read scope and is still a write scope, so viewers are never offered it.
  */
 export const MCP_WRITE_SCOPES: readonly McpScope[] = [
-  "notes:write-draft", "notes:publish", "files:write", "tasks:write", "calendar:write", "collections:write", "bin:write", "inbox:write", "whiteboards:write", "reports:write"
+  "notes:write-draft", "notes:publish", "files:write", "tasks:write", "calendar:write", "collections:write", "bin:write", "inbox:write", "whiteboards:write", "reports:write",
+  "forms:write", "time:write", "goals:write", "checkins:write", "crm:write", "bookings:write", "townhall:write"
 ];
 
 export const isWriteScope = (scope: McpScope) => MCP_WRITE_SCOPES.includes(scope);

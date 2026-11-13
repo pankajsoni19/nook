@@ -1,6 +1,7 @@
 import { createContext, useContext } from "react";
 import { Archive, Bell, CalendarDays, ChartColumn, FileText, Inbox, KanbanSquare, KeyRound, MessagesSquare, PenTool, Search, Table2, Trash2, Users, type LucideIcon } from "lucide-react";
 import type { AppSection } from "./appShellNavigation";
+import { WORKSPACE_MODULE_IDS, WORKSPACE_MODULE_LABELS } from "../shared/workspaceModules";
 
 /**
  * The module registry (D92, docs/plan/WAVE_13_TASK_CARD_UX.md §4.8). Settings → Modules lists these,
@@ -12,7 +13,7 @@ import type { AppSection } from "./appShellNavigation";
  */
 
 /** Every module id, in Settings order. Keep in step with `MODULE_IDS` in server/moduleIds.ts. */
-export const MODULE_IDS = ["notes", "files", "tasks", "collections", "calendar", "whiteboards", "vault", "agents", "reports", "search", "bin", "notifications", "team", "inbox"] as const;
+export const MODULE_IDS = ["notes", "files", "tasks", "collections", "calendar", "whiteboards", "vault", "agents", "reports", ...WORKSPACE_MODULE_IDS, "search", "bin", "notifications", "team", "inbox"] as const;
 export type ModuleId = (typeof MODULE_IDS)[number];
 
 /** The apps with a Today launcher tile. */
@@ -55,6 +56,9 @@ export const MODULES: readonly ModuleDef[] = [
   // hides the launcher and routes only; guests never have it (`features.reports`), and the server
   // keeps enforcing the allowlist, the guard, and ClickHouse's own grants (T97).
   { id: "reports", label: "Reports", description: "Analytics reports: SQL and charts over the warehouse tables an admin allowed. Queries run on that warehouse, never on your notes.", icon: ChartColumn, routeApps: ["reports"], launcher: { section: "reports", href: "/reports" }, todaySections: [] },
+  // Workspace modules (docs/plan/WORKSPACE_MODULES.md D800, W1-CORE placeholder): hidden (`planned`)
+  // until each lane ships; W1-UI's registry (src/workspaceModules) replaces these rows.
+  ...WORKSPACE_MODULE_IDS.map((id): ModuleDef => ({ id, label: WORKSPACE_MODULE_LABELS[id].label, description: WORKSPACE_MODULE_LABELS[id].description, icon: Inbox, routeApps: [], todaySections: [], planned: true })),
   { id: "search", label: "Search", description: "The search box in Notes, Ctrl+K, and the text filter on boards. The Notes list and the other board filters stay.", icon: Search, routeApps: [], todaySections: [], headerItem: "search" },
   { id: "bin", label: "Bin", description: "Hides Settings → Bin and Leaving the Bin soon. Deleting still moves items to the Bin, and they are still deleted forever after 30 days.", icon: Trash2, routeApps: ["bin"], todaySections: ["binSoon"], headerItem: "bin" },
   { id: "notifications", label: "Notifications", description: "Hides the bell and the Notifications page. Reminders and push notifications still arrive.", icon: Bell, routeApps: ["notifications"], todaySections: [], headerItem: "bell" },
