@@ -96,8 +96,9 @@ describe("estimates in the history (D750)", () => {
 describe("moving a card to another board (D716)", () => {
   test("is recorded on the card with both boards and keys; its earlier history moves with it", async () => {
     const { owner, member } = await users();
-    const source = await board(owner, "My tasks", { code: "MYT" });
-    const target = await board(owner, "Roadmap", { code: "ROA" });
+    const source = await board(owner, "My tasks", { code: "QMV" });
+    const target = await board(owner, "Roadmap", { code: "QRD" });
+    // Codes no other test file takes (the suite shares one database).
     // Tags: "Backend" exists on both boards, "Spike" only on the source, so the move drops it.
     const tag = async (boardId: string, name: string) => (await call(owner, "POST", `/boards/${boardId}/tags`, { name, color: "blue" })).body.tag.id as string;
     const backend = await tag(source.id, "Backend");
@@ -118,7 +119,7 @@ describe("moving a card to another board (D716)", () => {
     // Rows written before the move keep the old board's id; reads go by card.
     expect(rows.slice(0, 2).map((row) => row.board)).toEqual([source.id, source.id]);
     expect(rows[2]).toEqual({ kind: "board_move", board: target.id, via: null,
-      from: { id: source.id, label: "My tasks", detail: "MYT-2" }, to: { id: target.id, label: "Roadmap", detail: "ROA-1" } });
+      from: { id: source.id, label: "My tasks", detail: "QMV-2" }, to: { id: target.id, label: "Roadmap", detail: "QRD-1" } });
     expect(rows[3]).toMatchObject({ item: { id: spike, label: "Spike" } });
 
     // The owner reads the whole history on the new board, the move first (newest first).
@@ -129,15 +130,15 @@ describe("moving a card to another board (D716)", () => {
     const seen = await call(member, "GET", `/cards/${card.id}/activity`);
     expect(seen.status).toBe(200);
     const move = (seen.body.activity as CardActivityEntry[]).find((entry) => entry.kind === "board_move")!;
-    expect(move.payload).toEqual({ from: { label: "a board you can't open" }, to: { id: target.id, label: "Roadmap", detail: "ROA-1" } });
+    expect(move.payload).toEqual({ from: { label: "a board you can't open" }, to: { id: target.id, label: "Roadmap", detail: "QRD-1" } });
     expect(seen.body.activity.map((entry: CardActivityEntry) => entry.kind)).toEqual(["tag_removed", "board_move", "title", "created"]);
 
     // MCP reads it by the card's new key and by its old one.
     const key = createApiKey(owner.userId, { name: "Move reader", surfaces: "both", grants: [{ module: "tasks", permission: "read", resourceKind: null, resourceId: null }], expiresInDays: 30 });
-    for (const ref of ["ROA-1", "myt-2"]) {
+    for (const ref of ["QRD-1", "qmv-2"]) {
       const result = JSON.parse((await invokeMcpToolForTests("get_card_activity", { cardId: ref }, key.id, "mcp")).content[0]!.text) as { activity: CardActivityEntry[]; code?: string };
       expect(result.code).toBeUndefined();
-      expect(result.activity[1]).toMatchObject({ kind: "board_move", payload: { from: { label: "My tasks", detail: "MYT-2" }, to: { label: "Roadmap", detail: "ROA-1" } } });
+      expect(result.activity[1]).toMatchObject({ kind: "board_move", payload: { from: { label: "My tasks", detail: "QMV-2" }, to: { label: "Roadmap", detail: "QRD-1" } } });
     }
   });
 

@@ -9,7 +9,7 @@ import { addColumn, type Migration } from "./types";
  * `start:` filter and sort over live dated cards, like `idx_cards_due`.
  *
  * Needs 009, 011, and 015. Transactional and filesystem-free; existing rows stay NULL and pass;
- * re-running changes nothing. (064 and 065 were taken; 079 is left to the parallel board-codes lane.)
+ * re-running changes nothing. (064 and 065 were taken; 079 is board keys, D710–D716.)
  */
 export const cardStartDatesMigration: Migration = {
   id: 80,

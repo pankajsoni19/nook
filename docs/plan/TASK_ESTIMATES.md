@@ -2,7 +2,7 @@
 
 Operator, 2026-11-13: estimates on task cards, with a board-level setting that chooses what they mean (off, story points, or hours), editable in Board settings; a field on the card, a badge on card faces, column and sprint totals, and the same over REST v1 and MCP.
 
-Decisions **D750–D757** (D710–D749 are the parallel lanes' of the same day). Migration **082** (079 is board keys, 080 start dates, 081 reserved for card activity). No new threat: estimates are one bounded number per card, written at the card's edit level and the board's manage level like every other field.
+Decisions **D750–D757** (D710–D749 are the parallel lanes' of the same day). Migration **082** (079 is board keys, 080 start dates, 081 card activity). No new threat: estimates are one bounded number per card, written at the card's edit level and the board's manage level like every other field.
 
 This **supersedes Q4** (and the last sentence of **D134**, "No story points in v1") of [the hierarchy research](research/2026-09-26-task-hierarchy-workflows.md) ("Story points and a burndown chart? No, not in v1 … Add an optional `estimate` field later if a scrum team asks") and the "no points (Q4)" notes in `SprintBar.tsx` and `sprintModel.ts`. A burndown chart is still out of scope.
 
