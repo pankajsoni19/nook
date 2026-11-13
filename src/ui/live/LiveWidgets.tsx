@@ -131,7 +131,7 @@ export function WordCloud({ prompt, words, onSubmit, maxLength = 25, presenter =
       {top.length === 0 && <span className="ui-live-note" style={{ fontSize: 14 }}>No words yet.</span>}
     </div>
     <ol className="ui-visually-hidden" aria-label="Words, most frequent first">{top.map((word) => <li key={word.text}>{word.text}, {word.count}</li>)}</ol>
-    {onSubmit && !closed && <form className="ui-cloud-form" onSubmit={(event) => { event.preventDefault(); void send(); }}>
+    {onSubmit && !closed && <form className="ui-cloud-form" noValidate onSubmit={(event) => { event.preventDefault(); void send(); }}>
       <label className="ui-visually-hidden" htmlFor={`${id}-word`}>Your word</label>
       <input id={`${id}-word`} type="text" value={text} maxLength={maxLength} placeholder="Add a word or two" disabled={sending} onChange={(event) => setText(event.target.value)} />
       <button type="submit" className="ui-q-submit" disabled={sending || !text.trim()}>Send</button>

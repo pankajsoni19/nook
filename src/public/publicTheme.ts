@@ -1,6 +1,6 @@
 /**
  * The public pages' light theme (§E.6, D831): the only light surface in Nook. public.css and the
- * question renderer's `data-theme="public"` use these values; tests/publicPages.test.tsx checks every
+ * question renderer's `data-theme="public"` use these values; tests/workspaceUi.test.tsx checks every
  * text/background pair against WCAG AA (4.5:1) and the decorative pairs against 3:1.
  *
  * The plan's accent `#b8860b` (Nook's amber darkened) is 3.25:1 on white: enough for borders, focus

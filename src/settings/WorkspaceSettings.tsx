@@ -76,7 +76,7 @@ export function WorkspaceSettings({ role }: { role: string | undefined }) {
   return <section className="settings-content workspace-settings" aria-labelledby={HUB_TITLE_ID} aria-busy={units === null || undefined}>
     <div className="settings-section-heading"><span className="settings-icon"><Ruler /></span><div><h3>Your units</h3><p>How weeks, durations, and timesheets read for you.</p></div></div>
     {error && <p className="ui-field-error" role="alert">{error}</p>}
-    <div className="ui-q-settings-row" style={{ maxWidth: 720 }}>
+    <div className="ui-settings-grid">
       <div className="ui-field"><span id={`${id}-week`}>Week starts on</span>
         <Select labelledBy={`${id}-week`} value={String(prefs.weekStart) as "0" | "1" | "6"} disabled={busy || !units} onChange={(value) => { void saveUnits({ weekStart: Number(value) as 0 | 1 | 6 }); }}
           options={[{ value: "1", label: "Monday" }, { value: "0", label: "Sunday" }, { value: "6", label: "Saturday" }]} /></div>

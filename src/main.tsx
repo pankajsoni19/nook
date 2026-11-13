@@ -51,7 +51,6 @@ if (window.location.pathname.startsWith("/share/c/")) {
         <ErrorBoundary>
           <Gallery />
         </ErrorBoundary>
-        <AppToaster />
       </StrictMode>
     );
     mounted();

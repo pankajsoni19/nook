@@ -85,7 +85,7 @@ export function QaList({ questions, sort, onSort, onUpvote, onAsk, anonymousAllo
         <button type="button" aria-pressed={sort === "recent"} onClick={() => onSort("recent")}>Recent</button>
       </div>
     </header>
-    {onAsk && !closed && <form className="ui-qa-ask" onSubmit={(event) => { event.preventDefault(); void ask(); }}>
+    {onAsk && !closed && <form className="ui-qa-ask" noValidate onSubmit={(event) => { event.preventDefault(); void ask(); }}>
       <label className="ui-visually-hidden" htmlFor={`${id}-ask`}>Your question</label>
       <textarea id={`${id}-ask`} rows={2} value={text} maxLength={maxLength} placeholder="Ask a question" disabled={sending}
         onChange={(event) => setText(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) { event.preventDefault(); void ask(); } }} />

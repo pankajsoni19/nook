@@ -374,3 +374,6 @@ button.ui-person-body:hover .ui-person-name { color: #f5cf79; }
 
 .ui-kanban-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--tone-success-fill); }
 @media (max-width: 760px) { .ui-menu-root > .icon-button { width: 44px; height: 44px; } }
+
+/* Settings → Workspace: three fields in a row, one column on phones. */
+.ui-settings-grid { max-width: 760px; display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
