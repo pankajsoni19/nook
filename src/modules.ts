@@ -2,6 +2,7 @@ import { createContext, useContext } from "react";
 import { Archive, Bell, CalendarDays, ChartColumn, FileText, Inbox, KanbanSquare, KeyRound, MessagesSquare, PenTool, Search, Table2, Trash2, Users, type LucideIcon } from "lucide-react";
 import type { AppSection } from "./appShellNavigation";
 import { workspaceModules, type WorkspaceModuleId } from "./workspaceModules";
+import { WORKSPACE_MODULE_IDS } from "../shared/workspaceModules";
 
 /**
  * The module registry (D92, docs/plan/WAVE_13_TASK_CARD_UX.md §4.8). Settings → Modules lists these,
@@ -14,7 +15,7 @@ import { workspaceModules, type WorkspaceModuleId } from "./workspaceModules";
 
 /** Every module id, in Settings order. Keep in step with `MODULE_IDS` in server/moduleIds.ts. */
 // The workspace modules (D800, docs/plan/WORKSPACE_MODULES.md §B.1) follow Reports, in WORKSPACE_MODULE_IDS order.
-export const MODULE_IDS = ["notes", "files", "tasks", "collections", "calendar", "whiteboards", "vault", "agents", "reports", "forms", "time", "goals", "checkins", "crm", "bookings", "townhall", "search", "bin", "notifications", "team", "inbox"] as const;
+export const MODULE_IDS = ["notes", "files", "tasks", "collections", "calendar", "whiteboards", "vault", "agents", "reports", ...WORKSPACE_MODULE_IDS, "search", "bin", "notifications", "team", "inbox"] as const;
 export type ModuleId = (typeof MODULE_IDS)[number];
 
 /** The apps with a Today launcher tile. */

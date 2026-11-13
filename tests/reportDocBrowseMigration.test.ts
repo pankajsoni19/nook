@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { registeredMigrations, runMigrations } from "../server/migrations";
 import { reportDocBrowseMigration } from "../server/migrations/056_report_doc_browse";
+// Workspace modules (085 onward) are listed by server/migrations/workspace/*.ts, which each lane appends to.
+const workspaceMigrationIds = (await import("../server/migrations/workspace")).workspaceMigrations.map((migration) => migration.id);
 
 /** Migration 056: reports.doc_browse_tools and doc_source, and report_doc_pages (B3, B4). */
 const at = "2026-10-14T00:00:00.000Z";
@@ -46,6 +48,6 @@ describe("migration 056 report_doc_browse", () => {
 
     reportDocBrowseMigration.up(db);
     expect(db.query("SELECT doc_browse_tools, doc_source FROM reports WHERE id = 'r1'").get()).toEqual({ doc_browse_tools: "[\"fetch\"]", doc_source: "nook" });
-    expect((db.query("SELECT id FROM schema_migrations WHERE id >= 55 ORDER BY id").all() as Array<{ id: number }>).map((row) => row.id)).toEqual([55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 68, 69, 73, 74, 76, 77, 78, 79, 80, 81, 82, 83]);
+    expect((db.query("SELECT id FROM schema_migrations WHERE id >= 55 ORDER BY id").all() as Array<{ id: number }>).map((row) => row.id)).toEqual([55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 68, 69, 73, 74, 76, 77, 78, 79, 80, 81, 82, 83, ...workspaceMigrationIds]);
   });
 });

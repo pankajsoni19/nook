@@ -2,6 +2,7 @@ import { createContext, useContext } from "react";
 import { api } from "../api";
 import { KIND_LABELS, resourceToken, type GrantModule, type GrantPayload, type KeyGrantView, type KeyState, type KeySurfaces, type PolicySummary, type ResourceKind } from "./keyGrants";
 import type { McpScope } from "../mcpPermissions";
+import { WORKSPACE_MODULE_IDS } from "../../shared/workspaceModules";
 import type { VaultGrantPayload } from "./vaultKeyGrants";
 
 /** `/api/keys` (access plan §C.7). */
@@ -129,6 +130,11 @@ export async function loadResources(module: GrantModule): Promise<ResourceOption
     // Wave 45: your own reports.
     const { reports } = await api<{ reports: Array<{ id: string; title: string; isOwner: boolean }> }>("/reports");
     return reports.map((report) => ({ value: resourceToken("report", report.id), label: report.title, writable: report.isOwner }));
+  }
+  if ((WORKSPACE_MODULE_IDS as readonly string[]).includes(module)) {
+    // Workspace modules (W1-CORE): one generic list of the module's containers the caller can open.
+    const { resources } = await api<{ resources: Array<{ kind: ResourceKind; id: string; name: string; writable: boolean; ownerName: string | null }> }>(`/workspace/key-resources?module=${encodeURIComponent(module)}`);
+    return resources.map((item) => ({ value: resourceToken(item.kind, item.id), label: item.name, description: item.ownerName ? `Owned by ${item.ownerName}` : undefined, writable: item.writable }));
   }
   if (module === "calendar") {
     const { calendars } = await api<{ calendars: Array<{ id: string; name: string; role: string } & Owned> }>("/calendars");

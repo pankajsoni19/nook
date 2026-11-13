@@ -74,6 +74,7 @@ import { cardStartDatesMigration } from "./080_card_start_dates";
 import { cardActivityMigration } from "./081_card_activity";
 import { cardEstimatesMigration } from "./082_card_estimates";
 import { shortIdsMigration } from "./083_short_ids";
+import { workspaceMigrations } from "./workspace";
 
 const migrations = [initialMigration, folderSharingMigration, totpMigration, totpRecoveryCodesMigration, mcpApiKeysMigration, documentsMigration, binMigration, noteSearchMigration, taskBoardsMigration, mcpKeyScopesMigration, taskDatesMigration, collectionsMigration, calendarMigration, eventNextOccurrenceMigration, taskCardUxMigration, userPreferencesMigration, teamRolesMigration,
   // 018 (Team invites) may reach existing installs after 019 (task hierarchy) and 020 (task views); none depends on another.
@@ -211,7 +212,10 @@ const migrations = [initialMigration, folderSharingMigration, totpMigration, tot
   cardEstimatesMigration,
   // 083 (friendly URLs, D770–D789: short_id with a unique index and an insert trigger on notes, documents,
   // collections, and reports) needs 001, 006, 012, and 050.
-  shortIdsMigration
+  shortIdsMigration,
+  // 085–117 (workspace modules, docs/plan/WORKSPACE_MODULES.md): the foundation (085–089) and each lane's
+  // block, listed by server/migrations/workspace/*.ts (each lane appends to its own file only).
+  ...workspaceMigrations
 ];
 
 /** Every registered migration in order (read-only), for tests that build an older database shape. */

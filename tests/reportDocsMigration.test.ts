@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { registeredMigrations, runMigrations } from "../server/migrations";
 import { reportDocsMigration } from "../server/migrations/064_report_docs";
+// Workspace modules (085 onward) are listed by server/migrations/workspace/*.ts, which each lane appends to.
+const workspaceMigrationIds = (await import("../server/migrations/workspace")).workspaceMigrations.map((migration) => migration.id);
 
 /** Migration 064 (lane DOCS, D515–D517): report_docs backfilled from the one-doc columns, snapshot and run doc ids, instruction kinds and docs. */
 const at = "2026-10-20T00:00:00.000Z";
@@ -70,6 +72,6 @@ describe("migration 064 report_docs", () => {
 
     reportDocsMigration.up(db);
     expect(db.query("SELECT COUNT(*) AS count FROM report_docs").get()).toEqual({ count: 1 });
-    expect((db.query("SELECT id FROM schema_migrations WHERE id >= 63 ORDER BY id").all() as Array<{ id: number }>).map((row) => row.id)).toEqual([63, 64, 65, 66, 68, 69, 73, 74, 76, 77, 78, 79, 80, 81, 82, 83]);
+    expect((db.query("SELECT id FROM schema_migrations WHERE id >= 63 ORDER BY id").all() as Array<{ id: number }>).map((row) => row.id)).toEqual([63, 64, 65, 66, 68, 69, 73, 74, 76, 77, 78, 79, 80, 81, 82, 83, ...workspaceMigrationIds]);
   });
 });

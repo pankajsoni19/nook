@@ -1,4 +1,5 @@
 import { formatEntry, parseEntry } from "../../shared/ipRanges";
+import { WORKSPACE_MODULE_IDS, WORKSPACE_MODULE_LABELS, type WorkspaceContainerKind, type WorkspaceModuleId } from "../../shared/workspaceModules";
 import { MCP_PERMISSIONS, offeredMcpPermissions, type McpScope } from "../mcpPermissions";
 
 /**
@@ -7,15 +8,16 @@ import { MCP_PERMISSIONS, offeredMcpPermissions, type McpScope } from "../mcpPer
  * builder's rules and summaries are unit-tested.
  */
 
-export type GrantModule = "notes" | "files" | "tasks" | "today" | "calendar" | "collections" | "team" | "inbox" | "bin" | "whiteboards" | "agents" | "reports";
+export type GrantModule = "notes" | "files" | "tasks" | "today" | "calendar" | "collections" | "team" | "inbox" | "bin" | "whiteboards" | "agents" | "reports" | WorkspaceModuleId;
 export type KeyPermission = "read" | "comment" | "write" | "draft" | "publish" | "create" | "run";
-export type ResourceKind = "folder" | "note" | "document" | "board" | "task_view" | "collection" | "calendar" | "routine" | "whiteboard" | "agent" | "knowledge_base" | "report";
+export type ResourceKind = "folder" | "note" | "document" | "board" | "task_view" | "collection" | "calendar" | "routine" | "whiteboard" | "agent" | "knowledge_base" | "report" | WorkspaceContainerKind;
 export type KeySurfaces = "mcp" | "rest" | "both";
 
-export const GRANT_MODULES: readonly GrantModule[] = ["notes", "files", "tasks", "today", "calendar", "collections", "team", "inbox", "bin", "whiteboards", "agents", "reports"];
+export const GRANT_MODULES: readonly GrantModule[] = ["notes", "files", "tasks", "today", "calendar", "collections", "team", "inbox", "bin", "whiteboards", "agents", "reports", ...WORKSPACE_MODULE_IDS];
 
 export const MODULE_LABELS: Record<GrantModule, string> = {
-  notes: "Notes", files: "Files", tasks: "Tasks", today: "Today", calendar: "Calendar", collections: "Collections", team: "Team", inbox: "Inbox", bin: "Bin", whiteboards: "Whiteboards", agents: "Chat", reports: "Reports"
+  notes: "Notes", files: "Files", tasks: "Tasks", today: "Today", calendar: "Calendar", collections: "Collections", team: "Team", inbox: "Inbox", bin: "Bin", whiteboards: "Whiteboards", agents: "Chat", reports: "Reports",
+  ...Object.fromEntries(WORKSPACE_MODULE_IDS.map((id) => [id, WORKSPACE_MODULE_LABELS[id].label])) as Record<WorkspaceModuleId, string>
 };
 
 /** Every `{module, permission}` pair a key can hold, and the MCP scope it is. */
@@ -33,7 +35,9 @@ export const GRANT_SCOPES: Record<GrantModule, Partial<Record<KeyPermission, Mcp
   // Wave 42 (AC-C): run agents over REST and MCP.
   agents: { read: "agents:read", run: "agents:run" },
   // Wave 45: analytics reports.
-  reports: { read: "reports:read", write: "reports:write" }
+  reports: { read: "reports:read", write: "reports:write" },
+  // Workspace modules (D800).
+  ...Object.fromEntries(WORKSPACE_MODULE_IDS.map((id) => [id, { read: `${id}:read`, write: `${id}:write` }])) as Record<WorkspaceModuleId, Partial<Record<KeyPermission, McpScope>>>
 };
 
 export const scopeFor = (module: GrantModule, permission: KeyPermission) => GRANT_SCOPES[module][permission] ?? null;
@@ -57,7 +61,15 @@ export const SELECTOR_KINDS: Partial<Record<GrantModule, { kinds: readonly Resou
   // Wave 42 (AC-C): run all your agents or chosen ones. Wave 44 (AC-E): reading may name chosen
   // knowledge bases (PERMISSION_SELECTORS below decides per permission).
   agents: { kinds: ["agent", "knowledge_base"], one: "agent or knowledge base", many: "agents and knowledge bases" },
-  reports: { kinds: ["report"], one: "report", many: "reports" }
+  reports: { kinds: ["report"], one: "report", many: "reports" },
+  // Workspace modules (§B.9): the module's sharing container (GET /api/workspace/key-resources lists them).
+  forms: { kinds: ["form"], one: "form", many: "forms" },
+  time: { kinds: ["time_project"], one: "time project", many: "time projects" },
+  goals: { kinds: ["goal"], one: "goal", many: "goals" },
+  checkins: { kinds: ["checkin"], one: "standup", many: "standups" },
+  crm: { kinds: ["contact_book"], one: "contact book", many: "contact books" },
+  bookings: { kinds: ["booking_type"], one: "booking type", many: "booking types" },
+  townhall: { kinds: ["townhall_session"], one: "townhall", many: "townhalls" }
 };
 
 /**
@@ -71,7 +83,8 @@ export const PERMISSION_SELECTORS: Readonly<Record<string, { kinds: readonly Res
 };
 
 export const KIND_LABELS: Record<ResourceKind, string> = {
-  folder: "Folder", note: "Note", document: "File", board: "Board", task_view: "View", collection: "Collection", calendar: "Calendar", routine: "Routine", whiteboard: "Whiteboard", agent: "Agent", knowledge_base: "Knowledge base", report: "Report"
+  folder: "Folder", note: "Note", document: "File", board: "Board", task_view: "View", collection: "Collection", calendar: "Calendar", routine: "Routine", whiteboard: "Whiteboard", agent: "Agent", knowledge_base: "Knowledge base", report: "Report",
+  form: "Form", time_project: "Time project", goal: "Goal", checkin: "Standup", contact_book: "Contact book", booking_type: "Booking type", townhall_session: "Townhall"
 };
 
 /**
@@ -291,7 +304,9 @@ export function grantChips(grants: readonly KeyGrantView[]) {
 const KIND_NOUNS: Record<ResourceKind, readonly [string, string]> = {
   folder: ["folder", "folders"], note: ["note", "notes"], document: ["file", "files"], board: ["board", "boards"], task_view: ["view", "views"],
   collection: ["collection", "collections"], calendar: ["calendar", "calendars"], routine: ["routine", "routines"], whiteboard: ["whiteboard", "whiteboards"],
-  agent: ["agent", "agents"], knowledge_base: ["knowledge base", "knowledge bases"], report: ["report", "reports"]
+  agent: ["agent", "agents"], knowledge_base: ["knowledge base", "knowledge bases"], report: ["report", "reports"],
+  form: ["form", "forms"], time_project: ["time project", "time projects"], goal: ["goal", "goals"], checkin: ["standup", "standups"],
+  contact_book: ["contact book", "contact books"], booking_type: ["booking type", "booking types"], townhall_session: ["townhall", "townhalls"]
 };
 
 /** One sentence under the builder: what the key can do, and what no key ever does (D265). */
