@@ -1,6 +1,7 @@
 import { db } from "../db";
 import { readableBoardPredicate } from "./access";
 import { NO_FILTER, type SqlFilter } from "../keyResources";
+import { cardIdForKey } from "./keys";
 
 /**
  * Card search for the relation picker (WAVE_13_TASK_CARD_UX.md D106, T95). Not full-text search:
@@ -13,8 +14,8 @@ export const CARD_SEARCH_LIMIT_MAX = 20;
 export const CARD_SEARCH_RATE_LIMIT = 20;
 export const CARD_SEARCH_RATE_WINDOW_MS = 10_000;
 
-/** `is_archived` (D607): 1 for a card the auto-archive sweep archived; search still finds it. */
-export type CardSearchHit = { id: string; board_id: string; board_name: string; title: string; column_name: string; is_done: 0 | 1; is_archived: 0 | 1 };
+/** `is_archived` (D607): 1 for a card the auto-archive sweep archived; search still finds it. `key` (D710): MYT-12. */
+export type CardSearchHit = { id: string; board_id: string; board_name: string; title: string; column_name: string; is_done: 0 | 1; is_archived: 0 | 1; key: string | null };
 
 /**
  * Order: cards on `boardId` first (a hint only; it never widens or narrows the readable set), then
@@ -24,17 +25,21 @@ export type CardSearchHit = { id: string; board_id: string; board_name: string; 
 export function searchCards(userId: string, q: string, options: { boardId?: string | null; excludeCardId?: string | null; limit?: number; keyScope?: SqlFilter } = {}) {
   const keyScope = options.keyScope ?? NO_FILTER;
   const limit = options.limit ?? CARD_SEARCH_LIMIT_MAX;
+  // A key (MYT-12, an old code or a moved card's old key too, D713) finds its card first; the
+  // readable predicate and the key's scope still decide whether it is listed (T460).
+  const keyCardId = cardIdForKey(q);
   const rows = db.query(`
     SELECT k.id, k.board_id, b.name AS board_name, k.title, c.name AS column_name, c.is_done,
-           CASE WHEN k.archived_at IS NULL THEN 0 ELSE 1 END AS is_archived
+           CASE WHEN k.archived_at IS NULL THEN 0 ELSE 1 END AS is_archived,
+           CASE WHEN b.code IS NOT NULL AND k.number IS NOT NULL THEN b.code || '-' || k.number END AS "key"
     FROM cards k JOIN boards b ON b.id = k.board_id JOIN board_columns c ON c.id = k.column_id
     WHERE k.deleted_at IS NULL AND ${readableBoardPredicate}
-      AND instr(lower(k.title), lower($q)) > 0
+      AND (instr(lower(k.title), lower($q)) > 0 OR k.id = $keyCardId)
       AND ($excludeCardId IS NULL OR k.id <> $excludeCardId)
       AND ${keyScope.sql}
-    ORDER BY CASE WHEN k.board_id = $boardId THEN 0 ELSE 1 END, CASE WHEN instr(lower(k.title), lower($q)) = 1 THEN 0 ELSE 1 END,
+    ORDER BY CASE WHEN k.id = $keyCardId THEN 0 ELSE 1 END, CASE WHEN k.board_id = $boardId THEN 0 ELSE 1 END, CASE WHEN instr(lower(k.title), lower($q)) = 1 THEN 0 ELSE 1 END,
              k.updated_at DESC, k.id
-    LIMIT $limit`).all({ ...keyScope.params, userId, q, boardId: options.boardId ?? null, excludeCardId: options.excludeCardId ?? null, limit: limit + 1 }) as CardSearchHit[];
+    LIMIT $limit`).all({ ...keyScope.params, userId, q, keyCardId, boardId: options.boardId ?? null, excludeCardId: options.excludeCardId ?? null, limit: limit + 1 }) as CardSearchHit[];
   return { results: rows.slice(0, limit), truncated: rows.length > limit };
 }
 
