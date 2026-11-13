@@ -4,6 +4,7 @@ import { EmptyState } from "../ui/EmptyState";
 import { Select } from "../ui/Select";
 import { useModuleShortcuts } from "../ui/moduleKeys";
 import { notify } from "../ui/notify";
+import { useConfirm } from "../ui/useConfirm";
 import type { CrmBook, CrmCompany, CrmContact, CrmEntity, CrmFilter, CrmList, CrmSort, CrmView } from "../../shared/crm";
 import { binCompany, binContact, changeListMembers, createView, deleteView, errorMessage, listCompanies, listContacts, listLists, listViews, updateContact } from "./crmApi";
 import { FilterSheet, filterLabel } from "./Sheets";
@@ -39,6 +40,8 @@ export function RecordsView({ entity, book, books, q, userId, canWrite, listRef,
   const [views, setViews] = useState<CrmView[]>([]);
   const [viewId, setViewId] = useState<string | null>(null);
   const request = useRef(0);
+  const { ask, confirmElement } = useConfirm();
+  const [naming, setNaming] = useState<string | null>(null);
   const custom = book?.fields[entity] ?? [];
 
   const load = useCallback(async (next: string | null = null) => {
@@ -76,7 +79,8 @@ export function RecordsView({ entity, book, books, q, userId, canWrite, listRef,
   };
   const saveView = async () => {
     if (!book) return;
-    const name = window.prompt("Name this view", filters.map((filter) => filterLabel(filter, book, entity)).join(", ").slice(0, 60) || "My view");
+    const name = naming;
+    setNaming(null);
     if (!name?.trim()) return;
     try { const { view } = await createView({ bookId: book.id, entity, name: name.trim(), config: { filters, ...(sort ? { sort } : {}) } }); setViews((current) => [...current, view]); setViewId(view.id); notify.success(`Saved “${view.name}”`); }
     catch (reason) { notify.error(errorMessage(reason, "Could not save the view")); }
@@ -103,7 +107,7 @@ export function RecordsView({ entity, book, books, q, userId, canWrite, listRef,
     catch (reason) { notify.error(errorMessage(reason, "Could not change the owner")); }
   };
   const binSelected = async () => {
-    if (!window.confirm(`Move ${ids.length} ${entity === "contact" ? (ids.length === 1 ? "contact" : "contacts") : (ids.length === 1 ? "company" : "companies")} to the Bin? You can restore them for 30 days.`)) return;
+    if (!(await ask({ title: `Move ${ids.length} ${entity === "contact" ? (ids.length === 1 ? "contact" : "contacts") : (ids.length === 1 ? "company" : "companies")} to the Bin?`, message: "You can restore them from the Bin for 30 days.", confirmLabel: "Move to Bin", danger: true }))) return;
     try { await Promise.all(ids.map((id) => entity === "contact" ? binContact(id) : binCompany(id))); notify.success(`Moved ${ids.length} to the Bin`); setSelected(new Set()); void load(null); }
     catch (reason) { notify.error(errorMessage(reason, "Could not move to the Bin")); }
   };
@@ -147,7 +151,13 @@ export function RecordsView({ entity, book, books, q, userId, canWrite, listRef,
       {filters.filter((filter) => !(filter.field === "owner" && filter.value === "me") && !(filter.field === "lifecycle" && filter.op === "eq")).map((filter, index) =>
         <span key={`${filter.field}-${index}`} className="ui-filter-chip crm-filter-applied">{filterLabel(filter, book, entity)}<button type="button" aria-label={`Remove filter ${filterLabel(filter, book, entity)}`} onClick={() => setFilters((current) => current.filter((item) => item !== filter))}><X aria-hidden="true" /></button></span>)}
       <button type="button" className="ui-filter-chip" onClick={() => setFiltering(true)}><Filter aria-hidden="true" />Filter</button>
-      {book && filters.length > 0 && !viewId && <button type="button" className="ui-text-button" onClick={() => void saveView()}>Save view</button>}
+      {book && filters.length > 0 && !viewId && naming === null && <button type="button" className="ui-text-button" onClick={() => setNaming(filters.map((filter) => filterLabel(filter, book, entity)).join(", ").slice(0, 60))}>Save view</button>}
+      {naming !== null && <form className="crm-inline-name" onSubmit={(event) => { event.preventDefault(); void saveView(); }}>
+        <label className="ui-visually-hidden" htmlFor="crm-view-name">View name</label>
+        <input id="crm-view-name" autoFocus maxLength={60} value={naming} onChange={(event) => setNaming(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); setNaming(null); } }} />
+        <button type="submit" className="ui-small-button secondary-button" disabled={!naming.trim()}>Save</button>
+        <button type="button" className="ui-text-button" onClick={() => setNaming(null)}>Cancel</button>
+      </form>}
       {viewId && views.find((view) => view.id === viewId)?.mine && <button type="button" className="ui-text-button" onClick={() => void removeView()}>Delete view</button>}
     </div>
 
@@ -194,6 +204,6 @@ export function RecordsView({ entity, book, books, q, userId, canWrite, listRef,
       </table></div>}
     {cursor && <button type="button" className="secondary-button crm-more" disabled={loadingMore} onClick={() => { setLoadingMore(true); void load(cursor).finally(() => setLoadingMore(false)); }}>{loadingMore ? "Loading…" : "Load more"}</button>}
     {filtering && <FilterSheet entity={entity as CrmEntity} book={book} onClose={() => setFiltering(false)} onAdd={(filter) => { setFilters((current) => [...current, filter]); setViewId(null); setFiltering(false); }} />}
-    <span hidden>{books.length}</span>
+    {confirmElement}
   </div>;
 }
