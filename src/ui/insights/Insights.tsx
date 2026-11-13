@@ -55,7 +55,8 @@ export function insightOption(kind: "bar" | "line" | "area" | "stacked" | "pie",
   return {
     color: palette,
     grid: { left: 8, right: 16, top: series.length > 1 ? 36 : 16, bottom: 8, containLabel: true },
-    legend: series.length > 1 ? { top: 0, left: 0 } : undefined,
+    // One scrolling row: a plain legend wraps onto more rows on a phone and runs into the plot (top is one row).
+    legend: series.length > 1 ? { type: "scroll", top: 0, left: 0, right: 0 } : undefined,
     tooltip: { trigger: "axis", valueFormatter: format },
     xAxis: { type: "category", data: categories, boundaryGap: kind !== "line" && kind !== "area" },
     yAxis: { type: "value", axisLabel: { formatter: format } },

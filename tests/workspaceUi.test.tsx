@@ -254,6 +254,10 @@ describe("timeline, board, live widgets", () => {
     expect(formatInsightValue(5400, "duration")).toBe("1h 30m");
     expect(formatInsightValue(0.625, "percent")).toBe("63%");
     expect(formatInsightValue(null)).toBe("—");
+    // Several series: the legend is one scrolling row above the plot, so it never wraps into it at 375 px.
+    const legendOption = insightOption("bar", ["A"], [{ name: "Consulting", values: [1] }, { name: "Internal", values: [2] }, { name: "Support", values: [3] }], "number") as { legend?: { type?: string }; grid: { top: number } };
+    expect(legendOption.legend?.type).toBe("scroll");
+    expect(legendOption.grid.top).toBe(36);
     const option = insightOption("stacked", ["A"], [{ name: "x", values: [1] }], "number") as { series: Array<{ stack?: string; type: string }> };
     expect(option.series[0]).toMatchObject({ type: "bar", stack: "total" });
   });
