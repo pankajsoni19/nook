@@ -15,7 +15,9 @@ import { moduleDef } from "../src/modules";
  */
 const src = join(import.meta.dir, "..", "src");
 const read = (path: string) => readFileSync(join(src, path), "utf8");
-const ids = (entries: ReturnType<typeof hubEntries>) => entries.map((entry) => entry.id);
+// Settings → Workspace joins once a workspace module ships (D836, Contacts has); these tests are about the Bin.
+const withoutWorkspace = (entries: ReturnType<typeof hubEntries>) => entries.filter((entry) => entry.id !== "workspace");
+const ids = (entries: ReturnType<typeof hubEntries>) => withoutWorkspace(entries).map((entry) => entry.id);
 
 describe("routes", () => {
   test("/settings/bin is canonical; /bin opens the same screen and is rewritten to it (both directions)", () => {
@@ -50,7 +52,7 @@ describe("routes", () => {
 describe("the hub's entries", () => {
   test("every role but guest has the Bin in a Workspace group between Account and Team", () => {
     for (const role of ["admin", "member", "viewer"] as const) {
-      const entries = hubEntries(role, { teamModuleEnabled: true });
+      const entries = withoutWorkspace(hubEntries(role, { teamModuleEnabled: true }));
       const bin = entries.findIndex((entry) => entry.id === "bin");
       expect(entries[bin]).toMatchObject({ group: "workspace", label: "Bin", route: { app: "bin" } });
       expect(entries.slice(0, bin).every((entry) => entry.group === "account")).toBe(true);
