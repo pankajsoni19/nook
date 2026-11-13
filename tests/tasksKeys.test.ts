@@ -238,6 +238,18 @@ describe("move a card to another board (D715, D716, T462)", () => {
     expect((await call(owner, "GET", `/cards/${task.id}`)).body.card.child_count).toBe(0);
   });
 
+  test("the sheet lists a target board's columns from GET /boards/:b/columns, for readers only", async () => {
+    const owner = await createUser("Keys Columns owner");
+    const stranger = await createUser("Keys Columns stranger");
+    const target = await board(owner, "Columns target");
+    await card(owner, target.id, target.columns[0]!.id, "Not sent");
+    const listed = await call(owner, "GET", `/boards/${target.id}/columns`);
+    expect(listed.status).toBe(200);
+    expect(Object.keys(listed.body)).toEqual(["columns"]);
+    expect((listed.body.columns as Array<{ id: string; board_id: string }>).map((column) => column.id)).toEqual(target.columns.map((column) => column.id));
+    expect((await call(stranger, "GET", `/boards/${target.id}/columns`)).status).toBe(404);
+  });
+
   test("refused: below edit on either board, an unreadable board, the same board, a card with sub-cards, a full column", async () => {
     const { owner, source, target } = await scene("Keys Refuse");
     const member = await createUser("Keys Refuse member");

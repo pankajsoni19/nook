@@ -4,7 +4,7 @@ import { ColumnStatusIcon, ColumnStatusText, columnStatuses, columnStatusId } fr
 import { ModalDialog } from "../files/Dialog";
 import { useHistoryDialogGuard } from "../ui/useHistoryDialogGuard";
 import { canEnterColumn } from "./taskActions";
-import { getBoard, listBoards, type BoardColumn, type BoardSummary, type CardSummary } from "./tasksApi";
+import { getBoardColumns, listBoards, type BoardColumn, type BoardSummary, type CardSummary } from "./tasksApi";
 import { levelAtLeast } from "../access/accessLevels";
 import { FormError } from "../ui/FormError";
 
@@ -46,7 +46,7 @@ type MoveCardSheetProps = {
 };
 
 const defaultLoadBoards = () => listBoards().then((result) => result.boards);
-const defaultLoadColumns = (boardId: string) => getBoard(boardId).then((detail) => [...detail.columns].sort((a, b) => a.position - b.position));
+const defaultLoadColumns = (boardId: string) => getBoardColumns(boardId);
 
 /** The boards a card can move to (D716): every other board where the person edits cards. */
 export function moveTargets(boards: readonly BoardSummary[], fromBoardId: string) {

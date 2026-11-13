@@ -46,7 +46,9 @@ import {
   getSharing,
   listBoardReaders,
   listBoards,
+  listColumns,
   patchColumn,
+  requireReadableBoard,
   putSharing,
   updateBoard,
   TaskError
@@ -309,6 +311,16 @@ export function registerTaskRoutes(app: Hono<AppEnv>) {
   app.get("/api/tasks/boards/:boardId", (c) => {
     const boardId = id(c, "boardId");
     return respond(c, () => boardPayload(c.get("user").id, boardId));
+  });
+
+  // A board's columns alone, in board order, for anyone who can read it (Move to another board lists
+  // a target board's columns without loading its cards).
+  app.get("/api/tasks/boards/:boardId/columns", (c) => {
+    const boardId = id(c, "boardId");
+    return respond(c, () => {
+      requireReadableBoard(boardId, c.get("user").id);
+      return { columns: listColumns(boardId) };
+    });
   });
 
   // D634: the next page of archived cards after `before` (the last page's `archivedPage.next`), newest archived first.

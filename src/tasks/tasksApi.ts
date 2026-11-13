@@ -191,6 +191,8 @@ export function hydrateBoard(payload: BoardPayload): BoardDetail {
 }
 
 export const getBoard = (boardId: string) => api<BoardPayload>(`/tasks/boards/${boardId}`).then(hydrateBoard);
+/** A board's columns in board order, without its cards (Move to another board, D716). */
+export const getBoardColumns = (boardId: string) => api<{ columns: BoardColumn[] }>(`/tasks/boards/${boardId}/columns`).then((result) => result.columns);
 /** The next page of archived cards (D634), hydrated like the board's. */
 export async function getArchivedCards(boardId: string, before: string, code?: string | null) {
   const page = await api<Pick<BoardPayload, "cards" | "users"> & { archivedPage: ArchivedPage }>(`/tasks/boards/${boardId}/archived?before=${encodeURIComponent(before)}`);
