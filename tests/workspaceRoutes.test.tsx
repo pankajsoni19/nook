@@ -7,7 +7,7 @@ import { MODULES, ModulesContext, settingsModulesFor } from "../src/modules";
 import { formatRoute, locationUrl, parseRoute } from "../src/router";
 import { nameItems } from "../src/routeNames";
 import { readAppHistorySection } from "../src/appShellNavigation";
-import { module as goalsStub } from "../src/goals/module";
+import { module as goalsModule } from "../src/goals/module";
 import {
   friendlyWorkspaceItem, isWorkspaceModuleId, readyWorkspaceModules, registerWorkspaceClientModule, WORKSPACE_MODULE_IDS, workspaceHomeRoute, workspaceModules,
   type WorkspaceClientModule, type WorkspaceRoute
@@ -29,6 +29,12 @@ import { TopBarItems } from "../src/AppShell";
 
 const notify = Object.assign(() => undefined, { success: () => undefined, info: () => undefined, warning: () => undefined, error: () => undefined }) as never;
 const card = { id: "0b7c1a52-3f5e-4d8e-9a51-0c6a7f2b9d11", board_id: "1b7c1a52-3f5e-4d8e-9a51-0c6a7f2b9d11", key: "MYT-12", title: "Ship it" };
+
+// Goals has shipped (lane GOALS); the throwaway below is still built on its id, from a stub copy of it.
+const goalsStub: WorkspaceClientModule = {
+  id: goalsModule.id, segment: goalsModule.segment, label: goalsModule.label, icon: goalsModule.icon, description: goalsModule.description, ready: false, app: null
+};
+const SHIPPED: readonly string[] = ["goals"];
 
 const goalsTest: WorkspaceClientModule = {
   ...goalsStub,
@@ -67,7 +73,7 @@ const goalsTest: WorkspaceClientModule = {
 };
 
 afterAll(() => {
-  registerWorkspaceClientModule(goalsStub);
+  registerWorkspaceClientModule(goalsModule);
   clearCardSlotsForTests();
   clearModuleEmbedsForTests();
 });
@@ -76,7 +82,7 @@ describe("the stubs (D800, D832)", () => {
   test("seven modules, in Settings order, all registered and none ready", () => {
     expect(workspaceModules().map((module) => module.id)).toEqual([...WORKSPACE_MODULE_IDS]);
     expect(WORKSPACE_MODULE_IDS).toEqual(["forms", "time", "goals", "checkins", "crm", "bookings", "townhall"]);
-    expect(readyWorkspaceModules()).toEqual([]);
+    expect(readyWorkspaceModules().map((module) => module.id)).toEqual([...SHIPPED]);
     // Product owner names (§G.1): Contacts at /contacts, Standups at /standups.
     expect(workspaceModules().map((module) => [module.id, module.label, module.segment])).toEqual([
       ["forms", "Forms", "forms"], ["time", "Time", "time"], ["goals", "Goals", "goals"], ["checkins", "Standups", "standups"],
@@ -85,13 +91,13 @@ describe("the stubs (D800, D832)", () => {
   });
 
   test("a stub is a planned module: not in Settings, no launcher, its URLs open Home", () => {
-    for (const id of WORKSPACE_MODULE_IDS) {
+    for (const id of WORKSPACE_MODULE_IDS.filter((item) => !SHIPPED.includes(item))) {
       const def = MODULES.find((module) => module.id === id)!;
       expect(def.planned).toBe(true);
       expect(def.routeApps).toEqual([id]);
     }
-    expect(settingsModulesFor("admin").some((module) => isWorkspaceModuleId(module.id))).toBe(false);
-    for (const path of ["/forms", "/contacts/ana-silva-9xk2mm0a1b", "/standups", "/goals/x"]) expect(parseRoute(path)).toEqual({ app: "home" });
+    expect(settingsModulesFor("admin").filter((module) => isWorkspaceModuleId(module.id)).map((module) => module.id)).toEqual([...SHIPPED]);
+    for (const path of ["/forms", "/contacts/ana-silva-9xk2mm0a1b", "/standups"]) expect(parseRoute(path)).toEqual({ app: "home" });
     expect(renderToStaticMarkup(<TopBarItems />)).toBe("");
   });
 

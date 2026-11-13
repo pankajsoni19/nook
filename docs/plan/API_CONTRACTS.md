@@ -3044,3 +3044,31 @@ No migration. Wire types: `shared/backups.ts` (`BackupsView`, `BackupRun`, `Dril
   - Content → moved to the Bin with the draft file and `draft_revision`/`draft_checksum` **kept** (today this route deletes them). The response still returns `{ ok: true }`, plus `binned: true`, so the client can pick the right toast.
 - "Blank" means `current_version = 0` and the draft is absent or empty after `trim()` (DEVELOPMENT_PLAN §9.1).
 - Unchanged: every read endpoint continues to exclude `deleted_at IS NOT NULL`. So do all MCP tools.
+
+## Goals (lane GOALS, D900–D922; migrations 096–097)
+
+JSON under `/api`, errors `{ error, code }`; a goal the caller cannot open is `404 NOT_FOUND`; `:id` takes a goal's UUID or short id. Writes need `edit` on the goal (owners, contributors, editors) unless noted.
+
+| Method | Path | Body / query | Returns |
+| --- | --- | --- | --- |
+| GET | `/api/goals` | `period` (id, `none`), `owner`, `team`, `parent` (id, `root`), `state`, `health`, `mine=1`, `q`, `closed=1`, `view=tree\|list`, `cursor`, `limit` | `{ goals: GoalSummary[], nextCursor }` (tree: ≤ 500, no cursor) |
+| POST | `/api/goals` | `{ title, description?, kind?, parentId?, periodId?, teamId?, ownerId?, startOn?, dueOn?, state?, progressMode?, cadence?, visibility?, shareRole?, contributorIds?, keyResults? }` | `201 { goal: GoalDetail }` |
+| GET / PATCH / DELETE | `/api/goals/:id` | PATCH: any of the above plus `health`, `progress` (manual mode), `expectedRevision` (409 `CONFLICT`); owner/visibility need manage | `{ goal }`; DELETE moves it to the Bin (manage) |
+| POST | `/api/goals/:id/key-results` | `{ title, metric?, direction?, startValue?, targetValue?, currentValue?, unit?, currency?, weight?, ownerId?, source?: { kind, config }, milestones? }` | `201 { keyResult }` |
+| PATCH / DELETE | `/api/key-results/:id` | PATCH: the same fields, partial, `expectedRevision` | `{ keyResult }`; DELETE `{ undoTicket }` (POST `/api/undo/:ticket`) |
+| GET | `/api/key-results/:id/values?from=&to=` | — | `{ values: [{ at, value, progress, source }] }` |
+| POST | `/api/goals/:id/preview-source` | `{ kind, config }` | `{ preview: { value, target, detail, description } }` |
+| POST | `/api/goals/:id/checkins` | `{ health, confidence?, note?, values?: { krId: number \| boolean }, milestonesDone?: { krId: milestoneId[] } }` | `201 { checkin, goal }` |
+| GET | `/api/goals/:id/checkins?cursor=` | — | `{ checkins, nextCursor }` |
+| GET | `/api/goals/:id/history` | — | `{ keyResults: [{ id, title, points }], checkins, current, ideal }` |
+| POST | `/api/goals/:id/close` · `/api/goals/:id/reopen` | `{ state: achieved\|missed\|dropped\|carried_over, carryOver?: { periodId } }` | `{ goal, carriedOver }` / `{ goal }` |
+| GET | `/api/goals/:id/work` | — | `{ links: WorkLinkView[] }` |
+| GET | `/api/goals/for-item?kind=&id=` | — | `{ goals }` the item contributes to (the card slot) |
+| GET | `/api/goals/sources` | — | `{ sources: [{ kind, label, module }] }` |
+| GET / POST | `/api/goal-periods` | `archived=1`; POST `{ name, startsOn, endsOn }` (members, admins) | `{ periods }` / `201 { period }` |
+| PATCH / DELETE | `/api/goal-periods/:id` | `{ name?, startsOn?, endsOn?, archived? }` (its creator or an admin) | `{ period }` / `{ deleted }` |
+| POST | `/api/goal-periods/:id/close` | `{ carryOverTo? }` | `{ closed: { achieved, missed, carried_over, skipped } }` |
+
+Sharing: `GET/PUT /api/access/goal/:id` (the generic container sheet). Links: `POST /api/links` with `a` the work and `b` the goal, relation `contributes`. Datasets: `goals.key_results`, `goals.kr_values`, `goals.checkins`. Search scope `goals`. Today sections `goalsCheckin`, `goalsAtRisk`. Notification topics `goals.checkin_due`, `goals.health_changed`, `goals.source_failing`, `goals.period_ending`.
+
+MCP (`goals:read` / `goals:write`; REST v1 exposes the same): `list_goals`, `get_goal`, `get_goal_tree`, `list_goal_checkins`, `list_goal_periods`, `list_goal_sources`, `create_goal`, `update_goal`, `add_kr`, `update_kr`, `check_in_goal`, `close_goal`, `create_goal_period`, `bin_goal` (also `bin:write`). Key results anchor on their goal for chosen-item keys.
