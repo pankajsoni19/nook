@@ -82,6 +82,7 @@ import {
 } from "./tasksApi";
 import { useHistoryDialogGuard } from "./useHistoryDialogGuard";
 import { useLayerOpener } from "../historyDialogs";
+import { estimateSettingsOf } from "../../shared/estimates";
 
 type BoardViewProps = {
   userId: string;
@@ -306,6 +307,8 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
 
   const board = detail?.board ?? null;
   const owner = board?.is_owner === 1;
+  // Lane ESTIMATES (D754, D755): what card estimates mean here; off hides them everywhere.
+  const estimates = estimateSettingsOf(board);
   const readOnly = cardsReadOnly(roleReadOnly, board?.level);
   // Managers (Wave 32, D273) change the structure, columns, tags, sprints, and sharing up to Can edit.
   const canManage = !roleReadOnly && (owner || board?.level === "manage");
@@ -851,7 +854,7 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
       name={hierarchy.structure.levels[hierarchy.structure.workLevel]?.name ?? "Card"} plural={hierarchy.structure.levels[hierarchy.structure.workLevel]?.plural ?? "Cards"}
       today={viewContext.today} owner={canManage} onSelect={sprints.select} onStart={(sprint) => { void sprints.start(sprint); }}
       onComplete={(sprint, trigger) => openDialog({ kind: "completeSprint", sprintId: sprint.id }, trigger)}
-      onNewSprint={(trigger) => openDialog({ kind: "newSprint" }, trigger)} onManage={onOpenSprints} />}
+      onNewSprint={(trigger) => openDialog({ kind: "newSprint" }, trigger)} onManage={onOpenSprints} estimateKind={estimates.kind} />}
     <KeyboardMoveHint id="task-card-keys">Press Alt with an arrow key to move a card up, down, or to the next column.</KeyboardMoveHint>
     <p className="sr-only" aria-live="polite">{announcement}</p>
 
@@ -901,7 +904,7 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
       })}
       {canManage && columns.length < MAX_COLUMNS && <button className="task-tab-add" onClick={(event) => openDialog({ kind: "addColumn" }, event.currentTarget)} aria-haspopup="dialog" aria-label="Add column"><Plus /></button>}
     </nav>}
-    {detail && view === "board" && swimMode && <BoardSwimlanes mode={swimMode} columns={columns} statuses={statuses} cards={shownLane} allCards={cards} tags={detail.tags ?? []}
+    {detail && view === "board" && swimMode && <BoardSwimlanes mode={swimMode} columns={columns} statuses={statuses} cards={shownLane} allCards={cards} tags={detail.tags ?? []} estimateKind={estimates.kind}
       today={viewContext.today} noneLabel={swimMode === "parent" ? `No ${(parentLevel?.name ?? "parent").toLowerCase()}` : "No assignee"}
       collapsedColumns={collapsed} onToggleColumn={(columnId) => { void toggleCollapsed(columnId); }} collapsedRows={collapsedRows} onToggleRow={(row) => { void toggleRow(row); }}
       readOnly={readOnly} phone={phone} trackRef={trackRef} onTrackScroll={onTrackScroll}
@@ -934,6 +937,7 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
         onToggleCollapsed={() => { void toggleCollapsed(column.id); }}
         phone={phone}
         tags={detail.tags}
+        estimateKind={estimates.kind}
         owner={owner}
         isFirst={index === 0}
         isLast={index === columns.length - 1}
@@ -990,6 +994,7 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
       onRelationsChanged={(id, counts) => setCards((items) => items.map((item) => item.id === id ? { ...item, ...counts } : item))}
       hierarchy={hierarchy.dialog}
       sprints={sprints.enabled ? sprints.sprints : undefined}
+      estimates={estimates}
     /></CardPage>}
     {composer && !readOnly && detail && board && <CardComposer
       boardId={boardId}
@@ -1014,7 +1019,11 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
     {savedViews.dialogs}
     {(dialog?.kind === "settings" || overSettings) && board && <BoardSettingsSheet board={board} owner={canManage} isOwner={owner} showAllLevels={hierarchy.showAll} onShowAllLevels={hierarchy.setShowAll}
       showArchived={showArchived} onShowArchived={(value) => { void setShowArchived(value); }}
-      onBoardSaved={(saved) => setDetail((current) => current ? { ...current, board: saved } : current)}
+      onBoardSaved={(saved) => {
+        setDetail((current) => current ? { ...current, board: saved } : current);
+        // Estimates turned on or changed kind (D752): the cards' kept values come with a fresh read.
+        if (estimateSettingsOf(saved).kind !== estimates.kind) void load();
+      }}
       onClose={closeDialog} notify={notify} suspended={overSettings}
       onRename={() => openOverSettings("rename")} onShare={() => openOverSettings("share")} onDelete={() => openOverSettings("deleteBoard")} onAddColumn={() => openOverSettings("addColumn")}
       onStructureSaved={(saved) => setDetail((current) => current ? { ...current, board: saved } : current)}

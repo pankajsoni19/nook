@@ -768,3 +768,24 @@ svg.task-column-status.done { color: #6fbf85; }
   .task-card-title-display { font-size: 1rem; }
 }
 .task-card-title-static { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+
+/* Lane ESTIMATES (D754, D755): the estimate chip on faces and rows, the column total, the card field, and the sprint total. */
+.task-estimate-chip { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 22px; border-radius: 999px; padding: 0 7px; background: #1a2232; color: #a9c2ee; font-size: .72rem; font-weight: 600; white-space: nowrap; }
+.task-estimate-chip svg { width: 12px; height: 12px; }
+.task-column-estimate { flex: none; margin: -4px 0 6px; padding: 0 14px; color: #a9c2ee; font-size: .72rem; font-weight: 600; }
+.task-estimate-scale { display: flex; flex-wrap: wrap; gap: 6px; }
+.task-estimate-option { min-width: 40px; min-height: 34px; border: 1px solid #303035; border-radius: 999px; padding: 0 10px; background: transparent; color: #b7b7bd; font: inherit; font-size: .84rem; font-weight: 600; cursor: pointer; }
+.task-estimate-option:hover { border-color: #45454b; color: #ededee; }
+.task-estimate-option:focus-visible { outline: 2px solid #6b582f; outline-offset: 1px; }
+.task-estimate-option:disabled { opacity: .5; cursor: not-allowed; }
+.task-estimate-option.active { border-color: #34507f; background: #1a2640; color: #f2f2f3; }
+.task-estimate-input { display: inline-flex; align-items: center; gap: 6px; }
+.task-estimate-input input { width: 96px; min-height: 36px; border: 1px solid #333338; border-radius: 9px; padding: 0 10px; background: #0b0b0d; color: #ededee; font: inherit; font-size: .88rem; }
+.task-estimate-input input[aria-invalid="true"] { border-color: #7a3a33; }
+.task-estimate-unit { color: #85858c; font-size: .82rem; font-weight: 600; }
+.task-sprint-estimate { color: #a9c2ee; font-weight: 600; }
+.task-settings-note.task-estimate-warning { color: #d9bf7e; }
+.task-table-estimate { white-space: nowrap; }
+@media (max-width: 760px) {
+  .task-estimate-option, .task-estimate-input input { min-height: 44px; }
+}

@@ -17,6 +17,8 @@ import { attachCapReason, attachmentsFor, binConfirmMessage, canRetryTitle, canU
 import { CardFields } from "./CardFields";
 import { CardBreadcrumb, CardParentFields, SubtasksSection } from "./CardHierarchySection";
 import { CardSprintField } from "./SprintField";
+import { CardEstimateField } from "./EstimateField";
+import type { EstimateSettings } from "../../shared/estimates";
 import { childrenOf, levelEyebrow, levelOf } from "./hierarchyModel";
 import type { CardHierarchyContext } from "./useBoardHierarchy";
 import type { TagChange } from "./cardTags";
@@ -94,6 +96,8 @@ type CardDialogProps = {
   boardLevel?: ItemLevel;
   /** The board's sprints (17B), for the Sprint field; only on boards with sprints on. */
   sprints?: SprintSummary[];
+  /** The board's estimate settings (lane ESTIMATES, D754), for the Estimate field; none or off hides it. */
+  estimates?: EstimateSettings;
   /**
    * The card's data when the caller already has it (render tests); the dialog still loads the
    * current version on open.
@@ -117,7 +121,7 @@ const payloadCard = (reason: unknown) => reason instanceof ApiError && reason.pa
  * The description is Markdown shown through the notes renderer read-only (D44) and edited with
  * an explicit Save; a revision conflict offers Reload or Copy my text.
  */
-export function CardDialog({ userId, cardId, columns, columnId, boardOwner, boardLevel, onClose, onMissing, onChanged, onArchive, onMove, onDelete, notify, tags, onTagsChange, onOpenRelated, onRelationsChanged, layout = "dialog", onExpand, onCollapse, hierarchy, sprints, initialView }: CardDialogProps) {
+export function CardDialog({ userId, cardId, columns, columnId, boardOwner, boardLevel, onClose, onMissing, onChanged, onArchive, onMove, onDelete, notify, tags, onTagsChange, onOpenRelated, onRelationsChanged, layout = "dialog", onExpand, onCollapse, hierarchy, sprints, estimates, initialView }: CardDialogProps) {
   const page = layout === "page";
   // Viewers and guests read the card: every write control is left out or shown as text, since the
   // server's write gate refuses those writes (403 ROLE_READ_ONLY), comments included. Members below
@@ -691,6 +695,7 @@ export function CardDialog({ userId, cardId, columns, columnId, boardOwner, boar
             {!readOnly && <button type="button" className="secondary-button task-small-button" disabled={restoring} onClick={() => { void restoreArchived(); }}><ArchiveRestore />{restoring ? "Restoring…" : "Restore to board"}</button>}
           </p>}
           <CardFields card={card} userId={userId} idPrefix={titleId} done={column?.is_done === 1} saving={savingDetails} onSave={saveDetails} tags={tags} owner={boardOwner} onTagsChange={onTagsChange} readOnly={readOnly} />
+          {estimates && estimates.kind !== "none" && <div className="task-card-details"><CardEstimateField card={card} settings={estimates} idPrefix={titleId} saving={savingDetails} onSave={saveDetails} readOnly={readOnly} /></div>}
           {hierarchy && <div className="task-card-details"><CardParentFields card={card} context={hierarchy} idPrefix={titleId} saving={savingDetails} onSave={saveDetails} readOnly={readOnly} />
             {sprints && <CardSprintField card={card} structure={hierarchy.structure} cards={hierarchy.cards} sprints={sprints} idPrefix={titleId} saving={savingDetails} onSave={saveDetails} readOnly={readOnly} />}</div>}
           <FormError message={detailsConflict} className="file-dialog-error" />

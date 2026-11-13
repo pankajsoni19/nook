@@ -18,6 +18,7 @@ import {
 import { structureOf } from "./hierarchyModel";
 import { setAutoArchiveDays, taskErrorMessage, updateBoardStructure, type BoardSummary } from "./tasksApi";
 import { FormError } from "../ui/FormError";
+import { EstimateSettingsSection } from "./EstimateSettingsSection";
 
 type BoardSettingsSheetProps = {
   board: BoardSummary;
@@ -199,6 +200,8 @@ export function BoardSettingsSheet({ board, owner, isOwner = owner, showAllLevel
         {saved.sprints && sprintsSection}
 
         <AutoArchiveSection board={board} owner={owner} notify={notify} onSaved={onBoardSaved} titleId={titleId} />
+
+        <EstimateSettingsSection board={board} owner={owner} notify={notify} onSaved={onBoardSaved} />
 
         {(saved.levels.length > 1 || onShowArchived) && <section className="task-settings-section" aria-labelledby={`${titleId}-display`}>
           <h3 id={`${titleId}-display`}>Display</h3>

@@ -6,6 +6,7 @@ import { CardFace, cardFaceLabel } from "./CardFace";
 import { ColumnStatusIcon, type ColumnStatus } from "./ColumnStatusIcon";
 import { cardCountLabel, columnBadge } from "./taskActions";
 import type { BoardColumn, BoardTag, CardSummary } from "./tasksApi";
+import type { EstimateKind } from "../../shared/estimates";
 
 type BoardSwimlanesProps = {
   mode: SwimlaneMode;
@@ -40,6 +41,8 @@ type BoardSwimlanesProps = {
   onAddCard?: (row: Swimlane, columnId: string) => void;
   /** A key move that cannot happen (the first or last row): the host says why. */
   onKeyRefused?: (message: string) => void;
+  /** The board's estimate kind (lane ESTIMATES, D754), for the cards' estimate chips. */
+  estimateKind?: EstimateKind;
 };
 
 /** Which slot a pointer at `clientY` points to among a cell's cards (the dragged one excluded). */
@@ -138,7 +141,7 @@ export function BoardSwimlanes(props: BoardSwimlanesProps) {
 
   const cardItem = (card: CardSummary, row: Swimlane, columnId: string, slot: number, indicator: boolean) => {
     const column = columns.find((item) => item.id === columnId);
-    const face = { card, tags, done: column?.is_done === 1, today };
+    const face = { card, tags, done: column?.is_done === 1, today, estimateKind: props.estimateKind };
     const excerptId = `task-swim-excerpt-${row.key.replace(/[^a-z0-9]/gi, "")}-${card.id}`;
     return <li key={card.id} className="task-card-item">
       {indicator && target?.index === slot && <span className="task-drop-indicator" aria-hidden="true" />}

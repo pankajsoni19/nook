@@ -4,6 +4,7 @@ import { TASK_FLAGS, type TaskFlag } from "../../shared/taskQuery";
 import type { BoardStructure, BoardTemplateId } from "../../shared/boardStructure";
 import type { ReactionAggregate, ReactionKey } from "../../shared/reactions";
 import type { ItemLevel } from "../access/accessLevels";
+import type { EstimateKind, EstimateScale } from "../../shared/estimates";
 
 export type BoardVisibility = "private" | "selected" | "all_users";
 
@@ -26,6 +27,9 @@ export type BoardSummary = {
   auto_archive_days?: number | null;
   /** Level names, work level, and sprints (migration 019); older servers omit it (Flat). */
   structure?: BoardStructure;
+  /** Lane ESTIMATES (D750, D751): what card estimates mean here, and the points scale; older servers omit them (off). */
+  estimate_kind?: EstimateKind;
+  estimate_scale?: EstimateScale;
   created_at: string;
   updated_at: string;
 };
@@ -93,6 +97,8 @@ export type CardSummary = {
   done_at?: string | null;
   /** When the auto-archive sweep archived it (D605), or null. The board lists archived cards only when the viewer shows them. */
   archived_at?: string | null;
+  /** Lane ESTIMATES (D750, D752): points or hours as the board says; null without one or while the board has estimates off. */
+  estimate?: number | null;
   created_at: string;
   updated_at: string;
 };
@@ -161,6 +167,9 @@ export async function getArchivedCards(boardId: string, before: string) {
 export const renameBoard = (boardId: string, name: string) => api<{ board: BoardSummary }>(`/tasks/boards/${boardId}`, json("PATCH", { name }));
 /** Owner or manager (D604): 1–365 days, or null to turn auto-archive off. */
 export const setAutoArchiveDays = (boardId: string, autoArchiveDays: number | null) => api<{ board: BoardSummary }>(`/tasks/boards/${boardId}`, json("PATCH", { autoArchiveDays }));
+/** Owner or manager (lane ESTIMATES, D750–D752): what card estimates mean on the board; stored values are kept. */
+export const setBoardEstimates = (boardId: string, change: { estimateKind?: EstimateKind; estimateScale?: EstimateScale }) =>
+  api<{ board: BoardSummary }>(`/tasks/boards/${boardId}`, json("PATCH", change));
 /** Any reader (D602, D606): replaces the fields sent of the caller's own view of the board. */
 export const saveBoardView = (boardId: string, change: Partial<BoardView>) => api<{ view: BoardView }>(`/tasks/boards/${boardId}/view`, json("PUT", change));
 /** Archives a card by hand (D610), in any column: hidden from the board, never deleted. */
@@ -209,6 +218,8 @@ export type CardCreate = {
   level?: number;
   /** A planned or active sprint of this board (17B); work-level cards only. */
   sprintId?: string | null;
+  /** Points or hours (D753); 400 `ESTIMATES_OFF` while the board has estimates off. */
+  estimate?: number | null;
 };
 export const createCard = (boardId: string, body: CardCreate) =>
   api<{ card: CardDetail; renormalized?: boolean }>(`/tasks/boards/${boardId}/cards`, json("POST", body));
@@ -270,6 +281,8 @@ export type CardChange = {
   level?: number;
   /** Plan the card in a sprint, or null for the backlog (17B); work-level cards only. */
   sprintId?: string | null;
+  /** Points or hours, or null to clear (D753); 400 `ESTIMATE_INVALID` off the board's scale or range. */
+  estimate?: number | null;
 };
 export const updateCard = (cardId: string, change: CardChange & { revision: number }) =>
   api<{ card: CardDetail }>(`/tasks/cards/${cardId}`, json("PATCH", change));

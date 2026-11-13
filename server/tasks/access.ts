@@ -13,6 +13,9 @@ export type BoardRow = {
   visibility: BoardVisibility;
   /** The `all_users` audience level (migration 025, D272); `edit` keeps D38 for existing boards. */
   share_role: "view" | "comment" | "edit";
+  /** Migration 082 (lane ESTIMATES, D750, D751): what card estimates mean here, and the points scale. */
+  estimate_kind: "none" | "points" | "hours";
+  estimate_scale: "fibonacci" | "free";
   created_at: string;
   updated_at: string;
   deleted_at: string | null;

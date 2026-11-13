@@ -84,6 +84,8 @@ export function mergeCardDetail(item: CardSummary, card: CardDetail): CardSummar
     // Auto-archive (D605): restoring from the dialog clears it.
     archived_at: card.archived_at !== undefined ? card.archived_at : item.archived_at,
     done_at: card.done_at !== undefined ? card.done_at : item.done_at,
+    // Lane ESTIMATES (D754): the dialog's Estimate field.
+    estimate: card.estimate !== undefined ? card.estimate : item.estimate,
     updated_at: card.updated_at
   };
 }

@@ -48,6 +48,7 @@ import {
   TaskError
 } from "./service";
 import { BOARD_TEMPLATES, validateStructure } from "../../shared/boardStructure";
+import { ESTIMATE_KINDS, ESTIMATE_SCALES } from "../../shared/estimates";
 import { validTimeZone } from "../today/registry";
 
 // C0/C1 controls and bidi overrides never belong in a board, column, or card name.
@@ -68,9 +69,13 @@ export const boardCreateSchema = z.object({
 export const boardPatchSchema = z.object({
   name: label(120).optional(),
   structure: z.unknown().optional(),
-  autoArchiveDays: z.number().int().min(1).max(AUTO_ARCHIVE_MAX_DAYS).nullable().optional()
+  autoArchiveDays: z.number().int().min(1).max(AUTO_ARCHIVE_MAX_DAYS).nullable().optional(),
+  /** Lane ESTIMATES (D750, D751): what card estimates mean on this board, and the points scale. */
+  estimateKind: z.enum(ESTIMATE_KINDS).optional(),
+  estimateScale: z.enum(ESTIMATE_SCALES).optional()
 }).strict()
-  .refine((value) => value.name !== undefined || value.structure !== undefined || value.autoArchiveDays !== undefined, "Provide a name, a structure, or autoArchiveDays");
+  .refine((value) => value.name !== undefined || value.structure !== undefined || value.autoArchiveDays !== undefined || value.estimateKind !== undefined || value.estimateScale !== undefined,
+    "Provide a name, a structure, autoArchiveDays, estimateKind, or estimateScale");
 /** `PUT /boards/:b/view` (D602, D606): the caller's own collapsed columns and archived-card choice. */
 export const boardViewSchema = z.object({
   collapsedColumnIds: z.array(uuid).max(40).optional(),
@@ -130,6 +135,12 @@ const flagsSchema = z.array(z.enum(CARD_FLAGS)).max(CARD_FLAGS.length).refine((f
 const createRelationsSchema = z.array(z.object({ targetCardId: uuid, type: z.enum(RELATION_TYPES as [RelationType, ...RelationType[]]) }).strict())
   .max(MAX_RELATIONS_PER_CARD)
   .refine((relations) => new Set(relations.map((relation) => relation.targetCardId.toLowerCase())).size === relations.length, "Each card can be related once");
+/**
+ * An estimate (lane ESTIMATES, D753): any JSON number or null here; the service checks it against the
+ * board (400 ESTIMATES_OFF while estimates are off, ESTIMATE_INVALID out of 0–999, past two
+ * decimals, or off a Fibonacci scale), so REST and MCP get the same coded errors.
+ */
+const estimateSchema = z.number().nullable();
 /** A card level (migration 019): 0–2; the service also checks the board's level count (D121). */
 const levelSchema = z.number().int().min(0).max(2);
 export const tagCreateSchema = z.object({ name: label(TAG_NAME_MAX), color: z.enum(TAG_COLORS).optional() }).strict();
@@ -155,6 +166,8 @@ export const cardCreateSchema = z.object({
   level: levelSchema.optional(),
   /** A planned or active sprint of this board (17B); work-level cards only. */
   sprintId: uuid.nullable().optional(),
+  /** Points or hours as the board's estimate kind says (D753). */
+  estimate: estimateSchema.optional(),
   afterCardId: uuid.nullable().optional()
 }).strict();
 export const cardPatchSchema = z.object({
@@ -174,13 +187,15 @@ export const cardPatchSchema = z.object({
   level: levelSchema.optional(),
   /** Plan the card in a sprint of its board, or null for the backlog (17B); work-level cards only. */
   sprintId: uuid.nullable().optional(),
+  /** Points or hours (D753), or null to clear. */
+  estimate: estimateSchema.optional(),
   revision: z.number().int().positive()
 }).strict()
   .refine((value) => value.assigneeId === undefined || value.assigneeIds === undefined, "Send assigneeIds or the legacy assigneeId, not both")
   .refine((value) => value.title !== undefined || value.description !== undefined || value.dueOn !== undefined || value.dueTime !== undefined
     || value.dueTz !== undefined || value.assigneeId !== undefined || value.assigneeIds !== undefined || value.tagIds !== undefined || value.flags !== undefined
-    || value.parentId !== undefined || value.level !== undefined || value.sprintId !== undefined,
-  "Provide a title, description, dueOn, dueTime, assigneeIds, tagIds, flags, parentId, level, or sprintId");
+    || value.parentId !== undefined || value.level !== undefined || value.sprintId !== undefined || value.estimate !== undefined,
+  "Provide a title, description, dueOn, dueTime, assigneeIds, tagIds, flags, parentId, level, sprintId, or estimate");
 // A blank body is allowed only with files (files-only comments, uploads everywhere D397): the server
 // stores a generated body then (shared/commentFiles.ts).
 const commentBody = z.string().refine((value) => Buffer.byteLength(value, "utf8") <= COMMENT_MAX_BYTES, `Comments can be at most ${COMMENT_MAX_BYTES} bytes`);
@@ -279,7 +294,8 @@ export function registerTaskRoutes(app: Hono<AppEnv>) {
     return respond(c, () => updateBoard(userId, boardId, {
       ...(body.name !== undefined ? { name: body.name } : {}),
       ...(structure?.ok ? { structure: structure.structure, keepSprintDefaults } : {}),
-      ...(body.autoArchiveDays !== undefined ? { autoArchiveDays: body.autoArchiveDays } : {})
+      ...(body.autoArchiveDays !== undefined ? { autoArchiveDays: body.autoArchiveDays } : {}),
+      ...(body.estimateKind !== undefined || body.estimateScale !== undefined ? { estimates: { kind: body.estimateKind, scale: body.estimateScale } } : {})
     }));
   });
 
