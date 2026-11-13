@@ -64,7 +64,7 @@ import { lineDiff } from "./diff/lineDiff";
 import { TeamSection } from "./team/TeamApp";
 import { useBlockedCount } from "./team/blockedCount";
 import { SettingsHubShell } from "./settings/SettingsHub";
-import { aiTabRedirect, aiTabsFor, binEntryShown, hubBackAction, hubBackSteps, hubEntries, hubEntryLabel, hubEntryOf, hubListGoesUnder, hubPopRoute, isHubRoute, isNestedHubRoute, keysTabRedirect, keysTabsFor, leaveGuardAction, settingsRoute, teamGroupShown, type HubEntry, type HubEntryId } from "./settings/hubModel";
+import { aiTabRedirect, aiTabsFor, binEntryShown, workspaceEntryShown, hubBackAction, hubBackSteps, hubEntries, hubEntryLabel, hubEntryOf, hubListGoesUnder, hubPopRoute, isHubRoute, isNestedHubRoute, keysTabRedirect, keysTabsFor, leaveGuardAction, settingsRoute, teamGroupShown, type HubEntry, type HubEntryId } from "./settings/hubModel";
 import { HubBeforeLeaveContext, type BeforeHubLeave } from "./settings/hubLeave";
 import { InviteRegister, InviteWhileSignedIn, type InviteRegisterBody } from "./auth/InviteRegister";
 import { initialInvite } from "./auth/inviteLink";
@@ -553,9 +553,12 @@ function SettingsPage({ session, modules, googleResult = null, navigate, flash, 
   const listScreen = route.app === "settings" && route.section === null;
   // Q6: guests have no My access; its URL opens Security (replaced below).
   const guestAccess = route.app === "settings" && route.section === "access" && session.user.role === "guest";
-  const section: SettingsSection | null = route.app === "settings" ? guestAccess ? "security" : route.section ?? "security" : null;
-  const selected: HubEntryId = guestAccess ? "security" : hubEntryOf(route) ?? "security";
+  // Nor Settings → Workspace (D836) where it has no entry: for guests, or before a workspace module ships.
+  const workspaceHidden = route.app === "settings" && route.section === "workspace" && !workspaceEntryShown(session.user.role);
+  const section: SettingsSection | null = route.app === "settings" ? guestAccess || workspaceHidden ? "security" : route.section ?? "security" : null;
+  const selected: HubEntryId = guestAccess || workspaceHidden ? "security" : hubEntryOf(route) ?? "security";
   useEffect(() => { if (guestAccess) go(settingsRoute("security"), { replace: true }); }, [go, guestAccess]);
+  useEffect(() => { if (workspaceHidden) go(settingsRoute("security"), { replace: true }); }, [go, workspaceHidden]);
   // Wave 38: with the Bin module off (D92), or for a guest, the Bin has no entry, and /settings/bin opens Security in place.
   const binHidden = route.app === "bin" && !binShown;
   useEffect(() => { if (binHidden) go(settingsRoute("security"), { replace: true }); }, [binHidden, go]);

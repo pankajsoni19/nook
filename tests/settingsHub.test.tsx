@@ -3,7 +3,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { formatRoute, parseRoute, type Route } from "../src/router";
-import { firstTeamRoute, HUB_PUSHED_OVER_KEY, hubBackAction, hubEntries, hubEntryLabel, hubEntryOf, hubListGoesUnder, hubPopRoute, isHubRoute, isNestedHubRoute, leaveGuardAction, settingsRoute, teamGroupShown } from "../src/settings/hubModel";
+import { firstTeamRoute, HUB_PUSHED_OVER_KEY, hubBackAction, hubEntries, hubEntryLabel, hubEntryOf, hubListGoesUnder, hubPopRoute, isHubRoute, isNestedHubRoute, leaveGuardAction, settingsRoute, teamGroupShown, workspaceEntryShown } from "../src/settings/hubModel";
+import { readyWorkspaceModules } from "../src/workspaceModules";
 import { SettingsHubShell } from "../src/settings/SettingsHub";
 import { readHistoryDepth, withHistoryDepth } from "../src/appShellNavigation";
 import { unsavedKeyConfirm } from "../src/keys/unsavedKeyConfirm";
@@ -133,6 +134,18 @@ describe("the nav per role", () => {
     // Wave 38 fixes: no Bin for guests either (they can delete nothing).
     expect(ids(hubEntries("guest", { teamModuleEnabled: true }))).toEqual(["security", "notifications", "mcp", "modules", "about"]);
     expect(teamGroupShown("guest", true)).toBe(false);
+  });
+
+  test("Settings → Workspace (D836): members, viewers, and admins once a module ships; never guests", () => {
+    const shipped = readyWorkspaceModules().length > 0;
+    for (const role of ["admin", "member", "viewer"] as const) {
+      expect(workspaceEntryShown(role)).toBe(shipped);
+      expect(hubEntries(role, { teamModuleEnabled: true }).some((entry) => entry.id === "workspace")).toBe(shipped);
+    }
+    expect(workspaceEntryShown("guest")).toBe(false);
+    expect(hubEntries("guest", { teamModuleEnabled: true }).some((entry) => entry.id === "workspace")).toBe(false);
+    // Its URL opens Security for a guest, as My access does (App.tsx).
+    expect(readFileSync(join(import.meta.dir, "..", "src", "App.tsx"), "utf8")).toContain('const workspaceHidden = route.app === "settings" && route.section === "workspace" && !workspaceEntryShown(session.user.role);');
   });
 
   test("while two-factor setup is required, Security is the only entry", () => {

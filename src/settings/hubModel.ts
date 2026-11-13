@@ -23,9 +23,14 @@ const team = (flags: Partial<TeamRoute> = {}): TeamRoute => ({ app: "team", user
 /** Account entries, in nav order. My access, Agents, and Knowledge are for every role but guest; AI is for admins. */
 const ACCOUNT_ORDER: readonly SettingsSection[] = ["security", "notifications", "access", "mcp", "agents", "knowledge", "ai", "datasources", "reportowners", "backups", "modules", "about"];
 
-/** Settings → Workspace (D836): in the Workspace group once a workspace module ships (none: Settings is as before). */
+/**
+ * Settings → Workspace (D836): in the Workspace group once a workspace module ships (none: Settings is
+ * as before), for every role but guest. Members and viewers set their own units there; the currency and
+ * public page policies on the same page are for admins only. Guests never get Time, Contacts, or
+ * Bookings (D832), where units matter, so they have no entry and its URL opens Security.
+ */
 const WORKSPACE_ENTRY: HubEntry = { id: "workspace", group: "workspace", label: SETTINGS_SECTION_NAMES.workspace, route: { app: "settings", section: "workspace" } };
-export const workspaceEntryShown = () => readyWorkspaceModules().length > 0;
+export const workspaceEntryShown = (role: Role | undefined) => role !== "guest" && readyWorkspaceModules().length > 0;
 // Report data sources (Wave 45), Report owners (D500), and Backups (lane BACKUP) are for admins too.
 const ADMIN_ONLY_SECTIONS: readonly SettingsSection[] = ["ai", "datasources", "reportowners", "backups"];
 
@@ -72,7 +77,7 @@ export function hubEntries(role: Role | undefined, options: { teamModuleEnabled:
     .filter((section) => !ADMIN_ONLY_SECTIONS.includes(section) || role === "admin")
     .map((section) => ({ id: section, group: "account", label: SETTINGS_SECTION_NAMES[section], route: { app: "settings", section } }));
   const workspace: HubEntry[] = [
-    ...(workspaceEntryShown() ? [WORKSPACE_ENTRY] : []),
+    ...(workspaceEntryShown(role) ? [WORKSPACE_ENTRY] : []),
     ...(!binEntryShown(role, options.binModuleEnabled !== false) ? [] : [options.binCount ? { ...BIN_ENTRY, badge: options.binCount } : BIN_ENTRY])
   ];
   if (!teamGroupShown(role, options.teamModuleEnabled)) return [...account, ...workspace];
