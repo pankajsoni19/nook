@@ -191,5 +191,11 @@ export function parseWorkRef(text: string, origins: readonly string[] = []): Par
   }
 }
 
+/** The workspace module a kind belongs to (absent for the built-in modules' kinds): notifications, scopes, and labels. */
+export const WORK_KIND_MODULE: Partial<Record<WorkKind, "forms" | "time" | "goals" | "checkins" | "crm" | "bookings" | "townhall">> = {
+  form: "forms", response: "forms", time_entry: "time", time_project: "time", goal: "goals", key_result: "goals", checkin: "checkins", checkin_round: "checkins",
+  contact: "crm", company: "crm", deal: "crm", booking: "bookings", booking_type: "bookings", townhall_session: "townhall", townhall_question: "townhall"
+};
+
 /** A stable string for a ref (map keys, dedupe). */
 export const workRefKey = (ref: WorkRef) => `${ref.kind}:${ref.id}`;

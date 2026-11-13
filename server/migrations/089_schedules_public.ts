@@ -13,6 +13,7 @@ import type { Migration } from "./types";
  *   forms, booking types, a booking's manage page, a time-poll guest, a townhall session.
  * - `public_link_usage`: durable per-link submission counts per hour (the per-link limit).
  * - `public_submissions_log`: every public submission's outcome with a salted IP hash, kept 30 days.
+ * - `public_nonces`: used render nonces until they expire (no replay, even across a restart).
  * - `public_verifications`: pending email verifications of public submissions (code hashed).
  * - `external_mail_stops`: outside addresses that asked to hear nothing more about an item.
  * - `user_ui_prefs`: per-person unit preferences (week start, duration format), JSON; the existing
@@ -92,6 +93,13 @@ export const schedulesPublicMigration: Migration = {
       ) STRICT;
       CREATE INDEX IF NOT EXISTS public_submissions_log_created ON public_submissions_log(created_at);
       CREATE INDEX IF NOT EXISTS public_submissions_log_email ON public_submissions_log(kind, item_id, email_hash, created_at) WHERE email_hash IS NOT NULL;
+
+      -- Single-use render nonces (§B.8): a submitted nonce is recorded until it would have expired anyway, so a replay fails even across a restart.
+      CREATE TABLE IF NOT EXISTS public_nonces (
+        nonce_hash TEXT PRIMARY KEY CHECK (length(nonce_hash) = 64),
+        expires_at TEXT NOT NULL
+      ) STRICT, WITHOUT ROWID;
+      CREATE INDEX IF NOT EXISTS public_nonces_expiry ON public_nonces(expires_at);
 
       CREATE TABLE IF NOT EXISTS public_verifications (
         id TEXT PRIMARY KEY,
