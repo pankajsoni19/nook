@@ -95,6 +95,8 @@ describe("tool resource policy", () => {
     const owner = await createUser("Policy enumeration");
     const checked: string[] = [];
     for (const spec of mcpToolSpecs.filter((item) => item.access.mode === "items")) {
+      // Each tool gets a fresh minute: every module's write tools together pass the per-user write limit (lane FORMS).
+      resetMcpLimits();
       const needed = SCOPE_GRANTS[spec.scopes[0]!];
       const kinds = SELECTOR_KINDS[needed.module] ?? [];
       // For each named item, a kind it anchors on that the module's grants may name (on random ids).
