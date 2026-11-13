@@ -172,6 +172,12 @@ describe("a ready module (the throwaway test module)", () => {
     expect(renderToStaticMarkup(<TopBarItems />)).toBe('<span class="test-timer">0:42</span>');
   });
 
+  test("an embed kind or slash label another module owns is refused (one owner per kind)", async () => {
+    const { registerEmbedKind, registerSlashItem } = await import("../src/editor/moduleEmbedRegistry");
+    expect(() => registerEmbedKind({ kind: "goal", component: () => null, module: "time" })).toThrow();
+    expect(() => registerSlashItem({ label: "Goal", hint: "", keywords: "", run: () => undefined, module: "time" })).toThrow();
+  });
+
   test("its embed parses, keeps the neutral word, and round-trips; other lines stay links", () => {
     expect(embedKindForPath("/goals/grow-mrr-7k3f9x2ab0")?.kind).toBe("goal");
     expect(moduleEmbedMarkdown("goal", "/goals/grow-mrr-7k3f9x2ab0")).toBe('[Goal](/goals/grow-mrr-7k3f9x2ab0 "nook-embed")');

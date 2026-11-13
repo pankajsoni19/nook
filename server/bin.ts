@@ -143,6 +143,8 @@ const providers = binProviders;
 
 /** Registered by server/collections/bin.ts and server/calendar/calendarBin.ts when their module loads. */
 export function registerBinProvider(type: ProvidedBinType, provider: BinProvider) {
+  // Two modules claiming one Bin type would silently replace each other's restore and purge: fail at startup.
+  if (providers.has(type)) throw new Error(`Bin type ${type} is already registered`);
   providers.set(type, provider);
 }
 

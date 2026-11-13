@@ -46,6 +46,7 @@ const containers = new Map<WorkspaceContainerKind, AccessContainer>();
 export function registerAccessContainer(container: AccessContainer) {
   if (!(WORKSPACE_CONTAINER_KINDS as readonly string[]).includes(container.kind)) throw new Error(`Unknown container kind ${container.kind}`);
   if (!/^[a-z_]+$/.test(container.table) || !/^[a-z_]+$/.test(container.nameColumn)) throw new Error("Invalid container table");
+  if (containers.has(container.kind)) throw new Error(`Access container ${container.kind} is already registered`);
   containers.set(container.kind, container);
   return () => { if (containers.get(container.kind) === container) containers.delete(container.kind); };
 }

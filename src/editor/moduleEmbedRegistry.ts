@@ -47,14 +47,19 @@ export type SlashItemDef = {
 const kinds: EmbedKindDef[] = [];
 const slashItems: SlashItemDef[] = [];
 
+/** One module owns each embed kind and slash label; the same module registering again replaces its own (tests, hot reload). */
+const ownedByAnother = (existing: { module?: string } | undefined, def: { module?: string }) => Boolean(existing?.module && def.module && existing.module !== def.module);
+
 export function registerEmbedKind(def: EmbedKindDef) {
   const at = kinds.findIndex((item) => item.kind === def.kind);
+  if (ownedByAnother(kinds[at], def)) throw new Error(`Embed kind ${def.kind} is already registered by ${kinds[at]!.module}`);
   if (at >= 0) kinds.splice(at, 1, def);
   else kinds.push(def);
 }
 
 export function registerSlashItem(def: SlashItemDef) {
   const at = slashItems.findIndex((item) => item.label === def.label);
+  if (ownedByAnother(slashItems[at], def)) throw new Error(`Slash item ${def.label} is already registered by ${slashItems[at]!.module}`);
   if (at >= 0) slashItems.splice(at, 1, def);
   else slashItems.push(def);
 }

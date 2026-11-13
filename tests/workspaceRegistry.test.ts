@@ -61,6 +61,39 @@ describe("vocabulary and stubs (D800)", () => {
   });
 });
 
+describe("one owner per kind (Wave 2 integration)", () => {
+  test("every registry refuses a second registration of a kind a shipped module holds, so a clash fails at startup", async () => {
+    const { registerUndoKind } = await import("../server/undo");
+    const { registerItemKind } = await import("../server/keyResources");
+    const { registerWorkKind } = await import("../server/links/adapters");
+    const { registerAccessContainer } = await import("../server/access/workspaceItems");
+    const { registerBinProvider, binProviders } = await import("../server/bin");
+    const { registerSearchScope } = await import("../server/searchRegistry");
+    const { registerScheduleHandler } = await import("../server/schedules/service");
+    const { registerTodayProvider } = await import("../server/today/registry");
+    const { registerDataset, datasetDef } = await import("../server/datasets/registry");
+    const { registerProgressSource } = await import("../server/goalsProgress");
+    await import("../server/forms/index");
+    const provider = binProviders.get("form")!;
+    expect(provider).toBeDefined();
+    const clashes: Array<[string, () => unknown]> = [
+      ["module", () => registerWorkspaceModule({ id: "forms" } as never)],
+      ["undo", () => registerUndoKind("response", {})],
+      ["item", () => registerItemKind("form" as never, () => null)],
+      ["work", () => registerWorkKind({ kind: "form" } as never)],
+      ["access", () => registerAccessContainer({ kind: "form", table: "forms", nameColumn: "title" })],
+      ["bin", () => registerBinProvider("form", provider)],
+      ["search", () => registerSearchScope({ scope: "forms" } as never)],
+      ["schedule", () => registerScheduleHandler("forms.close", () => undefined)],
+      ["dataset", () => registerDataset(datasetDef("tasks.cards")!)],
+      ["progress", () => registerProgressSource("form_metric", {} as never)]
+    ];
+    for (const [name, register] of clashes) expect({ name, threw: (() => { try { register(); return false; } catch { return true; } })() }).toEqual({ name, threw: true });
+    expect(binProviders.get("form")).toBe(provider);
+    expect(() => registerTodayProvider("tasksDue", (() => null) as never)).toThrow();
+  });
+});
+
 describe("routes (T500)", () => {
   test("module routes sit behind the session, CSRF, and role write guards", async () => {
     expect((await api(null, "GET", "/test-widgets")).status).toBe(401);
