@@ -649,7 +649,7 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
     if (!current || !card || card.due_on === dueOn) return;
     const before = current.cards;
     const shift = dueOn && card.due_on ? daysBetween(card.due_on, dueOn) : 0;
-    // A drag or Alt+Arrow moves a card's whole range (D714): its start shifts by as many days.
+    // A drag or Alt+Arrow moves a card's whole range (D724): its start shifts by as many days.
     const startOn = keepSpan ? shiftedStartOn(card, dueOn) : undefined;
     setCards((items) => items.map((item) => item.id !== cardId ? item : dueOn === null
       ? { ...item, due_on: null, due_time: null, due_tz: null, due_at: null }

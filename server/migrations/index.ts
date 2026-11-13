@@ -195,7 +195,7 @@ const migrations = [initialMigration, folderSharingMigration, totpMigration, tot
   // 078 (lane VIEWS2, D655–D659: task_view_pins; board_view_prefs.show_all_levels and collapsed_rows; task_view_prefs.own_collapse,
   // collapsed_columns, collapsed_rows) needs 009, 020, 074, and 077.
   taskViewPinsMigration,
-  // 080 (card start dates, D710–D712: cards.start_on, start_time, start_tz, idx_cards_start) needs 009, 011, and 015.
+  // 080 (card start dates, D720–D722: cards.start_on, start_time, start_tz, idx_cards_start) needs 009, 011, and 015.
   // 079 is left to the parallel board short codes lane; runMigrations applies each missing id on its own.
   cardStartDatesMigration
 ];

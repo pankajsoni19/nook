@@ -7,7 +7,7 @@ import { cardDateStatus, startChipLabel } from "../src/tasks/taskActions";
 import { chipLabel } from "../src/tasks/FilterBar";
 import type { CardDetail } from "../src/tasks/tasksApi";
 
-/** Card start dates in the app (D710, D711, D713, D714): the picker, the range chip, and the calendar span. */
+/** Card start dates in the app (D720, D721, D723, D724): the picker, the range chip, and the calendar span. */
 
 const zone = "Europe/Berlin";
 const card: CardDetail = {

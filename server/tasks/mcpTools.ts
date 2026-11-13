@@ -190,7 +190,7 @@ const cardFields = (card: CardSummary, tags: Map<string, string>, structure?: Bo
   due_time: card.due_time,
   due_tz: card.due_tz,
   due_at: card.due_at,
-  // The optional start (D710), shaped like the due fields.
+  // The optional start (D720), shaped like the due fields.
   start_on: card.start_on,
   start_time: card.start_time,
   start_tz: card.start_tz,

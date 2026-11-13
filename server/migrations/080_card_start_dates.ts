@@ -1,10 +1,10 @@
 import { addColumn, type Migration } from "./types";
 
 /**
- * Card start dates (D710–D712): `start_on`, an optional `start_time`, and its `start_tz`, shaped and
+ * Card start dates (D720–D722): `start_on`, an optional `start_time`, and its `start_tz`, shaped and
  * checked exactly like the due columns (migrations 011 and 015): a civil date `YYYY-MM-DD`, an
  * `HH:MM` wall time in the IANA zone the setter's browser sent, both time and zone NULL or both
- * set, and a time only with a date. The API also refuses a start after the due date (D711); the
+ * set, and a time only with a date. The API also refuses a start after the due date (D721); the
  * schema does not, since comparing timed values needs the zones. `idx_cards_start` serves the
  * `start:` filter and sort over live dated cards, like `idx_cards_due`.
  *

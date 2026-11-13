@@ -231,11 +231,11 @@ export function dueStatus(dueOn: string | null, today: string, done = false, tim
   return { tone: days <= 7 ? "soon" : "later", label, description: `Due ${spoken}` };
 }
 
-/** The start fields a date chip reads (D710). */
+/** The start fields a date chip reads (D720). */
 export type StartTiming = { start_on?: string | null; start_time?: string | null; start_at?: string | null };
 
 /**
- * The start's words on a chip (D713): "Nov 12", "Today", or "Tomorrow 09:00", on the viewer's local
+ * The start's words on a chip (D723): "Nov 12", "Today", or "Tomorrow 09:00", on the viewer's local
  * day and time of a timed start, as the due chip reads its date. Null without a start.
  */
 export function startChipLabel(card: StartTiming, today: string, timeZone = viewerTimeZone()) {
@@ -251,7 +251,7 @@ export function startChipLabel(card: StartTiming, today: string, timeZone = view
 }
 
 /**
- * The date chip on a card (D713): the due chip (`dueStatus`), with the start before it as a range,
+ * The date chip on a card (D723): the due chip (`dueStatus`), with the start before it as a range,
  * "Nov 12 → Nov 15". A card with only a start shows "Nov 12 →". Done cards show no chip, as before.
  */
 export function cardDateStatus(card: StartTiming & { due_on: string | null; due_at?: string | null }, today: string, done = false, timing: Omit<DueTiming, "dueAt"> = {}): DueStatus | null {

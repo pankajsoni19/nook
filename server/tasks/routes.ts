@@ -142,7 +142,7 @@ export const cardCreateSchema = z.object({
   dueOn: dueOnSchema.nullable().optional(),
   dueTime: dueTimeSchema.nullable().optional(),
   dueTz: dueTzSchema.nullable().optional(),
-  /** The optional start (D710): the due fields' shapes and rules; on or before the due date (D711). */
+  /** The optional start (D720): the due fields' shapes and rules; on or before the due date (D721). */
   startOn: dueOnSchema.nullable().optional(),
   startTime: dueTimeSchema.nullable().optional(),
   startTz: dueTzSchema.nullable().optional(),
@@ -167,7 +167,7 @@ export const cardPatchSchema = z.object({
   dueOn: dueOnSchema.nullable().optional(),
   dueTime: dueTimeSchema.nullable().optional(),
   dueTz: dueTzSchema.nullable().optional(),
-  /** The start (D710): startOn null clears it and its time; startTime null clears only the time. */
+  /** The start (D720): startOn null clears it and its time; startTime null clears only the time. */
   startOn: dueOnSchema.nullable().optional(),
   startTime: dueTimeSchema.nullable().optional(),
   startTz: dueTzSchema.nullable().optional(),

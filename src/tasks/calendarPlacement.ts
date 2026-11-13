@@ -4,7 +4,7 @@
 // - A timed card sits on the viewer-local date of its `due_at` and shows the viewer-local time.
 // - A card without `due_on` is Unscheduled (a start alone does not schedule it).
 // - A card with a start before its due day also spans the days from its start up to the day before
-//   its due day (D714, `spanningDays`), clipped to the days the month grid shows. It still counts,
+//   its due day (D724, `spanningDays`), clipped to the days the month grid shows. It still counts,
 //   sorts, and moves by its due day; the agenda lists it on its due day only.
 // The board pipeline (filters) runs before placement; the list grouping does not apply here.
 import { addDays, daysBetween, monthOf } from "../calendarRoute";
@@ -28,7 +28,7 @@ export function displayedTime(card: DueCard, viewerZone: string) {
 
 export type Placement<T> = { byDay: Map<string, T[]>; unscheduled: T[] };
 
-/** The day a card's start shows on for the viewer (its local date when timed), or null without one (D714). */
+/** The day a card's start shows on for the viewer (its local date when timed), or null without one (D724). */
 export function displayedStartDay(card: StartCard, viewerZone: string) {
   if (!card.start_on) return null;
   if (card.start_time && card.start_at && Number.isFinite(Date.parse(card.start_at))) return instantParts(card.start_at, viewerZone).date;
@@ -36,7 +36,7 @@ export function displayedStartDay(card: StartCard, viewerZone: string) {
 }
 
 /**
- * The days before its due day a scheduled card also shows on (D714): from its start day up to the
+ * The days before its due day a scheduled card also shows on (D724): from its start day up to the
  * day before its due day, clipped to `[from, to]` (the days the grid shows, so a long span costs
  * no more than the grid). Keyed by day, cards in the given order. A card without a start, or
  * whose start is on (or after) its due day, spans nothing.
@@ -98,7 +98,7 @@ export function dropDueOn(card: DueCard, day: string, viewerZone: string): strin
 
 /**
  * The `startOn` that keeps a card's span when its due date moves from `dueOn` to `nextDueOn`
- * (D714: a drag or Alt+Arrow moves the whole range), or undefined when there is no start to move.
+ * (D724: a drag or Alt+Arrow moves the whole range), or undefined when there is no start to move.
  */
 export function shiftedStartOn(card: StartCard & { due_on: string | null }, nextDueOn: string | null) {
   if (!card.start_on || !card.due_on || !nextDueOn) return undefined;

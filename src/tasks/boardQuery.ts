@@ -250,7 +250,7 @@ export const FILTER_FIELDS: Record<string, FilterField> = {
     labelFor: (value) => dueValueLabel(value)
   },
   start: {
-    // D712: the card's start, with the due field's windows and dates (no Overdue).
+    // D722: the card's start, with the due field's windows and dates (no Overdue).
     label: "Start",
     key: "start",
     optionsFor: () => [

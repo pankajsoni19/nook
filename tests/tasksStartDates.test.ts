@@ -10,7 +10,7 @@ const { resetTaskQueryRateLimit } = await import("../server/tasks/queryRoutes");
 const { createMcpApiKey } = await import("../server/mcp");
 const { invokeMcpToolForTests } = await import("../server/mcpTools");
 
-/** Card start dates (D710–D712, migration 080): schema, the start-before-due rule, the API, MCP, and `start:`. */
+/** Card start dates (D720–D722, migration 080): schema, the start-before-due rule, the API, MCP, and `start:`. */
 
 beforeEach(() => resetTaskQueryRateLimit());
 
@@ -104,7 +104,7 @@ async function setup(label: string) {
   return { owner, boardId: created.body.board.id as string, columns: created.body.columns as [Column, Column, Column] };
 }
 
-describe("card start dates over the API (D710, D711)", () => {
+describe("card start dates over the API (D720, D721)", () => {
   test("create and patch round-trip the start; the board payload and audit carry it", async () => {
     const { owner, boardId, columns } = await setup("Start api");
     const created = await call(owner, "POST", `/boards/${boardId}/cards`, {
@@ -169,7 +169,7 @@ describe("card start dates over the API (D710, D711)", () => {
   });
 });
 
-describe("start: in the task query (D712)", () => {
+describe("start: in the task query (D722)", () => {
   test("parses, formats, and matches in memory like due:", () => {
     const parsed = parse("start:<2026-11-14,none start:WEEK");
     expect(parsed.ok).toBe(true);

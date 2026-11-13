@@ -166,7 +166,7 @@ export type CardSummary = {
   due_tz: string | null;
   /** The computed UTC instant when `due_time` is set, else null. */
   due_at: string | null;
-  /** The optional start (D710, migration 080), shaped like the due fields: a civil date, an optional `HH:MM` in `start_tz`. */
+  /** The optional start (D720, migration 080), shaped like the due fields: a civil date, an optional `HH:MM` in `start_tz`. */
   start_on: string | null;
   start_time: string | null;
   start_tz: string | null;
@@ -236,14 +236,14 @@ function requireDue(current: Parameters<typeof resolveDue>[0], input: DueInput) 
   return resolved;
 }
 
-/** The start fields after a change, or 400 with the rule that failed (D710, the due rules). */
+/** The start fields after a change, or 400 with the rule that failed (D720, the due rules). */
 function requireStart(current: StartFields, input: StartInput) {
   const resolved = resolveStart(current, input);
   if ("error" in resolved) throw new TaskError(400, resolved.error);
   return resolved;
 }
 
-/** 400 START_AFTER_DUE when the card's start, as it will be saved, comes after its due date (D711). */
+/** 400 START_AFTER_DUE when the card's start, as it will be saved, comes after its due date (D721). */
 function requireStartNotAfterDue(start: StartFields, due: DueFields) {
   if (startAfterDue(start, due)) throw new TaskError(400, "The start must be on or before the due date", "START_AFTER_DUE");
 }
@@ -691,7 +691,7 @@ export function requireReadableCard(cardId: string, userId: string) {
 export type CardCreateInput = {
   columnId: string; title: string; description?: string; dueOn?: string | null; afterCardId?: string | null;
   dueTime?: string | null; dueTz?: string | null;
-  /** The optional start (D710), with the due date's rules; on or before the due date (D711). */
+  /** The optional start (D720), with the due date's rules; on or before the due date (D721). */
   startOn?: string | null; startTime?: string | null; startTz?: string | null;
   assigneeIds?: string[];
   /** Tags of this board (D109), at most 10 after deduplication. */
@@ -862,7 +862,7 @@ export type CardPatchInput = {
   /** `HH:MM` with `dueTz`, or null to clear the time (D100). */
   dueTime?: string | null;
   dueTz?: string | null;
-  /** The start (D710): `startOn` null clears it and its time; `startTime` comes with `startTz`, null clears the time. */
+  /** The start (D720): `startOn` null clears it and its time; `startTime` comes with `startTz`, null clears the time. */
   startOn?: string | null;
   startTime?: string | null;
   startTz?: string | null;
@@ -966,7 +966,7 @@ export async function patchCard(userId: string, cardId: string, input: CardPatch
     const due = setDue ? requireDue(card, input) : null;
     const setStart = input.startOn !== undefined || input.startTime !== undefined || input.startTz !== undefined;
     const start = setStart ? requireStart(card, input) : null;
-    // Checked whenever either side changes, against the other side as saved (D711).
+    // Checked whenever either side changes, against the other side as saved (D721).
     if (setDue || setStart) requireStartNotAfterDue(start?.value ?? card, due?.value ?? card);
     const current = db.query("SELECT parent_card_id, level, sprint_id FROM cards WHERE id = ?").get(cardId) as { parent_card_id: string | null; level: number; sprint_id: string | null };
     const hierarchyChange = input.parentId !== undefined || input.level !== undefined;

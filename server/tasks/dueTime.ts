@@ -58,7 +58,7 @@ export function resolveDue(current: DueFields, input: DueInput): { value: DueFie
 }
 
 /**
- * Optional start dates (D710–D712; migration 080). The start mirrors the due date exactly:
+ * Optional start dates (D720–D722; migration 080). The start mirrors the due date exactly:
  * `start_on` is the civil date, `start_time` an optional `HH:MM` in `start_tz`, the zone the
  * setter's browser sent, and `start_at` the derived instant. The same rules apply (a time needs a
  * date and a zone; changing only the date keeps the wall time and zone; clearing the date clears
@@ -83,7 +83,7 @@ export function resolveStart(current: StartFields, input: StartInput): { value: 
 }
 
 /**
- * Whether the start comes after the due date (D711), which a card refuses (400 START_AFTER_DUE).
+ * Whether the start comes after the due date (D721), which a card refuses (400 START_AFTER_DUE).
  * With both times set, the two instants compare, so zones never matter. Otherwise the civil dates
  * compare: a date-only start or due date means its whole day, so a start on the due day is fine
  * whatever its time, and a timed side counts by the date it was set on (in its own zone). Either

@@ -67,7 +67,7 @@ export type CardSummary = {
   due_tz?: string | null;
   /** The UTC instant when `due_time` is set. */
   due_at?: string | null;
-  /** The optional start (D710), shaped like the due fields; older servers omit it. */
+  /** The optional start (D720), shaped like the due fields; older servers omit it. */
   start_on?: string | null;
   start_time?: string | null;
   start_tz?: string | null;
@@ -269,7 +269,7 @@ export const getCard = (cardId: string) => api<CardView>(`/tasks/cards/${cardId}
  */
 export type CardChange = {
   title?: string; description?: string; dueOn?: string | null; dueTime?: string | null; dueTz?: string; assigneeIds?: string[]; tagIds?: string[]; flags?: CardFlag[];
-  /** The start (D710), as the due fields: `startTime` with `startTz`; on or before the due date (400 `START_AFTER_DUE`). */
+  /** The start (D720), as the due fields: `startTime` with `startTz`; on or before the due date (400 `START_AFTER_DUE`). */
   startOn?: string | null; startTime?: string | null; startTz?: string;
   /** Reparent (D128): a card one level up on this board, or null to detach. */
   parentId?: string | null;

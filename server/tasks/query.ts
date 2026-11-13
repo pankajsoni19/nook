@@ -155,7 +155,7 @@ function termSql(term: FilterTerm, compiler: Compiler): string {
       }
       break;
     case "start":
-      // The civil start date (D712), as `due:` reads `due_on`; `start:` has no overdue.
+      // The civil start date (D722), as `due:` reads `due_on`; `start:` has no overdue.
       for (const value of values) {
         const window = dueWindow(value, compiler.context.today);
         switch (window.kind) {
@@ -247,7 +247,7 @@ type KeyPart = { sql: string; desc: boolean };
 const SORT_PARTS: Record<QuerySort, KeyPart[]> = {
   // Dates are 1900–2999 and times ≤ 23:59, so the sentinels put undated cards and date-only cards last.
   due: [{ sql: "COALESCE(k.due_on, '9999-12-31')", desc: false }, { sql: "COALESCE(k.due_time, '99:99')", desc: false }],
-  // The start (D712), like due: cards without a start last, date-only starts after timed ones that day.
+  // The start (D722), like due: cards without a start last, date-only starts after timed ones that day.
   start: [{ sql: "COALESCE(k.start_on, '9999-12-31')", desc: false }, { sql: "COALESCE(k.start_time, '99:99')", desc: false }],
   updated: [{ sql: "k.updated_at", desc: true }],
   created: [{ sql: "k.created_at", desc: true }],
@@ -283,7 +283,7 @@ export type QueriedCard = {
   due_time: string | null;
   due_tz: string | null;
   due_at: string | null;
-  /** The optional start (D710), shaped like the due fields. */
+  /** The optional start (D720), shaped like the due fields. */
   start_on: string | null;
   start_time: string | null;
   start_tz: string | null;

@@ -32,7 +32,7 @@ type BoardCalendarProps = {
   onOpenCard: (card: BoardCard) => void;
   /**
    * PATCH `{ dueOn }` with the card's revision; `null` clears the date (and its time). `keepSpan`
-   * (a drag or Alt+Arrow, D714) moves the card's start by as many days, so its range keeps its length.
+   * (a drag or Alt+Arrow, D724) moves the card's start by as many days, so its range keeps its length.
    */
   onSetDue: (card: BoardCard, dueOn: string | null, keepSpan?: boolean) => void;
   filtered: boolean;
@@ -63,7 +63,7 @@ export function BoardCalendar({ board, cards, layout, month: routeMonth, today, 
   useHistoryDialogGuard(sheet !== null, () => setSheet(null));
 
   const { byDay, unscheduled } = placeCards(cards, viewerZone);
-  // A card with a start also shows on the days before its due day (D714), within the grid's six weeks.
+  // A card with a start also shows on the days before its due day (D724), within the grid's six weeks.
   const spans = spanningDays(cards, viewerZone, addDays(`${month}-01`, -7), addDays(`${month}-01`, 42));
   // Cards due that day first, so a long range never pushes them behind "+N more".
   const dayItems = (cell: string) => [...(byDay.get(cell) ?? []), ...(spans.get(cell) ?? [])];
@@ -110,7 +110,7 @@ export function BoardCalendar({ board, cards, layout, month: routeMonth, today, 
     return `${card.title}${start ? `, starts ${start}` : ""}${time ? `, due at ${time}` : ""}${home}${done.has(card.column_id) ? ", done" : ""}`;
   };
 
-  // `continued`: a day of the card's range before its due day (D714).
+  // `continued`: a day of the card's range before its due day (D724).
   const chip = (card: BoardCard, cell?: string) => <div key={card.id} className={`task-cal-chip${done.has(card.column_id) ? " done" : ""}${cell && displayedDay(card, viewerZone) !== cell ? " continued" : ""}`} tabIndex={0} role="button"
     data-card-id={card.id} data-open-card={card.id} draggable={movable} aria-label={chipLabel(card)} aria-roledescription={readOnly ? "Card" : "Draggable card"}
     aria-keyshortcuts={readOnly ? undefined : "Alt+ArrowLeft Alt+ArrowRight Alt+ArrowUp Alt+ArrowDown"} aria-describedby={readOnly ? undefined : "task-cal-keys"}

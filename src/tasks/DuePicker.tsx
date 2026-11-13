@@ -9,16 +9,16 @@ import type { CardChange } from "./tasksApi";
 // Apply and Cancel. Nothing saves until Apply, which sends one change (one PATCH with the revision);
 // Cancel, Escape, a click outside, and Back discard the draft (D69, D91).
 //
-// The same picker edits the card's Start (D710, `kind="start"`): a date with an optional time, with
+// The same picker edits the card's Start (D720, `kind="start"`): a date with an optional time, with
 // the due date's rules. The start fields are read as due-shaped fields (`startAsDue`) so every
 // helper here serves both, and the change is renamed to `startOn`/`startTime`/`startTz` on Apply.
 
 export type DueFields = { due_on: string | null; due_time?: string | null; due_tz?: string | null; due_at?: string | null };
 export type StartFields = { start_on?: string | null; start_time?: string | null; start_tz?: string | null; start_at?: string | null };
-/** Which of the card's dates a picker edits (D710). */
+/** Which of the card's dates a picker edits (D720). */
 export type DateKind = "due" | "start";
 
-/** The start fields as due-shaped fields, so the start reuses every due helper (D710). */
+/** The start fields as due-shaped fields, so the start reuses every due helper (D720). */
 export function startAsDue(card: StartFields): DueFields {
   return { due_on: card.start_on ?? null, due_time: card.start_time ?? null, due_tz: card.start_tz ?? null, due_at: card.start_at ?? null };
 }
@@ -87,14 +87,14 @@ export function dueChange(card: DueFields, draft: DueDraft, zone: string): { cha
   return { change, success };
 }
 
-/** The one change Apply sends for the start (D710), worded for it; `dueChange`'s rules. */
+/** The one change Apply sends for the start (D720), worded for it; `dueChange`'s rules. */
 export function startChange(card: StartFields, draft: DueDraft, zone: string): { change: CardChange; success: string } | null {
   const pending = dueChange(startAsDue(card), draft, zone);
   return pending && { change: changeAsStart(pending.change), success: pending.success.replace(/^Due/, "Start") };
 }
 
 /**
- * Why the draft would put the start after the due date (D711), or null. Civil dates compare here;
+ * Why the draft would put the start after the due date (D721), or null. Civil dates compare here;
  * the server also compares the instants when both have a time (400 START_AFTER_DUE).
  */
 export function dateOrderError(kind: DateKind, card: DueFields & StartFields, draft: DueDraft) {
@@ -116,14 +116,14 @@ export function dueTriggerLabel(card: DueFields, today: string, zone = viewerTim
   return time ? `${words} at ${time}` : words;
 }
 
-/** The Start trigger's words (D710): "No start date", "3 Oct", or "3 Oct at 09:00". */
+/** The Start trigger's words (D720): "No start date", "3 Oct", or "3 Oct at 09:00". */
 export function startTriggerLabel(card: StartFields, today: string, zone = viewerTimeZone()) {
   return card.start_on ? dueTriggerLabel(startAsDue(card), today, zone) : "No start date";
 }
 
 type DuePickerProps = {
   card: DueFields & StartFields;
-  /** The due date (the default) or the start (D710). */
+  /** The due date (the default) or the start (D720). */
   kind?: DateKind;
   idPrefix: string;
   /** The card sits in a done column: no due status. */
@@ -143,7 +143,7 @@ export function DuePicker({ card, kind = "due", idPrefix, done, disabled, onAppl
   const sheet = useSheet(presentation);
   const [open, setOpen] = useState(defaultOpen);
   const start = kind === "start";
-  // The start reads as due-shaped fields, so the rest of the picker is the same for both (D710).
+  // The start reads as due-shaped fields, so the rest of the picker is the same for both (D720).
   const fields = start ? startAsDue(card) : card;
   const [draft, setDraft] = useState<DueDraft>(() => initialDueDraft(fields));
   const [applying, setApplying] = useState(false);

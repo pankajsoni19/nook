@@ -44,7 +44,7 @@ type CardFieldsProps = {
 };
 
 /**
- * The card's fields (WAVE_13_TASK_CARD_UX.md §4.3): the start and due dates, each with an optional time (D710), the
+ * The card's fields (WAVE_13_TASK_CARD_UX.md §4.3): the start and due dates, each with an optional time (D720), the
  * assignees, the tags, and the flags. The card dialog uses it today; the composer and the full
  * page (13D) join here, so each adds a field with a small diff.
  */
@@ -97,7 +97,7 @@ function StaticCardFields({ card, idPrefix, done, tags }: Pick<CardFieldsProps, 
   </div>;
 }
 
-/** The start date and optional time (D710): the same picker as Due, editing the start. */
+/** The start date and optional time (D720): the same picker as Due, editing the start. */
 function StartField({ card, idPrefix, done, saving, onSave }: Omit<CardFieldsProps, "userId">) {
   return <div className="task-card-field">
     <label htmlFor={`${idPrefix}-start-input`}><CalendarDays aria-hidden="true" />Start</label>

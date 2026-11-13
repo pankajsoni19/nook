@@ -78,7 +78,7 @@ export const LEVEL_VALUES = ["work", "0", "1", "2"] as const;
 /** Relative due keywords. `week` is today and the next six days; `next-week` the seven days after that. */
 export const DUE_KEYWORDS = ["overdue", "today", "week", "next-week", "none"] as const;
 /**
- * `start:` values (D712): the due keywords but `overdue`, and the same dates (`YYYY-MM-DD`,
+ * `start:` values (D722): the due keywords but `overdue`, and the same dates (`YYYY-MM-DD`,
  * `<YYYY-MM-DD`, `>YYYY-MM-DD`), over the card's civil `start_on`.
  */
 export const START_KEYWORDS = ["today", "week", "next-week", "none"] as const;
@@ -780,7 +780,7 @@ export type MemoryQueryCard = QueryCard & {
   created_by?: string | null;
   due_time?: string | null;
   due_at?: string | null;
-  /** The optional start's civil date (D710), for `start:`. */
+  /** The optional start's civil date (D720), for `start:`. */
   start_on?: string | null;
   relation_count?: number;
   open_blockers?: number;
@@ -824,7 +824,7 @@ function matchesDueValue(card: MemoryQueryCard, value: string, context: MemoryQu
   }
 }
 
-/** A `start:` value over the card's civil `start_on` (D712), as `dueWindow` reads the due keywords. */
+/** A `start:` value over the card's civil `start_on` (D722), as `dueWindow` reads the due keywords. */
 function matchesStartValue(card: MemoryQueryCard, value: string, context: MemoryQueryContext) {
   const window = dueWindow(value, context.today);
   const start = card.start_on ?? null;
