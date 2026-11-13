@@ -15,7 +15,7 @@ import { moduleDef } from "../src/modules";
  */
 const src = join(import.meta.dir, "..", "src");
 const read = (path: string) => readFileSync(join(src, path), "utf8");
-const ids = (entries: ReturnType<typeof hubEntries>) => entries.map((entry) => entry.id);
+const ids = (entries: ReturnType<typeof hubEntries>) => entries.map((entry) => entry.id).filter((id) => id !== "workspace"); // Settings → Workspace (D836) appears once a workspace module is ready; these lists are about the rest.
 
 describe("routes", () => {
   test("/settings/bin is canonical; /bin opens the same screen and is rewritten to it (both directions)", () => {
@@ -53,7 +53,7 @@ describe("the hub's entries", () => {
       const entries = hubEntries(role, { teamModuleEnabled: true });
       const bin = entries.findIndex((entry) => entry.id === "bin");
       expect(entries[bin]).toMatchObject({ group: "workspace", label: "Bin", route: { app: "bin" } });
-      expect(entries.slice(0, bin).every((entry) => entry.group === "account")).toBe(true);
+      expect(entries.slice(0, bin).every((entry) => entry.group === "account" || entry.id === "workspace")).toBe(true);
       expect(entries.slice(bin + 1).every((entry) => entry.group === "team")).toBe(true);
     }
     // wave38-fixes: a guest can delete nothing, so their (always empty) Bin has no entry.

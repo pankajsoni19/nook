@@ -25,7 +25,7 @@
 .bk-slots-day:disabled { cursor: default; }
 .bk-slots-zone { display: inline-flex; align-items: center; gap: 8px; color: var(--bk-muted); font-size: .84rem; }
 .bk-slots-zone svg { width: 16px; height: 16px; flex: none; }
-.bk-slots-zone select { min-width: 0; max-width: 100%; min-height: 36px; border: 1px solid var(--bk-border); border-radius: 8px; padding: 0 8px; background: var(--bk-surface); color: var(--bk-text); font: inherit; }
+.bk-slots-zone input { min-width: 0; max-width: 100%; min-height: 36px; border: 1px solid var(--bk-border); border-radius: 8px; padding: 0 8px; background: var(--bk-surface); color: var(--bk-text); font: inherit; }
 .bk-slots-times { display: grid; gap: 10px; align-content: start; min-width: 0; }
 .bk-slots-times h3 { margin: 6px 0 0; font-size: .95rem; font-weight: 650; }
 .bk-slots-times ul { display: grid; gap: 8px; max-height: 380px; margin: 0; padding: 0 2px 2px 0; overflow-y: auto; list-style: none; }

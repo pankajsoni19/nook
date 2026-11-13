@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { FieldSelect, zoneOptions } from "./FieldSelect";
 import { CalendarSync, Plus, RefreshCw, Star, Trash2 } from "lucide-react";
 import { AvailabilityEditor, OverridesEditor } from "../ui/schedule/AvailabilityEditor";
 import { useUnitPreferences } from "../ui/units";
@@ -19,7 +20,6 @@ export function AvailabilityView({ flash, readOnly }: { flash: (message: string)
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const units = useUnitPreferences();
-  const zoneList = useMemo(zones, []);
   const { ask, confirmElement } = useConfirm();
 
   useEffect(() => { bookingsApi.schedules().then((result) => { setSchedules(result.schedules); setSelectedId((id) => id ?? result.schedules[0]?.id ?? null); }).catch(() => setError("Could not load your schedules")); }, []);
@@ -64,8 +64,7 @@ export function AvailabilityView({ flash, readOnly }: { flash: (message: string)
       </div>}
       <div className="bk-grid">
         <label className="ui-field"><span>Name</span><input value={draft.name} maxLength={60} disabled={readOnly} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
-        <label className="ui-field"><span>Time zone</span><select className="bk-select" value={draft.tz} disabled={readOnly} onChange={(event) => setDraft({ ...draft, tz: event.target.value })}>
-          {(zoneList.includes(draft.tz) ? zoneList : [draft.tz, ...zoneList]).map((zone) => <option key={zone} value={zone}>{zone.replace(/_/g, " ")}</option>)}</select></label>
+        <FieldSelect label="Time zone" value={draft.tz} disabled={readOnly} onChange={(tz) => setDraft({ ...draft, tz })} options={zoneOptions(draft.tz)} />
       </div>
       <AvailabilityEditor weekly={draft.weekly} onChange={(weekly) => setDraft({ ...draft, weekly })} weekStart={weekStart} disabled={readOnly} />
       {!readOnly && <div className="bk-save-row">
@@ -126,7 +125,7 @@ function BusySources({ flash, readOnly }: { flash: (message: string) => void; re
         {!readOnly && <button type="button" className="icon-button" aria-label={`Refresh ${feed.label}`} title="Refresh now" onClick={() => void bookingsApi.refreshFeed(feed.id).then((result) => setFeeds(feeds.map((item) => item.id === feed.id ? result.feed : item)))}><RefreshCw /></button>}
         {!readOnly && <button type="button" className="icon-button" aria-label={`Remove ${feed.label}`} onClick={() => void bookingsApi.removeFeed(feed.id).then(() => setFeeds(feeds.filter((item) => item.id !== feed.id)))}><Trash2 /></button>}
       </li>)}</ul>}
-    {!readOnly && <form className="bk-feed-form" onSubmit={(event) => { event.preventDefault(); void add(); }}>
+    {!readOnly && <form className="bk-feed-form" noValidate onSubmit={(event) => { event.preventDefault(); void add(); }}>
       <label className="ui-field"><span>Name</span><input value={label} maxLength={80} placeholder="Work Google" onChange={(event) => setLabel(event.target.value)} /></label>
       <label className="ui-field bk-grow"><span>Secret address (ICS)</span><input value={url} type="url" required autoComplete="off" spellCheck={false} placeholder="https://calendar.google.com/calendar/ical/…/basic.ics" onChange={(event) => setUrl(event.target.value)} /></label>
       <button type="submit" className="secondary-button ui-small-button bk-form-button" disabled={adding || url.length < 8}><Plus aria-hidden="true" />{adding ? "Checking…" : "Add calendar"}</button>

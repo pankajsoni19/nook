@@ -113,7 +113,7 @@ describe("route scheme", () => {
 });
 
 describe("the nav per role", () => {
-  const ids = (entries: ReturnType<typeof hubEntries>) => entries.map((entry) => entry.id);
+  const ids = (entries: ReturnType<typeof hubEntries>) => entries.map((entry) => entry.id).filter((id) => id !== "workspace"); // Settings → Workspace (D836) appears once a workspace module is ready; these lists are about the rest.
 
   test("admins: every account section, the Bin, then every Team section", () => {
     expect(ids(hubEntries("admin", { teamModuleEnabled: true }))).toEqual([

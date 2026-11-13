@@ -375,7 +375,7 @@ describe("access, search, datasets, MCP, Bin", () => {
     const otherKey = makeKey(outsider, ["bookings:read"]);
     expect(await errorCode(otherKey, "get_booking", { bookingId: booked.id })).toBe("NOT_FOUND");
     expect((await ok(reader, "get_booking_link", { typeId })).url).toBe(`${origin}/p/book/${handle}/intro-call`);
-    expect((await call(writer, "delete_booking_type", { typeId })).isError).toBe(true); // needs bin:write too
+    expect((await call(writer, "bin_booking_type", { typeId })).isError).toBe(true); // needs bin:write too
   });
   test("Bin: a binned type 404s publicly, restores, and a purge leaves its bookings with the saved title", async () => {
     const type = await api("/bookings/types", host, "POST", { title: "Doomed", minNotice: 0 });

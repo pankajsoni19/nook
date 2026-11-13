@@ -76,7 +76,8 @@ describe("the stubs (D800, D832)", () => {
   test("seven modules, in Settings order, all registered and none ready", () => {
     expect(workspaceModules().map((module) => module.id)).toEqual([...WORKSPACE_MODULE_IDS]);
     expect(WORKSPACE_MODULE_IDS).toEqual(["forms", "time", "goals", "checkins", "crm", "bookings", "townhall"]);
-    expect(readyWorkspaceModules()).toEqual([]);
+    // Lanes flip their module ready one by one (Bookings is); the rest stay stubs.
+    expect(readyWorkspaceModules().every((module) => module.app !== null)).toBe(true);
     // Product owner names (§G.1): Contacts at /contacts, Standups at /standups.
     expect(workspaceModules().map((module) => [module.id, module.label, module.segment])).toEqual([
       ["forms", "Forms", "forms"], ["time", "Time", "time"], ["goals", "Goals", "goals"], ["checkins", "Standups", "standups"],
@@ -87,10 +88,11 @@ describe("the stubs (D800, D832)", () => {
   test("a stub is a planned module: not in Settings, no launcher, its URLs open Home", () => {
     for (const id of WORKSPACE_MODULE_IDS) {
       const def = MODULES.find((module) => module.id === id)!;
+      if (readyWorkspaceModules().some((module) => module.id === id)) continue;
       expect(def.planned).toBe(true);
       expect(def.routeApps).toEqual([id]);
     }
-    expect(settingsModulesFor("admin").some((module) => isWorkspaceModuleId(module.id))).toBe(false);
+    expect(settingsModulesFor("admin").some((module) => isWorkspaceModuleId(module.id) && !readyWorkspaceModules().some((ready) => ready.id === module.id))).toBe(false);
     for (const path of ["/forms", "/contacts/ana-silva-9xk2mm0a1b", "/standups", "/goals/x"]) expect(parseRoute(path)).toEqual({ app: "home" });
     expect(renderToStaticMarkup(<TopBarItems />)).toBe("");
   });
@@ -130,13 +132,13 @@ describe("a ready module (the throwaway test module)", () => {
     expect(TODAY_SECTIONS.goalsCheckin?.module).toBe("goals");
     expect(DEFAULT_SECTION_ORDER).toContain("goalsCheckin");
     expect(groupTodaySections(["tasksDue", "goalsCheckin", "notesRecent"]).map((group) => [group.id, group.names])).toEqual([["today", ["tasksDue", "goalsCheckin"]], ["recent", ["notesRecent"]]]);
-    expect(visibleQuickActions([], "member").map((action) => action.id)).toEqual(["checkin", "admin-only"]);
-    expect(visibleQuickActions([], "guest").map((action) => action.id)).toEqual(["checkin"]);
-    expect(visibleQuickActions(["goals"], "member")).toEqual([]);
+    expect(visibleQuickActions([], "member").map((action) => action.id).filter((id) => !id.startsWith("bookings."))).toEqual(["checkin", "admin-only"]);
+    expect(visibleQuickActions([], "guest").map((action) => action.id).filter((id) => !id.startsWith("bookings."))).toEqual(["checkin"]);
+    expect(visibleQuickActions(["goals"], "member").filter((action) => !action.id.startsWith("bookings."))).toEqual([]);
     const markup = renderToStaticMarkup(<QuickActions onOpenRoute={() => undefined} />);
     expect(markup).toContain('<ul class="today-quick-actions" aria-label="Quick actions">');
     expect(markup).toContain('<a class="today-quick-action" href="/goals">');
-    expect(renderToStaticMarkup(<ModulesContext.Provider value={["goals"]}><QuickActions onOpenRoute={() => undefined} /></ModulesContext.Provider>)).toBe("");
+    expect(renderToStaticMarkup(<ModulesContext.Provider value={["goals", "bookings"]}><QuickActions onOpenRoute={() => undefined} /></ModulesContext.Provider>)).toBe("");
   });
 
   test("its card slots render in the dialog, face, header, and Timeline, and hide while it is off", () => {
@@ -173,7 +175,7 @@ describe("a ready module (the throwaway test module)", () => {
     expect(manager.serialize(json).trim()).toBe('Before\n\n[Goal](/goals/grow-mrr-7k3f9x2ab0 "nook-embed")\n\nAfter');
     const plain = manager.parse('[Poll](/forms/x "nook-embed")');
     expect(JSON.stringify(plain)).not.toContain("moduleEmbed");
-    expect(registeredSlashItems().map((item) => [item.label, item.module])).toEqual([["Goal", "goals"]]);
+    expect(registeredSlashItems().filter((item) => item.module === "goals").map((item) => [item.label, item.module])).toEqual([["Goal", "goals"]]);
   });
 
   test("going back to the stub hides its routes again", () => {

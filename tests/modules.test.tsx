@@ -28,6 +28,7 @@ import { parseRoute } from "../src/router";
 import { TodayHome } from "../src/today/TodayHome";
 import { enabledTodayApps, TODAY_APPS } from "../src/today/todayApps";
 import { TODAY_SECTIONS } from "../src/today/todaySections";
+import { isWorkspaceModuleId } from "../shared/workspaceModules";
 
 describe("module registry (D92)", () => {
   test("client and server know the same module ids, in the same order, including team", () => {
@@ -37,7 +38,7 @@ describe("module registry (D92)", () => {
   });
 
   test("Settings lists every module, Team included, but never shows Team to guests", () => {
-    expect(SETTINGS_MODULES.map((module) => module.id)).toEqual(["notes", "files", "tasks", "collections", "calendar", "whiteboards", "vault", "agents", "reports", "search", "bin", "notifications", "team", "inbox"]);
+    expect(SETTINGS_MODULES.map((module) => module.id).filter((id) => !isWorkspaceModuleId(id))).toEqual(["notes", "files", "tasks", "collections", "calendar", "whiteboards", "vault", "agents", "reports", "search", "bin", "notifications", "team", "inbox"]);
     expect(settingsModulesFor("admin").map((module) => module.id)).toContain("team");
     expect(settingsModulesFor("viewer").map((module) => module.id)).toContain("team");
     expect(settingsModulesFor("guest").map((module) => module.id)).not.toContain("team");
@@ -101,7 +102,8 @@ describe("Settings → Modules", () => {
     expect(guest).not.toContain("module-label-agents");
     // Nor Reports (Wave 45).
     expect(guest).not.toContain("module-label-reports");
-    expect([...guest.matchAll(/role="switch"/g)]).toHaveLength(SETTINGS_MODULES.length - 5);
+    // Ready workspace modules guests never get (Time, Contacts, Bookings) are hidden too.
+    expect([...guest.matchAll(/role="switch"/g)]).toHaveLength(SETTINGS_MODULES.length - 5 - SETTINGS_MODULES.filter((module) => ["time", "crm", "bookings"].includes(module.id)).length);
     expect(render(["team"], null, "admin")).toContain("You are an admin: Team stays available from Settings.");
   });
 
@@ -128,10 +130,10 @@ describe("gating (client only)", () => {
   const launcher = (markup: string) => [...markup.matchAll(/class="today-app today-app-([a-z]+)"/g)].map(([, section]) => section);
 
   test("the launcher is derived from the registry and drops modules that are off", () => {
-    expect(TODAY_APPS.map((app) => app.section)).toEqual(["notes", "files", "tasks", "collections", "calendar", "whiteboards", "vault", "chat", "reports"]);
-    expect(enabledTodayApps(["calendar", "search"]).map((app) => app.section)).toEqual(["notes", "files", "tasks", "collections", "whiteboards", "vault", "chat", "reports"]);
-    expect(launcher(home([]))).toEqual(["notes", "files", "tasks", "collections", "calendar", "whiteboards", "vault", "chat", "reports"]);
-    expect(launcher(home(["calendar", "tasks", "vault", "agents", "reports"]))).toEqual(["notes", "files", "collections", "whiteboards"]);
+    expect(TODAY_APPS.map((app) => app.section).filter((section) => !isWorkspaceModuleId(section))).toEqual(["notes", "files", "tasks", "collections", "calendar", "whiteboards", "vault", "chat", "reports"]);
+    expect(enabledTodayApps(["calendar", "search"]).map((app) => app.section).filter((section) => !isWorkspaceModuleId(section))).toEqual(["notes", "files", "tasks", "collections", "whiteboards", "vault", "chat", "reports"]);
+    expect(launcher(home([])).filter((section) => !isWorkspaceModuleId(section))).toEqual(["notes", "files", "tasks", "collections", "calendar", "whiteboards", "vault", "chat", "reports"]);
+    expect(launcher(home(["calendar", "tasks", "vault", "agents", "reports"])).filter((section) => !isWorkspaceModuleId(section))).toEqual(["notes", "files", "collections", "whiteboards"]);
   });
 
   test("Wave 38: no header has a Bin or Team button, whatever the modules; Bin off removes Settings → Bin", () => {

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { FieldSelect, zoneOptions } from "./FieldSelect";
 import { CalendarCheck2, CalendarClock, Check, Clock, Copy, Link2, MapPin, Phone, PencilLine, CircleHelp, Plus, Trash2, Users, Video, X, ExternalLink, Eye, EyeOff, KeyRound } from "lucide-react";
 import { ModuleHome } from "../ui/ModuleHome";
 import { EmptyState } from "../ui/EmptyState";
@@ -256,7 +257,6 @@ function ProfileView({ flash, readOnly }: { flash: (message: string) => void; re
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   useEffect(() => { bookingsApi.profile().then((result) => { setProfile(result.profile); setDraft(result.profile); }).catch(() => setError("Could not load your profile")); }, []);
-  const zoneList = useMemo(() => { try { return Intl.supportedValuesOf("timeZone"); } catch { return ["UTC"]; } }, []);
   if (error) return <p className="bk-error" role="alert">{error}</p>;
   if (!profile || !draft) return <p className="bk-muted" role="status">Loading…</p>;
   const dirty = JSON.stringify(profile) !== JSON.stringify(draft);
@@ -268,7 +268,7 @@ function ProfileView({ flash, readOnly }: { flash: (message: string) => void; re
     finally { setSaving(false); }
   };
   const url = absolute(`/p/book/${profile.handle}`);
-  return <form className="bk-panel bk-profile" onSubmit={(event) => { event.preventDefault(); void save(); }}>
+  return <form className="bk-panel bk-profile" noValidate onSubmit={(event) => { event.preventDefault(); void save(); }}>
     <div className="bk-panel-head">
       <h2>Your booking page</h2>
       <p className="bk-muted">People see your name, this welcome, and your public booking types. Your calendar's details are never shown.</p>
@@ -282,7 +282,7 @@ function ProfileView({ flash, readOnly }: { flash: (message: string) => void; re
       <label className="ui-field"><span>Link name</span><input value={draft.handle} maxLength={30} disabled={readOnly} onChange={(event) => setDraft({ ...draft, handle: event.target.value.toLowerCase() })} />
         <span className="ui-field-hint">Your old link keeps working for 90 days after a change.</span></label>
       <label className="ui-field"><span>Name shown</span><input value={draft.displayName} maxLength={80} disabled={readOnly} onChange={(event) => setDraft({ ...draft, displayName: event.target.value })} /></label>
-      <label className="ui-field"><span>Time zone</span><select className="bk-select" value={draft.tz} disabled={readOnly} onChange={(event) => setDraft({ ...draft, tz: event.target.value })}>{zoneList.map((zone) => <option key={zone} value={zone}>{zone.replace(/_/g, " ")}</option>)}</select></label>
+      <FieldSelect label="Time zone" value={draft.tz} disabled={readOnly} onChange={(tz) => setDraft({ ...draft, tz })} options={zoneOptions(draft.tz)} />
       <label className="bk-check"><input type="checkbox" checked={draft.enabled} disabled={readOnly} onChange={(event) => setDraft({ ...draft, enabled: event.target.checked })} /><span>My booking page is on</span></label>
       <label className="ui-field bk-wide"><span>Welcome</span><textarea value={draft.welcome} maxLength={2000} rows={3} disabled={readOnly} placeholder="Pick a time that works for you." onChange={(event) => setDraft({ ...draft, welcome: event.target.value })} /></label>
     </div>

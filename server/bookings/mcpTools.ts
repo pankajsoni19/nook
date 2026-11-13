@@ -2,11 +2,12 @@ import * as z from "zod/v4";
 import { db, withAuditContext } from "../db";
 import { config } from "../config";
 import { keyContainerIds } from "../keyResources";
-import { BIN_BUCKETS, BIN_DESCRIPTION, defineTool, McpToolError, type McpKeyContext, type McpToolSpec } from "../mcpToolKit";
+import { BIN_BUCKETS, BIN_DESCRIPTION, defineTool, McpToolError, restoreResult, type McpKeyContext, type McpToolSpec } from "../mcpToolKit";
+import { restoreItem } from "../bin";
 import { readableContact } from "../people/contacts";
 import { QuestionError } from "../questions/service";
 import { ASSIGNMENTS, LOCATION_KINDS, MAX_SLOT_WINDOW_DAYS, slotsByDate } from "../../shared/bookings";
-import { BookingError, requireBooking, requireType } from "./model";
+import { BookingError, requireBooking, requireType, typeRow } from "./model";
 import { availability } from "./availability";
 import { approveBooking, bookingView, cancelBooking, createBooking, declineBooking, markNoShow, rescheduleBooking } from "./service";
 import { createType, deleteType, listTypes, typeView, updateType, type TypeInput } from "./types";
@@ -97,7 +98,7 @@ export const bookingTools: McpToolSpec[] = [
     title: "Create a booking type",
     description: "Create a booking type (an event type people book). It is public on the owner's booking page unless public is false. Defaults: 30 minutes, video link, 4 hours notice, 60 days ahead, weekdays 09–17 in the owner's zone.",
     scopes: ["bookings:write"],
-    access: { mode: "global" },
+    access: { mode: "global", related: ["hostIds"] },
     write: true,
     inputSchema: z.object({ ...typeFields, title: z.string().min(1).max(120) }),
     handler: (args, key) => run(key, () => createType(key.userId, toInput(args) as TypeInput & { title: string }))
@@ -107,15 +108,15 @@ export const bookingTools: McpToolSpec[] = [
     title: "Update a booking type",
     description: "Change a booking type's settings (partial). Pass expectedRevision from get_booking_type to refuse a change made meanwhile.",
     scopes: ["bookings:write"],
-    access: { mode: "items", items: [{ arg: "typeId", kind: "booking_type" }] },
+    access: { mode: "items", items: [{ arg: "typeId", kind: "booking_type" }], related: ["hostIds"] },
     write: true,
     inputSchema: z.object({ typeId: ref, ...typeFields, expectedRevision: z.number().int().min(1).optional() }),
     handler: ({ typeId, ...args }, key) => run(key, () => updateType(key.userId, typeId, toInput(args)))
   }),
   defineTool({
-    name: "delete_booking_type",
-    title: "Delete a booking type",
-    description: `Moves a booking type to the Bin; its bookings stay. ${BIN_DESCRIPTION}`,
+    name: "bin_booking_type",
+    title: "Move a booking type to the Bin",
+    description: `Moves a booking type to the Bin; its bookings stay and its links stop working. ${BIN_DESCRIPTION} Restore it with restore_booking_type.`,
     scopes: ["bookings:write"],
     alsoRequires: ["bin:write"],
     access: { mode: "items", items: [{ arg: "typeId", kind: "booking_type" }] },
@@ -124,6 +125,22 @@ export const bookingTools: McpToolSpec[] = [
     annotations: { destructiveHint: true },
     inputSchema: z.object({ typeId: ref }),
     handler: ({ typeId }, key) => run(key, () => deleteType(key.userId, typeId))
+  }),
+  defineTool({
+    name: "restore_booking_type",
+    title: "Restore a booking type from the Bin",
+    description: "Restore a binned booking type (its owner, or whoever binned it). Its secret links stay revoked; make new ones.",
+    scopes: ["bookings:write"],
+    alsoRequires: ["bin:write"],
+    access: { mode: "items", items: [{ arg: "typeId", kind: "booking_type" }] },
+    write: true,
+    inputSchema: z.object({ typeId: ref }),
+    handler: ({ typeId }, key) => run(key, async () => {
+      const row = typeRow(typeId);
+      if (!row) throw new BookingError(404, "NOT_FOUND", "Booking type not found");
+      restoreResult(await restoreItem("booking_type", row.id, key.userId), "Booking type");
+      return typeView(typeRow(row.id)!, key.userId);
+    })
   }),
   defineTool({
     name: "get_availability",
@@ -230,9 +247,9 @@ export const bookingTools: McpToolSpec[] = [
     handler: ({ bookingId, message }, key) => run(key, () => bookingView(cancelBooking(requireBooking(bookingId, key.userId, true).booking, "host", key.userId, message ?? null), key.userId))
   }),
   defineTool({
-    name: "approve_booking",
-    title: "Approve a booking",
-    description: "Confirm a booking that awaits approval.",
+    name: "confirm_booking_request",
+    title: "Confirm a booking request",
+    description: "Confirm a booking that awaits the host's confirmation (manual-confirmation types).",
     scopes: ["bookings:write"],
     access: { mode: "items", items: [{ arg: "bookingId", kind: "booking" }] },
     write: true,
@@ -277,5 +294,5 @@ export const bookingTools: McpToolSpec[] = [
 
 export const BOOKING_AGENT_TOOLS = {
   allowed: ["list_booking_types", "get_booking_type", "get_availability", "list_bookings", "get_booking", "get_booking_link", "create_booking"],
-  never: ["create_booking_type", "update_booking_type", "delete_booking_type", "reschedule_booking", "cancel_booking", "approve_booking", "decline_booking", "mark_no_show"]
+  never: ["create_booking_type", "update_booking_type", "bin_booking_type", "restore_booking_type", "reschedule_booking", "cancel_booking", "confirm_booking_request", "decline_booking", "mark_no_show"]
 };

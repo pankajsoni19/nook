@@ -200,7 +200,7 @@ function Field({ label, hint, error, children }: { label: string; hint?: string;
 function Verify({ base, id, onDone }: { base: string; id: string; onDone: (result: Confirmation) => void }) {
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
-  return <form className="bk-pub-fields" onSubmit={(event) => { event.preventDefault(); call<Confirmation>(`${base}/verify`, { method: "POST", body: JSON.stringify({ id, code: code.trim() }) }).then(onDone, (reason: unknown) => setError(reason instanceof Error ? reason.message : "That code did not work")); }}>
+  return <form className="bk-pub-fields" noValidate onSubmit={(event) => { event.preventDefault(); call<Confirmation>(`${base}/verify`, { method: "POST", body: JSON.stringify({ id, code: code.trim() }) }).then(onDone, (reason: unknown) => setError(reason instanceof Error ? reason.message : "That code did not work")); }}>
     <h2 className="bk-pub-h2">Check your email</h2>
     <p className="ui-public-text">We sent a 6-digit code to confirm your address. Enter it to finish booking.</p>
     <Field label="Code" error={error ?? undefined}><input inputMode="numeric" autoComplete="one-time-code" pattern="\d{6}" maxLength={6} value={code} onChange={(event) => setCode(event.target.value)} autoFocus /></Field>
@@ -276,7 +276,7 @@ function ManagePage({ token }: { token: string }) {
           <button type="button" className="bk-pub-link" onClick={() => setMode("view")}>Keep the current time</button>
         </div>
       </section>}
-      {mode === "cancel" && <form className="bk-pub-fields" onSubmit={(event) => { event.preventDefault(); void act("cancel"); }}>
+      {mode === "cancel" && <form className="bk-pub-fields" noValidate onSubmit={(event) => { event.preventDefault(); void act("cancel"); }}>
         <Field label="Reason (optional)"><textarea maxLength={500} rows={3} value={reason} onChange={(event) => setReason(event.target.value)} autoFocus /></Field>
         <div className="bk-pub-actions">
           <button type="submit" className="bk-pub-button danger">Cancel booking</button>

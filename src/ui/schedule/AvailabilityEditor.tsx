@@ -103,7 +103,7 @@ export function OverridesEditor({ overrides, onPut, onRemove, today, disabled = 
           <button type="button" className="icon-button" disabled={disabled} aria-label={`Remove the override on ${row.date}`} onClick={() => void onRemove(row.date)}><Trash2 /></button>
         </li>)}
       </ul>}
-    <form className="ui-overrides-form" onSubmit={(event) => { event.preventDefault(); if (date && !problem) void Promise.resolve(onPut({ date, ranges: closed ? null : [range], note })).then(() => { setDate(""); setNote(""); }); }}>
+    <form className="ui-overrides-form" noValidate onSubmit={(event) => { event.preventDefault(); if (date && !problem) void Promise.resolve(onPut({ date, ranges: closed ? null : [range], note })).then(() => { setDate(""); setNote(""); }); }}>
       <label className="ui-field"><span>Date</span><input id={`${id}-date`} type="date" required value={date} min={today} disabled={disabled} onChange={(event) => setDate(event.target.value)} /></label>
       <label className="ui-availability-switch"><input type="checkbox" checked={closed} disabled={disabled} onChange={(event) => setClosed(event.target.checked)} /><span>Unavailable all day</span></label>
       {!closed && <span className="ui-availability-range">

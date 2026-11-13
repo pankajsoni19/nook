@@ -92,7 +92,7 @@ export function SlotPicker({ load, tz, onTz, onPick, picked, weekStart = 1, labe
       <label className="bk-slots-zone">
         <Globe aria-hidden="true" />
         <span className="bk-visually-hidden">Time zone</span>
-        <select value={tz} onChange={(event) => onTz(event.target.value)}>{zoneList.map((zone) => <option key={zone} value={zone}>{zone.replace(/_/g, " ")}</option>)}</select>
+        <ZoneInput tz={tz} zones={zoneList} onTz={onTz} />
       </label>
     </div>
     <div className="bk-slots-times">
@@ -107,4 +107,20 @@ export function SlotPicker({ load, tz, onTz, onPick, picked, weekStart = 1, labe
         </>}
     </div>
   </div>;
+}
+
+/** The zone field: type to search every IANA zone (a datalist, so it works the same on public pages); applied when it names a real zone. */
+function ZoneInput({ tz, zones: list, onTz }: { tz: string; zones: readonly string[]; onTz: (tz: string) => void }) {
+  const [text, setText] = useState(tz.replace(/_/g, " "));
+  useEffect(() => { setText(tz.replace(/_/g, " ")); }, [tz]);
+  const listId = `bk-zones-${useMemo(() => Math.random().toString(36).slice(2, 8), [])}`;
+  const apply = (value: string) => {
+    const zone = list.find((item) => item.replace(/_/g, " ").toLowerCase() === value.trim().toLowerCase());
+    if (zone && zone !== tz) onTz(zone);
+  };
+  return <>
+    <input className="bk-slots-zone-input" list={listId} value={text} spellCheck={false} autoComplete="off"
+      onChange={(event) => { setText(event.target.value); apply(event.target.value); }} onBlur={() => setText(tz.replace(/_/g, " "))} />
+    <datalist id={listId}>{list.map((zone) => <option key={zone} value={zone.replace(/_/g, " ")} />)}</datalist>
+  </>;
 }

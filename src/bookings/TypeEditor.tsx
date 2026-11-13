@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FieldSelect } from "./FieldSelect";
 import { ArrowLeft, Copy, ExternalLink, KeyRound, Trash2, TriangleAlert } from "lucide-react";
 import { api } from "../api";
 import { PersonPicker } from "../ui/people/People";
@@ -155,9 +156,8 @@ export function TypeEditor({ typeRef, onBack, flash, readOnly, userId, onReplace
               onClick={() => { const next = draft.durations.includes(minutes) ? draft.durations.filter((value) => value !== minutes) : [...draft.durations, minutes].sort((a, b) => a - b); if (next.length) set("durations", next.slice(0, 6)); }}>{durationLabel(minutes)}</button>)}
           </div></div>
           <div className="bk-grid">
-            <label className="ui-field"><span>Schedule</span><select className="bk-select" value={draft.scheduleId ?? ""} onChange={(event) => set("scheduleId", event.target.value || null)}>
-              <option value="">My default schedule</option>{schedules.map((schedule) => <option key={schedule.id} value={schedule.id}>{schedule.name} ({schedule.tz.replace(/_/g, " ")})</option>)}</select></label>
-            <label className="ui-field"><span>Start times every</span><select className="bk-select" value={draft.slotInterval} onChange={(event) => set("slotInterval", Number(event.target.value))}>{SLOT_INTERVALS.map((value) => <option key={value} value={value}>{value} min</option>)}</select></label>
+            <FieldSelect label="Schedule" value={draft.scheduleId ?? ""} onChange={(value) => set("scheduleId", value || null)} options={[{ value: "", label: "My default schedule" }, ...schedules.map((schedule) => ({ value: schedule.id, label: `${schedule.name} (${schedule.tz.replace(/_/g, " ")})` }))]} />
+            <FieldSelect label="Start times every" value={String(draft.slotInterval)} onChange={(value) => set("slotInterval", Number(value))} options={SLOT_INTERVALS.map((value) => ({ value: String(value), label: `${value} min` }))} />
             <NumberField label="Buffer before (min)" value={draft.bufferBefore} min={0} max={240} onChange={(value) => set("bufferBefore", value ?? 0)} />
             <NumberField label="Buffer after (min)" value={draft.bufferAfter} min={0} max={240} onChange={(value) => set("bufferAfter", value ?? 0)} />
             <NumberField label="Minimum notice (hours)" value={Math.round(draft.minNotice / 60 * 10) / 10} min={0} max={720} step={0.5} onChange={(value) => set("minNotice", Math.round((value ?? 0) * 60))} />
@@ -189,8 +189,7 @@ export function TypeEditor({ typeRef, onBack, flash, readOnly, userId, onReplace
         </fieldset>
         <fieldset id="bk-sec-calendars" className="bk-panel" disabled={!manage}>
           <legend>Calendars</legend>
-          <label className="ui-field"><span>Add bookings to</span><select className="bk-select" value={draft.calendarId ?? ""} onChange={(event) => set("calendarId", event.target.value || null)}>
-            <option value="">My first calendar</option>{ownCalendars.map((calendar) => <option key={calendar.id} value={calendar.id}>{calendar.name}</option>)}</select></label>
+          <FieldSelect label="Add bookings to" value={draft.calendarId ?? ""} onChange={(value) => set("calendarId", value || null)} options={[{ value: "", label: "My first calendar" }, ...ownCalendars.map((calendar) => ({ value: calendar.id, label: calendar.name }))]} />
           {sharedTarget && <p className="bk-warn"><TriangleAlert aria-hidden="true" />If this calendar is shared, its readers see the booker's name and answers.</p>}
           <fieldset className="bk-checks"><legend>Busy on (empty: your booking profile's choice)</legend>
             {calendars.map((calendar) => <label key={calendar.id} className="bk-check"><input type="checkbox" checked={draft.busyCalendarIds.includes(calendar.id)} onChange={(event) => set("busyCalendarIds", event.target.checked ? [...draft.busyCalendarIds, calendar.id] : draft.busyCalendarIds.filter((id) => id !== calendar.id))} /><span>{calendar.name}</span></label>)}
@@ -208,8 +207,7 @@ export function TypeEditor({ typeRef, onBack, flash, readOnly, userId, onReplace
             <button type="button" role="radio" aria-checked={draft.confirm === "manual"} className="bk-location-kind" onClick={() => set("confirm", "manual")}>I approve each request</button>
           </div>
           {draft.confirm === "manual" && <NumberField label="Requests expire after (hours)" value={draft.pendingHours} min={1} max={168} onChange={(value) => set("pendingHours", value ?? 24)} />}
-          <label className="ui-field"><span>Save bookers as contacts in</span><select className="bk-select" value={draft.contactBookId ?? ""} onChange={(event) => set("contactBookId", event.target.value || null)}>
-            <option value="">Don't save them</option>{books.map((book) => <option key={book.id} value={book.id}>{book.name}</option>)}</select></label>
+          <FieldSelect label="Save bookers as contacts in" value={draft.contactBookId ?? ""} onChange={(value) => set("contactBookId", value || null)} options={[{ value: "", label: "Don't save them" }, ...books.map((book) => ({ value: book.id, label: book.name }))]} />
           <div className="ui-field"><span id="bk-reminders">Reminders</span><div className="bk-chips" role="group" aria-labelledby="bk-reminders">
             {[[10080, "1 week"], [1440, "1 day"], [120, "2 hours"], [60, "1 hour"], [15, "15 min"]].map(([minutes, label]) => <button key={minutes} type="button" className="ui-filter-chip" aria-pressed={draft.reminders.offsets.includes(minutes as number)}
               onClick={() => { const offsets = draft.reminders.offsets.includes(minutes as number) ? draft.reminders.offsets.filter((value) => value !== minutes) : [...draft.reminders.offsets, minutes as number]; if (offsets.length <= 3) set("reminders", { ...draft.reminders, offsets }); }}>{label} before</button>)}
@@ -220,8 +218,8 @@ export function TypeEditor({ typeRef, onBack, flash, readOnly, userId, onReplace
           </div>
           <label className="bk-check"><input type="checkbox" checked={Boolean(draft.card)} onChange={(event) => set("card", event.target.checked ? { boardId: boards[0]?.id ?? "", columnId: "", titleTemplate: DEFAULT_CARD_TITLE, assignHost: true } : null)} /><span>Create a prep card</span></label>
           {draft.card && <div className="bk-grid">
-            <label className="ui-field"><span>Board</span><select className="bk-select" value={draft.card.boardId} onChange={(event) => set("card", { ...draft.card!, boardId: event.target.value, columnId: "" })}><option value="">Choose…</option>{boards.map((board) => <option key={board.id} value={board.id}>{board.name}</option>)}</select></label>
-            <label className="ui-field"><span>Column</span><select className="bk-select" value={draft.card.columnId} onChange={(event) => set("card", { ...draft.card!, columnId: event.target.value })}><option value="">Choose…</option>{columns.map((column) => <option key={column.id} value={column.id}>{column.name}</option>)}</select></label>
+            <FieldSelect label="Board" value={draft.card.boardId} onChange={(value) => set("card", { ...draft.card!, boardId: value, columnId: "" })} options={[{ value: "", label: "Choose…" }, ...boards.map((board) => ({ value: board.id, label: board.name }))]} />
+            <FieldSelect label="Column" value={draft.card.columnId} onChange={(value) => set("card", { ...draft.card!, columnId: value })} options={[{ value: "", label: "Choose…" }, ...columns.map((column) => ({ value: column.id, label: column.name }))]} />
             <label className="ui-field bk-wide"><span>Card title</span><input value={draft.card.titleTemplate} maxLength={200} onChange={(event) => set("card", { ...draft.card!, titleTemplate: event.target.value })} /><span className="ui-field-hint">{"{{type}}, {{name}}, {{email}}, {{date}}"}</span></label>
           </div>}
         </fieldset>
