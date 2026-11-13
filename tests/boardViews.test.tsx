@@ -35,9 +35,9 @@ const noop = () => undefined;
 test("the view switch is a labelled radio group with one tab stop", () => {
   const markup = renderToStaticMarkup(<BoardViewSwitch value="table" onChange={noop} />);
   expect(markup).toContain('role="radiogroup" aria-label="View"');
-  expect(markup.match(/role="radio"/g)).toHaveLength(4);
+  expect(markup.match(/role="radio"/g)).toHaveLength(5);
   expect(markup).toContain('aria-checked="true" tabindex="0" class="icon-button active" aria-label="Table"');
-  expect(markup.match(/tabindex="-1"/g)).toHaveLength(3);
+  expect(markup.match(/tabindex="-1"/g)).toHaveLength(4);
   expect(renderToStaticMarkup(<BoardViewSwitch value="board" onChange={noop} views={["board", "table", "list"]} />)).not.toContain("Calendar");
 });
 

@@ -175,7 +175,7 @@ export const taskViewTools: McpToolSpec[] = [
       baseRevision: z.number().int().min(1).optional().describe("With viewId: the revision from list_views"),
       name: z.string().trim().min(1).max(80).optional().describe("Up to 80 characters"),
       filter: z.string().max(TASK_QUERY_LIMITS.length).optional().describe("A filter in the task query language, as for query_cards"),
-      layout: z.enum(VIEW_LAYOUTS).optional().describe("list (default), table, or board"),
+      layout: z.enum(VIEW_LAYOUTS).optional().describe("list (default), table, board, or timeline (a Gantt of start and due dates; a view on one board opens in it, a cross-board view shows it as the list)"),
       group: z.enum(VIEW_GROUPS).optional().describe("The list's grouping: none, board, state, due, assignee, or tag"),
       sort: z.enum(QUERY_SORTS).optional().describe("due (default), updated, created, title, board, or start"),
       lanes: z.enum(LANE_MODES).optional().describe("The board layout's lanes across boards: columns (default), state, assignee, tag, sprint, due, or board")

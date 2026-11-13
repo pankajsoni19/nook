@@ -188,6 +188,10 @@ describe("task views: create, read, and run as the viewer (T115, T116)", () => {
     expect((await call(owner, "POST", "/views", { name: "x".repeat(81), query: "" })).status).toBe(400);
     expect((await call(owner, "POST", "/views", { name: "Bidi‮", query: "" })).status).toBe(400);
     expect((await call(owner, "POST", "/views", { name: "Layout", query: "", display: { layout: "gantt" } })).status).toBe(400);
+    // D760: the timeline is a saved layout.
+    const timeline = await call(owner, "POST", "/views", { name: "Timeline", query: "", display: { layout: "timeline" } });
+    expect(timeline).toMatchObject({ status: 201, body: { view: { display: { layout: "timeline" } } } });
+    expect((await call(owner, "DELETE", `/views/${timeline.body.view.id}`)).status).toBeLessThan(300);
     expect((await call(owner, "POST", "/views", { name: "Extra", query: "", display: { color: "red" } })).status).toBe(400);
     expect((await call(owner, "POST", "/views", { name: "Fields", query: "", display: { fields: ["due", "due"] } })).status).toBe(400);
     expect((await call(owner, "POST", "/views", { name: "Everything", query: "" })).body.view).toMatchObject({ query: "", display: { layout: "list", group: "none", sort: "due" } });

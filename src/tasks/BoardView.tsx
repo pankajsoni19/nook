@@ -56,6 +56,8 @@ import { useTasksTitle } from "./home/HomeSegments";
 import { BoardCalendar } from "./BoardCalendar";
 import { displayedDay, displayedTime, dueAnnouncement, shiftedDueAt, shiftedStartOn } from "./calendarPlacement";
 import { daysBetween } from "../calendarRoute";
+import { BoardTimeline } from "./BoardTimeline";
+import { barLabel, barOf, type DateChange } from "./timelinePlacement";
 import "./boardViews.css";
 import { applyCardDetail, applyTagChange, recountTags } from "./cardTags";
 import {
@@ -345,7 +347,10 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
   const sprints = useBoardSprints({ detail, setDetail, query, onQueryChange, notify, load, defaultAll: savedViewId !== null });
   const sprintScoped = sprints.term !== null;
   const scopedQuery = sprints.term ? { ...query, filter: { terms: [...query.filter.terms, sprints.term] } } : query;
-  const result = data ? applyBoardQuery(data, scopedQuery, viewContext) : null;
+  // The timeline groups by the list's dimensions when one is picked (D768); it is not grouped by default.
+  const timelineGrouped = query.view === "timeline" && query.group !== null;
+  const result = data ? applyBoardQuery(data, timelineGrouped ? { ...scopedQuery, view: "list" } : scopedQuery, viewContext) : null;
+  const timelineGroups = timelineGrouped ? result?.groups ?? null : null;
   const scopedTotal = data && sprints.term ? filterBoardCards(data, { terms: [sprints.term] }, viewContext).length : cards.length;
   const filtered = hasBoardFilter(query);
   const view = query.view;
@@ -681,6 +686,61 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
     }
   }
 
+  /**
+   * The timeline's date change (D764, D765): `startOn` and/or `dueOn`, one PATCH with the card's
+   * revision; the server keeps each side's time and zone when only its date changes. The bar moves at
+   * once; on CARD_CHANGED, START_AFTER_DUE, or any failure it moves back, says so, and the board reloads.
+   */
+  // Date changes to one card are sent in order (D764): quick Alt+Arrow presses each wait for the
+  // revision the one before them saved, while every bar move shows at once.
+  const datesQueueRef = useRef(new Map<string, { chain: Promise<void>; pending: number }>());
+  function setDates(cardId: string, change: DateChange) {
+    const current = detailRef.current;
+    const card = current?.cards.find((item) => item.id === cardId);
+    if (!current || !card) return;
+    const startOn = change.startOn !== undefined && change.startOn !== card.start_on ? change.startOn : undefined;
+    const dueOn = change.dueOn !== undefined && change.dueOn !== card.due_on ? change.dueOn : undefined;
+    if (startOn === undefined && dueOn === undefined) return;
+    const shift = (from: string | null | undefined, to: string | null | undefined) => from && to ? daysBetween(from, to) : 0;
+    const prior = { start_on: card.start_on, start_at: card.start_at, due_on: card.due_on, due_at: card.due_at };
+    setCards((items) => items.map((item) => item.id !== cardId ? item : {
+      ...item,
+      ...(dueOn !== undefined ? { due_on: dueOn, due_at: shiftedDueAt(item.due_at, shift(item.due_on, dueOn)) } : {}),
+      ...(startOn !== undefined ? { start_on: startOn, start_at: shiftedDueAt(item.start_at, shift(item.start_on, startOn)) } : {})
+    }));
+    const queues = datesQueueRef.current;
+    const queue = queues.get(cardId) ?? { chain: Promise.resolve(), pending: 0 };
+    queue.pending += 1;
+    queue.chain = queue.chain.then(async () => {
+      const latest = detailRef.current?.cards.find((item) => item.id === cardId);
+      if (!latest) return;
+      try {
+        const { card: saved } = await updateCard(cardId, { ...(startOn !== undefined ? { startOn } : {}), ...(dueOn !== undefined ? { dueOn } : {}), revision: latest.revision });
+        const last = queue.pending === 1;
+        // A later change already shows on screen: take only the revision, so the bar does not step back.
+        setCards((items) => items.map((item) => item.id !== cardId ? item : last
+          ? { ...item, revision: saved.revision, due_on: saved.due_on, due_time: saved.due_time, due_tz: saved.due_tz, due_at: saved.due_at,
+            start_on: saved.start_on, start_time: saved.start_time, start_tz: saved.start_tz, start_at: saved.start_at, updated_at: saved.updated_at }
+          : { ...item, revision: saved.revision, updated_at: saved.updated_at }));
+        if (detailRef.current) detailRef.current = { ...detailRef.current, cards: detailRef.current.cards.map((item) => item.id === cardId ? { ...item, revision: saved.revision } : item) };
+        const bar = barOf(saved, viewerTimeZone());
+        if (last) setAnnouncement(`${card.title}: ${bar ? barLabel(bar) : "no dates"}`);
+      } catch (reason) {
+        const code = taskErrorCode(reason);
+        notify.error(code === "CARD_CHANGED" ? "Someone else changed this card. It was reloaded."
+          : code === "START_AFTER_DUE" ? "The start must be on or before the due date"
+          : taskErrorMessage(reason, "Could not change the dates"));
+        // The bar goes back at once, then to what the server has.
+        setCards((items) => items.map((item) => item.id === cardId ? { ...item, ...prior } : item));
+        await load();
+      } finally {
+        queue.pending -= 1;
+        if (!queue.pending) queues.delete(cardId);
+      }
+    });
+    queues.set(cardId, queue);
+  }
+
   /** The composer created a card: it joins the board, then closes, opens, or starts another (§4.3). */
   function cardCreated(card: CardDetail, mode: ComposerMode, options: { hadRelations: boolean }) {
     setDetail((current) => current ? {
@@ -921,6 +981,14 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
         onMonth={(month) => onQueryChange(withBoardQuery(query, { month }))}
         onLayout={(cal) => onQueryChange(withBoardQuery(query, { cal }), { push: true })}
         onOpenCard={(card) => onOpenCard(card.id)} onSetDue={(card, dueOn, keepSpan) => { void setDue(card.id, dueOn, keepSpan); }} readOnly={readOnly} />
+    </div>}
+    {detail && data && result && view === "timeline" && <div className="task-view-body task-view-body-timeline">
+      <BoardTimeline board={data} cards={result.cards} groups={timelineGroups} group={query.group} scale={query.zoom ?? "month"}
+        today={viewContext.today} viewerZone={viewContext.timeZone} filtered={filtered} readOnly={readOnly}
+        onGroup={(group) => onQueryChange(withBoardQuery(query, { group }))}
+        onScale={(zoom) => onQueryChange(withBoardQuery(query, { zoom: zoom === "month" ? null : zoom }))}
+        onOpenCard={(card) => onOpenCard(card.id)} onChangeDates={(card, change) => setDates(card.id, change)}
+        onAddCard={readOnly ? undefined : () => setComposer({ columnId: null })} />
     </div>}
     {detail && view === "board" && <nav className="task-column-tabs" aria-label="Columns">
       {columns.map((column, index) => {

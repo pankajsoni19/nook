@@ -31,15 +31,23 @@ export function boardViewQueryText(boardId: string, filter: TaskQuery) {
 /** Whether two filters are the same question (canonical text). */
 export const sameFilter = (left: TaskQuery, right: TaskQuery) => format(left) === format(right);
 
-/** The board layout a saved display opens in; the board keeps the calendar as its own. */
+export type SavedLayout = "list" | "table" | "board" | "timeline";
+
+/** The board layout a saved display opens in; the board keeps the calendar as its own. A timeline view opens as the timeline (D760). */
 export function boardLayoutOf(display: { layout?: string } | undefined): BoardViewId {
-  return display?.layout === "table" || display?.layout === "list" ? display.layout : "board";
+  return display?.layout === "table" || display?.layout === "list" || display?.layout === "timeline" ? display.layout : "board";
 }
 
-/** The view display for a board layout: the calendar has no cross-board twin, so it keeps the saved one. */
-export function displayLayoutOf(view: BoardViewId, saved: string | undefined): "list" | "table" | "board" {
-  if (view === "table" || view === "list" || view === "board") return view;
-  return saved === "table" || saved === "list" ? saved : "board";
+/** The view display for a board layout: the calendar has no saved twin, so it keeps the saved one. */
+export function displayLayoutOf(view: BoardViewId, saved: string | undefined): SavedLayout {
+  if (view === "table" || view === "list" || view === "board" || view === "timeline") return view;
+  return saved === "table" || saved === "list" || saved === "timeline" ? saved : "board";
+}
+
+/** A board layout on the cross-board view page, which has no timeline (D760): it shows as the list there. */
+export function homeLayoutOf(view: BoardViewId): "list" | "table" | "board" {
+  const layout = displayLayoutOf(view, undefined);
+  return layout === "timeline" ? "list" : layout;
 }
 
 const single = (filter: TaskQuery, key: FilterTerm["key"]) => {

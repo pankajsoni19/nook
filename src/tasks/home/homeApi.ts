@@ -79,7 +79,8 @@ const json = (method: string, body: unknown): RequestInit => ({ method, body: JS
 export const queryTaskCards = (body: QueryRequest, signal?: AbortSignal) =>
   api<QueryPage>("/tasks/query", { ...json("POST", body), ...(signal ? { signal } : {}) });
 
-export type ViewDisplay = { layout: HomeLayout; group: HomeGroup; sort: HomeSort; lanes?: LaneMode; /** A board view's swimlanes (D655); null clears them. */ swimlanes?: SwimlaneMode | null };
+/** `timeline` is a board layout (D760): the cross-board view page shows such a view as the list. */
+export type ViewDisplay = { layout: HomeLayout | "timeline"; group: HomeGroup; sort: HomeSort; lanes?: LaneMode; /** A board view's swimlanes (D655); null clears them. */ swimlanes?: SwimlaneMode | null };
 
 export type TaskView = {
   id: string;

@@ -15,6 +15,7 @@ Release notes for Nook, newest first. Upgrade steps for each release are in [doc
 - **Start dates**: a card can have a start date, with an optional time, next to its due date (the same picker, same time zone rules). The start must be on or before the due date.
 - Cards, lists and tables show the range ("Nov 12 → Nov 15"); the board calendar spans a card from its start to its due date, and dragging it moves the whole range.
 - Filter by start (`start:`, or **Start** in + Filter) and sort by start. MCP `create_card` / `update_card` take `startOn`, `startTime`, `startTz`; cards carry `start_on`, `start_time`, `start_tz`, `start_at`.
+- **Timeline view**: a board's cards as bars from start to due date over a scrolling day grid, with Week / Month / Quarter zoom, Today, weekends and today marked, and grouping by column, assignee, tag, flag, parent or due. Drag a bar to move it, drag its ends to change the start or due date (the start can't pass the due date), Alt+arrows from the keyboard, or click an empty row to schedule a card. Saved views can open in it (MCP `save_view` takes `layout: "timeline"`).
 
 **Tasks: card activity**
 

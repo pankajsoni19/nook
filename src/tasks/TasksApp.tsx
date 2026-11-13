@@ -14,7 +14,7 @@ import { BoardView } from "./BoardView";
 import { DEFAULT_BOARD_QUERY, withBoardQuery, type BoardQuery, type BoardViewId } from "./boardUrl";
 import type { TaskQuery } from "../../shared/taskQuery";
 import type { TaskView } from "./home/homeApi";
-import { boardLayoutOf, boardViewFilter, displayLayoutOf } from "./views/boardViewModel";
+import { boardLayoutOf, boardViewFilter, homeLayoutOf } from "./views/boardViewModel";
 import { lookupCardKey } from "./tasksApi";
 import { ApiError } from "../api";
 import "../bin/bin.css";
@@ -152,7 +152,7 @@ export function TasksApp({ userId, displayName, navigate, onHome, onSettings, on
    * as a filter edit replaces.
    */
   const leaveSavedView = useCallback((viewId: string, change?: { filter: TaskQuery; layout: BoardViewId }) => {
-    const query = change ? { layout: displayLayoutOf(change.layout, undefined), group: "none" as const, sort: "due" as const, filter: change.filter } : undefined;
+    const query = change ? { layout: homeLayoutOf(change.layout), group: "none" as const, sort: "due" as const, filter: change.filter } : undefined;
     go(tasksHomeRoute({ section: "view", viewId, ...(query ? { query } : {}) }), true);
   }, [go]);
   /** A view on one board opens as that board (D635, D636), with an unsaved filter carried over when it has one. */

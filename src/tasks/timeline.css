@@ -1,0 +1,240 @@
+/* Board timeline view (docs/plan/TASK_VIEWS.md §Timeline, D760–D769). One scroll container holds the
+   sticky header, the sticky card pane, and the day grid, so rows always line up. Colours are tokens on
+   the view's root, Nook's dark palette by default with a light set for `data-theme="light"`. */
+
+.task-view-body.task-view-body-timeline { display: flex; flex-direction: column; overflow: hidden; padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
+
+.task-timeline {
+  --tl-bg: #111113;
+  --tl-head-bg: #151517;
+  --tl-pane-bg: #121214;
+  --tl-row-hover: rgb(255 255 255 / 3%);
+  --tl-border: #242428;
+  --tl-line: rgb(255 255 255 / 4.5%);
+  --tl-week-line: rgb(255 255 255 / 8%);
+  --tl-weekend: rgb(255 255 255 / 2.2%);
+  --tl-today: rgb(246 196 83 / 7%);
+  --tl-today-line: #f6c453;
+  --tl-text: #ededee;
+  --tl-muted: #8d8d94;
+  --tl-faint: #5f5f66;
+  --tl-group-bg: #161618;
+  /* Bars, by the column's state (D761): the same hues as the column status icons. */
+  --tl-todo-bg: #2a2a30; --tl-todo-border: #3c3c44; --tl-todo-text: #e4e4e7; --tl-todo-accent: #a8a8ae;
+  --tl-backlog-bg: #1d1d21; --tl-backlog-border: #3a3a41; --tl-backlog-text: #b9b9bf; --tl-backlog-accent: #6d6d74;
+  --tl-doing-bg: #3a3020; --tl-doing-border: #6b5526; --tl-doing-text: #f7e2ad; --tl-doing-accent: #f6c453;
+  --tl-done-bg: #1c2a21; --tl-done-border: #2f4a37; --tl-done-text: #93c3a0; --tl-done-accent: #6fbf85;
+  --tl-overdue: #fb7185;
+  --tl-tip-bg: #f2f2f3; --tl-tip-text: #141416;
+  --tl-shadow: 0 1px 2px rgb(0 0 0 / 40%);
+  flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px;
+}
+:root[data-theme="light"] .task-timeline {
+  --tl-bg: #ffffff;
+  --tl-head-bg: #fafafa;
+  --tl-pane-bg: #ffffff;
+  --tl-row-hover: rgb(0 0 0 / 2.5%);
+  --tl-border: #e6e6e9;
+  --tl-line: rgb(0 0 0 / 5%);
+  --tl-week-line: rgb(0 0 0 / 9%);
+  --tl-weekend: rgb(0 0 0 / 2.6%);
+  --tl-today: rgb(214 158 30 / 9%);
+  --tl-today-line: #c98a0b;
+  --tl-text: #1b1b1f;
+  --tl-muted: #6b6b73;
+  --tl-faint: #a3a3aa;
+  --tl-group-bg: #f6f6f7;
+  --tl-todo-bg: #ececf0; --tl-todo-border: #d6d6dc; --tl-todo-text: #26262b; --tl-todo-accent: #77777f;
+  --tl-backlog-bg: #f5f5f7; --tl-backlog-border: #d9d9de; --tl-backlog-text: #5d5d65; --tl-backlog-accent: #a0a0a8;
+  --tl-doing-bg: #fbefcf; --tl-doing-border: #ecc96f; --tl-doing-text: #6b4a05; --tl-doing-accent: #d69e1e;
+  --tl-done-bg: #e3f3e7; --tl-done-border: #b6dcc0; --tl-done-text: #2f6b41; --tl-done-accent: #3f9b5a;
+  --tl-overdue: #e11d48;
+  --tl-tip-bg: #1b1b1f; --tl-tip-text: #f5f5f4;
+  --tl-shadow: 0 1px 2px rgb(0 0 0 / 10%);
+  color-scheme: light;
+}
+
+/* Toolbar */
+.task-tl-toolbar { flex: none; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
+.task-tl-toolbar-start, .task-tl-toolbar-end { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.task-tl-today { min-height: 32px; display: inline-flex; align-items: center; gap: 6px; margin: 0; border-radius: 999px; padding: 0 12px 0 10px; font-size: .8rem; }
+.task-tl-today svg { width: 15px; height: 15px; }
+.task-tl-title { margin: 0 0 0 4px; overflow: hidden; color: var(--tl-text); font-size: .95rem; font-weight: 650; letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; }
+.task-tl-count { color: var(--tl-muted); font-size: .76rem; white-space: nowrap; }
+.task-tl-scale button { min-width: 64px; }
+
+/* Frame and scroller */
+.task-tl-frame { position: relative; flex: 1; min-height: 0; border: 1px solid var(--tl-border); border-radius: 12px; background: var(--tl-bg); overflow: hidden; }
+.task-tl-scroller { position: absolute; inset: 0; overflow: auto; overscroll-behavior-x: contain; scrollbar-width: thin; outline: 0; }
+.task-tl-canvas { position: relative; min-width: 100%; }
+.task-timeline.is-dragging, .task-timeline.is-dragging * { cursor: grabbing !important; user-select: none; }
+
+/* Header: months over days (or weeks), sticky at the top; the pane's corner sticky at both. */
+.task-tl-head { position: sticky; top: 0; z-index: 6; display: flex; height: 56px; background: var(--tl-head-bg); box-shadow: inset 0 -1px 0 var(--tl-border); }
+.task-tl-head-pane { position: sticky; left: 0; z-index: 2; flex: none; width: var(--tl-pane); display: flex; align-items: flex-end; gap: 8px; padding: 0 6px 9px 14px; background: var(--tl-head-bg); box-shadow: inset -1px -1px 0 var(--tl-border); color: var(--tl-muted); font-size: .7rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.pane-collapsed .task-tl-head-pane { width: 0; padding: 0; overflow: visible; box-shadow: none; }
+.task-tl-head-title { flex: 1; min-width: 0; }
+.task-tl-head-duration { width: 72px; flex: none; padding-right: 8px; text-align: right; }
+.task-tl-pane-toggle { position: absolute; top: 4px; right: 4px; width: 28px; height: 28px; border-radius: 8px; color: var(--tl-muted); }
+.task-tl-pane-toggle svg { width: 16px; height: 16px; }
+.pane-collapsed .task-tl-pane-toggle { left: 4px; right: auto; z-index: 3; background: var(--tl-head-bg); box-shadow: 0 0 0 1px var(--tl-border); }
+.task-tl-head-grid { position: relative; flex: none; width: var(--tl-grid); }
+.task-tl-months { position: absolute; inset: 0 0 auto; height: 24px; }
+.task-tl-month { position: absolute; top: 0; height: 24px; box-shadow: inset 1px 0 0 var(--tl-week-line); }
+.task-tl-month span { position: sticky; left: calc(var(--tl-pane) + 10px); display: inline-block; padding: 6px 10px 0; color: var(--tl-text); font-size: .74rem; font-weight: 650; white-space: nowrap; }
+.pane-collapsed .task-tl-month span { left: 38px; }
+.task-tl-days { position: absolute; inset: 24px 0 0; }
+.task-tl-day { position: absolute; top: 0; bottom: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; color: var(--tl-muted); font-size: .7rem; font-variant-numeric: tabular-nums; line-height: 1; }
+.task-tl-day.weekend { color: var(--tl-faint); }
+.task-tl-day-initial { font-size: .62rem; font-weight: 600; letter-spacing: .04em; opacity: .8; }
+.task-tl-day-num { font-weight: 600; }
+.task-tl-day.today { color: var(--tl-today-line); }
+.task-tl-day.today .task-tl-day-num { min-width: 20px; border-radius: 999px; padding: 2px 4px; background: var(--tl-today-line); color: #17140c; text-align: center; }
+.scale-month .task-tl-day-initial { display: none; }
+.scale-month .task-tl-day.today .task-tl-day-num { padding: 3px 4px; }
+.scale-quarter .task-tl-day { align-items: flex-start; padding-left: 5px; box-shadow: inset 1px 0 0 var(--tl-week-line); white-space: nowrap; }
+.scale-quarter .task-tl-day.today .task-tl-day-num { min-width: 0; border-radius: 6px; padding: 2px 5px; }
+
+/* Body: the grid's backdrop (day lines, weekends, today), then the rows. */
+.task-tl-body { position: relative; }
+.task-tl-grid-bg {
+  position: absolute; top: 0; bottom: 0; left: var(--tl-pane); width: var(--tl-grid); pointer-events: none;
+  /* The range starts on a Monday, so days 5 and 6 of every 7 are the weekend. */
+  background:
+    repeating-linear-gradient(90deg, var(--tl-line) 0 1px, transparent 1px var(--tl-day)),
+    repeating-linear-gradient(90deg, transparent 0 calc(var(--tl-day) * 5), var(--tl-weekend) calc(var(--tl-day) * 5) calc(var(--tl-day) * 7));
+}
+.scale-quarter .task-tl-grid-bg {
+  background:
+    repeating-linear-gradient(90deg, var(--tl-week-line) 0 1px, transparent 1px calc(var(--tl-day) * 7)),
+    repeating-linear-gradient(90deg, transparent 0 calc(var(--tl-day) * 5), var(--tl-weekend) calc(var(--tl-day) * 5) calc(var(--tl-day) * 7));
+}
+.task-tl-today-col { position: absolute; top: 0; bottom: 0; background: var(--tl-today); }
+.task-tl-today-col::after { content: ""; position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; margin-left: -1px; background: var(--tl-today-line); opacity: .55; }
+.scale-quarter .task-tl-today-col { background: transparent; }
+.scale-quarter .task-tl-today-col::after { opacity: .8; }
+
+.task-tl-row { position: absolute; left: 0; right: 0; height: var(--tl-row); display: flex; }
+.task-tl-row:hover .task-tl-pane-cell, .task-tl-row:hover .task-tl-lane { background-color: var(--tl-row-hover); }
+.task-tl-pane-cell { position: sticky; left: 0; z-index: 4; flex: none; width: var(--tl-pane); display: flex; align-items: center; gap: 4px; padding: 0 6px 0 8px; background: var(--tl-pane-bg); box-shadow: inset -1px 0 0 var(--tl-border), inset 0 -1px 0 var(--tl-line); }
+.task-tl-row:hover .task-tl-pane-cell { background-image: linear-gradient(var(--tl-row-hover), var(--tl-row-hover)); }
+.pane-collapsed .task-tl-pane-cell { width: 0; padding: 0; box-shadow: none; }
+.task-tl-open { flex: 1; min-width: 0; height: calc(var(--tl-row) - 8px); display: flex; align-items: center; gap: 8px; border: 0; border-radius: 8px; padding: 0 6px; background: transparent; color: var(--tl-text); font: inherit; font-size: .84rem; font-weight: 550; text-align: left; cursor: pointer; }
+.task-tl-open:hover .task-tl-name { text-decoration: underline; text-decoration-color: var(--tl-faint); text-underline-offset: 3px; }
+.task-tl-open:focus-visible { outline: 2px solid var(--yellow); outline-offset: -2px; }
+.task-tl-row.done .task-tl-name { color: var(--tl-muted); }
+.task-tl-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-tl-key { flex: none; color: var(--tl-muted); font-size: .72rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.task-tl-duration { width: 72px; flex: none; padding-right: 8px; color: var(--tl-muted); font-size: .76rem; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.task-tl-duration.empty { color: var(--tl-faint); }
+.task-tl-lane { position: relative; flex: none; width: var(--tl-grid); box-shadow: inset 0 -1px 0 var(--tl-line); }
+
+/* Group headers (D768) */
+.task-tl-group-row .task-tl-pane-cell, .task-tl-group-row .task-tl-lane { background: var(--tl-group-bg); }
+.task-tl-group-row .task-tl-pane-cell { box-shadow: inset -1px 0 0 var(--tl-border), inset 0 -1px 0 var(--tl-border), inset 0 1px 0 var(--tl-border); }
+.task-tl-group-row .task-tl-lane { box-shadow: inset 0 -1px 0 var(--tl-border), inset 0 1px 0 var(--tl-border); }
+.pane-collapsed .task-tl-group-row .task-tl-pane-cell { width: auto; min-width: 220px; padding: 0 6px; }
+.task-tl-group-toggle { flex: 1; min-width: 0; height: calc(var(--tl-row) - 8px); display: flex; align-items: center; gap: 8px; border: 0; border-radius: 8px; padding: 0 6px; background: transparent; color: var(--tl-text); font: inherit; font-size: .84rem; font-weight: 650; text-align: left; cursor: pointer; }
+.task-tl-group-toggle:hover { background: var(--tl-row-hover); }
+.task-tl-group-toggle:focus-visible { outline: 2px solid var(--yellow); outline-offset: -2px; }
+.task-tl-group-toggle svg { width: 16px; flex: none; color: var(--tl-muted); }
+
+/* Bars (D761) */
+.task-tl-bar {
+  --bar-bg: var(--tl-todo-bg); --bar-border: var(--tl-todo-border); --bar-text: var(--tl-todo-text); --bar-accent: var(--tl-todo-accent);
+  position: absolute; top: 7px; height: calc(var(--tl-row) - 14px); z-index: 1; display: flex; align-items: center; min-width: 0;
+  border-radius: 7px; color: var(--bar-text); font-size: .76rem; font-weight: 600; outline: 0; cursor: pointer;
+  will-change: transform; touch-action: auto;
+}
+.task-tl-bar.editable { cursor: grab; touch-action: none; }
+.task-tl-bar.status-backlog { --bar-bg: var(--tl-backlog-bg); --bar-border: var(--tl-backlog-border); --bar-text: var(--tl-backlog-text); --bar-accent: var(--tl-backlog-accent); }
+.task-tl-bar.status-doing { --bar-bg: var(--tl-doing-bg); --bar-border: var(--tl-doing-border); --bar-text: var(--tl-doing-text); --bar-accent: var(--tl-doing-accent); }
+.task-tl-bar.status-done { --bar-bg: var(--tl-done-bg); --bar-border: var(--tl-done-border); --bar-text: var(--tl-done-text); --bar-accent: var(--tl-done-accent); }
+.task-tl-fill { position: absolute; inset: 0; border: 1px solid var(--bar-border); border-radius: inherit; background: var(--bar-bg); box-shadow: var(--tl-shadow), inset 3px 0 0 var(--bar-accent); }
+.task-tl-bar.status-backlog .task-tl-fill { border-style: dashed; }
+.task-tl-bar.overdue .task-tl-fill { box-shadow: var(--tl-shadow), inset 3px 0 0 var(--bar-accent), inset -3px 0 0 var(--tl-overdue); }
+.task-tl-bar.clip-start .task-tl-fill { border-left-width: 0; border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.task-tl-bar.clip-end .task-tl-fill { border-right-width: 0; border-top-right-radius: 0; border-bottom-right-radius: 0; }
+/* A start alone: the bar fades out to the right. */
+.task-tl-bar.open .task-tl-fill { border-right: 0; border-top-right-radius: 0; border-bottom-right-radius: 0; -webkit-mask-image: linear-gradient(90deg, #000 45%, transparent); mask-image: linear-gradient(90deg, #000 45%, transparent); }
+.task-tl-bar-title { position: sticky; left: calc(var(--tl-pane) + 6px); min-width: 0; overflow: hidden; padding: 0 10px 0 11px; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
+.task-tl-bar.status-done .task-tl-bar-title { text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--bar-text) 45%, transparent); }
+.task-tl-bar-label { position: absolute; left: calc(100% + 8px); top: 50%; max-width: 240px; overflow: hidden; transform: translateY(-50%); color: var(--tl-muted); font-weight: 550; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
+.task-tl-bar.milestone .task-tl-bar-label { left: calc(50% + 14px); }
+/* Due only: a milestone diamond on the due day. */
+.task-tl-diamond { position: absolute; left: 50%; top: 50%; width: 14px; height: 14px; border: 1.5px solid var(--bar-accent); border-radius: 3px; background: var(--bar-bg); box-shadow: var(--tl-shadow); transform: translate(-50%, -50%) rotate(45deg); }
+.task-tl-bar.milestone.overdue .task-tl-diamond { border-color: var(--tl-overdue); }
+.task-tl-bar.milestone.status-done .task-tl-diamond { background: var(--bar-accent); }
+.task-tl-bar:hover .task-tl-fill { filter: brightness(1.12); }
+:root[data-theme="light"] .task-tl-bar:hover .task-tl-fill { filter: brightness(.97); }
+.task-tl-bar:focus-visible .task-tl-fill, .task-tl-bar:focus-visible .task-tl-diamond { outline: 2px solid var(--yellow); outline-offset: 2px; }
+.task-tl-row.dragging .task-tl-bar { z-index: 3; }
+.task-tl-row.dragging .task-tl-fill { box-shadow: 0 6px 18px rgb(0 0 0 / 35%), inset 3px 0 0 var(--bar-accent); filter: brightness(1.15); }
+
+/* Drag handles: thin grips that appear on hover. */
+.task-tl-handle { position: absolute; top: -2px; bottom: -2px; z-index: 2; width: 10px; cursor: ew-resize; }
+.task-tl-handle.start { left: -4px; }
+.task-tl-handle.end { right: -4px; }
+.task-tl-handle::after { content: ""; position: absolute; top: 50%; left: 50%; width: 3px; height: 14px; border-radius: 2px; background: var(--bar-accent); opacity: 0; transform: translate(-50%, -50%); transition: opacity .12s; }
+.task-tl-bar:hover .task-tl-handle::after, .task-tl-row.dragging .task-tl-handle::after { opacity: .9; }
+.task-tl-bar.milestone .task-tl-handle.start { left: calc(50% - 16px); }
+.task-tl-bar.milestone .task-tl-handle.end { right: calc(50% - 16px); }
+.task-tl-bar.open .task-tl-handle.end { right: 0; }
+
+/* Off-screen bars: an arrow at the row's visible edge scrolls to them (D766). */
+.task-tl-jump { position: sticky; top: 0; z-index: 2; width: 26px; height: 26px; margin-top: 7px; display: grid; place-items: center; border: 1px solid var(--tl-border); border-radius: 999px; background: var(--tl-head-bg); color: var(--tl-muted); box-shadow: var(--tl-shadow); cursor: pointer; }
+.task-tl-jump svg { width: 14px; height: 14px; }
+.task-tl-jump:hover { color: var(--tl-text); border-color: var(--tl-faint); }
+.task-tl-jump:focus-visible { outline: 2px solid var(--yellow); outline-offset: 1px; }
+.task-tl-lane:has(.task-tl-jump) { display: flex; }
+.task-tl-jump.before { left: calc(var(--tl-pane) + 8px); }
+.task-tl-jump.after { right: 8px; margin-left: auto; }
+
+/* An unscheduled row (D765): a ghost "+" follows the pointer; click or drag sets start and due. */
+.task-tl-lane.can-create { cursor: copy; }
+.task-tl-ghost { position: absolute; top: 7px; left: 0; width: var(--tl-day); height: calc(var(--tl-row) - 14px); display: grid; place-items: center; border: 1px dashed var(--tl-muted); border-radius: 7px; color: var(--tl-text); opacity: 0; transform: translateX(var(--tl-ghost-x, 0)); pointer-events: none; transition: opacity .1s; }
+.task-tl-ghost svg { width: 14px; height: 14px; }
+.task-tl-lane.can-create:hover .task-tl-ghost { opacity: 1; }
+.task-tl-ghost[data-active] { opacity: 1; border-style: solid; border-color: var(--tl-doing-accent); background: color-mix(in srgb, var(--tl-doing-accent) 16%, transparent); color: var(--tl-doing-text); }
+.task-tl-ghost[data-active] svg { display: none; }
+
+/* Add a card */
+.task-tl-add-row { position: absolute; left: 0; right: 0; z-index: 4; height: var(--tl-row); display: flex; align-items: center; }
+.task-tl-add { position: sticky; left: 8px; min-height: 32px; display: inline-flex; align-items: center; gap: 6px; margin-left: 8px; border: 0; border-radius: 8px; padding: 0 10px; background: transparent; color: var(--tl-muted); font: inherit; font-size: .82rem; font-weight: 600; cursor: pointer; }
+.task-tl-add:hover { background: var(--tl-row-hover); color: var(--tl-text); }
+.task-tl-add:focus-visible { outline: 2px solid var(--yellow); outline-offset: -2px; }
+.task-tl-add svg { width: 15px; height: 15px; }
+.task-tl-empty { position: sticky; left: 0; margin: 14px 16px; }
+
+/* A bar scrolled out of view leaves only its arrow: its outside label would sit under the arrow. */
+.task-tl-lane.offscreen .task-tl-bar-label { visibility: hidden; }
+
+/* Pane resize */
+.task-tl-resize { position: absolute; top: 0; bottom: 0; left: calc(var(--tl-pane) - 4px); z-index: 8; width: 8px; cursor: col-resize; touch-action: none; }
+.task-tl-resize::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; background: transparent; transition: background .12s; }
+.task-tl-resize:hover::after, .task-tl-resize:focus-visible::after { background: var(--tl-today-line); }
+.task-tl-resize:focus-visible { outline: 0; }
+
+/* The live tooltip while dragging (D764). */
+.task-tl-tip { position: fixed; left: 0; top: 0; z-index: 60; border-radius: 8px; padding: 5px 9px; background: var(--tl-tip-bg); color: var(--tl-tip-text); font-size: .76rem; font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; box-shadow: 0 6px 20px rgb(0 0 0 / 30%); pointer-events: none; }
+.task-tl-tip[hidden] { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .task-tl-handle::after, .task-tl-ghost, .task-tl-resize::after { transition: none; }
+}
+
+/* Phones (390 px): a narrow title column, no Duration, touch scrolling in both directions (D769). */
+@media (max-width: 767px) {
+  .task-timeline { gap: 8px; }
+  .task-tl-toolbar { gap: 6px; }
+  .task-tl-toolbar-end { width: 100%; justify-content: space-between; }
+  .task-tl-today { min-height: 40px; }
+  .task-tl-scale button { min-width: 0; min-height: 40px; padding: 0 12px; }
+  .task-tl-frame { border-radius: 10px; }
+  .task-tl-head-pane { padding-left: 10px; }
+  .task-tl-pane-cell { padding: 0 2px 0 4px; }
+  .task-tl-open { gap: 6px; padding: 0 4px; font-size: .8rem; height: calc(var(--tl-row) - 4px); }
+  .task-tl-open svg.task-column-status { width: 12px; height: 12px; }
+  .task-tl-bar-label { max-width: 160px; }
+  .task-tl-bar { touch-action: auto; }
+}
