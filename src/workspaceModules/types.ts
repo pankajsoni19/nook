@@ -81,6 +81,9 @@ export type SearchRendererDef = {
   row: (result: Record<string, unknown>) => { key: string; title: string; meta?: string; href: string };
 };
 
+/** A public page a module renders under /p/… (§B.8): no session; it fetches /api/public/… itself. */
+export type PublicPageDef = { prefix: string; component: LazyExoticComponent<ComponentType<{ path: string; search: string }>> };
+
 export type WorkspaceClientModule = {
   id: WorkspaceModuleId;
   /** The URL's first segment: "forms", "contacts" (crm), "standups" (checkins). */
@@ -117,4 +120,6 @@ export type WorkspaceClientModule = {
   cardHeaderActions?: readonly CardHeaderActionDef[];
   timelineDecorations?: readonly TimelineDecorationDef[];
   shortcuts?: readonly ShortcutDef[];
+  /** Its public pages by path prefix (`/p/f/`, `/p/book/`, `/p/t/`). */
+  publicPages?: readonly PublicPageDef[];
 };

@@ -302,3 +302,72 @@ button.ui-person-body:hover .ui-person-name { color: #f5cf79; }
   .ui-activity { padding: 0 4px; }
 }
 @media (prefers-reduced-motion: reduce) { .ui-switch-track, .ui-switch-thumb { transition: none; } }
+
+/* ── Kanban (the Tasks board's look: 280 px columns, 10 px cards) ───────────────────────────── */
+.ui-kanban { min-width: 0; display: grid; gap: 10px; }
+.ui-kanban-columns { display: flex; align-items: flex-start; gap: 12px; overflow-x: auto; overscroll-behavior-x: contain; padding-bottom: 8px; }
+.ui-kanban-column { flex: 0 0 280px; width: 280px; display: flex; flex-direction: column; border: 1px solid #242428; border-radius: 14px; background: #121214; }
+.ui-kanban-column.drop { border-color: #6b572c; background: #16150f; }
+.ui-kanban-column-header { display: flex; align-items: center; gap: 8px; padding: 10px 12px 8px 14px; }
+.ui-kanban-column-header h3 { min-width: 0; margin: 0; overflow: hidden; color: #e4e4e6; font-size: .86rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.ui-kanban-count { min-width: 22px; flex: none; border-radius: 999px; padding: 1px 7px; background: rgb(255 255 255 / 7%); color: #a8a8ae; font-size: .7rem; text-align: center; }
+.ui-kanban-total { margin-left: auto; color: #d9bf7e; font-size: .78rem; font-weight: 650; white-space: nowrap; }
+.ui-kanban-list { min-height: 40px; display: grid; align-content: start; gap: 6px; margin: 0; padding: 2px 8px 8px; list-style: none; }
+.ui-kanban-slot { display: grid; gap: 6px; }
+.ui-kanban-card { position: relative; display: grid; gap: 6px; border: 1px solid #2a2a2f; border-radius: 10px; padding: 10px 12px; background: #1a1a1d; color: #e8e8ea; font-size: .86rem; line-height: 1.4; outline: 0; cursor: grab; user-select: none; touch-action: pan-y; }
+.ui-kanban-card:hover { border-color: #3c3c42; }
+.ui-kanban-card:focus-visible { outline: 2px solid var(--yellow); outline-offset: 1px; }
+.ui-kanban-card.placeholder { border-style: dashed; border-color: #4a4a50; background: transparent; }
+.ui-kanban-card.placeholder > * { visibility: hidden; }
+.ui-kanban-drop-line { display: block; height: 3px; border-radius: 2px; background: var(--yellow); }
+.ui-kanban-empty { padding: 10px 6px; color: #77777e; font-size: .8rem; text-align: center; }
+.ui-kanban-ghost { position: fixed; z-index: 90; pointer-events: none; transform: rotate(1.5deg); }
+.ui-kanban-ghost .ui-kanban-card { border-color: #6b572c; box-shadow: 0 18px 50px rgb(0 0 0 / 60%); cursor: grabbing; }
+.ui-kanban.dragging, .ui-kanban.dragging * { cursor: grabbing; user-select: none; }
+.ui-kanban-strip { display: flex; gap: 6px; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; padding-bottom: 2px; }
+.ui-kanban-strip::-webkit-scrollbar { display: none; }
+.ui-kanban-stage { flex: none; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; border: 1px solid #2f2f35; border-radius: 999px; padding: 0 12px; background: #151518; color: #b4b4ba; font: inherit; font-size: .84rem; font-weight: 600; cursor: pointer; }
+.ui-kanban-stage[aria-selected="true"] { border-color: #6d5a2c; background: #2b261b; color: #ffe19a; }
+.ui-kanban.phone .ui-kanban-columns { display: block; overflow: visible; }
+.ui-kanban.phone .ui-kanban-column { width: 100%; }
+.ui-kanban.phone .ui-kanban-card { padding-right: 52px; cursor: pointer; }
+.ui-kanban-move { position: absolute; top: 4px; right: 4px; }
+.ui-kanban-move .ui-select { min-height: 44px; min-width: 44px; }
+@media (prefers-reduced-motion: reduce) { .ui-kanban-ghost { transform: none; } }
+
+/* ── Insights (KPI tiles over Reports' look) ────────────────────────────────────────────────── */
+.ui-insights { display: grid; gap: 16px; }
+.ui-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+.ui-kpi { min-width: 0; display: grid; gap: 4px; border: 1px solid #29292d; border-radius: 12px; padding: 14px 16px; background: #111113; }
+.ui-kpi-label { margin: 0; color: #a1a1a8; font-size: .76rem; font-weight: 650; letter-spacing: .02em; }
+.ui-kpi-value { margin: 0; color: #f4f4f5; font-size: 1.6rem; font-weight: 750; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.ui-kpi-change { display: inline-flex; align-items: center; gap: 4px; color: var(--tone-text, #a1a1a8); font-size: .76rem; font-weight: 650; }
+.ui-kpi-change svg { width: 13px; height: 13px; }
+.ui-chart-card { min-width: 0; display: grid; gap: 8px; border: 1px solid #29292d; border-radius: 12px; padding: 14px 16px; background: #111113; }
+.ui-chart-card h3 { margin: 0; color: #ececee; font-size: .9rem; font-weight: 650; }
+.ui-chart-table { width: 100%; border-collapse: collapse; color: #d6d6d9; font-size: .8rem; font-variant-numeric: tabular-nums; }
+.ui-chart-table th, .ui-chart-table td { border-bottom: 1px solid #222226; padding: 6px 8px; text-align: left; }
+.ui-chart-table th { color: #8d8d94; font-weight: 650; }
+.ui-chart-table td.number { text-align: right; }
+.ui-chart-card details summary { color: #a1a1a8; font-size: .78rem; cursor: pointer; }
+@media (max-width: 760px) { .ui-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; } .ui-kpi { padding: 12px; } .ui-kpi-value { font-size: 1.3rem; } }
+
+/* ── Embed card (a poll, form, goal, booking link inside a note) ────────────────────────────── */
+.ui-embed { min-width: 0; display: grid; gap: 10px; border: 1px solid #2c2c31; border-radius: 12px; padding: 12px 14px; background: #141416; }
+.ui-embed-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.ui-embed-icon { width: 34px; height: 34px; flex: none; display: grid; place-items: center; border-radius: 10px; background: #2d281b; color: #f4ca67; }
+.ui-embed-icon svg { width: 17px; height: 17px; }
+.ui-embed-icon.unavailable { background: #1f1f23; color: #77777e; }
+.ui-embed-copy { min-width: 0; flex: 1; display: grid; gap: 1px; }
+.ui-embed-copy strong { overflow: hidden; color: #f2f2f3; font-size: .92rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.ui-embed-copy small { overflow: hidden; color: #8d8d94; font-size: .76rem; text-overflow: ellipsis; white-space: nowrap; }
+.ui-embed-head .secondary-button, .ui-embed-head .action-button { flex: none; min-height: 34px; display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; font-size: .8rem; font-weight: 650; }
+@media (max-width: 760px) { .ui-embed-head .secondary-button, .ui-embed-head .action-button { min-height: 44px; } }
+
+/* A filter chip for ModuleHome's filter row (a toggle, or a "+ Filter" opener). */
+.ui-filter-chip { min-height: 32px; display: inline-flex; align-items: center; gap: 6px; border: 1px solid #2f2f35; border-radius: 999px; padding: 0 12px; background: #151518; color: #b4b4ba; font: inherit; font-size: .8rem; font-weight: 600; cursor: pointer; }
+.ui-filter-chip:hover { border-color: #45454b; color: #f2f2f3; }
+.ui-filter-chip[aria-pressed="true"] { border-color: #6d5a2c; background: #2b261b; color: #ffe19a; }
+.ui-filter-chip svg { width: 14px; height: 14px; }
+.ui-chart-card .report-chart-canvas { width: 100%; }
+@media (max-width: 760px) { .ui-filter-chip { min-height: 44px; padding: 0 14px; } }

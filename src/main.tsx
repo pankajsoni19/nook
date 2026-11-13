@@ -31,6 +31,31 @@ if (window.location.pathname.startsWith("/share/c/")) {
     );
     mounted();
   });
+} else if (window.location.pathname.startsWith("/p/")) {
+  // Public pages (workspace modules §B.8): forms, polls, booking pages; no session or shell.
+  void import("./public/PublicApp").then(({ PublicApp }) => {
+    root.render(
+      <StrictMode>
+        <ErrorBoundary>
+          <PublicApp pathname={window.location.pathname} search={window.location.search} />
+        </ErrorBoundary>
+      </StrictMode>
+    );
+    mounted();
+  });
+} else if (import.meta.env.VITE_UI_GALLERY === "1" && window.location.pathname === "/__gallery") {
+  // The shared component gallery (W1-UI visual QA), only in a build made with VITE_UI_GALLERY=1.
+  void import("./ui/gallery/Gallery").then(({ Gallery }) => {
+    root.render(
+      <StrictMode>
+        <ErrorBoundary>
+          <Gallery />
+        </ErrorBoundary>
+        <AppToaster />
+      </StrictMode>
+    );
+    mounted();
+  });
 } else {
   root.render(
     <StrictMode>
