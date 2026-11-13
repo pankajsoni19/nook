@@ -170,7 +170,7 @@ function NewBookSheet({ onClose, onCreated }: { onClose: () => void; onCreated: 
     try { onCreated((await createBook({ name, visibility: shared ? "all_users" : "private" })).book); } catch (reason) { setError(errorMessage(reason, "Could not create the book")); setBusy(false); }
   };
   return <ModalDialog title="New contact book" onClose={onClose} variant="sheet" busy={busy} className="crm-sheet">
-    <form className="crm-sheet-form" onSubmit={(event) => { event.preventDefault(); if (name.trim()) void save(); }}>
+    <form className="crm-sheet-form" noValidate onSubmit={(event) => { event.preventDefault(); if (name.trim()) void save(); }}>
       <div className="crm-sheet-body">
         <div className="ui-field"><label htmlFor="crm-book-name">Name</label><input id="crm-book-name" autoFocus maxLength={120} value={name} onChange={(event) => setName(event.target.value)} placeholder="Sales" /></div>
         <div className="ui-field"><span>Who can see it</span><div className="ui-segmented" role="group" aria-label="Who can see it">
@@ -207,6 +207,7 @@ function ListsIndex({ book, q, canWrite: writable, onOpen, onNew, refreshKey }: 
 function ListPage({ listRef, book, books, q, userId, canWrite: writable, onOpen, onBack, refreshKey }: { listRef: string; book: CrmBook; books: readonly CrmBook[]; q: string; userId: string; canWrite: boolean; onOpen: (href: string) => void; onBack: () => void; refreshKey: number }) {
   const [list, setList] = useState<CrmList | null>(null);
   const [deals, setDeals] = useState<CrmDeal[] | null>(null);
+  const [renaming, setRenaming] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => { getList(listRef).then(({ list: found }) => found).then(setList, (reason) => setError(errorMessage(reason, "List not found"))); }, [listRef, refreshKey]);
   useEffect(() => { if (list?.entity === "deal") void listDeals({ book: list.bookId, list: list.id, q, limit: 200 }).then((page) => setDeals(page.items)); }, [list, q]);
@@ -217,7 +218,13 @@ function ListPage({ listRef, book, books, q, userId, canWrite: writable, onOpen,
     <div className="crm-listpage-head">
       <button type="button" className="ui-text-button" onClick={onBack}>All lists</button>
       <h2>{list.name}</h2>
-      {writable && <button type="button" className="ui-text-button" onClick={() => { const name = window.prompt("Rename the list", list.name); if (name?.trim()) void renameList(list.id, name.trim()).then(({ list: renamed }) => setList(renamed)); }}>Rename</button>}
+      {writable && (renaming === null
+        ? <button type="button" className="ui-text-button" onClick={() => setRenaming(list.name)}>Rename</button>
+        : <form className="crm-inline-name" noValidate onSubmit={(event) => { event.preventDefault(); const name = renaming.trim(); setRenaming(null); if (name && name !== list.name) void renameList(list.id, name).then(({ list: renamed }) => setList(renamed)); }}>
+          <label className="ui-visually-hidden" htmlFor="crm-list-name">List name</label>
+          <input id="crm-list-name" autoFocus maxLength={80} value={renaming} onChange={(event) => setRenaming(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); setRenaming(null); } }} />
+          <button type="submit" className="ui-small-button secondary-button" disabled={!renaming.trim()}>Save</button>
+        </form>)}
     </div>
     {list.entity === "deal" ? (!deals ? <p className="ui-panel-loading">Loading deals…</p> : deals.length === 0 ? <EmptyState icon={Handshake} title="This list is empty">Open a deal and use ⋯ → Add to list.</EmptyState>
       : <ul className="crm-mini-cards">{deals.map((deal) => <li key={deal.id}><button type="button" className="crm-mini-card" onClick={() => onOpen(deal.href)}><DealCard deal={deal} /><span className="crm-mini-stage">{deal.stageName}</span></button></li>)}</ul>)

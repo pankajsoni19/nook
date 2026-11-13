@@ -4,6 +4,7 @@ import {
 } from "lucide-react";
 import { EmptyState } from "../ui/EmptyState";
 import { ModalDialog } from "../files/Dialog";
+import { Avatar } from "../ui/Avatar";
 import { MoreMenu } from "../ui/MoreMenu";
 import { Select } from "../ui/Select";
 import { MoneyInput } from "../ui/money/Money";
@@ -25,7 +26,7 @@ import {
 import { CRM_ACTIVITY_RENDERERS, activityPlain } from "./activityText";
 import { FollowupSheet, LostReasonSheet, NewDealSheet, TaskSheet } from "./Sheets";
 import { DealCard } from "./DealsView";
-import { dateTime, fieldText, initials, isPast, money, relative, shortDate } from "./format";
+import { dateTime, fieldText, isPast, money, relative, shortDate } from "./format";
 
 /**
  * A contact, company, or deal page (§D.5 "Record page", §E.4): a header with the quick actions (Log,
@@ -121,7 +122,7 @@ export function RecordPage({ kind, refId, books, canWriteRole, onOpen, onBack, o
   const inLists = new Set(detail.lists.map((list) => list.id));
 
   const header = <header className="crm-record-header">
-    <span className={`crm-avatar large${kind !== "contact" ? " square" : ""}`} aria-hidden="true">{kind === "deal" ? <Handshake /> : initials(title)}</span>
+    {kind === "contact" ? <Avatar className="crm-avatar large" name={title} url={null} /> : <span className="crm-avatar large square" aria-hidden="true">{kind === "deal" ? <Handshake /> : <Building2 />}</span>}
     <div className="crm-record-title">
       <h2 tabIndex={-1}>{title}</h2>
       <p className="crm-record-sub">
@@ -207,7 +208,7 @@ export function RecordPage({ kind, refId, books, canWriteRole, onOpen, onBack, o
         </section>}
         {kind === "company" && <section className="crm-panel-mini" aria-label="People">
           <h3><Contact aria-hidden="true" />People <span className="ui-panel-count">{(detail as CrmCompanyDetail).contacts.length}</span></h3>
-          {(detail as CrmCompanyDetail).contacts.length === 0 ? <p className="crm-muted">No contacts at this company yet.</p> : <ul className="crm-people">{(detail as CrmCompanyDetail).contacts.map((contact) => <li key={contact.id}><button type="button" className="crm-list-row" onClick={() => onOpen(contact.href)}><span className="crm-avatar" aria-hidden="true">{initials(contact.displayName)}</span><span className="crm-list-text"><strong>{contact.displayName}</strong><small>{contact.jobTitle ?? contact.email ?? ""}</small></span></button></li>)}</ul>}
+          {(detail as CrmCompanyDetail).contacts.length === 0 ? <p className="crm-muted">No contacts at this company yet.</p> : <ul className="crm-people">{(detail as CrmCompanyDetail).contacts.map((contact) => <li key={contact.id}><button type="button" className="crm-list-row" onClick={() => onOpen(contact.href)}><Avatar className="crm-avatar" name={contact.displayName} url={null} /><span className="crm-list-text"><strong>{contact.displayName}</strong><small>{contact.jobTitle ?? contact.email ?? ""}</small></span></button></li>)}</ul>}
         </section>}
         <LinkedItemsPanel item={{ kind, id: detail.id }} canEdit={canEdit} onOpen={onOpen} title="Linked work" />
         <ItemTimeline kind={kind} id={detail.id} canComment={canWriteRole && detail.canEdit} renderers={CRM_ACTIVITY_RENDERERS} title="Comments" refreshKey={String(tick)} />

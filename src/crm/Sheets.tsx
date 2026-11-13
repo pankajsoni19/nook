@@ -22,7 +22,7 @@ function Sheet({ title, eyebrow, busy, error, onClose, onSubmit, submitLabel, ch
 }) {
   const submit = (event: FormEvent) => { event.preventDefault(); if (!busy && !submitDisabled) onSubmit(); };
   return <ModalDialog title={title} eyebrow={eyebrow} onClose={onClose} variant="sheet" busy={busy} className="crm-sheet">
-    <form className="crm-sheet-form" onSubmit={submit}>
+    <form className="crm-sheet-form" noValidate onSubmit={submit}>
       <div className="crm-sheet-body">{children}</div>
       {error && <p className="file-dialog-error" role="alert">{error}</p>}
       <footer className="file-dialog-actions">
@@ -45,7 +45,7 @@ export function NewRecordSheet({ entity, book, onClose, onCreated, onOpenExistin
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [existing, setExisting] = useState<string | null>(null);
-  const set = (key: string) => (event: { target: { value: string } }) => setValues((current) => ({ ...current, [key]: event.target.value }));
+  const set = (key: string) => (event: { target: { value: string } }) => { const value = event.target.value; setValues((current) => ({ ...current, [key]: value })); };
   const save = async () => {
     setBusy(true); setError(null); setExisting(null);
     try {

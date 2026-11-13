@@ -7,7 +7,8 @@ import { notify } from "../ui/notify";
 import type { CrmBoard, CrmBook, CrmDeal, CrmPipeline } from "../../shared/crm";
 import { errorMessage, listDeals, listPipelines, pipelineBoard, updateDeal } from "./crmApi";
 import { LostReasonSheet } from "./Sheets";
-import { initials, isPast, money, shortDate } from "./format";
+import { isPast, money, shortDate } from "./format";
+import { Avatar } from "../ui/Avatar";
 
 /**
  * Deals (§D.5 "Deal board", C16): the shared KanbanBoard with one column per stage (count, total,
@@ -123,7 +124,7 @@ export function DealCard({ deal }: { deal: CrmDeal }) {
     {(deal.contacts.length > 0 || deal.nextStepOn || deal.owner) && <div className="crm-deal-foot">
       {deal.contacts[0] && <span className="crm-deal-contact">{deal.contacts[0].name}{deal.contacts.length > 1 ? ` +${deal.contacts.length - 1}` : ""}</span>}
       {deal.nextStepOn && <span className={`crm-deal-next${overdue ? " overdue" : ""}`} title={deal.nextStep ?? "Next step"}><CalendarClock aria-hidden="true" />{shortDate(deal.nextStepOn)}</span>}
-      {deal.owner && <span className="crm-avatar small" title={`Owner: ${deal.owner.name}`} aria-label={`Owner ${deal.owner.name}`}>{initials(deal.owner.name)}</span>}
+      {deal.owner && <span className="crm-deal-owner" title={`Owner: ${deal.owner.name}`} aria-label={`Owner ${deal.owner.name}`}><Avatar className="crm-avatar small" name={deal.owner.name} url={null} /></span>}
     </div>}
   </div>;
 }

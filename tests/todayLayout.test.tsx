@@ -22,11 +22,12 @@ const quietIn = (markup: string) => [...markup.matchAll(/<li class="today-quiet 
 test("every client section names one of the three fixed groups, listed in group order", () => {
   expect(TODAY_GROUPS.map((group) => group.title)).toEqual(["Today", "Recent work", "Housekeeping"]);
   const ids = TODAY_GROUPS.map((group) => group.id as string);
-  const order = DEFAULT_SECTION_ORDER.map((name) => ids.indexOf(TODAY_SECTIONS[name]!.group));
-  expect(order.every((index) => index >= 0)).toBe(true);
+  // Workspace modules' sections are appended to the order and placed by their group (D836); the built-in ones are in group order.
+  const order = DEFAULT_SECTION_ORDER.filter((name) => !TODAY_SECTIONS[name]!.module).map((name) => ids.indexOf(TODAY_SECTIONS[name]!.group));
+  expect(DEFAULT_SECTION_ORDER.every((name) => ids.includes(TODAY_SECTIONS[name]!.group))).toBe(true);
   expect(order).toEqual([...order].sort((a, b) => a - b));
   expect(groupTodaySections(DEFAULT_SECTION_ORDER).map((group) => [group.id, group.names])).toEqual([
-    ["today", ["tasksDue", "upcoming", "tasksMine", "proposals"]],
+    ["today", ["tasksDue", "upcoming", "tasksMine", "proposals", "crmFollowups"]],
     ["recent", ["notesRecent", "files", "collectionsRecent", "whiteboardsRecent"]],
     ["housekeeping", ["drafts", "binSoon", "storage"]]
   ]);
@@ -47,7 +48,7 @@ test("while loading, each group shows headed skeleton cards", () => {
   expect(groupsIn(markup)).toEqual(["today", "recent", "housekeeping"]);
   expect(markup).toContain('<h2 id="today-group-today" class="today-group-title">Today</h2>');
   expect(markup).toContain('<h2 id="today-group-recent" class="today-group-title">Recent work</h2>');
-  expect(cardsIn(markup)).toEqual(DEFAULT_SECTION_ORDER);
+  expect(cardsIn(markup)).toEqual(groupTodaySections(DEFAULT_SECTION_ORDER).flatMap((group) => group.names));
   expect(quietIn(markup)).toEqual([]);
 });
 

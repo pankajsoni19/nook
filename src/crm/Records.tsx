@@ -8,7 +8,8 @@ import { useConfirm } from "../ui/useConfirm";
 import type { CrmBook, CrmCompany, CrmContact, CrmEntity, CrmFilter, CrmList, CrmSort, CrmView } from "../../shared/crm";
 import { binCompany, binContact, changeListMembers, createView, deleteView, errorMessage, listCompanies, listContacts, listLists, listViews, updateContact } from "./crmApi";
 import { FilterSheet, filterLabel } from "./Sheets";
-import { fieldText, initials, relative } from "./format";
+import { fieldText, relative } from "./format";
+import { Avatar } from "../ui/Avatar";
 import { usePhone } from "./usePhone";
 
 /**
@@ -152,7 +153,7 @@ export function RecordsView({ entity, book, books, q, userId, canWrite, listRef,
         <span key={`${filter.field}-${index}`} className="ui-filter-chip crm-filter-applied">{filterLabel(filter, book, entity)}<button type="button" aria-label={`Remove filter ${filterLabel(filter, book, entity)}`} onClick={() => setFilters((current) => current.filter((item) => item !== filter))}><X aria-hidden="true" /></button></span>)}
       <button type="button" className="ui-filter-chip" onClick={() => setFiltering(true)}><Filter aria-hidden="true" />Filter</button>
       {book && filters.length > 0 && !viewId && naming === null && <button type="button" className="ui-text-button" onClick={() => setNaming(filters.map((filter) => filterLabel(filter, book, entity)).join(", ").slice(0, 60))}>Save view</button>}
-      {naming !== null && <form className="crm-inline-name" onSubmit={(event) => { event.preventDefault(); void saveView(); }}>
+      {naming !== null && <form className="crm-inline-name" noValidate onSubmit={(event) => { event.preventDefault(); void saveView(); }}>
         <label className="ui-visually-hidden" htmlFor="crm-view-name">View name</label>
         <input id="crm-view-name" autoFocus maxLength={60} value={naming} onChange={(event) => setNaming(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); setNaming(null); } }} />
         <button type="submit" className="ui-small-button secondary-button" disabled={!naming.trim()}>Save</button>
@@ -179,7 +180,7 @@ export function RecordsView({ entity, book, books, q, userId, canWrite, listRef,
         {rows.map((row, index) => <li key={row.id} data-crm-row={index} className={index === active ? "active" : undefined}>
           {canWrite && <input type="checkbox" className="crm-check" checked={selected.has(row.id)} onChange={() => toggle(row.id)} aria-label={`Select ${nameOf(row)}`} />}
           <button type="button" className="crm-list-row" onClick={() => onOpen(row.href)}>
-            <span className={`crm-avatar${entity === "company" ? " square" : ""}`} aria-hidden="true">{initials(nameOf(row))}</span>
+            {entity === "company" ? <span className="crm-avatar square" aria-hidden="true"><Building2 /></span> : <Avatar className="crm-avatar" name={nameOf(row)} url={null} />}
             <span className="crm-list-text"><strong>{nameOf(row)}</strong><small>{isContact(row) ? [row.jobTitle, row.companyName].filter(Boolean).join(" · ") || row.email || "—" : row.domain ?? `${row.contactCount} contacts`}</small></span>
             <span className="crm-list-metric">{row.lastInteractionAt ? relative(row.lastInteractionAt) : isContact(row) ? row.lifecycle ?? "" : `${row.openDeals} open`}</span>
           </button>
@@ -196,7 +197,7 @@ export function RecordsView({ entity, book, books, q, userId, canWrite, listRef,
         <tbody>{rows.map((row, index) => <tr key={row.id} data-crm-row={index} className={`${selected.has(row.id) ? "selected" : ""}${index === active ? " active" : ""}`}>
           {canWrite && <td className="crm-col-check"><input type="checkbox" checked={selected.has(row.id)} onChange={() => toggle(row.id)} aria-label={`Select ${nameOf(row)}`} /></td>}
           <th scope="row"><a href={row.href} className="crm-name" onClick={(event) => { event.preventDefault(); onOpen(row.href); }}>
-            <span className={`crm-avatar${entity === "company" ? " square" : ""}`} aria-hidden="true">{initials(nameOf(row))}</span><span>{nameOf(row)}{isContact(row) && row.jobTitle && <small>{row.jobTitle}</small>}</span>
+            {entity === "company" ? <span className="crm-avatar square" aria-hidden="true"><Building2 /></span> : <Avatar className="crm-avatar" name={nameOf(row)} url={null} />}<span>{nameOf(row)}{isContact(row) && row.jobTitle && <small>{row.jobTitle}</small>}</span>
           </a></th>
           {columns.map((column) => <td key={column.id} className={column.id === "contacts" || column.id === "deals" ? "number" : undefined}>{cell(row, column.id) || <span className="crm-empty-cell" aria-label="Empty">—</span>}</td>)}
           {custom.map((field) => <td key={field.id}>{cell(row, field.id) || <span className="crm-empty-cell" aria-label="Empty">—</span>}</td>)}
