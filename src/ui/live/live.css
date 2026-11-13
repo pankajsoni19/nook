@@ -53,6 +53,12 @@
 .ui-qa-flag svg { width: 12px; height: 12px; }
 .ui-qa-text { margin: 0; color: #f2f2f3; font-size: .95rem; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ui-qa-meta { margin: 0; color: #8d8d94; font-size: .76rem; }
+.ui-qa-flag.starred { color: #f4ca67; }
+.ui-qa-note { margin: 0; color: #8d8d94; font-size: .74rem; }
+.ui-qa-actions { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 2px 0 0; }
+.ui-qa-actions .ui-text-button { display: inline-flex; align-items: center; gap: 5px; min-height: 28px; font-size: .76rem; }
+.ui-qa-actions svg { width: 13px; height: 13px; }
+@media (max-width: 760px) { .ui-qa-actions .ui-text-button { min-height: 36px; } }
 .ui-qa-anon { display: inline-flex; align-items: center; gap: 3px; font-style: italic; }
 .ui-qa-anon svg { width: 12px; height: 12px; }
 .ui-qa-status.answered { color: var(--tone-success); }

@@ -73,10 +73,11 @@ afterAll(() => {
 });
 
 describe("the stubs (D800, D832)", () => {
-  test("seven modules, in Settings order, all registered and none ready", () => {
+  test("seven modules, in Settings order, all registered; only shipped lanes are ready (Townhall)", () => {
     expect(workspaceModules().map((module) => module.id)).toEqual([...WORKSPACE_MODULE_IDS]);
     expect(WORKSPACE_MODULE_IDS).toEqual(["forms", "time", "goals", "checkins", "crm", "bookings", "townhall"]);
-    expect(readyWorkspaceModules()).toEqual([]);
+    // Lanes flip `ready` as they ship (D800); Townhall shipped (lane TOWNHALL).
+    expect(readyWorkspaceModules().map((module) => module.id)).toEqual(["townhall"]);
     // Product owner names (§G.1): Contacts at /contacts, Standups at /standups.
     expect(workspaceModules().map((module) => [module.id, module.label, module.segment])).toEqual([
       ["forms", "Forms", "forms"], ["time", "Time", "time"], ["goals", "Goals", "goals"], ["checkins", "Standups", "standups"],
@@ -87,10 +88,10 @@ describe("the stubs (D800, D832)", () => {
   test("a stub is a planned module: not in Settings, no launcher, its URLs open Home", () => {
     for (const id of WORKSPACE_MODULE_IDS) {
       const def = MODULES.find((module) => module.id === id)!;
-      expect(def.planned).toBe(true);
+      expect(Boolean(def.planned)).toBe(id !== "townhall");
       expect(def.routeApps).toEqual([id]);
     }
-    expect(settingsModulesFor("admin").some((module) => isWorkspaceModuleId(module.id))).toBe(false);
+    expect(settingsModulesFor("admin").filter((module) => isWorkspaceModuleId(module.id)).map((module) => module.id)).toEqual(["townhall"]);
     for (const path of ["/forms", "/contacts/ana-silva-9xk2mm0a1b", "/standups", "/goals/x"]) expect(parseRoute(path)).toEqual({ app: "home" });
     expect(renderToStaticMarkup(<TopBarItems />)).toBe("");
   });
@@ -130,13 +131,14 @@ describe("a ready module (the throwaway test module)", () => {
     expect(TODAY_SECTIONS.goalsCheckin?.module).toBe("goals");
     expect(DEFAULT_SECTION_ORDER).toContain("goalsCheckin");
     expect(groupTodaySections(["tasksDue", "goalsCheckin", "notesRecent"]).map((group) => [group.id, group.names])).toEqual([["today", ["tasksDue", "goalsCheckin"]], ["recent", ["notesRecent"]]]);
-    expect(visibleQuickActions([], "member").map((action) => action.id)).toEqual(["checkin", "admin-only"]);
-    expect(visibleQuickActions([], "guest").map((action) => action.id)).toEqual(["checkin"]);
-    expect(visibleQuickActions(["goals"], "member")).toEqual([]);
+    // Townhall (shipped) is turned off here so only the throwaway module's actions count.
+    expect(visibleQuickActions(["townhall"], "member").map((action) => action.id)).toEqual(["checkin", "admin-only"]);
+    expect(visibleQuickActions(["townhall"], "guest").map((action) => action.id)).toEqual(["checkin"]);
+    expect(visibleQuickActions(["goals", "townhall"], "member")).toEqual([]);
     const markup = renderToStaticMarkup(<QuickActions onOpenRoute={() => undefined} />);
     expect(markup).toContain('<ul class="today-quick-actions" aria-label="Quick actions">');
     expect(markup).toContain('<a class="today-quick-action" href="/goals">');
-    expect(renderToStaticMarkup(<ModulesContext.Provider value={["goals"]}><QuickActions onOpenRoute={() => undefined} /></ModulesContext.Provider>)).toBe("");
+    expect(renderToStaticMarkup(<ModulesContext.Provider value={["goals", "townhall"]}><QuickActions onOpenRoute={() => undefined} /></ModulesContext.Provider>)).toBe("");
   });
 
   test("its card slots render in the dialog, face, header, and Timeline, and hide while it is off", () => {

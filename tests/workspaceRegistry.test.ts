@@ -44,10 +44,10 @@ beforeAll(async () => {
 afterAll(() => unregisterTestModule());
 
 describe("vocabulary and stubs (D800)", () => {
-  test("the seven module stubs are registered on the server and hidden in the app", () => {
+  test("the seven module stubs are registered on the server; the unshipped ones are hidden in the app (Townhall shipped)", () => {
     for (const id of WORKSPACE_MODULE_IDS) expect(registeredWorkspaceModules()).toContain(id);
     for (const id of WORKSPACE_MODULE_IDS) expect(MODULE_IDS).toContain(id);
-    expect(MODULES.filter((module) => (WORKSPACE_MODULE_IDS as readonly string[]).includes(module.id)).map((module) => [module.id, module.planned])).toEqual(WORKSPACE_MODULE_IDS.map((id) => [id, true]));
+    expect(MODULES.filter((module) => (WORKSPACE_MODULE_IDS as readonly string[]).includes(module.id)).map((module) => [module.id, Boolean(module.planned)])).toEqual(WORKSPACE_MODULE_IDS.map((id) => [id, id !== "townhall"]));
     expect(MODULES.find((module) => module.id === "crm")!.label).toBe("Contacts");
     expect(MODULES.find((module) => module.id === "checkins")!.label).toBe("Standups");
   });

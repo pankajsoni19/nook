@@ -1,5 +1,5 @@
 import { useId, useState } from "react";
-import { ArrowBigUp, CheckCheck, CircleCheck, EyeOff, Eye, Merge, MessageCircleQuestion, Pin, PinOff, Send, UserRound } from "lucide-react";
+import { ArrowBigUp, CheckCheck, CircleCheck, EyeOff, Eye, Merge, MessageCircleQuestion, MessageSquare, Pin, PinOff, RotateCcw, Send, Star, StarOff, Trash2, UserRound } from "lucide-react";
 import { relativeTime } from "../../files/format";
 import { EmptyState } from "../EmptyState";
 import { MoreMenu, type MoreMenuItem } from "../MoreMenu";
@@ -26,8 +26,12 @@ export type QaQuestion = {
   createdAt: string;
   /** This person asked it (they may see it while pending). */
   mine?: boolean;
+  /** Townhall (lane TOWNHALL, D1084): a moderator's star, the comment count, duplicates merged into it. */
+  starred?: boolean;
+  commentCount?: number;
+  mergedCount?: number;
 };
-export type QaModeration = "approve" | "hide" | "unhide" | "answered" | "pin" | "unpin" | "merge";
+export type QaModeration = "approve" | "hide" | "unhide" | "answered" | "pin" | "unpin" | "merge" | "star" | "unstar" | "reopen";
 
 /** The list as shown: hidden ones only to moderators, pinned first, then by votes or time. Pure. */
 export function orderQuestions(questions: readonly QaQuestion[], sort: "top" | "recent", moderator: boolean): QaQuestion[] {
@@ -43,7 +47,7 @@ export function orderQuestions(questions: readonly QaQuestion[], sort: "top" | "
 
 const STATUS_WORDS: Record<QaStatus, string> = { pending: "Waiting for review", approved: "", answered: "Answered", hidden: "Hidden" };
 
-export function QaList({ questions, sort, onSort, onUpvote, onAsk, anonymousAllowed = true, moderator = false, onModerate, closed = false, maxLength = 300 }: {
+export function QaList({ questions, sort, onSort, onUpvote, onAsk, anonymousAllowed = true, moderator = false, onModerate, closed = false, maxLength = 300, onOpen, onWithdraw, askNote, emptyText }: {
   questions: readonly QaQuestion[];
   sort: "top" | "recent";
   onSort: (sort: "top" | "recent") => void;
@@ -55,6 +59,14 @@ export function QaList({ questions, sort, onSort, onUpvote, onAsk, anonymousAllo
   onModerate?: (id: string, action: QaModeration) => void;
   closed?: boolean;
   maxLength?: number;
+  /** Opens a question's comments (absent: no comments here). */
+  onOpen?: (id: string) => void;
+  /** Lets the asker take back their own question. */
+  onWithdraw?: (id: string) => void;
+  /** A line under the ask box ("Your name shows to everyone in this session"). */
+  askNote?: string;
+  /** The empty state's sentence when nothing matches (a filter). */
+  emptyText?: string;
 }) {
   const id = useId();
   const [text, setText] = useState("");
@@ -73,6 +85,8 @@ export function QaList({ questions, sort, onSort, onUpvote, onAsk, anonymousAllo
   const menu = (question: QaQuestion): MoreMenuItem[] => [
     ...(question.status === "pending" ? [{ id: "approve", label: "Approve", icon: CircleCheck, onSelect: () => onModerate?.(question.id, "approve") }] : []),
     ...(question.status !== "answered" && question.status !== "hidden" ? [{ id: "answered", label: "Mark answered", icon: CheckCheck, onSelect: () => onModerate?.(question.id, "answered") }] : []),
+    ...(question.status === "answered" ? [{ id: "reopen", label: "Mark not answered", icon: RotateCcw, onSelect: () => onModerate?.(question.id, "reopen") }] : []),
+    question.starred ? { id: "unstar", label: "Remove star", icon: StarOff, onSelect: () => onModerate?.(question.id, "unstar") } : { id: "star", label: "Star", icon: Star, onSelect: () => onModerate?.(question.id, "star") },
     question.pinned ? { id: "unpin", label: "Unpin", icon: PinOff, onSelect: () => onModerate?.(question.id, "unpin") } : { id: "pin", label: "Pin as current", icon: Pin, onSelect: () => onModerate?.(question.id, "pin") },
     { id: "merge", label: "Merge into…", icon: Merge, onSelect: () => onModerate?.(question.id, "merge") },
     question.status === "hidden" ? { id: "unhide", label: "Show again", icon: Eye, onSelect: () => onModerate?.(question.id, "unhide") } : { id: "hide", label: "Hide", icon: EyeOff, danger: true, onSelect: () => onModerate?.(question.id, "hide") }
@@ -94,10 +108,11 @@ export function QaList({ questions, sort, onSort, onUpvote, onAsk, anonymousAllo
         <span className="ui-qa-left ui-tabular" aria-hidden="true">{maxLength - text.length}</span>
         <button type="submit" className="action-button ui-small-action" disabled={sending || !text.trim()}><Send aria-hidden="true" />{sending ? "Sending…" : "Ask"}</button>
       </div>
+      {askNote && <p className="ui-qa-note">{askNote}</p>}
       {error && <p className="ui-field-error" role="alert">{error}</p>}
     </form>}
     {ordered.length === 0
-      ? <EmptyState compact as="h4" icon={MessageCircleQuestion} title="No questions yet">{onAsk && !closed ? "Be the first to ask." : undefined}</EmptyState>
+      ? <EmptyState compact as="h4" icon={MessageCircleQuestion} title={emptyText ? "Nothing here" : "No questions yet"}>{emptyText ?? (onAsk && !closed ? "Be the first to ask." : undefined)}</EmptyState>
       : <ol className="ui-qa-list">
         {ordered.map((question) => <li key={question.id} className={`ui-qa-item${question.pinned ? " pinned" : ""}${question.status !== "approved" ? ` ${question.status}` : ""}`}>
           <button type="button" className="ui-qa-vote" aria-pressed={question.voted} disabled={!onUpvote || closed || question.status === "hidden"}
@@ -106,12 +121,18 @@ export function QaList({ questions, sort, onSort, onUpvote, onAsk, anonymousAllo
           </button>
           <div className="ui-qa-body">
             {question.pinned && <span className="ui-qa-flag"><Pin aria-hidden="true" />Now answering</span>}
+            {moderator && question.starred && !question.pinned && <span className="ui-qa-flag starred"><Star aria-hidden="true" />Starred</span>}
             <p className="ui-qa-text">{question.text}</p>
             <p className="ui-qa-meta">
               {question.author ? <span>{question.author}</span> : <span className="ui-qa-anon"><UserRound aria-hidden="true" />Anonymous</span>}
               {" · "}<time dateTime={question.createdAt}>{relativeTime(question.createdAt)}</time>
               {STATUS_WORDS[question.status] && <> · <span className={`ui-qa-status ${question.status}`}>{STATUS_WORDS[question.status]}</span></>}
+              {question.mergedCount ? <> · <span>{question.mergedCount} merged</span></> : null}
             </p>
+            {(onOpen || (onWithdraw && question.mine && question.status !== "answered")) && <p className="ui-qa-actions">
+              {onOpen && <button type="button" className="ui-text-button" onClick={() => onOpen(question.id)}><MessageSquare aria-hidden="true" />{question.commentCount ? `${question.commentCount} ${question.commentCount === 1 ? "reply" : "replies"}` : "Reply"}</button>}
+              {onWithdraw && question.mine && question.status !== "answered" && !closed && <button type="button" className="ui-text-button" onClick={() => onWithdraw(question.id)}><Trash2 aria-hidden="true" />Withdraw</button>}
+            </p>}
           </div>
           {moderator && onModerate && <MoreMenu label="Moderate question" items={menu(question)} />}
         </li>)}
