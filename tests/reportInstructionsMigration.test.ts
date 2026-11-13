@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { registeredMigrationIds, registeredMigrations, runMigrations } from "../server/migrations";
 import { reportInstructionsMigration } from "../server/migrations/052_report_instructions";
+// Workspace modules (085 onward) are listed by server/migrations/workspace/*.ts, which each lane appends to.
+const workspaceMigrationIds = (await import("../server/migrations/workspace")).workspaceMigrations.map((migration) => migration.id);
 
 /**
  * Migration 052 (reports wave 48, D450–D455): report_instructions (one running or proposed per report),
@@ -117,7 +119,7 @@ describe("migration 052 report_instructions", () => {
     const schema = db.query("SELECT name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY name").all();
     runMigrations(db);
     expect(db.query("SELECT name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY name").all()).toEqual(schema);
-    expect((db.query("SELECT id FROM schema_migrations WHERE id >= 49 ORDER BY id").all() as Array<{ id: number }>).map((row) => row.id)).toEqual([49, 50, 51, 52, 53, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 68, 69, 73, 74, 76, 77, 78, 79, 80, 81, 82, 83]);
+    expect((db.query("SELECT id FROM schema_migrations WHERE id >= 49 ORDER BY id").all() as Array<{ id: number }>).map((row) => row.id)).toEqual([49, 50, 51, 52, 53, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 68, 69, 73, 74, 76, 77, 78, 79, 80, 81, 82, 83, ...workspaceMigrationIds]);
   });
 
   test("a full migration run from scratch includes 052", () => {

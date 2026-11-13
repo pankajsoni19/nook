@@ -1,8 +1,11 @@
 import type { RenderedMail } from "../layout";
+import { WORKSPACE_MAIL_CATEGORIES, WORKSPACE_MODULE_LABELS } from "../../../shared/workspaceModules";
 
 export type MailClass = "security" | "account" | "activity" | "reminders" | "digest";
 /** Activity categories (§A.1, D231); `reminders` is the Wave 29 reminders-by-email switch. */
-export const MAIL_CATEGORIES = ["assignments", "comments", "sharing", "proposals", "sprints", "bin", "reminders"] as const;
+export const MAIL_CATEGORIES = ["assignments", "comments", "sharing", "proposals", "sprints", "bin", "reminders",
+  // Workspace modules (docs/plan/WORKSPACE_MODULES.md §B.7, D809): one switch per module.
+  ...WORKSPACE_MAIL_CATEGORIES] as const;
 export type MailCategory = typeof MAIL_CATEGORIES[number];
 
 export const CATEGORY_LABELS: Record<MailCategory, string> = {
@@ -12,7 +15,8 @@ export const CATEGORY_LABELS: Record<MailCategory, string> = {
   proposals: "Proposals awaiting you",
   sprints: "Sprints",
   bin: "Bin clean-up",
-  reminders: "Reminders by email"
+  reminders: "Reminders by email",
+  ...Object.fromEntries(WORKSPACE_MAIL_CATEGORIES.map((id) => [id, WORKSPACE_MODULE_LABELS[id].label])) as Record<typeof WORKSPACE_MAIL_CATEGORIES[number], string>
 };
 
 /** What every render gets besides its data. */

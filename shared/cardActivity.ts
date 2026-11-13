@@ -70,7 +70,16 @@ export const CARD_ACTIVITY_KINDS = {
   archived: { shape: "event", coalesce: false },
   unarchived: { shape: "event", coalesce: false },
   attachment_added: { shape: "item", coalesce: false },
-  attachment_removed: { shape: "item", coalesce: false }
+  attachment_removed: { shape: "item", coalesce: false },
+  /**
+   * Workspace modules (docs/plan/WORKSPACE_MODULES.md §C, W1-CORE): time logged on the card (`item`:
+   * the entry, `label` the duration, e.g. "1h 30m"); linked to or unlinked from a goal (`item`: the
+   * goal); flagged as blocked by a standup answer (`item`: the standup, `label` its name).
+   */
+  time_logged: { shape: "item", coalesce: false },
+  goal_linked: { shape: "item", coalesce: false },
+  goal_unlinked: { shape: "item", coalesce: false },
+  blocked_by_checkin: { shape: "item", coalesce: false }
 } as const satisfies Record<string, { shape: ActivityShape; coalesce: boolean }>;
 
 export type CardActivityKind = keyof typeof CARD_ACTIVITY_KINDS;

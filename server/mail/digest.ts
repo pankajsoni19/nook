@@ -27,6 +27,27 @@ import type { DigestCard, DigestEvent, DigestShared } from "./templates/digest";
  */
 
 const DAY = 86_400_000;
+
+/**
+ * Digest sections registered by the workspace modules (docs/plan/WORKSPACE_MODULES.md §B.7):
+ * "Standups you missed", "Goals needing a check-in", "Today's bookings", "Follow-ups due". Each is
+ * read at send time as the recipient, with the module's own access checks (T226); rows carry titles
+ * the recipient can read and relative hrefs. A section that throws is left out of that digest.
+ */
+export type DigestSectionRow = { title: string; meta?: string; href: string };
+export type DigestSection = {
+  id: string;
+  label: string;
+  module: string;
+  rows: (recipient: Recipient, context: { period: "daily" | "weekly"; today: string; tz: string; nowMs: number }) => { rows: DigestSectionRow[]; total: number };
+};
+const digestSections: DigestSection[] = [];
+
+export function registerDigestSection(section: DigestSection) {
+  if (digestSections.some((existing) => existing.id === section.id)) throw new Error(`Digest section ${section.id} is already registered`);
+  digestSections.push(section);
+  return () => { const index = digestSections.indexOf(section); if (index >= 0) digestSections.splice(index, 1); };
+}
 export const DIGEST_BATCH = 50;
 /** Cards due within this many days count as due soon (daily: today and tomorrow; weekly: the week). */
 export const DUE_SOON_DAYS = { daily: 1, weekly: 7 } as const;
@@ -154,12 +175,23 @@ export function resolveDigest(payload: Record<string, unknown>, recipient: Recip
     if (item) shared.push({ ...item, actor: row.actor });
   }
 
+  // Workspace modules' sections, read now as the recipient.
+  const modules: Array<{ label: string; rows: DigestSectionRow[]; total: number }> = [];
+  for (const section of digestSections) {
+    try {
+      const result = section.rows(recipient, { period, today, tz, nowMs });
+      const rows = result.rows.filter((row) => row.href.startsWith("/") && !row.href.startsWith("//")).slice(0, DIGEST_LIST_MAX);
+      if (rows.length) modules.push({ label: section.label, rows, total: Math.max(result.total, rows.length) });
+    } catch {
+      // One module's failure leaves its section out; the digest still goes.
+    }
+  }
   // D241: never an empty digest.
-  if (!cards.length && !events.length && !proposals && !shared.length) return { skip: "empty" };
+  if (!cards.length && !events.length && !proposals && !shared.length && !modules.length) return { skip: "empty" };
   return {
     data: {
       period, date: today, cards, cardsTotal, events, eventsMore: upcoming.more, proposals,
-      shared: shared.slice(0, DIGEST_LIST_MAX), sharedTotal: shared.length
+      shared: shared.slice(0, DIGEST_LIST_MAX), sharedTotal: shared.length, ...(modules.length ? { modules } : {})
     }
   };
 }

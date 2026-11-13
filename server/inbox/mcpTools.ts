@@ -1,6 +1,6 @@
 import * as z from "zod/v4";
 import { defineTool, type McpToolSpec } from "../mcpToolKit";
-import { KIND_TOOL, PROPOSAL_KINDS } from "./kinds";
+import { isProposalKind, KIND_TOOL, PROPOSAL_KINDS } from "./kinds";
 import { listKeyProposals, RATIONALE_MAX, submitProposals, SUBMIT_BATCH_MAX, TITLE_MAX, withdrawProposal } from "./service";
 import { CLIENT_LABEL_MAX, finishRun, listDueRoutines, listRoutinesForKey, MAX_PROPOSALS_CEILING, MAX_PROPOSALS_DEFAULT, RUN_ERROR_MAX, startRun, SUMMARY_MAX_BYTES } from "./routines";
 
@@ -16,7 +16,8 @@ import { CLIENT_LABEL_MAX, finishRun, listDueRoutines, listRoutinesForKey, MAX_P
 const kindList = PROPOSAL_KINDS.map((kind) => kind === "note_draft" ? "note_draft (notes:write-draft; payload {noteId?, folderId?, markdown, mode, baseRevision})" : `${kind} (payload = the ${KIND_TOOL[kind]} arguments)`).join("; ");
 
 const proposalItem = z.object({
-  kind: z.enum(PROPOSAL_KINDS),
+  // Built-in kinds, plus each workspace module's kind once its module registers it (registerProposalKind).
+  kind: z.string().max(40).refine(isProposalKind, "Unknown proposal kind"),
   title: z.string().min(1).max(TITLE_MAX * 2).describe(`What the change is, in a few words, as the user will see it (at most ${TITLE_MAX} characters). Plain text`),
   rationale: z.string().max(RATIONALE_MAX * 2).optional().describe(`Why you suggest it (at most ${RATIONALE_MAX} characters). Plain text, shown labelled as written by the agent`),
   payload: z.record(z.string(), z.unknown()).describe("The change, in the shape of the matching write tool's arguments")

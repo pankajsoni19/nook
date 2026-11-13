@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { registeredMigrationIds, runMigrations } from "../server/migrations";
 import { serviceAccountsMigration } from "../server/migrations/036_service_accounts";
+// Workspace modules (085 onward) are listed by server/migrations/workspace/*.ts, which each lane appends to.
+const workspaceMigrationIds = (await import("../server/migrations/workspace")).workspaceMigrations.map((migration) => migration.id);
 
 /**
  * Wave 36 review: migration 036 on a database upgraded from 035 with people already in it. It
@@ -39,7 +41,7 @@ const identity = (db: Database, userId: string) =>
 describe("review: migration 036 (service accounts) on an upgraded database", () => {
   test("follows 035 directly; only 037 (vault sharing, Wave 26), 038 (vault keys, Wave 27), 039 (agent chat, Wave 40), and 040 (agent audit, Wave 42) come after it", () => {
     expect(registeredMigrationIds.indexOf(36)).toBe(registeredMigrationIds.indexOf(35) + 1);
-    expect(registeredMigrationIds.filter((id) => id > 35)).toEqual([36, 37, 38, 39, 40, 41, 42, 43, 44, 46, 47, 48, 49, 50, 51, 52, 53, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 68, 69, 73, 74, 76, 77, 78, 79, 80, 81, 82, 83]);
+    expect(registeredMigrationIds.filter((id) => id > 35)).toEqual([36, 37, 38, 39, 40, 41, 42, 43, 44, 46, 47, 48, 49, 50, 51, 52, 53, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 68, 69, 73, 74, 76, 77, 78, 79, 80, 81, 82, 83, ...workspaceMigrationIds]);
   });
 
   test("upgrades a 035 database with people in it, re-runs as a no-op, and leaves person flows alone", () => {

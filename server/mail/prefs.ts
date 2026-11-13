@@ -3,6 +3,7 @@ import { audit, db, now } from "../db";
 import { isValidTimeZone, utcToZoned, zonedToUtc } from "../calendar/recurrence";
 import { MAIL_CATEGORIES, type MailCategory } from "./templates/types";
 import { clampDigestTime, refreshDigestSchedule } from "./digest";
+import { WORKSPACE_MAIL_CATEGORIES } from "../../shared/workspaceModules";
 
 /**
  * Email preferences (docs/plan/research/2026-09-28-outbound-email.md §B.1, D247, D248). They gate
@@ -25,7 +26,11 @@ export type EmailPrefs = {
   nextDigestAt: string | null;
 };
 
-export const DEFAULT_CATEGORIES: Record<MailCategory, boolean> = { assignments: true, comments: true, sharing: true, proposals: true, sprints: false, bin: false, reminders: true };
+export const DEFAULT_CATEGORIES: Record<MailCategory, boolean> = {
+  assignments: true, comments: true, sharing: true, proposals: true, sprints: false, bin: false, reminders: true,
+  // Workspace modules (D809): on by default, like the activity categories.
+  ...Object.fromEntries(WORKSPACE_MAIL_CATEGORIES.map((id) => [id, true])) as Record<typeof WORKSPACE_MAIL_CATEGORIES[number], boolean>
+};
 
 type Row = { enabled: number; categories: string; digest: EmailPrefs["digest"]; digest_local_time: string; quiet_start: string | null; quiet_end: string | null; tz: string; unsub_epoch: number; revision: number; updated_at: string; next_digest_at: string | null };
 
@@ -54,7 +59,8 @@ const clock = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Use a 24-hour time 
 
 export const emailPrefsPutSchema = z.object({
   enabled: z.boolean(),
-  categories: z.object(Object.fromEntries(MAIL_CATEGORIES.map((category) => [category, z.boolean()])) as Record<MailCategory, z.ZodBoolean>).strict(),
+  // The workspace modules' categories are optional (an older client sends the original seven; a missing one keeps its stored value).
+  categories: z.object(Object.fromEntries(MAIL_CATEGORIES.map((category) => [category, (WORKSPACE_MAIL_CATEGORIES as readonly string[]).includes(category) ? z.boolean().optional() : z.boolean()])) as Record<MailCategory, z.ZodBoolean>).strict(),
   /** Off (D248 default), daily, or weekly on Mondays, at digestLocalTime in tz. */
   digest: z.enum(["off", "daily", "weekly"]),
   digestLocalTime: clock,
@@ -70,7 +76,8 @@ export function writeEmailPrefs(userId: string, input: EmailPrefsInput, nowMs = 
   const timestamp = now();
   // B.1: the digest never lands inside quiet hours; the server moves it to their end.
   input = { ...input, digestLocalTime: clampDigestTime(input.digestLocalTime, input.quietHours?.start ?? null, input.quietHours?.end ?? null) };
-  const categories = JSON.stringify(Object.fromEntries(MAIL_CATEGORIES.map((category) => [category, input.categories[category] ? 1 : 0])));
+  const stored = readEmailPrefs(userId).categories;
+  const categories = JSON.stringify(Object.fromEntries(MAIL_CATEGORIES.map((category) => [category, (input.categories[category] ?? stored[category]) ? 1 : 0])));
   const values = [input.enabled ? 1 : 0, categories, input.digest, input.digestLocalTime, input.quietHours?.start ?? null, input.quietHours?.end ?? null, input.tz, timestamp];
   return db.transaction((): EmailPrefsWrite => {
     const before = db.query("SELECT digest, digest_local_time, tz, next_digest_at FROM email_prefs WHERE user_id = ?").get(userId) as { digest: string; digest_local_time: string; tz: string; next_digest_at: string | null } | null;

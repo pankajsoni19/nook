@@ -11,6 +11,7 @@ import { config } from "../config";
 import { audit, db, type NoteRow } from "../db";
 import { McpToolError, notFound, type McpKeyContext, type McpToolSpec } from "../mcpToolKit";
 import type { McpScope } from "../mcpScopes";
+import type { ItemKind } from "../keyResources";
 import { appendMarkdownBlock } from "./text";
 import { InboxError } from "./errors";
 import { createDraftNote, DraftActionError, publishDraft, writeDraftLocked } from "../noteDrafts";
@@ -22,6 +23,8 @@ import { sprintNames } from "../tasks/sprintData";
 import { listBoardTags } from "../tasks/tags";
 import { noteRef, type NoteDraftPayload } from "./noteDraftProposals";
 import { neutralizeWhiteboardEmbeds } from "../../shared/whiteboardEmbed";
+import { WORKSPACE_PROPOSAL_KINDS, type WORKSPACE_PROPOSAL_TARGETS, type WorkspaceProposalKind } from "../../shared/workspaceModules";
+import type { WorkKind } from "../../shared/workRefs";
 
 /**
  * Proposal kinds (docs/plan/research/2026-09-28-agent-inbox-routines.md §4.2, D148–D151).
@@ -37,10 +40,11 @@ import { neutralizeWhiteboardEmbeds } from "../../shared/whiteboardEmbed";
  */
 
 export const PROPOSAL_KINDS = ["note_draft", "card_create", "card_update", "card_comment", "event_create", "event_update", "row_create", "row_update"] as const;
-export type ProposalKind = typeof PROPOSAL_KINDS[number];
-export type TargetType = "note" | "folder" | "board" | "card" | "calendar" | "event" | "collection" | "row";
+/** The built-in kinds plus the workspace modules' (085 pre-allows the words; each lane registers its kind with registerProposalKind). */
+export type ProposalKind = typeof PROPOSAL_KINDS[number] | WorkspaceProposalKind;
+export type TargetType = "note" | "folder" | "board" | "card" | "calendar" | "event" | "collection" | "row" | typeof WORKSPACE_PROPOSAL_TARGETS[number];
 
-export type ProposalRef = { type: "note" | "card" | "event" | "row"; id: string; href: string };
+export type ProposalRef = { type: "note" | "card" | "event" | "row" | WorkKind; id: string; href: string };
 export type PreviewField = { name: string; before: string | null; after: string | null };
 export type ProposalPreview =
   | { restricted: true }
@@ -63,7 +67,7 @@ type SubmitResult = { targetType: TargetType; targetId: string; payload: Record<
 /** What the approver confirmed along with the approval (v0.35.0 review M1: a note_draft's Files items). */
 export type ApplyOptions = { confirmAttachments?: readonly string[] };
 
-type KindDef = {
+export type KindDef = {
   /** The module scope a key needs, besides inbox:write (D151). */
   scope: McpScope;
   label: string;
@@ -81,6 +85,8 @@ type KindDef = {
   digest: (payload: Record<string, unknown>) => string;
   /** The in-app path of the target, built from ids only; only sent when the viewer can read it. */
   targetHref: (proposal: StoredProposal) => string | null;
+  /** Workspace kinds: the payload field naming the target and its item kind, for keys limited to chosen items (review S3). */
+  target?: { field: string; kind: ItemKind };
 };
 
 const cardHref = (cardId: unknown) => {
@@ -507,13 +513,32 @@ const noteKinds = {
   }
 } satisfies Record<string, KindDef>;
 
-export const PROPOSAL_KIND_DEFS: Record<ProposalKind, KindDef> = { ...noteKinds, ...tasksKinds, ...calendarKinds, ...collectionKinds };
+/** Every kind's definition: the built-in ones, and the workspace modules' once registered. */
+export const PROPOSAL_KIND_DEFS = { ...noteKinds, ...tasksKinds, ...calendarKinds, ...collectionKinds } as unknown as Record<ProposalKind, KindDef>;
 
-export const isProposalKind = (value: unknown): value is ProposalKind => typeof value === "string" && (PROPOSAL_KINDS as readonly string[]).includes(value);
+/** A kind with a definition now (a workspace word counts only once its module registered it). */
+export const isProposalKind = (value: unknown): value is ProposalKind => typeof value === "string" && Object.hasOwn(PROPOSAL_KIND_DEFS, value);
 
 /** Tool schemas the MCP `submit_proposals` description can point at. */
-export const KIND_TOOL: Record<Exclude<ProposalKind, "note_draft">, string> = {
+export const KIND_TOOL = {
   card_create: "create_card", card_update: "update_card", card_comment: "comment_on_card",
   event_create: "create_event", event_update: "update_event", row_create: "create_row", row_update: "update_row"
-};
+} as Record<Exclude<ProposalKind, "note_draft">, string>;
+
+/**
+ * Registers a workspace module's proposal kind (docs/plan/WORKSPACE_MODULES.md §B.1, §B.7): the
+ * word must be one 085 allows. `tool` is the MCP write tool whose arguments are the payload (its
+ * schema validates at submit, its handler applies as the approver, D148).
+ */
+export function registerProposalKind(kind: WorkspaceProposalKind, def: KindDef & { tool: string }) {
+  if (!(WORKSPACE_PROPOSAL_KINDS as readonly string[]).includes(kind)) throw new Error(`Proposal kind ${kind} is not a workspace word`);
+  if (Object.hasOwn(PROPOSAL_KIND_DEFS, kind)) throw new Error(`Proposal kind ${kind} is already registered`);
+  const { tool: toolName, ...rest } = def;
+  PROPOSAL_KIND_DEFS[kind] = rest;
+  KIND_TOOL[kind] = toolName;
+  return () => {
+    delete (PROPOSAL_KIND_DEFS as Partial<Record<ProposalKind, KindDef>>)[kind];
+    delete (KIND_TOOL as Partial<Record<string, string>>)[kind];
+  };
+}
 

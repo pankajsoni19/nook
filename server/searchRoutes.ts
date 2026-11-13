@@ -9,6 +9,44 @@ import { searchDocuments } from "./documentSearch";
 import { searchReports } from "./reports/search";
 import { uuid } from "./validation";
 import { NO_FILTER, type SqlFilter } from "./keyResources";
+import { registeredSearchScopes, scopeAllowed, searchScope } from "./searchRegistry";
+import { ALL_SEARCH_PER_SCOPE, type SearchSection } from "../shared/workspaceSearch";
+import type { Role } from "./team/roles";
+
+/**
+ * `scope=all` (docs/plan/WORKSPACE_MODULES.md §B.12): every built-in scope and every registered module
+ * scope the caller has, the top results of each under its header. A scope that fails errors only its
+ * own section. Each scope runs its own access predicate (nothing new is reachable through All).
+ */
+async function searchAll(userId: string, role: Role, q: string): Promise<{ sections: SearchSection[] }> {
+  const limit = ALL_SEARCH_PER_SCOPE;
+  const builtins: Array<{ scope: string; label: string; run: () => { results: unknown[]; truncated: boolean } }> = [
+    { scope: "notes", label: "Notes", run: () => searchNotes(userId, q, { folder: "all", limit }) },
+    { scope: "files", label: "Files", run: () => searchDocuments(userId, q, limit) },
+    { scope: "whiteboards", label: "Whiteboards", run: () => searchWhiteboards(userId, q, limit) },
+    { scope: "collections", label: "Collections", run: () => searchCollectionRows(userId, q, { collection: "all", limit }) },
+    ...(role === "guest" ? [] : [{ scope: "reports", label: "Reports", run: () => searchReports(userId, q, limit) }])
+  ];
+  const modules = registeredSearchScopes().filter((def) => scopeAllowed(def, role));
+  const sections: SearchSection[] = [];
+  for (const builtin of builtins) {
+    try {
+      const { results, truncated } = builtin.run();
+      sections.push({ scope: builtin.scope, label: builtin.label, results, truncated });
+    } catch {
+      sections.push({ scope: builtin.scope, label: builtin.label, results: [], truncated: false, error: "This section could not be searched" });
+    }
+  }
+  for (const def of modules) {
+    try {
+      const { results, truncated } = await def.search({ userId, role, q, limit });
+      sections.push({ scope: def.scope, label: def.label, results: results.slice(0, limit), truncated: truncated || results.length > limit });
+    } catch {
+      sections.push({ scope: def.scope, label: def.label, results: [], truncated: false, error: "This section could not be searched" });
+    }
+  }
+  return { sections };
+}
 
 /** docs/plan/API_CONTRACTS.md § Search. */
 export type NoteSearchHit = {
@@ -186,7 +224,7 @@ export function searchPublishedNotes(userId: string, q: string, options: { folde
 const invalid = (detail: string) => ({ error: "Invalid request", details: [detail] });
 
 export function registerSearchRoutes(app: Hono<AppEnv>) {
-  app.get("/api/search", (c) => {
+  app.get("/api/search", async (c) => {
     const userId = c.get("user").id;
     const retryAfter = searchRateLimited(userId);
     if (retryAfter) {
@@ -198,11 +236,18 @@ export function registerSearchRoutes(app: Hono<AppEnv>) {
     const folder = c.req.query("folder") ?? "all";
     const limitParam = c.req.query("limit");
     if (q.length > MAX_QUERY_LENGTH) return c.json(invalid(`q must be at most ${MAX_QUERY_LENGTH} characters`), 400);
-    if (scope !== "notes" && scope !== "collections" && scope !== "whiteboards" && scope !== "reports" && scope !== "files") return c.json(invalid("scope must be notes, collections, whiteboards, reports, or files"), 400);
+    const registered = searchScope(scope);
+    if (scope !== "notes" && scope !== "collections" && scope !== "whiteboards" && scope !== "reports" && scope !== "files" && scope !== "all" && !registered) {
+      return c.json(invalid("scope must be all, notes, collections, whiteboards, reports, files, or a module's scope"), 400);
+    }
     const limit = limitParam === undefined ? DEFAULT_LIMIT : Number(limitParam);
     if (!/^\d+$/.test(limitParam ?? "20") || !Number.isSafeInteger(limit) || limit < 1 || limit > MAX_LIMIT) {
       return c.json(invalid(`limit must be an integer from 1 to ${MAX_LIMIT}`), 400);
     }
+    const role = c.get("user").role;
+    if (scope === "all") return c.json(await searchAll(userId, role, q));
+    // Workspace modules (§B.12): the module's own search, with its own access predicate.
+    if (registered) return c.json(scopeAllowed(registered, role) ? await registered.search({ userId, role, q, limit }) : { results: [], truncated: false });
     // Whiteboards (Wave 23, D204): names and text elements of boards the caller can read (T171).
     if (scope === "whiteboards") return c.json(searchWhiteboards(userId, q, limit));
     // Files (lane FTS, 060): names and text of Files documents the caller can list, as read_document_text allows.

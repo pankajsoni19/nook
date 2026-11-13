@@ -83,6 +83,31 @@ export function previewFixtures(): Array<{ id: string; template: TemplateName; d
   ];
 }
 
+/**
+ * Mail templates registered by the workspace modules (docs/plan/WORKSPACE_MODULES.md §B.1, §B.7,
+ * D809), named `<module>.<event>` (`bookings.confirmed`). A template for team users has `resolve`
+ * (payload ids → data, re-read as the recipient with the module's own checks, T226); one for outside
+ * addresses (bookers, time-poll guests) has `resolveExternal` and is queued with enqueueExternalMail
+ * only. Rendered data for an outside address carries `stopHref` ("Stop emails about this booking").
+ */
+export type RegisteredMailTemplate<D = unknown> = TemplateDef<D> & {
+  resolve?: (payload: Record<string, unknown>, recipient: import("./resolve").Recipient, nowMs: number) => import("./resolve").Resolution;
+  resolveExternal?: (payload: Record<string, unknown>, nowMs: number) => { data: D } | { skip: "empty" | "access_lost" };
+};
+
+const registeredTemplates = new Map<string, RegisteredMailTemplate>();
+
+export function registerMailTemplate<D>(name: string, def: RegisteredMailTemplate<D>) {
+  if (!/^[a-z]+\.[a-z_]{2,30}$/.test(name) || name.length > 40) throw new Error(`Invalid mail template name ${name}`);
+  if (isTemplateName(name) || registeredTemplates.has(name)) throw new Error(`Mail template ${name} is already registered`);
+  if (!def.resolve && !def.resolveExternal) throw new Error(`Mail template ${name} needs resolve or resolveExternal`);
+  registeredTemplates.set(name, def as RegisteredMailTemplate);
+  return () => { registeredTemplates.delete(name); };
+}
+
+export const registeredMailTemplate = (name: string): RegisteredMailTemplate | null => registeredTemplates.get(name) ?? null;
+export const registeredMailTemplateNames = () => [...registeredTemplates.keys()];
+
 /** Renders any template by name (data is trusted to match: it comes from a resolver or a fixture). */
 export function renderTemplate(name: TemplateName, data: unknown, context: Parameters<TemplateDef<unknown>["render"]>[1]) {
   return (TEMPLATES[name] as TemplateDef<unknown>).render(data, context);

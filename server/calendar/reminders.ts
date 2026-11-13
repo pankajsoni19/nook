@@ -356,8 +356,12 @@ export function startDispatcher() {
 // Notifications
 
 /** `kind` (TODO "Push notifications"): what the line is about, so a push can say so without more content: a calendar `reminder`, Inbox `proposals`, or an `access` notice. */
-export type NotificationKind = "reminder" | "proposals" | "access";
-export type NotificationItem = { id: string; kind: NotificationKind; title: string; href: string; late: boolean; read: boolean; createdAt: string; occurrenceStart: string | null };
+export type NotificationKind = "reminder" | "proposals" | "access" | "module";
+export type NotificationItem = {
+  id: string; kind: NotificationKind; title: string; href: string; late: boolean; read: boolean; createdAt: string; occurrenceStart: string | null;
+  /** Module rows only (docs/plan/WORKSPACE_MODULES.md §B.7): which module, its topic, the body, the item, and who did it. */
+  module?: string; topic?: string; body?: string | null; item?: { kind: string; id: string } | null; actor?: { id: string; name: string } | null;
+};
 
 /** Same-origin paths built from ids only (T68). */
 export function notificationHref(eventId: string | null) {
@@ -366,8 +370,10 @@ export function notificationHref(eventId: string | null) {
 
 type NotificationRow = {
   id: string; event_id: string | null; reminder_title: string | null; late: number; read_at: string | null; created_at: string; occurrence_start: string | null;
-  kind: "reminder" | "proposals"; proposal_count: number | null; key_name: string | null; routine_name: string | null;
+  kind: "reminder" | "proposals" | "module"; proposal_count: number | null; key_name: string | null; routine_name: string | null;
   run_id: string | null; proposal_key_id: string | null;
+  module: string | null; topic: string | null; title: string | null; body: string | null; href: string | null; item_kind: string | null; item_id: string | null;
+  actor_id: string | null; actor_name: string | null;
 };
 
 const runProposals = db.query("SELECT id, status FROM proposals WHERE run_id = ? AND owner_id = ? ORDER BY created_at, rowid LIMIT 2");
@@ -416,12 +422,21 @@ export function proposalNotificationTitle(keyName: string | null, count: number,
  */
 export function listNotifications(userId: string, options: { unread: boolean; limit: number }) {
   const rows = db.query(`SELECT n.id, n.event_id, r.title AS reminder_title, n.late, n.read_at, n.created_at, n.occurrence_start,
-             n.kind, n.proposal_count, k.name AS key_name, ro.name AS routine_name, n.run_id, n.proposal_key_id
+             n.kind, n.proposal_count, k.name AS key_name, ro.name AS routine_name, n.run_id, n.proposal_key_id,
+             n.module, n.topic, n.title, n.body, n.href, n.item_kind, n.item_id, n.actor_id, au.display_name AS actor_name
       FROM notifications n LEFT JOIN reminders r ON r.id = n.reminder_id LEFT JOIN mcp_api_keys k ON k.id = n.proposal_key_id
-      LEFT JOIN routine_runs rr ON rr.id = n.run_id LEFT JOIN routines ro ON ro.id = rr.routine_id
+      LEFT JOIN routine_runs rr ON rr.id = n.run_id LEFT JOIN routines ro ON ro.id = rr.routine_id LEFT JOIN users au ON au.id = n.actor_id
       WHERE n.user_id = $userId AND ($unread = 0 OR n.read_at IS NULL) ORDER BY n.created_at DESC, n.rowid DESC LIMIT $limit`)
     .all({ userId, unread: options.unread ? 1 : 0, limit: options.limit }) as NotificationRow[];
   const calendarItems = rows.map((row): NotificationItem => {
+    // Module rows (D809): the title and href were written by the server from kinds (T509); the app shows the module's icon.
+    if (row.kind === "module") {
+      return {
+        id: row.id, kind: "module", title: row.title ?? "", href: row.href ?? "/notifications", late: false, read: row.read_at !== null, createdAt: row.created_at, occurrenceStart: null,
+        module: row.module ?? undefined, topic: row.topic ?? undefined, body: row.body, item: row.item_kind && row.item_id ? { kind: row.item_kind, id: row.item_id } : null,
+        actor: row.actor_id && row.actor_name !== null ? { id: row.actor_id, name: row.actor_name } : null
+      };
+    }
     if (row.kind === "proposals") {
       return { id: row.id, kind: "proposals", title: proposalNotificationTitle(row.key_name, row.proposal_count ?? 1, row.routine_name), href: proposalNotificationHref(userId, row), late: false, read: row.read_at !== null, createdAt: row.created_at, occurrenceStart: null };
     }

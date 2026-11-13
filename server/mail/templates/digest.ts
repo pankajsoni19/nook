@@ -30,6 +30,8 @@ export type DigestMail = {
   proposals: { keys: Array<{ name: string; count: number }>; total: number } | null;
   shared: DigestShared[];
   sharedTotal: number;
+  /** Workspace modules' sections (registerDigestSection, server/mail/digest.ts). */
+  modules?: Array<{ label: string; rows: Array<{ title: string; meta?: string; href: string }>; total: number }>;
 };
 
 /** A section: a small eyebrow, then its rows in a context block. */
@@ -87,7 +89,11 @@ export const digestTemplate = defineTemplate<DigestMail>({
       ...section("Your cards: overdue and due soon", cardRows, data.cardsTotal - cardRows.length, data.cardsTotal > cardRows.length ? `and ${plural(data.cardsTotal - cardRows.length, "more card")} in My work` : undefined),
       ...section(weekly ? "Events this week" : "Upcoming events", eventRows, data.events.length - eventRows.length + (data.eventsMore ? 1 : 0), data.events.length > eventRows.length || data.eventsMore ? "and more in Calendar" : undefined),
       ...section("Proposals awaiting you", proposalRows, (data.proposals?.keys.length ?? 0) - proposalRows.length),
-      ...section(weekly ? "Shared with you this week" : "Shared with you", sharedRows, data.sharedTotal - sharedRows.length)
+      ...section(weekly ? "Shared with you this week" : "Shared with you", sharedRows, data.sharedTotal - sharedRows.length),
+      ...(data.modules ?? []).flatMap((module) => {
+        const rows: ContextRow[] = module.rows.slice(0, LIST_MAX).map((row) => ({ title: itemTitle(row.title), meta: row.meta ?? "", href: appLink(row.href) }));
+        return section(module.label, rows, module.total - rows.length);
+      })
     ];
     return layout({
       instanceName: ctx.instanceName,

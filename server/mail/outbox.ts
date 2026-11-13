@@ -1,7 +1,7 @@
 import { db } from "../db";
 import { mailEnabled, recipientHash } from "../mail";
 import { quietHoursEnd, readEmailPrefs } from "./prefs";
-import { TEMPLATES, type TemplateName } from "./registry";
+import { registeredMailTemplate, TEMPLATES, type TemplateName } from "./registry";
 
 /**
  * The mail outbox (docs/plan/research/2026-09-28-outbound-email.md §D.1). `enqueueMail` is a plain
@@ -23,7 +23,8 @@ export type Payload = Record<string, unknown>;
 
 export type EnqueueInput = {
   userId: string;
-  template: TemplateName;
+  /** A built-in template, or a workspace module's registered one (`<module>.<event>`). */
+  template: TemplateName | (string & {});
   payload: Payload;
   /** Rows with the same key merge while queued; the window is a max wait, never extended. */
   coalesceKey?: string;
@@ -48,7 +49,8 @@ export function mergeIds(queued: unknown, incoming: unknown, max = PAYLOAD_MAX_I
  */
 export function enqueueMail(input: EnqueueInput): string | null {
   if (!mailEnabled()) return null;
-  const definition = TEMPLATES[input.template];
+  const definition = (TEMPLATES as Record<string, (typeof TEMPLATES)[TemplateName]>)[input.template] ?? registeredMailTemplate(input.template);
+  if (!definition) throw new Error(`Unknown mail template ${input.template}`);
   // Integrations (D287) never receive mail: their address is a synthetic `.invalid` one.
   const user = db.query("SELECT email FROM users WHERE id = ? AND kind = 'person'").get(input.userId) as { email: string } | null;
   if (!user) return null;
