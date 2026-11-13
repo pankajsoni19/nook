@@ -3057,7 +3057,7 @@ Module routes (session; guests 404). Errors `{ error, code }`; unreadable is `NO
 
 Public (no session, strict headers, one 404): `GET /api/public/book/:handle`, `GET /api/public/book/:handle/:slug` and `/api/public/book/link/:token` (`{ meta: { renderNonce }, host, type, questions, verifyEmail, mail }`), `…/slots` (≤ 31 days), `POST …/bookings` (`{ start, duration, tz, name, email, guests?, location?, answers, nonce, website }` → 201 `{ status, manageUrl, mailQueued, booking }` or 202 `{ status: "verify", verificationId }`), `POST …/verify` (`{ id, code }`), `GET /api/public/bookings/manage/:token` (+ `/ics`, `/slots`), `POST …/cancel` (`{ reason?, nonce, website }`), `POST …/reschedule` (`{ start, reason?, nonce, website }` → new `manageUrl`). Pages: `/p/book/:handle`, `/p/book/:handle/:slug`, `/p/book/link/:token`, `/p/book/manage/:token`.
 
-MCP (`bookings:read` / `bookings:write`): `list_booking_types`, `get_booking_type`, `create_booking_type`, `update_booking_type`, `delete_booking_type` (+ `bin:write`), `get_availability`, `list_bookings`, `get_booking`, `create_booking`, `reschedule_booking`, `cancel_booking`, `approve_booking`, `decline_booking`, `mark_no_show`, `get_booking_link`. Agents: reads, `get_availability`, `create_booking`.
+MCP (`bookings:read` / `bookings:write`): `list_booking_types`, `get_booking_type`, `create_booking_type`, `update_booking_type`, `bin_booking_type` and `restore_booking_type` (+ `bin:write`), `get_availability`, `list_bookings`, `get_booking`, `create_booking`, `reschedule_booking`, `cancel_booking`, `confirm_booking_request`, `decline_booking`, `mark_no_show`, `get_booking_link`. Agents: reads, `get_availability`, `create_booking`.
 
 ## Changes to existing note endpoints (Wave 4)
 
