@@ -4,10 +4,10 @@ import { DynamicRoutes } from "./dynamicRoutes";
 import { registerAccessContainer, type AccessContainer } from "./access/workspaceItems";
 import { registerItemKind, type Anchor, type WorkspaceItemKind } from "./keyResources";
 import { registerWorkKind, type WorkKindAdapter } from "./links/adapters";
-import { registerMcpResource, registerMcpTools, type McpResourceSpec } from "./mcpRegistry";
+import { registerMcpResource, registerMcpTools, unregisterMcpResourceForTests, unregisterMcpToolsForTests, type McpResourceSpec } from "./mcpRegistry";
 import type { McpToolSpec } from "./mcpToolKit";
 import { registerAgentTools } from "./agents/nookBridge";
-import { registerBinProvider, type BinProvider, type ProvidedBinType } from "./bin";
+import { binProviders, registerBinProvider, type BinProvider, type ProvidedBinType } from "./bin";
 import { registerTodayProvider, type TodayProvider } from "./today/registry";
 import { registerSearchScope, type SearchScopeDef } from "./searchRegistry";
 import { registerDataset, type DatasetDef } from "./datasets/registry";
@@ -73,6 +73,7 @@ export type WorkspaceModuleDef = {
 };
 
 const modules = new Map<string, WorkspaceModuleDef>();
+const teardowns = new Map<string, Array<() => void>>();
 export const moduleRoutes = new DynamicRoutes("modules");
 /** Every module route registered, with its owner, for tests (T500). */
 export const moduleRoutePaths: Array<{ owner: string; method: string; path: string }> = [];
@@ -91,28 +92,52 @@ export function registerWorkspaceModule(def: WorkspaceModuleDef) {
   if (!isWorkspaceModuleId(def.id) && !testModule) throw new Error(`Unknown workspace module ${def.id}`);
   if (modules.has(def.id)) throw new Error(`Workspace module ${def.id} is already registered`);
   modules.set(def.id, def);
-  if (def.accessContainer) registerAccessContainer(def.accessContainer);
-  for (const item of def.itemKinds ?? []) registerItemKind(item.kind, item.anchors);
-  for (const adapter of def.workKinds ?? []) registerWorkKind(adapter);
-  if (def.mcpTools?.length) registerMcpTools(def.mcpTools);
-  for (const resource of def.mcpResources ?? []) registerMcpResource(resource);
-  if (def.agentTools) registerAgentTools(def.agentTools);
-  for (const { type, provider } of def.binProviders ?? []) registerBinProvider(type, provider);
-  for (const { name, provider } of def.todayProviders ?? []) registerTodayProvider(name, provider);
-  for (const scope of def.searchScopes ?? []) registerSearchScope(scope);
-  for (const dataset of def.datasets ?? []) registerDataset(dataset);
-  for (const [purpose, handler] of Object.entries(def.scheduleHandlers ?? {})) registerScheduleHandler(purpose, handler);
-  for (const { kind, source } of def.progressSources ?? []) registerProgressSource(kind, source);
-  for (const [name, template] of Object.entries(def.mailTemplates ?? {})) registerMailTemplate(name, template);
-  for (const { kind, def: kindDef } of def.proposalKinds ?? []) registerProposalKind(kind, kindDef);
-  for (const section of def.digestSections ?? []) registerDigestSection(section);
-  for (const [kind, undo] of Object.entries(def.undoKinds ?? {})) registerUndoKind(kind, undo);
-  for (const entry of def.readOnlyWrites ?? []) registerReadOnlyWrite(entry);
+  const undo: Array<() => void> = [];
+  teardowns.set(def.id, undo);
+  if (def.accessContainer) undo.push(registerAccessContainer(def.accessContainer));
+  for (const item of def.itemKinds ?? []) undo.push(registerItemKind(item.kind, item.anchors));
+  for (const adapter of def.workKinds ?? []) undo.push(registerWorkKind(adapter));
+  if (def.mcpTools?.length) {
+    registerMcpTools(def.mcpTools);
+    const names = def.mcpTools.map((spec) => spec.name);
+    undo.push(() => unregisterMcpToolsForTests(names));
+  }
+  for (const resource of def.mcpResources ?? []) {
+    registerMcpResource(resource);
+    undo.push(() => unregisterMcpResourceForTests(resource.kind));
+  }
+  if (def.agentTools) undo.push(registerAgentTools(def.agentTools));
+  for (const { type, provider } of def.binProviders ?? []) {
+    registerBinProvider(type, provider);
+    undo.push(() => { if (binProviders.get(type) === provider) binProviders.delete(type); });
+  }
+  for (const { name, provider } of def.todayProviders ?? []) undo.push(registerTodayProvider(name, provider));
+  for (const scope of def.searchScopes ?? []) undo.push(registerSearchScope(scope));
+  for (const dataset of def.datasets ?? []) undo.push(registerDataset(dataset));
+  for (const [purpose, handler] of Object.entries(def.scheduleHandlers ?? {})) undo.push(registerScheduleHandler(purpose, handler));
+  for (const { kind, source } of def.progressSources ?? []) undo.push(registerProgressSource(kind, source));
+  for (const [name, template] of Object.entries(def.mailTemplates ?? {})) undo.push(registerMailTemplate(name, template));
+  for (const { kind, def: kindDef } of def.proposalKinds ?? []) undo.push(registerProposalKind(kind, kindDef));
+  for (const section of def.digestSections ?? []) undo.push(registerDigestSection(section));
+  for (const [kind, undoKind] of Object.entries(def.undoKinds ?? {})) undo.push(registerUndoKind(kind, undoKind));
+  for (const entry of def.readOnlyWrites ?? []) undo.push(registerReadOnlyWrite(entry));
   if (def.publicRoutes) registerPublicRoutes(def.id, def.publicRoutes);
   if (def.routes) def.routes(routerFor(def.id));
 }
 
 export const registeredWorkspaceModules = () => [...modules.keys()];
+
+/**
+ * Tests only: undoes a `test_*` module's registrations (tools, kinds, sections, scopes, datasets,
+ * handlers, templates), so the rest of the run sees the registries as before. Its routes stay mounted
+ * (their paths are its own and nothing else lists them).
+ */
+export function unregisterWorkspaceModuleForTests(id: string) {
+  if (!/^test_[a-z]+$/.test(id)) throw new Error("Only test modules can be unregistered");
+  for (const undo of (teardowns.get(id) ?? []).reverse()) undo();
+  teardowns.delete(id);
+  modules.delete(id);
+}
 
 /** Mounts the module routes' dispatcher (server/index.ts, after every guard, before the /api 404). */
 export function mountWorkspaceModuleRoutes(app: Hono<AppEnv>) {

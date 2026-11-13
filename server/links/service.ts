@@ -87,9 +87,12 @@ function recordLinkActivity(side: WorkRef, other: WorkRef, relation: LinkRelatio
     recordCardActivity({ cardId: side.id, boardId, actorId, kind, payload: { item: { id: other.id, label } } });
     return;
   }
-  if (!workKindAdapter(side.kind) || !["form", "response", "time_entry", "time_project", "goal", "key_result", "checkin", "checkin_round", "contact", "company", "deal", "booking", "booking_type", "townhall_session", "townhall_question"].includes(side.kind)) return;
+  // The older modules' items keep their own histories (or none); every workspace kind records item activity.
+  if (!workKindAdapter(side.kind) || BUILTIN_KINDS.has(side.kind)) return;
   recordItemActivity({ itemKind: side.kind, itemId: side.id, actorId, kind: added ? "linked" : "unlinked", payload: { item: { id: other.id, label, kind: other.kind }, extra: { relation } } });
 }
+
+const BUILTIN_KINDS: ReadonlySet<string> = new Set(["board", "sprint", "note", "document", "whiteboard", "event", "calendar", "collection", "row", "report"]);
 
 export type WorkLinkRow = { id: string; a_kind: WorkKind; a_id: string; b_kind: WorkKind; b_id: string; relation: LinkRelation; created_by: string | null; created_via: string; created_at: string };
 

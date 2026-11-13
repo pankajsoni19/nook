@@ -87,7 +87,7 @@ export function addComment(input: { kind: string; itemId: string; authorId: stri
       // One level of threading: a reply to a reply joins its thread.
       input = { ...input, parentId: parent.parent_id ?? parent.id };
     }
-    const id = crypto.randomUUID();
+    const id = Bun.randomUUIDv7();
     const timestamp = now();
     db.query("INSERT INTO item_comments (id, item_kind, item_id, parent_id, author_id, body_md, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
       .run(id, kind, input.itemId, input.parentId ?? null, input.authorId, body, timestamp, timestamp);
