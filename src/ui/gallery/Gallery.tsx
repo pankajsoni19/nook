@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { BarChart3, CalendarClock, ClipboardList, Contact, FileText, Plus, Sparkles, Target, Timer, Trash2, Upload } from "lucide-react";
+import { BarChart3, CalendarClock, ClipboardList, FileText, Plus, Sparkles, Target, Trash2, Upload } from "lucide-react";
 import { EmptyState } from "../EmptyState";
 import { ModuleHome } from "../ModuleHome";
 import { GoalHealthChip, HealthChip, ProgressBar, ProgressRing } from "../progress/Progress";
@@ -138,7 +138,7 @@ function Samples({ only }: { only: string | null }) {
   const columns = useMemo(() => [
     { id: "lead", title: "Lead", total: <MoneyText money={{ amount: items.filter((item) => item.columnId === "lead").reduce((sum, item) => sum + item.value, 0), currency: "EUR" }} compact /> },
     { id: "proposal", title: "Proposal", total: <MoneyText money={{ amount: items.filter((item) => item.columnId === "proposal").reduce((sum, item) => sum + item.value, 0), currency: "EUR" }} compact /> },
-    { id: "won", title: "Won", total: <MoneyText money={{ amount: items.filter((item) => item.columnId === "won").reduce((sum, item) => sum + item.value, 0), currency: "EUR" }} compact />, marker: <HealthChip tone="success" label="Won" /> }
+    { id: "won", title: "Won", total: <MoneyText money={{ amount: items.filter((item) => item.columnId === "won").reduce((sum, item) => sum + item.value, 0), currency: "EUR" }} compact />, marker: <span className="ui-kanban-dot" aria-hidden="true" /> }
   ], [items]);
   return <div className="gallery-body">
     {show("empty") && <Section id="empty" title="EmptyState">
@@ -278,6 +278,6 @@ export function Gallery() {
       <button type="button" className="action-button secondary" onClick={() => setPresenting(true)}><CalendarClock aria-hidden="true" />Present</button>
     </header>
     <Samples only={only} />
-    <p className="gallery-muted gallery-foot"><Contact aria-hidden="true" /> <Timer aria-hidden="true" /> Samples only; nothing here is saved.</p>
+    <p className="gallery-muted gallery-foot">Samples only; nothing here is saved.</p>
   </main>;
 }

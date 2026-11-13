@@ -371,3 +371,6 @@ button.ui-person-body:hover .ui-person-name { color: #f5cf79; }
 .ui-filter-chip svg { width: 14px; height: 14px; }
 .ui-chart-card .report-chart-canvas { width: 100%; }
 @media (max-width: 760px) { .ui-filter-chip { min-height: 44px; padding: 0 14px; } }
+
+.ui-kanban-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--tone-success-fill); }
+@media (max-width: 760px) { .ui-menu-root > .icon-button { width: 44px; height: 44px; } }

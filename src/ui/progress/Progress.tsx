@@ -64,7 +64,7 @@ export function ProgressRing({ value, label, size = 40, stroke = 4, tone = "acce
       <circle className="ui-ring-track" cx={size / 2} cy={size / 2} r={radius} fill="none" strokeWidth={stroke} />
       <circle className="ui-ring-fill" cx={size / 2} cy={size / 2} r={radius} fill="none" strokeWidth={stroke} strokeDasharray={circumference} strokeDashoffset={circumference * (1 - fill)} />
     </svg>
-    <span className="ui-ring-label" aria-hidden="true">{text}</span>
+    <span className="ui-ring-label" aria-hidden="true" style={{ fontSize: Math.max(9, Math.round(size * (text.length > 3 ? 0.22 : 0.27))) }}>{text}</span>
   </span>;
 }
 

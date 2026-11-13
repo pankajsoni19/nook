@@ -90,7 +90,7 @@ export function SchedulePicker({ value, onChange, label = "Schedule", allowEachZ
     </div>
     {allowEachZone && <div className="ui-segmented" role="group" aria-label="Whose time">
       <button type="button" aria-pressed={value.zoneMode === "fixed"} onClick={() => set({ zoneMode: "fixed" })}>One time zone</button>
-      <button type="button" aria-pressed={value.zoneMode === "each"} onClick={() => set({ zoneMode: "each" })}>Each person's time zone</button>
+      <button type="button" aria-pressed={value.zoneMode === "each"} onClick={() => set({ zoneMode: "each" })}>Each person's zone</button>
     </div>}
     {value.zoneMode === "fixed" && <div className="ui-field">
       <span id={`${id}-tz`}>Time zone</span>

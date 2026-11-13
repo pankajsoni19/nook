@@ -10,7 +10,7 @@
 .ui-live-question { margin: 0; color: #f4f4f5; font-size: 1.05rem; font-weight: 700; line-height: 1.35; }
 .ui-live-note { margin: 0; color: #a1a1a8; font-size: .84rem; }
 .ui-live-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #a1a1a8; font-size: .8rem; }
-.ui-live .ui-q-choices { --q-text: #f2f2f3; --q-border: #2f2f35; --q-card: #18181b; --q-hover: #1f1f23; --q-chosen: #2b261b; --q-chosen-border: #6b572c; --q-chosen-text: #f5cf79; --q-accent: var(--yellow); --q-accent-text: #281f0b; --q-focus: var(--field-focus); }
+.ui-live { --q-muted: #a1a1a8; --q-field: #0b0b0d; --q-text: #f2f2f3; --q-border: #2f2f35; --q-card: #18181b; --q-hover: #1f1f23; --q-chosen: #2b261b; --q-chosen-border: #6b572c; --q-chosen-text: #f5cf79; --q-accent: var(--yellow); --q-accent-text: #281f0b; --q-focus: var(--field-focus); }
 .ui-live .ui-q-submit { justify-self: start; }
 .ui-cloud { min-height: 140px; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; align-content: center; gap: 4px 14px; padding: 8px; line-height: 1.1; }
 .ui-cloud span { font-weight: 750; letter-spacing: -.01em; white-space: nowrap; }
@@ -23,6 +23,7 @@
 .ui-rating-average strong { color: #f5cf79; font-size: 2rem; font-weight: 800; }
 .ui-rating-bars { display: grid; gap: 4px; margin: 6px 0 0; padding: 0; list-style: none; }
 .ui-rating-bars li { display: grid; grid-template-columns: 16px minmax(0, 1fr) 36px; align-items: center; gap: 8px; color: #a1a1a8; font-size: .78rem; }
+.ui-rating-bars .ui-result-track { grid-area: auto; height: 8px; }
 .ui-rating-bars .ui-result-track span { background: var(--yellow); }
 .ui-rating-bars li > span:last-child { text-align: right; }
 @media (max-width: 760px) { .ui-cloud-form input { min-height: 44px; font-size: 1rem; } }

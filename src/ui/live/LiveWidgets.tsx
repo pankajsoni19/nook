@@ -67,7 +67,7 @@ export function LivePoll({ question, options, counts, myVote = [], multiple = fa
     <h3 id={`${id}-q`} className="ui-live-question">{question}</h3>
     {showResults
       ? <ResultBars rows={options.map((option) => ({ id: option.id, label: option.label + (myVote.includes(option.id) ? " (your vote)" : ""), count: counts![option.id] ?? 0 }))} total={total} highlight={lead} label="Results" />
-      : canVote
+      : canVote && !(voted && !changing)
         ? <div className="ui-q-choices" role={multiple ? "group" : "radiogroup"} aria-labelledby={`${id}-q`}>
           {options.map((option) => <label key={option.id} className="ui-q-choice">
             <input type={multiple ? "checkbox" : "radio"} name={`${id}-vote`} checked={draft.includes(option.id)} disabled={sending}
@@ -80,7 +80,7 @@ export function LivePoll({ question, options, counts, myVote = [], multiple = fa
           </label>)}
           {multiple && <button type="button" className="ui-q-submit" disabled={sending || draft.length === 0} onClick={() => { void submit(draft); }}><Check aria-hidden="true" />Vote</button>}
         </div>
-        : <p className="ui-live-note">{resultsHidden ? "Results show when the poll closes." : "Results are not shown yet."}</p>}
+        : <p className="ui-live-note">{voted ? "Thanks, your vote is in. " : ""}{resultsHidden ? "Results show when the poll closes." : "Results are not shown yet."}</p>}
     <footer className="ui-live-foot">
       <span className="ui-tabular" aria-hidden="true">{counts ? `${total} ${total === 1 ? "vote" : "votes"}` : ""}</span>
       <span className="ui-visually-hidden" role="status" aria-live="polite">{voters}</span>
@@ -94,8 +94,9 @@ export type CloudWord = { text: string; count: number };
 /** Font sizes for a cloud: log-scaled between `min` and `max` px. Pure (exported for tests). */
 export function cloudSizes(words: readonly CloudWord[], min = 14, max = 56): number[] {
   const counts = words.map((word) => Math.max(1, word.count));
-  const low = Math.log(Math.min(...counts, 1));
-  const high = Math.log(Math.max(...counts, 1));
+  if (!counts.length) return [];
+  const low = Math.log(Math.min(...counts));
+  const high = Math.log(Math.max(...counts));
   return counts.map((count) => high === low ? (min + max) / 2 : Math.round(min + ((Math.log(count) - low) / (high - low)) * (max - min)));
 }
 

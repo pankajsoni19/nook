@@ -25,7 +25,7 @@
 .ui-q-number { min-width: 22px; height: 22px; flex: none; display: inline-grid; place-items: center; border-radius: 6px; background: var(--q-hover); color: var(--q-muted); font-size: .72rem; font-weight: 700; }
 .ui-q-required { color: var(--q-error); font-weight: 700; }
 .ui-q-help { margin: -2px 0 0; color: var(--q-muted); font-size: .86rem; line-height: 1.45; }
-.ui-q-section { margin: 8px 0 -4px; border-top: 1px solid var(--q-border); padding-top: 16px; }
+.ui-q-section { margin: 8px 0 14px; border-top: 1px solid var(--q-border); padding-top: 16px; }
 .ui-q-section h3 { margin: 0 0 4px; font-size: 1.05rem; }
 .ui-q-section p { margin: 0; color: var(--q-muted); font-size: .88rem; }
 .ui-q-error { margin: 0; color: var(--q-error); font-size: .82rem; font-weight: 500; }
@@ -100,7 +100,8 @@ textarea.ui-q-text { min-height: 104px; padding: 10px 12px; line-height: 1.5; re
   .ui-q-sub input { min-height: 44px; font-size: 1rem; }
   .ui-q-hint { display: none; }
   .ui-q-actions .ui-q-submit { flex: 1; justify-content: center; }
-  .ui-questions .ui-segmented > button { min-height: 40px; }
+  .ui-questions .ui-segmented > button { min-height: 40px; white-space: nowrap; }
+  .ui-q-slots .ui-segmented { flex: 1 1 100%; }
 }
 @media (prefers-reduced-motion: reduce) { .ui-q-progress span { transition: none; } }
 

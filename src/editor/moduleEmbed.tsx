@@ -1,6 +1,7 @@
 import { Node } from "@tiptap/core";
 import { NodeViewWrapper, ReactNodeViewRenderer, type NodeViewProps } from "@tiptap/react";
 import { useDisabledModules } from "../modules";
+import "../ui/workspace.css";
 import type { EmbedKind } from "../../shared/embeds";
 import { embedKind, embedKindForPath, embedWord, isEmbedKind, MODULE_EMBED_TITLE, moduleEmbedMarkdown } from "./moduleEmbedRegistry";
 
