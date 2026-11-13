@@ -22,6 +22,7 @@ import { mailShared, shareMembers } from "../mail/triggers";
 import { GUEST_SHARE_DISABLED, legacyGuestShareBlocked, legacyShareLevels, writeDirectShares } from "../access/shares";
 import { groupGrantExists } from "../access/groups";
 import { foldText } from "../../shared/taskQuery";
+import { activityValue, cardActivitySnapshot, recordCardActivity, recordCardChange, recordCardItems, recordSnapshotChanges } from "./activity";
 
 /**
  * Task Boards services (WAVES_7-9.md §3). Routes are thin adapters over these
@@ -796,6 +797,8 @@ export function createCard(userId: string, boardId: string, input: CardCreateInp
       if (tagIds?.length) replaceCardTags(id, tagIds, timestamp);
       if (input.flags?.length) replaceCardFlags(id, input.flags, timestamp);
       db.query("UPDATE boards SET updated_at = ? WHERE id = ?").run(timestamp, boardId);
+      // Card history (lane ACTIVITY): "created this card in <column>"; the fields it starts with are part of it.
+      recordCardActivity({ cardId: id, boardId, actorId: userId, kind: "created", payload: { from: null, to: activityValue.column(input.columnId) }, at: timestamp });
       audit(userId, null, "task.card_create", {
         boardId, cardId: id,
         ...(assignees?.length ? { assigneesAdded: assignees.length } : {}),
@@ -971,6 +974,7 @@ export async function patchCard(userId: string, cardId: string, input: CardPatch
     const sprintChanged = sprint.set && sprint.id !== current.sprint_id;
     db.transaction(() => {
       const timestamp = now();
+      const before = cardActivitySnapshot(cardId)!;
       if (releveled) {
         // Children binned on their own keep their Bin entry and come back detached (D130).
         db.query("UPDATE cards SET parent_card_id = NULL WHERE parent_card_id = ? AND deleted_at IS NOT NULL").run(cardId);
@@ -1005,8 +1009,14 @@ export async function patchCard(userId: string, cardId: string, input: CardPatch
       if (updated.changes !== 1) throw new Error("Concurrent card update detected");
       const changed = assignees ? replaceAssignees(cardId, assignees, userId, timestamp) : null;
       const tagsChanged = tagIds ? replaceCardTags(cardId, tagIds, timestamp) : null;
-      if (input.flags) replaceCardFlags(cardId, input.flags, timestamp);
+      const flagsChanged = input.flags ? replaceCardFlags(cardId, input.flags, timestamp) : null;
       db.query("UPDATE boards SET updated_at = ? WHERE id = ?").run(timestamp, board.id);
+      // Card history (lane ACTIVITY): every field this patch changed, in the same transaction.
+      recordSnapshotChanges(cardId, userId, before, cardActivitySnapshot(cardId)!, timestamp);
+      if (input.description !== undefined && input.description !== card.description) recordCardActivity({ cardId, boardId: board.id, actorId: userId, kind: "description", at: timestamp });
+      if (changed) recordCardItems(cardId, board.id, userId, { added: "assignee_added", removed: "assignee_removed" }, changed, activityValue.user, timestamp);
+      if (tagsChanged) recordCardItems(cardId, board.id, userId, { added: "tag_added", removed: "tag_removed" }, tagsChanged, activityValue.tag, timestamp);
+      if (flagsChanged) recordCardItems(cardId, board.id, userId, { added: "flag_set", removed: "flag_cleared" }, flagsChanged, activityValue.flag, timestamp);
       audit(userId, null, "task.card_update", {
         boardId: board.id, cardId,
         ...(input.dueOn !== undefined ? { dueOn: input.dueOn } : {}),
@@ -1054,6 +1064,7 @@ export async function moveCard(userId: string, cardId: string, input: { columnId
         db.query(`UPDATE cards SET column_id = $columnId, position = $position, updated_at = $timestamp, archived_at = NULL,
             done_at = CASE WHEN NOT $toDone THEN NULL WHEN $fromDone AND done_at IS NOT NULL THEN done_at ELSE $timestamp END
           WHERE id = $cardId AND deleted_at IS NULL`).run({ columnId: input.columnId, position: plan.position, timestamp, cardId, toDone: column.state === "done" ? 1 : 0, fromDone: fromDone ? 1 : 0 });
+        recordCardChange(cardId, board.id, userId, "column", activityValue.column(card.column_id), activityValue.column(column.id), timestamp);
       }
       db.query("UPDATE boards SET updated_at = ? WHERE id = ?").run(timestamp, board.id);
       audit(userId, null, "task.card_move", { boardId: board.id, cardId, columnId: input.columnId });
@@ -1104,6 +1115,7 @@ export async function deleteCard(userId: string, cardId: string) {
       let count = descendants.run({ deletedAt: deletedAt.toISOString(), userId, purgeAfter, cardId, boardId: board.id }).changes;
       count += descendants.run({ deletedAt: deletedAt.toISOString(), userId, purgeAfter, cardId, boardId: board.id }).changes;
       db.query("UPDATE boards SET updated_at = ? WHERE id = ?").run(deletedAt.toISOString(), board.id);
+      recordCardActivity({ cardId, boardId: board.id, actorId: userId, kind: "binned", payload: count ? { count } : {}, at: deletedAt.toISOString() });
       audit(userId, null, "task.card_delete", { boardId: board.id, cardId, ...(count ? { descendantCount: count } : {}) });
       return count;
     })();

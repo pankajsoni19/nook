@@ -1,10 +1,23 @@
 import { audit, db, now } from "../db";
-import { relationTypeFor, storedRelation, type RelationKind, type RelationType, type StoredRelation } from "./relations";
+import { inverseType, relationTypeFor, storedRelation, type RelationKind, type RelationType, type StoredRelation } from "./relations";
 import { ARCHIVED_PAGE, encodeArchivedCursor, getBoard, limitReached, requireCardAt, requireReadableBoard, requireReadableCard, TaskError, withBoardLock, type ArchivedCursor } from "./service";
 import { readViewPrefs } from "./archive";
 import { AUDIENCE_ALL_USERS } from "../team/roles";
 import { groupGrantExists } from "../access/groups";
 import { avatarUrlsFor, integrationIdsAmong } from "../avatars";
+import { activityValue, recordCardActivity } from "./activity";
+
+/**
+ * Card history (lane ACTIVITY): a relation added or removed is recorded on both cards, each with the type
+ * as it sees it. A reader who cannot open the other card sees the entry without its title (activity.ts).
+ */
+function recordRelationActivity(userId: string, kind: "relation_added" | "relation_removed", cardId: string, otherCardId: string, type: RelationType) {
+  const boardOf = (id: string) => (db.query("SELECT board_id FROM cards WHERE id = ?").get(id) as { board_id: string } | null)?.board_id;
+  for (const [card, other, seen] of [[cardId, otherCardId, type], [otherCardId, cardId, inverseType(type)]] as const) {
+    const boardId = boardOf(card);
+    if (boardId) recordCardActivity({ cardId: card, boardId, actorId: userId, kind, payload: { item: { ...activityValue.card(other)!, detail: seen } } });
+  }
+}
 
 /**
  * Typed card relations (WAVE_13_TASK_CARD_UX.md D104–D107, §3.2, T90, T91).
@@ -125,6 +138,7 @@ export function insertRelation(userId: string, cardId: string, otherCardId: stri
     if (isUniqueViolation(error)) throw new TaskError(409, "These cards are already related", "RELATION_EXISTS");
     throw error;
   }
+  recordRelationActivity(userId, "relation_added", cardId, otherCardId, type);
   return { id, kind: row.kind, otherBoardId: other.board.id };
 }
 
@@ -151,11 +165,12 @@ export async function deleteRelation(userId: string, cardId: string, relationId:
   const { board } = requireCardAt(cardId, userId, "edit");
   return withBoardLock(board.id, () => {
     requireCardAt(cardId, userId, "edit");
-    const row = db.query("SELECT id, kind FROM card_relations WHERE id = ?1 AND (source_card_id = ?2 OR target_card_id = ?2)").get(relationId, cardId) as
-      { id: string; kind: RelationKind } | null;
+    const row = db.query("SELECT id, kind, source_card_id AS source, target_card_id AS target FROM card_relations WHERE id = ?1 AND (source_card_id = ?2 OR target_card_id = ?2)").get(relationId, cardId) as
+      ({ id: string } & StoredRelation) | null;
     if (!row) throw new TaskError(404, "Relation not found");
     db.transaction(() => {
       db.query("DELETE FROM card_relations WHERE id = ?").run(relationId);
+      recordRelationActivity(userId, "relation_removed", cardId, row.source === cardId ? row.target : row.source, relationTypeFor(row, cardId));
       audit(userId, null, "task.relation_delete", { boardId: board.id, cardId, relationId, kind: row.kind });
     })();
     return { ok: true as const };

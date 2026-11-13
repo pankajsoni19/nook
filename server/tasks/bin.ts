@@ -9,6 +9,7 @@ import { AUDIENCE_ALL_USERS } from "../team/roles";
 import { groupGrantExists } from "../access/groups";
 import { atLeast } from "../access/levels";
 import { boardLevel, type BoardRow } from "./access";
+import { recordCardActivity } from "./activity";
 
 /**
  * Cards and boards in the shared Bin (WAVES_7-9.md D41 and §3.3). Deleting only sets the Bin
@@ -28,6 +29,8 @@ import { boardLevel, type BoardRow } from "./access";
  *   restoring the root restores exactly its group, and purging it purges the group. A descendant
  *   binned on its own first is its own root and keeps its entry. A root restored while its parent
  *   is binned (or gone), or under a parent that already has 100 children, comes back detached.
+ * - History (lane ACTIVITY, D744): binning and restoring a root are recorded on it; purging deletes the
+ *   cards, and `card_activity` cascades with them.
  */
 export type TaskBinType = "card" | "board";
 export const isTaskBinType = (type: string): type is TaskBinType => type === "card" || type === "board";
@@ -186,6 +189,7 @@ export async function restoreTaskItem(type: TaskBinType, id: string, userId: str
         restoreMember.run(target, place.position, timestamp, member.id);
         resetClock.run(member.id);
       }
+      recordCardActivity({ cardId: id, boardId: card.board_id, actorId: userId, kind: "restored", payload: { to: { id: column.id, label: column.name }, ...(members.length ? { count: members.length } : {}) }, at: timestamp });
       audit(userId, null, "task.card_restore", { boardId: card.board_id, cardId: id, columnId: column.id, ...(members.length ? { descendantCount: members.length } : {}), ...(detached ? { detached: true } : {}) });
       return {
         status: "restored", boardId: card.board_id, boardName: card.board_name, columnId: column.id, columnName: column.name,

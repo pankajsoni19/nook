@@ -8,6 +8,7 @@ import { attachToCard, detachFromCard, listAttachments } from "./attachments";
 import { archivedCardsPage, boardPayload, listRelations, MAX_RELATIONS_PER_CARD } from "./cardRelations";
 import { RELATION_TYPES, type RelationType } from "./relations";
 import { registerCardRelationRoutes } from "./relationRoutes";
+import { registerCardActivityRoutes } from "./activityRoutes";
 import { CARD_FLAGS, createTag, deleteTag, MAX_TAGS_PER_CARD, TAG_COLORS, TAG_NAME_MAX, updateTag } from "./tags";
 import { registerTaskQueryRoutes } from "./queryRoutes";
 import { cardHierarchy } from "./hierarchy";
@@ -245,6 +246,8 @@ async function respond(c: Context<AppEnv>, operation: () => unknown, status: 200
 export function registerTaskRoutes(app: Hono<AppEnv>) {
   // First, so GET /cards/search is not taken for a card id.
   registerCardRelationRoutes(app);
+  // Lane ACTIVITY: GET /cards/:k/activity, the card's history.
+  registerCardActivityRoutes(app);
 
   app.get("/api/tasks/boards", (c) => c.json({ boards: listBoards(c.get("user").id) }));
 
