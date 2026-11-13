@@ -4,6 +4,13 @@ Release notes for Nook, newest first. Upgrade steps for each release are in [doc
 
 ## Unreleased
 
+**Goals**
+
+- **Goals with key results**: company, team, and personal goals aligned in a tree, in periods (Q1 2027) or with their own dates; key results as numbers, percents, money, done/not done, or milestones, rising, falling, or staying within a bound, with weights. KPIs keep a number healthy without an end date.
+- **Automatic progress**: a key result can count done cards (or estimate points or hours) of a board, saved view, filter, sprint, tag, or epic, as its owner sees them; other modules add their own sources. Progress rolls up to the goal and to the goals it aligns to.
+- **Check-ins**: health, confidence, a note, and new values in one sheet; weekly, fortnightly, or monthly reminders; a progress chart against the ideal line; comments and history on every goal.
+- **Views and work**: Tree, List, Timeline, Mine, and Insights; link cards and other work to a goal, and see a card's goals in the card itself. Close goals as achieved, missed, or dropped, or carry them over to the next period. MCP tools for agents (`list_goals`, `get_goal`, `create_goal`, `check_in_goal`, `get_goal_tree`, …).
+
 **Friendly, shareable URLs**
 
 - **Cards and boards**: the address bar shows `/tasks/KAN-1` for an open card (dialog or full page, `/tasks/KAN-1/full`) and `/tasks/KAN` for a board, keeping the board's view in the query when it is not the default. Old `/tasks/<id>/card/<id>` links, board ids, old card keys of moved cards, and a board's former code still open and turn into the current URL without an extra history entry.

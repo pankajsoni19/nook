@@ -641,6 +641,19 @@ Plan: `docs/plan/WAVES_45-48_REPORTS.md` (D410–D422). Reports run SQL that peo
 | T513 | **Embeds reveal titles** | Embed lines always carry the neutral kind word (`shared/embeds.ts` `neutralizeEmbeds`). | Required (built) |
 | T514 | **CSV formula injection** | `csvCell` prefixes `'` to cells starting with `= + - @`, tab, or CR. | Required (built) |
 
+### Goals (lane GOALS, migrations 096–097)
+
+Plan: `docs/plan/WORKSPACE_MODULES.md` §D.3 (D900–D922).
+
+| ID | Threat | Mitigation | Status |
+| --- | --- | --- | --- |
+| T540 | **An auto source counts items someone cannot read** (a KR pointed at a private board, through the owner or another editor) | Sources compute as the KR's owner (`ProgressContext.ownerId`, `readableBoardPredicate` with the owner's id); saving a config requires it to compute for the owner **and** the editor; results are numbers only; the description names a board only for viewers who can read it ("a board you can't open"). `tests/goals.test.ts` (refused config). | Mitigated |
+| T541 | **Roll-up leaks hidden children's progress** | Accepted (§G.1 Q4): the parent's stored progress includes them; lists show only readable children plus a count, and the goal page says the progress includes goals you can't open. | Accepted |
+| T542 | **Check-in or edit spoofing through MCP for goals you cannot edit** | Every write calls `requireGoal(…, "edit")` with the person's live level (contributors and editors), plus the Team role write gate; MCP tools run as the key's person and anchor key results on their goal for chosen-item keys; unreadable is NOT_FOUND. Tests: 403 for readers and viewers, NOT_FOUND through another person's key. | Mitigated |
+| T543 | **Recompute denial of service** (huge boards, many KRs) | One bounded SUM per KR over indexed columns; 60 s debounce on reads; a 5-minute sweep capped at 200 KRs; a compute over 2 s records `source_error`. No per-card triggers. | Mitigated |
+| T544 | **Titles leak through links, search, datasets, notifications** | The work kind adapters resolve a goal only for readers (null otherwise, T501); search and datasets AND `readableGoalSql`; notifications go only to people who can open the goal; activity payloads carry labels the item's readers may see, never check-in notes (T505). | Mitigated |
+| T545 | **Purge leaves orphans** (links, activity, comments, grants, schedules, search rows) | 097 triggers on `goals` and `key_results`; KRs, milestones, values, check-ins, contributors cascade. Test: Bin → purge → zero rows. | Mitigated |
+
 ## Notes on shipped behaviour (v0.3.0–v0.4.0)
 
 Deliberate deviations and accepted low findings from the Wave 3–5 reviews. The mitigations above still hold.

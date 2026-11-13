@@ -493,7 +493,8 @@ async function insertKr(goal: GoalRow, input: KrInput, actorId: string, position
       db.query("INSERT INTO kr_milestones (id, kr_id, title, done_at, position) VALUES (?, ?, ?, ?, ?)").run(Bun.randomUUIDv7(), id, milestone.title.trim().slice(0, 200) || "Milestone", milestone.done ? timestamp : null, index);
     });
     const progress = storeKrProgress(id);
-    recordValue(id, values.current, progress, "edit");
+    // An automatic KR's first point is its first computed value (refreshAutoKrs), never the placeholder 0.
+    if (sourceKind === "manual") recordValue(id, values.current, progress, "edit");
     return id;
   })();
 }
