@@ -1,7 +1,8 @@
 import { createContext, useContext } from "react";
 import { Archive, Bell, CalendarDays, ChartColumn, FileText, Inbox, KanbanSquare, KeyRound, MessagesSquare, PenTool, Search, Table2, Trash2, Users, type LucideIcon } from "lucide-react";
 import type { AppSection } from "./appShellNavigation";
-import { WORKSPACE_MODULE_IDS, WORKSPACE_MODULE_LABELS } from "../shared/workspaceModules";
+import { workspaceModules, type WorkspaceModuleId } from "./workspaceModules";
+import { WORKSPACE_MODULE_IDS } from "../shared/workspaceModules";
 
 /**
  * The module registry (D92, docs/plan/WAVE_13_TASK_CARD_UX.md §4.8). Settings → Modules lists these,
@@ -13,11 +14,12 @@ import { WORKSPACE_MODULE_IDS, WORKSPACE_MODULE_LABELS } from "../shared/workspa
  */
 
 /** Every module id, in Settings order. Keep in step with `MODULE_IDS` in server/moduleIds.ts. */
+// The workspace modules (D800, docs/plan/WORKSPACE_MODULES.md §B.1) follow Reports, in WORKSPACE_MODULE_IDS order.
 export const MODULE_IDS = ["notes", "files", "tasks", "collections", "calendar", "whiteboards", "vault", "agents", "reports", ...WORKSPACE_MODULE_IDS, "search", "bin", "notifications", "team", "inbox"] as const;
 export type ModuleId = (typeof MODULE_IDS)[number];
 
 /** The apps with a Today launcher tile. */
-export type LauncherSection = "notes" | "files" | "tasks" | "collections" | "calendar" | "whiteboards" | "vault" | "chat" | "reports";
+export type LauncherSection = "notes" | "files" | "tasks" | "collections" | "calendar" | "whiteboards" | "vault" | "chat" | "reports" | WorkspaceModuleId;
 
 export type ModuleDef = {
   id: ModuleId;
@@ -56,9 +58,18 @@ export const MODULES: readonly ModuleDef[] = [
   // hides the launcher and routes only; guests never have it (`features.reports`), and the server
   // keeps enforcing the allowlist, the guard, and ClickHouse's own grants (T97).
   { id: "reports", label: "Reports", description: "Analytics reports: SQL and charts over the warehouse tables an admin allowed. Queries run on that warehouse, never on your notes.", icon: ChartColumn, routeApps: ["reports"], launcher: { section: "reports", href: "/reports" }, todaySections: [] },
-  // Workspace modules (docs/plan/WORKSPACE_MODULES.md D800, W1-CORE placeholder): hidden (`planned`)
-  // until each lane ships; W1-UI's registry (src/workspaceModules) replaces these rows.
-  ...WORKSPACE_MODULE_IDS.map((id): ModuleDef => ({ id, label: WORKSPACE_MODULE_LABELS[id].label, description: WORKSPACE_MODULE_LABELS[id].description, icon: Inbox, routeApps: [], todaySections: [], planned: true })),
+  // The workspace modules (D800, D832): one entry per `src/<module>/module.tsx`, hidden (`planned`)
+  // until its lane sets `ready`. Their app section is the module id; their URL its `segment`.
+  ...workspaceModules().map((module): ModuleDef => ({
+    id: module.id,
+    label: module.label,
+    description: module.description,
+    icon: module.icon,
+    routeApps: [module.id],
+    ...(module.launcher ? { launcher: { section: module.id, href: `/${module.segment}` } } : {}),
+    todaySections: Object.keys(module.todaySections ?? {}),
+    ...(module.ready ? {} : { planned: true })
+  })),
   { id: "search", label: "Search", description: "The search box in Notes, Ctrl+K, and the text filter on boards. The Notes list and the other board filters stay.", icon: Search, routeApps: [], todaySections: [], headerItem: "search" },
   { id: "bin", label: "Bin", description: "Hides Settings → Bin and Leaving the Bin soon. Deleting still moves items to the Bin, and they are still deleted forever after 30 days.", icon: Trash2, routeApps: ["bin"], todaySections: ["binSoon"], headerItem: "bin" },
   { id: "notifications", label: "Notifications", description: "Hides the bell and the Notifications page. Reminders and push notifications still arrive.", icon: Bell, routeApps: ["notifications"], todaySections: [], headerItem: "bell" },
@@ -75,6 +86,8 @@ export const moduleDef = (id: ModuleId) => byId.get(id)!;
 /** The modules Settings lists (planned ones are left out until their wave ships). */
 export const SETTINGS_MODULES = MODULES.filter((module) => !module.planned);
 
+const GUEST_HIDDEN_MODULES: readonly ModuleId[] = ["team", "inbox", "vault", "agents", "reports", "time", "crm", "bookings"];
+
 /**
  * The modules Settings lists for a role. Guests never see Team (Team plan §6.2, §11): they have no
  * access to it, so it is left out rather than shown as a switch.
@@ -82,7 +95,8 @@ export const SETTINGS_MODULES = MODULES.filter((module) => !module.planned);
 export function settingsModulesFor(role: string | undefined, unavailable: readonly ModuleId[] = []): readonly ModuleDef[] {
   // Guests have no inbox either (D152): they cannot hold keys or apply proposals; nor a vault (V-O3).
   // Nor analytics reports (Wave 45).
-  const shown = role === "guest" ? SETTINGS_MODULES.filter((module) => module.id !== "team" && module.id !== "inbox" && module.id !== "vault" && module.id !== "agents" && module.id !== "reports") : SETTINGS_MODULES;
+  // Nor Time, Contacts, or Bookings (§B.9: guests answer forms and standups and read shared goals).
+  const shown = role === "guest" ? SETTINGS_MODULES.filter((module) => !GUEST_HIDDEN_MODULES.includes(module.id)) : SETTINGS_MODULES;
   return unavailable.length ? shown.filter((module) => !unavailable.includes(module.id)) : shown;
 }
 

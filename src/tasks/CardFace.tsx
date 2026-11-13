@@ -5,6 +5,7 @@ import { Avatar } from "../ui/Avatar";
 import { assigneeSentence, attachmentCountLabel, cardAssignees, cardDateStatus, commentCountLabel } from "./taskActions";
 import type { BoardTag, CardSummary } from "./tasksApi";
 import { EstimateBadge } from "./EstimateField";
+import { CardFaceBadgesOutlet, useCardFaceBadges } from "../ui/CardSlotOutlets";
 import { estimateBadge, estimateWords, type EstimateKind } from "../../shared/estimates";
 
 /** At most this many tag chips and avatars on a lane card, then "+N" (§4.4). */
@@ -155,9 +156,11 @@ export function CardFace({ card, tags, done, today, excerptId, rollup, childLabe
   const shownPeople = visibleItems(people, FACE_PEOPLE);
   const assigned = people.length ? `Assigned to ${assigneeSentence(people.map((person) => person.display_name))}` : "";
   const counts = (card.has_description === 1 && !excerpt) || card.comment_count > 0 || card.attachment_count > 0 || Boolean(card.relation_count) || Boolean(card.open_blockers);
-  const meta = key || archived || due || estimate || allTags.length > 0 || counts || people.length > 0 || children;
+  // Module badges (D834: Time's logged total); the footer line shows for them only when one is registered.
+  const slotBadges = useCardFaceBadges().length > 0;
+  const meta = key || archived || due || estimate || allTags.length > 0 || counts || people.length > 0 || children || slotBadges;
   const subtasks = children && <span className={`task-subtask-chip${children.done === children.total ? " complete" : ""}`} title={`${children.done} of ${children.total} ${childLabel} done`}><ListChecks />{children.done}/{children.total}</span>;
-  const main = key || archived || due || estimate || allTags.length > 0 || counts || children;
+  const main = key || archived || due || estimate || allTags.length > 0 || counts || children || slotBadges;
 
   return <div className="task-card-face" aria-hidden="true">
     <span className="task-card-title">
@@ -183,6 +186,7 @@ export function CardFace({ card, tags, done, today, excerptId, rollup, childLabe
         {Boolean(card.relation_count) && <span className="task-card-count" title={relatedLabel(card.relation_count!)}><Link2 />{card.relation_count}</span>}
         {Boolean(card.open_blockers) && <span className="task-card-count task-card-blockers" title={`B${blockerLabel(card.open_blockers!).slice(1)}`}><OctagonAlert />{card.open_blockers}</span>}
         {subtasks}
+        {slotBadges && <CardFaceBadgesOutlet card={card} />}
       </span>}
       {people.length > 0 && <span className="task-card-people" title={assigned}>
         {shownPeople.shown.map((person) => <Avatar key={person.id} className={`task-avatar tone-${avatarTone(person.id)}${person.can_read === 0 ? " former" : ""}`} name={person.display_name} url={person.avatar_url} fallback={initials(person.display_name)} integration={person.is_integration} />)}

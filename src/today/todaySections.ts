@@ -5,6 +5,8 @@ import { formatBytes } from "../files/filesApi";
 import { relativeTime } from "../files/format";
 import { parseRoute, type Route } from "../router";
 import { dueStatus } from "../tasks/taskActions";
+import { onWorkspaceModule } from "../workspaceModules/registry";
+import type { ComponentType } from "react";
 
 /** One rendered row: the link text, a short second line, and where it goes. */
 export type TodayRow = { key: string; label: string; meta: string; route: Route; tone?: "overdue" | "today" | "soon" };
@@ -30,7 +32,17 @@ export type TodaySectionDef = {
   viewAll?: string;
   /** The app the "View all" link opens, for its accessible name. */
   app: string;
+  /**
+   * A section that is more than a list of rows (Time's "Today" total with the running timer, D836):
+   * it renders the section's body itself. `row` is then unused.
+   */
+  render?: ComponentType<TodaySectionRenderProps>;
+  /** The workspace module that registered it (set by registerTodayRenderer's callers). */
+  module?: string;
 };
+
+/** What a registered section renderer receives: the server's section and Today's date and router. */
+export type TodaySectionRenderProps = { name: string; items: readonly Record<string, any>[]; more: boolean; date: string; onOpenRoute: (route: Route) => void };
 
 const noteRoute = (id: string): Route => ({ app: "notes", folder: "all", noteId: id });
 
@@ -120,6 +132,21 @@ export const TODAY_SECTIONS: Record<string, TodaySectionDef> = {
 };
 
 export const DEFAULT_SECTION_ORDER = Object.keys(TODAY_SECTIONS);
+
+/**
+ * Adds a module's Today section (D836, §B.11): its client copy and, for a section that is not a plain
+ * list, its renderer. It slots into its group after the sections already there; the server's
+ * provider of the same name (registerTodayProvider) supplies the items. Re-registering replaces it.
+ */
+export function registerTodayRenderer(name: string, def: TodaySectionDef) {
+  if (!TODAY_SECTIONS[name]) DEFAULT_SECTION_ORDER.push(name);
+  TODAY_SECTIONS[name] = def;
+}
+
+// Every ready workspace module's sections, now and whenever one registers later (tests).
+onWorkspaceModule((module) => {
+  for (const [name, def] of Object.entries(module.todaySections ?? {})) registerTodayRenderer(name, { ...def, module: module.id });
+});
 
 /** Orders section names by the client registry (which is group order) and splits them into the fixed groups, dropping empty groups and unknown names. */
 export function groupTodaySections(names: readonly string[]) {

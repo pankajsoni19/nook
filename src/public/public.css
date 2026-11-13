@@ -1,0 +1,35 @@
+/*
+ * Public pages (§E.6, D831): the only light surface. Values are src/public/publicTheme.ts's
+ * (contrast-checked by tests). Dark follows the visitor's system with the app's tokens.
+ */
+html:has(.ui-public), body:has(.ui-public) { overflow: auto; background: #f6f5f2; }
+.ui-public {
+  --public-bg: #f6f5f2; --public-card: #ffffff; --public-text: #18181b; --public-muted: #6b6b72; --public-border: #e4e4e7;
+  --public-accent: var(--module-accent, #b8860b); --public-accent-text: var(--module-accent-text, #8a6408); --public-on-accent: #ffffff; --public-error: #b42318;
+  min-height: 100dvh; display: flex; flex-direction: column; align-items: center; gap: 18px; padding: 24px 16px calc(24px + env(safe-area-inset-bottom));
+  background: var(--public-bg); color: var(--public-text); color-scheme: light;
+  font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  html:has(.ui-public), body:has(.ui-public) { background: #09090a; }
+  .ui-public { --public-bg: #09090a; --public-card: #141416; --public-text: #f2f2f3; --public-muted: #a1a1a8; --public-border: #2f2f35; --public-accent: #f6c453; --public-accent-text: #f6c453; --public-on-accent: #281f0b; --public-error: #fda4af; color-scheme: dark; }
+}
+.ui-public-brand { width: min(100%, 880px); display: flex; align-items: center; gap: 10px; color: var(--public-text); font-size: .95rem; font-weight: 650; }
+.ui-public-brand img { width: 28px; height: 28px; border-radius: 8px; object-fit: cover; }
+.ui-public-mark { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px; background: var(--public-accent); color: var(--public-on-accent); font-size: .85rem; font-weight: 800; }
+.ui-public-card { width: 100%; display: grid; gap: 18px; border: 1px solid var(--public-border); border-radius: 12px; padding: clamp(18px, 4vw, 32px); background: var(--public-card); box-shadow: 0 1px 2px rgb(0 0 0 / 4%), 0 8px 24px rgb(0 0 0 / 5%); }
+.ui-public-card.form { max-width: 640px; }
+.ui-public-card.booking { max-width: 880px; }
+.ui-public-brand:has(+ .ui-public-card.form) { width: min(100%, 640px); }
+.ui-public-title { margin: 0; color: var(--public-text); font-size: clamp(1.35rem, 4vw, 1.7rem); font-weight: 750; letter-spacing: -.02em; line-height: 1.2; }
+.ui-public-text { margin: 0; color: var(--public-muted); font-size: .95rem; line-height: 1.55; }
+.ui-public-text a, .ui-public-foot a { color: var(--public-accent-text); }
+.ui-public-foot { display: grid; justify-items: center; gap: 4px; color: var(--public-muted); font-size: .8rem; text-align: center; }
+.ui-public-foot p { margin: 0; }
+.ui-public-foot strong { color: var(--public-text); font-weight: 650; }
+.ui-public-done { display: grid; justify-items: center; gap: 8px; padding: 18px 0; text-align: center; }
+.ui-public-done h2 { margin: 0; font-size: 1.3rem; }
+.ui-public-check { width: 48px; height: 48px; display: grid; place-items: center; border-radius: 50%; background: var(--public-accent); color: var(--public-on-accent); font-size: 1.4rem; font-weight: 800; }
+.ui-public :focus-visible { outline: 2px solid var(--public-accent); outline-offset: 2px; }
+.ui-public .ui-visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+@media (max-width: 760px) { .ui-public { padding: 16px 12px; gap: 12px; } .ui-public-card { border-radius: 12px; } }

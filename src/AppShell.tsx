@@ -5,7 +5,8 @@ import { Inbox, LogOut, Settings } from "lucide-react";
 import "./appShell.css";
 import { binCountClaimed, listBin, onBinChanged, onBinCount } from "./bin/binApi";
 import { INBOX_CHANGED, pendingCount } from "./inbox/inboxApi";
-import { useModuleEnabled } from "./modules";
+import { useDisabledModules, useModuleEnabled } from "./modules";
+import { readyWorkspaceModules } from "./workspaceModules";
 import { NotificationBell } from "./notifications/NotificationBell";
 import { NOTIFICATIONS_POLLED } from "./notifications/notificationsApi";
 import type { Role } from "./team/teamRoles";
@@ -81,11 +82,23 @@ export function AccountActions({ displayName, onSettings, onSignOut }: AccountPr
   return <div className="app-account" role="group" aria-label="Account">
     {onSettings && <button className="app-account-button" onClick={onSettings} aria-label={`Open settings for ${displayName}`} title="Settings"><Settings /><span className="app-account-label">Settings</span></button>}
     {inbox && inboxEnabled && inbox.role !== "guest" && !inbox.onInbox && <InboxButton nav={inbox} />}
+    <TopBarItems />
     {/* The bell renders only inside the signed-in shell. */}
     <NotificationBell />
     <span className="app-home-user"><Avatar className="app-user-avatar" name={displayName} url={selfAvatar} /><span className="app-home-user-name">{displayName}</span></span>
     <button className="app-account-button app-account-signout" onClick={onSignOut} title="Sign out"><LogOut /><span className="app-account-label">Sign out</span></button>
   </div>;
+}
+
+/**
+ * Workspace modules' header items (D833, §B.1: Time's running timer), before the bell, for the
+ * ready modules that are on. Nothing while none registers one, so headers are unchanged.
+ */
+export function TopBarItems() {
+  const disabled = useDisabledModules();
+  const items = readyWorkspaceModules().filter((module) => module.topBarItem && !disabled.includes(module.id));
+  if (items.length === 0) return null;
+  return <>{items.map(({ id, topBarItem: Item }) => Item && <Item key={id} />)}</>;
 }
 
 /**

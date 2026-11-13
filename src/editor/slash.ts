@@ -1,6 +1,7 @@
 import { Extension, type Editor, type Range } from "@tiptap/core";
 import Suggestion, { type SuggestionKeyDownProps, type SuggestionProps } from "@tiptap/suggestion";
 import { PluginKey } from "@tiptap/pm/state";
+import { registeredSlashItems } from "./moduleEmbedRegistry";
 
 type Command = {
   label: string;
@@ -42,7 +43,8 @@ export const SlashCommands = Extension.create({
         allowSpaces: true,
         items: ({ query, editor }) => {
           const needle = query.toLowerCase();
-          return commands.filter((item) => (!item.requires || item.requires in editor.commands) && `${item.label} ${item.keywords}`.toLowerCase().includes(needle)).slice(0, 16);
+          // Module items (registerSlashItem, D835: "Poll", "Form", "Goal") come after the built-in ones.
+          return [...commands, ...registeredSlashItems()].filter((item) => (!item.requires || item.requires in editor.commands) && `${item.label} ${item.keywords}`.toLowerCase().includes(needle)).slice(0, 24);
         },
         command: ({ editor, range, props }) => props.run(editor, range),
         render: () => {
