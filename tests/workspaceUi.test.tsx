@@ -287,7 +287,8 @@ describe("public pages (§E.6, D831)", () => {
     expect(markup).toContain("Powered by <strong>Nook</strong>");
     expect(markup).not.toContain("evil.test");
     expect(renderToStaticMarkup(<PublicNotFound appName="Nook" />)).toContain("This link is not available");
-    expect(publicPageFor("/p/f/abc")).toBeNull();
+    // A path no module claims (Forms has /p/f, Bookings /p/book) is the one PublicNotFound.
+    expect(publicPageFor("/p/unclaimed/abc")).toBeNull();
   });
 });
 

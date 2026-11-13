@@ -3208,3 +3208,39 @@ Migrations **093** (`time_projects`, `time_member_rates`, `time_entries`, `time_
 | GET / PUT | `/api/time/settings` † | `{ dailyReminder, reminderAt, reminderDays, longTimerHours, tz }` | `{ settings }` |
 
 **MCP** (`time:read` / `time:write`): `get_running_timer`, `start_timer`, `stop_timer`, `log_time`, `list_time_entries`, `update_time_entry`, `discard_time_entry` (destructive; named `discard_` because tool names never say delete or remove, D265), `bulk_log_time` (dry run), `time_summary`, `list_time_projects`, `create_time_project`, `update_time_project`, `get_time_for_item`, `suggest_time_entries`. REST v1 exposes the same at `/api/v1/tools/<name>`. Chat agents: reads and `log_time` (as an Inbox proposal `time_log` unless the agent's mode allows writes). Dataset `time.entries`; Goals progress source `time`; Today section `timeToday`; search scope `time`; Bin type `time_project`; schedules `time.long_timer`, `time.daily_reminder`.
+
+## Forms, polls, and find-a-time (lane FORMS, D840–D869)
+
+All under the session, CSRF, and role guards; `:id` is a form's UUID, short id, or friendly segment; unreadable and missing are the same 404; errors `{ error, code }`. Readers of results need `view` on the form (the generic `/api/access/form/:id` sheet); answering is the form's audience.
+
+| Method | Path | Body / query | Returns |
+| --- | --- | --- | --- |
+| GET | `/api/forms` | `tab=mine\|shared\|answer\|all`, `kind`, `status`, `q`, `cursor`, `limit ≤ 100` | `{ items: FormListItem[], nextCursor }` |
+| GET | `/api/forms/counts` | — | `{ mine, answer }` |
+| GET | `/api/forms/targets` | — | boards (with columns), contact books, and calendars the caller can write |
+| POST | `/api/forms/contact-books` | `{ name }` | `{ book }` (201) |
+| POST | `/api/forms` | `{ kind, title?, description?, template?, questions? (QuestionSet or Question[]), publish?, settings? }` | `{ form: FormDetail }` (201) |
+| POST | `/api/forms/polls` | `{ question, options[2–20], multiple?, anonymous?, closesAt?, resultsVisibility?, audience? … }` | open poll (201) |
+| POST | `/api/forms/time-polls` | `{ title, slots[{start,end}] ≤ 60, allowMaybe?, calendarId?, closesAt?, audience? … }` | open time poll (201) |
+| GET / PATCH / DELETE | `/api/forms/:id` | PATCH: any settings field, `status: open\|closed`, `expectedRevision` (409 `FORM_CHANGED`); DELETE moves it to the Bin (manage) | `{ form }` |
+| GET / PUT / DELETE | `/api/forms/:id/draft` | PUT `{ set }` (validated; ids keep their type) | `{ set, hasDraft, version }` |
+| POST | `/api/forms/:id/publish` | — | new version; opens a draft form (409 `NO_DRAFT`) |
+| POST | `/api/forms/:id/duplicate` | — | a new draft copy (201) |
+| GET | `/api/forms/:id/respond` | — | `RespondView`: current set, your response, `closedReason`, poll results when visible |
+| POST / PUT | `/api/forms/:id/responses[/:rid]` | `{ answers, responseId?, hidden?, expectedRevision? }` | `{ responseId, ending, updated, view }`; 409 `ALREADY_RESPONDED`, `FORM_CLOSED`, `FORM_FULL`, `NOT_OPEN_YET`; 400 `INVALID_ANSWERS { errors }` |
+| DELETE | `/api/forms/:id/vote` | — | removes your named poll vote |
+| POST | `/api/forms/:id/visit` | — | 204 (funnel: started) |
+| GET | `/api/forms/:id/responses` | `question`+`option` filter, `since`, `until`, `cursor`, `limit` | `{ items, nextCursor, total }` (readers) |
+| GET / DELETE | `/api/forms/:id/responses/:rid` | — | one response with its set version / `{ undoTicket }` (edit) |
+| GET | `/api/forms/:id/summary` | filter | per-question aggregates, funnel, responses per day, `textHidden` |
+| GET | `/api/forms/:id/export.csv` | filter | UTF-8 CSV with BOM, formula-safe (T514) |
+| GET / POST / PATCH / DELETE | `/api/forms/:id/actions[/:aid]`, `POST …/:aid/retry` | `{ kind: create_card\|save_contact\|notify, config, enabled? }` | actions with their last run |
+| POST | `/api/forms/:id/finalize` | `{ slotId, calendarId?, tz?, inviteUserIds?, emailGuests? }` | `{ form, eventId, emailed, when }` (409 `ALREADY_FINALIZED`) |
+| POST / DELETE | `/api/forms/:id/public-link` | — | `{ token, path, link }` once (manage; 403 `POLICY_OFF`) / revoke |
+| GET | `/p/f/:token` | — | the public page shell (uniform 404) |
+| GET | `/api/public/forms/:token` | `browser?` | public definition (no roles, no member-only questions), `renderNonce`, results when public |
+| POST | `/api/public/forms/:token/responses` | `{ answers, hidden?, respondent?{name,email}, browser?, nonce, website }` | 201 `{ ending, results }`; 202 `{ verificationId, mailQueued }`; 400 `TOO_FAST`/`HONEYPOT`/`REPLAY`/`INVALID`/`INVALID_ANSWERS`; 409 `ALREADY_RESPONDED`/`FORM_CLOSED`; 429 |
+| POST | `/api/public/forms/:token/verify` | `{ id, code }` | 201 or 400 |
+| GET | `/api/public/forms/:token/results`, POST `…/visit` | — | results when visible / 204 |
+
+**MCP** (`forms:read`/`forms:write`; REST v1 the same): `list_forms`, `search_forms`, `get_form`, `create_form`, `update_form`, `update_form_questions`, `set_form_status`, `duplicate_form`, `bin_form` (+ `bin:write`), `list_responses`, `get_response`, `drop_response`, `bulk_drop_responses` (≤ 100, all or nothing, `dryRun`), `get_form_summary`, `export_responses` (≤ 1 MiB), `submit_response`, `create_poll` (`embedIn: { kind: "note", id }` appends to the owner's note draft), `vote_poll`, `create_time_poll`, `finalize_time_poll`. Datasets `forms.responses`, `forms.answers`; Goals progress source `form_metric`; search scope `forms`; Today sections `formsResponses`, `pollsToVote`.
