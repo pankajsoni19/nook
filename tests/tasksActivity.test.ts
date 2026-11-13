@@ -10,7 +10,7 @@ const { purgeTaskItem, restoreTaskItem } = await import("../server/tasks/bin");
 const { sweepAutoArchive } = await import("../server/tasks/archive");
 const { recordCardActivity } = await import("../server/tasks/activity");
 
-/** Card activity history (lane ACTIVITY, D740–D746, migration 067). */
+/** Card activity history (lane ACTIVITY, D740–D746, migration 081). */
 
 type Column = { id: string; name: string };
 type Card = { id: string; revision: number; column_id: string };

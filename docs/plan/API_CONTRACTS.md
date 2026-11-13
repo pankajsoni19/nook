@@ -538,7 +538,7 @@ type CardComment = {
 
 Comments on binned cards, binned boards, or boards the caller can no longer read return 404.
 
-### Card activity (lane ACTIVITY, D740–D746, migration 067)
+### Card activity (lane ACTIVITY, D740–D746, migration 081)
 
 A card's history, shown interleaved with its comments. Entries are written by the task services in the same transaction as the change, so every surface (web app, MCP, REST, agents, approved proposals) is recorded and a refused change records nothing. Kinds and payloads are in `shared/cardActivity.ts`:
 

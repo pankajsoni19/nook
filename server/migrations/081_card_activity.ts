@@ -17,7 +17,7 @@ import type { Migration } from "./types";
  * Needs 001 and 009. Transactional and filesystem-free; re-running changes nothing.
  */
 export const cardActivityMigration: Migration = {
-  id: 67,
+  id: 81,
   name: "card_activity",
   up(db) {
     db.exec(`

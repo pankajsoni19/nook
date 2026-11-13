@@ -12,7 +12,7 @@ Release notes for Nook, newest first. Upgrade steps for each release are in [doc
 
 **Upgrading**
 
-- Migration **067** (`card_activity`) runs once on the first boot; quick (it creates an empty table). Cards changed before the upgrade have no history from before it.
+- Migration **081** (`card_activity`) runs once on the first boot; quick (it creates an empty table). Cards changed before the upgrade have no history from before it.
 
 ## v0.47.0 — 2026-10-24
 

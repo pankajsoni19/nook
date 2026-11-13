@@ -15,7 +15,7 @@ import {
 } from "../../shared/cardActivity";
 
 /**
- * Card activity history (lane ACTIVITY, D740–D746; migration 067). The kinds, payload shapes, and the
+ * Card activity history (lane ACTIVITY, D740–D746; migration 081). The kinds, payload shapes, and the
  * steps to add a kind are in shared/cardActivity.ts.
  *
  * Recording: the service that changes a card calls `recordCardActivity` (or the `recordCardChange` /

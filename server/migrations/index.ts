@@ -62,7 +62,6 @@ import { reportParametersMigration } from "./063_report_parameters";
 import { reportDocsMigration } from "./064_report_docs";
 import { reportQuerySuggestionsMigration } from "./065_report_query_suggestions";
 import { reportFiltersMigration } from "./066_report_filters";
-import { cardActivityMigration } from "./067_card_activity";
 import { reportListsMigration } from "./068_report_lists";
 import { reportFilterViewsMigration } from "./069_report_filter_views";
 import { agentDatasourcesMigration } from "./073_agent_datasources";
@@ -70,6 +69,7 @@ import { taskArchiveMigration } from "./074_task_archive";
 import { vaultKeyFlagConfirmMigration } from "./076_vault_key_flag_confirm";
 import { taskViewPrefsMigration } from "./077_task_view_prefs";
 import { taskViewPinsMigration } from "./078_task_view_pins";
+import { cardActivityMigration } from "./081_card_activity";
 
 const migrations = [initialMigration, folderSharingMigration, totpMigration, totpRecoveryCodesMigration, mcpApiKeysMigration, documentsMigration, binMigration, noteSearchMigration, taskBoardsMigration, mcpKeyScopesMigration, taskDatesMigration, collectionsMigration, calendarMigration, eventNextOccurrenceMigration, taskCardUxMigration, userPreferencesMigration, teamRolesMigration,
   // 018 (Team invites) may reach existing installs after 019 (task hierarchy) and 020 (task views); none depends on another.
@@ -179,9 +179,6 @@ const migrations = [initialMigration, folderSharingMigration, totpMigration, tot
   // 066 (lane FILTERS, D532/D534: report_param_results.query_hash, per-query result keys; and
   // report_instructions.request_json, the owner's Add filter / Remove filter request) needs 052 and 063.
   reportFiltersMigration,
-  // 067 (lane ACTIVITY, D740–D746: card_activity, a card's history shown with its comments) needs 001 and
-  // 009. It reaches existing installs after 068–078, which runMigrations allows.
-  cardActivityMigration,
   // 068 (lane LISTS, D550–D559: report_lists, report_list_items, and their sharing) needs 050.
   reportListsMigration,
   // 069 (lane FILT2, D560/D565: report_param_linked_options, a linked filter's choices per parents'
@@ -197,7 +194,10 @@ const migrations = [initialMigration, folderSharingMigration, totpMigration, tot
   taskViewPrefsMigration,
   // 078 (lane VIEWS2, D655–D659: task_view_pins; board_view_prefs.show_all_levels and collapsed_rows; task_view_prefs.own_collapse,
   // collapsed_columns, collapsed_rows) needs 009, 020, 074, and 077.
-  taskViewPinsMigration
+  taskViewPinsMigration,
+  // 081 (lane ACTIVITY, D740–D746: card_activity, a card's history shown with its comments) needs 001 and 009.
+  // Built as 067; renumbered at integration so it follows 079 (board keys) and 080 (card start dates).
+  cardActivityMigration
 ];
 
 /** Every registered migration in order (read-only), for tests that build an older database shape. */
