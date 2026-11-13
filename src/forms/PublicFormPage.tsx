@@ -108,7 +108,7 @@ export default function PublicFormPage({ path, search }: { path: string; search:
       fetch(api, { credentials: "omit" }).then((response) => response.ok ? response.json() : null).then((body: Loaded | null) => { if (body) setLoaded({ ...loaded, renderNonce: body.renderNonce }); }).catch(() => undefined);
     }
   };
-  const confirm = async () => {
+  const confirmCode = async () => {
     if (!verify) return;
     setBusy(true);
     const result = await post(`${api}/verify`, { id: verify.id, code: code.trim() }).catch(() => ({ status: 0, payload: {} as Record<string, unknown> }));
@@ -140,7 +140,7 @@ export default function PublicFormPage({ path, search }: { path: string; search:
       <p className="ui-public-text">{verify.mailQueued ? "We sent a 6-digit code to your email. Enter it to send your response." : "Email is not set up here, so no code can be sent. Ask the form's owner."}</p>
       <label className="forms-public-field"><span>Code</span><input inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ""))} /></label>
       {message && <p className="forms-public-error" role="alert">{message}</p>}
-      <button type="button" className="ui-q-submit" disabled={busy || code.length !== 6} onClick={() => { void confirm(); }}>Confirm</button>
+      <button type="button" className="ui-q-submit" disabled={busy || code.length !== 6} onClick={() => { void confirmCode(); }}>Confirm</button>
     </div>
   </>);
   if (!form.accepting) return shell(<>

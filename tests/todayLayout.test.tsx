@@ -26,7 +26,7 @@ test("every client section names one of the three fixed groups, listed in group 
   expect(order.every((index) => index >= 0)).toBe(true);
   expect(order).toEqual([...order].sort((a, b) => a - b));
   expect(groupTodaySections(DEFAULT_SECTION_ORDER).map((group) => [group.id, group.names])).toEqual([
-    ["today", ["tasksDue", "upcoming", "tasksMine", "proposals"]],
+    ["today", ["tasksDue", "upcoming", "tasksMine", "proposals", "formsResponses", "pollsToVote"]],
     ["recent", ["notesRecent", "files", "collectionsRecent", "whiteboardsRecent"]],
     ["housekeeping", ["drafts", "binSoon", "storage"]]
   ]);

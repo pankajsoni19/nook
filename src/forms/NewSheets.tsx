@@ -44,7 +44,7 @@ export function NewPollSheet({ onClose, onCreated, title = "New poll" }: { onClo
     }
   };
   return <ModalDialog title={title} eyebrow="Forms" onClose={onClose} variant="sheet" busy={busy} className="forms-sheet">
-    <form className="file-dialog-form forms-sheet-body" onSubmit={submit}>
+    <form className="file-dialog-form forms-sheet-body" onSubmit={submit} noValidate>
       <label className="ui-field"><span>Question</span><input autoFocus value={question} maxLength={200} onChange={(event) => setQuestion(event.target.value)} placeholder="Where should we go for lunch?" /></label>
       <fieldset className="forms-fieldset">
         <legend>Options</legend>
@@ -149,7 +149,7 @@ export function NewTimePollSheet({ onClose, onCreated }: { onClose: () => void; 
     } catch (caught) { setError(errorText(caught)); setSaving(false); }
   };
   return <ModalDialog title="Find a time" eyebrow="Forms" onClose={onClose} variant="sheet" busy={saving} className="forms-sheet wide">
-    <form className="file-dialog-form forms-sheet-body" onSubmit={submit}>
+    <form className="file-dialog-form forms-sheet-body" onSubmit={submit} noValidate>
       <label className="ui-field"><span>What is it for?</span><input autoFocus value={title} maxLength={200} onChange={(event) => setTitle(event.target.value)} placeholder="Quarterly planning" /></label>
       <fieldset className="forms-fieldset">
         <legend>Propose times <span className="forms-muted">({ZONE.replace(/_/g, " ")})</span></legend>

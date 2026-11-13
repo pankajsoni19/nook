@@ -53,7 +53,8 @@ describe("the hub's entries", () => {
       const entries = hubEntries(role, { teamModuleEnabled: true });
       const bin = entries.findIndex((entry) => entry.id === "bin");
       expect(entries[bin]).toMatchObject({ group: "workspace", label: "Bin", route: { app: "bin" } });
-      expect(entries.slice(0, bin).every((entry) => entry.group === "account")).toBe(true);
+      // Settings → Workspace sits in the Workspace group too once a workspace module ships (D836).
+      expect(entries.slice(0, bin).every((entry) => entry.group === "account" || entry.id === "workspace")).toBe(true);
       expect(entries.slice(bin + 1).every((entry) => entry.group === "team")).toBe(true);
     }
     // wave38-fixes: a guest can delete nothing, so their (always empty) Bin has no entry.
@@ -61,8 +62,8 @@ describe("the hub's entries", () => {
   });
 
   test("the Bin module off removes the entry; the Team module still decides Team", () => {
-    expect(ids(hubEntries("member", { teamModuleEnabled: true, binModuleEnabled: false }))).toEqual(["security", "notifications", "access", "mcp", "agents", "knowledge", "modules", "about", "team-members"]);
-    expect(ids(hubEntries("guest", { teamModuleEnabled: true, binModuleEnabled: false }))).toEqual(["security", "notifications", "mcp", "modules", "about"]);
+    expect(ids(hubEntries("member", { teamModuleEnabled: true, binModuleEnabled: false }))).toEqual(["security", "notifications", "access", "mcp", "agents", "knowledge", "modules", "about", "workspace", "team-members"]);
+    expect(ids(hubEntries("guest", { teamModuleEnabled: true, binModuleEnabled: false }))).toEqual(["security", "notifications", "mcp", "modules", "about", "workspace"]);
     expect(ids(hubEntries("admin", { teamModuleEnabled: false, binModuleEnabled: false }))).not.toContain("bin");
     // While two-factor setup is required there is only Security.
     expect(ids(hubEntries("admin", { teamModuleEnabled: true, setupRequired: true, binCount: 4 }))).toEqual(["security"]);

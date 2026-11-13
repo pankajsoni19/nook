@@ -49,7 +49,7 @@ describe("vocabulary and stubs (D800)", () => {
   test("the seven modules are registered on the server; those not shipped are hidden in the app", () => {
     for (const id of WORKSPACE_MODULE_IDS) expect(registeredWorkspaceModules()).toContain(id);
     for (const id of WORKSPACE_MODULE_IDS) expect(MODULE_IDS).toContain(id);
-    expect(MODULES.filter((module) => (WORKSPACE_MODULE_IDS as readonly string[]).includes(module.id)).map((module) => [module.id, module.planned])).toEqual(WORKSPACE_MODULE_IDS.map((id) => [id, !READY_MODULES.includes(id)]));
+    expect(MODULES.filter((module) => (WORKSPACE_MODULE_IDS as readonly string[]).includes(module.id)).map((module) => [module.id, Boolean(module.planned)])).toEqual(WORKSPACE_MODULE_IDS.map((id) => [id, !READY_MODULES.includes(id)]));
     expect(MODULES.find((module) => module.id === "crm")!.label).toBe("Contacts");
     expect(MODULES.find((module) => module.id === "checkins")!.label).toBe("Standups");
   });

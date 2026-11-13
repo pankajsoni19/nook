@@ -1,5 +1,4 @@
 import { lazy, Suspense } from "react";
-import { createRoot } from "react-dom/client";
 import type { FormDetail, FormListItem } from "../../shared/forms";
 
 /**
@@ -10,12 +9,16 @@ import type { FormDetail, FormListItem } from "../../shared/forms";
 const NewPollDialog = lazy(() => import("./NewSheets").then((mod) => ({ default: mod.SlashPollDialog })));
 const FormPickerDialog = lazy(() => import("./NewSheets").then((mod) => ({ default: mod.FormPickerDialog })));
 
+// react-dom/client is loaded on first use: imported with this eagerly loaded module file, it would bind
+// before a test's DOM exists (and add to the entry chunk).
 function mount(render: (close: () => void) => React.ReactNode) {
-  const host = document.createElement("div");
-  document.body.appendChild(host);
-  const root = createRoot(host);
-  const close = () => { root.unmount(); host.remove(); };
-  root.render(<Suspense fallback={null}>{render(close)}</Suspense>);
+  void import("react-dom/client").then(({ createRoot }) => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    const close = () => { root.unmount(); host.remove(); };
+    root.render(<Suspense fallback={null}>{render(close)}</Suspense>);
+  });
 }
 
 export function openNewPollDialog(onCreated: (form: Pick<FormDetail, "kind" | "href">) => void) {

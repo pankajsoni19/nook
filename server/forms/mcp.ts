@@ -189,7 +189,7 @@ export const formsMcpTools: McpToolSpec[] = [
     handler: ({ formId, responseId }, key) => wrap(() => getFormResponse(key.userId, formId, responseId))
   }),
   defineTool({
-    name: "remove_response", title: "Delete a response",
+    name: "drop_response", title: "Delete a response",
     description: "Deletes one response at once (the person can undo in the app for 10 minutes). Needs edit on the form.",
     scopes: ["forms:write"], access: { mode: "items", items: [{ arg: "formId", kind: "form" }, { arg: "responseId", kind: "response" }] }, write: true,
     annotations: { destructiveHint: true },
@@ -197,7 +197,7 @@ export const formsMcpTools: McpToolSpec[] = [
     handler: ({ formId, responseId }, key) => wrap(() => { deleteFormResponse(key.userId, formId, responseId); return { deleted: true }; })
   }),
   defineTool({
-    name: "bulk_remove_responses", title: "Delete several responses",
+    name: "bulk_drop_responses", title: "Delete several responses",
     description: "Deletes up to 100 responses of one form, all or nothing (dryRun: true lists what would go). Needs edit on the form.",
     scopes: ["forms:write"], access: { mode: "items", items: [{ arg: "formId", kind: "form" }], related: ["responseIds"] }, write: true,
     annotations: { destructiveHint: true },
@@ -296,4 +296,4 @@ export const formsMcpTools: McpToolSpec[] = [
 ];
 
 export const FORMS_AGENT_ALLOWED = ["list_forms", "search_forms", "get_form", "list_responses", "get_response", "get_form_summary", "export_responses", "submit_response", "create_poll", "vote_poll"] as const;
-export const FORMS_AGENT_NEVER = ["create_form", "update_form", "update_form_questions", "set_form_status", "duplicate_form", "bin_form", "remove_response", "bulk_remove_responses", "create_time_poll", "finalize_time_poll"] as const;
+export const FORMS_AGENT_NEVER = ["create_form", "update_form", "update_form_questions", "set_form_status", "duplicate_form", "bin_form", "drop_response", "bulk_drop_responses", "create_time_poll", "finalize_time_poll"] as const;
