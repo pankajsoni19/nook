@@ -1376,7 +1376,7 @@ Deferred: editing an existing widget in the builder (Inspect → Edit SQL shows 
 | D1169 | **Untitled interactions** read "Note · Ada · 14 Nov" (the kind once, as the heading), not "Note · Note". |
 | D1170 | **A standup with no round yet** shows "First round Mon 16 Nov, 09:30" (the viewer's next open, `nextOpensAt`) in the list instead of "No rounds yet". Participants were already listed before the first round (`readableCheckinSql`); the audit's "No standups yet" came from a setup where the member had not been added. |
 
-Time and Goals (lane tg; migration 120):
+#### Time and Goals (lane tg; migration 120)
 
 | # | Decision |
 |---|---|
@@ -1393,8 +1393,6 @@ Time and Goals (lane tg; migration 120):
 | D1150 | **The `time.entries` dataset's money columns are built per query** (like D1143's project columns): built at load, the access predicate read as "0", so a project's managers saw amounts and currency of their own entries only, against D873. |
 
 ---
-
-### D.9 Audit 2 fixes
 
 #### Bookings (branch `fix/audit2-bookings`, decisions D1120–D1129)
 
@@ -1430,7 +1428,7 @@ Time and Goals (lane tg; migration 120):
 | D1112 | **Townhall Invite QR** encodes the link beside it: the audience link once one exists ("Scan to join as audience"), else the team link, shown in the team section and labelled so. |
 
 Threats: **T620** anonymity of askers and respondents (D1100, D1101: no actor, id, or hash links an anonymous question or response to a person). **T621** impersonation by a typed public name (D1104). **T622** a room behind one address locking itself out of the live page (D1103). **T623** timing anonymous responses from timestamps, ordering, cursors, or narrow windows (D1102).
-=======
+
 ### D.10 Leftovers built
 
 **Person and contact fields in Collections and Contacts (lane cf, TODO "Leftovers (lane W3-WIRE)")**
@@ -1444,7 +1442,6 @@ Threats: **T620** anonymity of askers and respondents (D1100, D1101: no actor, i
 | D1204 | MCP: values accept an id, email, or exact name; rows return `{ userId, name }` and `{ contactId, name }`, or `{ restricted: true }` when the owner can't read the contact or the key lacks `crm:read` for it (`keyMayRead` target `contact`). Writing or filtering by a contact the key may not read is NOT_FOUND. |
 | D1205 | Helpers live in `server/people/summaries.ts` (`userSummaries`, `isPickablePerson`, `pickablePersonByEmail`, `pickablePersonByName`, `readableContactIdByReference`); `server/crm` is unchanged. |
 | D1206 | Contacts custom fields: `GET /api/people/resolve?users=&contacts=` (≤ 200 each) names the ids a record holds; tables and record pages show names (cached per session, `src/crm/relationNames.ts`); a contact field's editor searches the whole book with `PersonPicker` instead of the first 100 contacts; the filter sheet offers is / is not with a picker. CRM MCP tools still take and return ids. |
->>>>>>> feat/collections-person-contact-fields
 
 ## E. Design and UX guidelines
 
