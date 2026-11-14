@@ -81,7 +81,7 @@ export function StandupSettings({ detail, canEdit, onChanged, onDeleted, flash, 
       <Schedule detail={detail} save={save} />
       <Participants detail={detail} flash={flash} onChanged={onChanged} />
       <Questions detail={detail} flash={flash} onChanged={onChanged} />
-      <Audience detail={detail} flash={flash} />
+      <Audience detail={detail} flash={flash} save={save} />
       <section className="standup-panel" aria-labelledby="standup-summary-settings">
         <h3 id="standup-summary-settings">Round summaries</h3>
         <p className="standup-muted">When a round closes, a summary goes to the inbox of its owner{detail.summary.notifyParticipants ? " and participants" : ""}.</p>
@@ -210,13 +210,28 @@ function Questions({ detail, flash, onChanged }: { detail: CheckinDetail; flash:
   </section>;
 }
 
-function Audience({ detail, flash }: { detail: CheckinDetail; flash: (message: string) => void }) {
+/** Who sees whose answers, in words (the switch's description and the panel's summary). */
+export function answersAudienceText(detail: Pick<CheckinDetail, "anonymous" | "privateAnswers">): string {
+  if (detail.anonymous) return "Anonymous answers are only ever shown without names, from 3 answers on.";
+  return detail.privateAnswers
+    ? "On: each person sees only their own answers. The owner and people who manage this standup see everyone's."
+    : "Off: everyone who can read this standup, participants included, sees every answer, blockers, and mood.";
+}
+
+function Audience({ detail, flash, save }: { detail: CheckinDetail; flash: (message: string) => void; save: (body: Record<string, unknown>, message: string) => Promise<void> }) {
   const manage = ["owner", "manage"].includes(detail.level);
   if (!manage) return null;
   // Taking part is reading (D938): the shared Access sheet adds readers besides the participants (D1050).
+  // Private answers (T550, D1191): only managers change it, since an editor who is not a manager reads
+  // only their own answers while it is on.
   return <section className="standup-panel" aria-labelledby="standup-audience">
     <h3 id="standup-audience">Who can read it</h3>
     <WorkspaceAccess kind="checkin" id={detail.id} title={detail.name} canManage onSaved={() => flash("Access saved")} />
-    <p className="standup-muted">{detail.anonymous ? "Anonymous answers are only ever shown without names, from 3 answers on." : detail.privateAnswers ? "Each person sees only their own answers; you see all of them." : "Readers see every answer, blockers, and mood."}</p>
+    {detail.anonymous
+      ? <p className="standup-muted">{answersAudienceText(detail)}</p>
+      : <>
+        <Switch checked={detail.privateAnswers} label="Private answers" onChange={(value) => void save({ privateAnswers: value }, value ? "Answers are private: each person sees only their own" : "Everyone who reads the standup sees every answer")} />
+        <p className="standup-muted" id="standup-private-help">{answersAudienceText(detail)}</p>
+      </>}
   </section>;
 }

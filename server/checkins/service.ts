@@ -139,7 +139,12 @@ export function createCheckin(userId: string, input: CheckinInput, nowMs = Date.
 
 export function updateCheckin(userId: string, ref: string, patch: CheckinPatch, nowMs = Date.now()): CheckinRow {
   return db.transaction(() => {
-    const { row } = requireLevel(checkinRow(ref), userId, "edit");
+    const { row, level } = requireLevel(checkinRow(ref), userId, "edit");
+    // D1191 (T550): an editor who is not a manager reads only their own answers under private answers,
+    // so turning it off (or on) is a manager's change, like who can read the standup.
+    if (patch.privateAnswers !== undefined && (patch.privateAnswers ? 1 : 0) !== row.private_answers && LEVEL_RANK[level] < LEVEL_RANK.manage) {
+      throw new CheckinError(403, "READ_ONLY", "Only the owner or a manager changes who sees the answers");
+    }
     if (patch.expectedRevision !== undefined && patch.expectedRevision !== row.revision) throw new CheckinError(409, "CHECKIN_CHANGED", "This standup changed since you opened it", { revision: row.revision });
     const name = patch.name !== undefined ? checkName(patch.name) : row.name;
     const description = patch.description !== undefined ? patch.description.trim() : row.description_md;
