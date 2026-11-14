@@ -1,8 +1,6 @@
 import { db } from "../db";
 import { logger } from "../log";
 import { onCardChange, type CardChange } from "../tasks/cardEvents";
-import { readableCard } from "../tasks/access";
-import { cardPath } from "../friendlyPaths";
 import { logInteraction } from "../crm/interactions";
 import { canEditBook } from "../people/contacts";
 
@@ -14,7 +12,8 @@ const slog = logger("wiring");
  * column, each linked record's book gets one `task` interaction "Task done" naming those records. It is
  * written as the person who finished the card when they may edit the book, else as the person who made
  * the link if they still may; otherwise nothing is logged. The interaction carries no card title (book
- * readers may not read the board, T595): its body is a link that opens only for card readers. One
+ * readers may not read the board, T595): the card itself is in the record's Linked work, where readers
+ * who cannot open it see "An item you can't open" (T501). One
  * interaction per card and book (`source = 'task'`, `source_ref = <card>:<book>`), so finishing a card
  * again, or a coalesced drag, never logs twice.
  */
@@ -45,10 +44,9 @@ export function logTaskDone(change: Pick<CardChange, "cardId" | "boardId" | "act
     if (!actor) continue;
     const sourceRef = `${change.cardId}:${bookId}`;
     if (db.query("SELECT 1 FROM interactions WHERE source = 'task' AND source_ref = ?").get(sourceRef)) continue;
-    const link = readableCard(change.cardId, actor) ? `[Open the card](${cardPath(change.boardId, change.cardId)})` : "";
     try {
       logInteraction(actor, {
-        kind: "task", title: "Task done", body: link || "A linked task was finished.", occurredAt: change.at, source: "task", sourceRef,
+        kind: "task", title: "Task done", body: "A linked task was finished.", occurredAt: change.at, source: "task", sourceRef,
         subjects: subjects.slice(0, 20).map((subject) => ({ kind: subject.kind, id: subject.id }))
       });
       logged += 1;

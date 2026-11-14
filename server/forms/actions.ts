@@ -38,7 +38,8 @@ const slog = logger("forms");
  *   response and book: a retried run finds the deal it made.
  *
  * `save_contact` and `create_deal` also log a `form` interaction on what they touched (C21), titled
- * "Form response" (book readers may not read the form, T595) with a link that opens for result readers.
+ * "Form response" (book readers may not read the form, T595); the response itself is in the record's
+ * Linked work (`source` link), which opens only for the form's result readers.
  */
 
 export const createCardConfig = z.object({
@@ -212,7 +213,6 @@ async function runOne(action: ActionRow, context: RunContext): Promise<string | 
     }
     return cardId ? `card:${cardId}` : null;
   }
-  const resultsLink = `[Open the response](${formPath(context.form.title, context.form.short_id, "results")}?response=${response.id})`;
   /** Upserts the respondent by their email answer into the book (D806); null without an email. */
   const saveRespondent = (bookId: string, ids: { emailQuestionId?: string | null; nameQuestionId?: string | null; phoneQuestionId?: string | null; companyQuestionId?: string | null }) => {
     const emailQuestion = usable(questionFor(set, ids.emailQuestionId, "contact_email", "email"));
@@ -230,10 +230,13 @@ async function runOne(action: ActionRow, context: RunContext): Promise<string | 
     return result.contactId;
   };
   /** The respondent on the contact (and deal) timeline (C21): one `form` interaction per action and response. */
-  const logFormInteraction = (subjects: Array<{ kind: "contact" | "deal"; id: string }>) => {
+  const logFormInteraction = (named: Array<{ kind: "contact" | "deal"; id: string }>) => {
+    // One entry per record and response, whichever action (contact, deal) logs it first.
+    const subjects = named.filter((subject) => !db.query(`SELECT 1 FROM interactions i JOIN interaction_subjects s ON s.interaction_id = i.id
+      WHERE i.source = 'form' AND substr(i.source_ref, 1, 36) = ? AND s.subject_kind = ? AND s.subject_id = ?`).get(response.id, subject.kind, subject.id));
     if (!subjects.length) return;
     try {
-      logInteraction(actor, { kind: "form", title: "Form response", body: resultsLink, occurredAt: response.submittedAt, source: "form", sourceRef: `${response.id}:${action.id}`, subjects });
+      logInteraction(actor, { kind: "form", title: "Form response", body: "Sent a form response (in Linked work).", occurredAt: response.submittedAt, source: "form", sourceRef: `${response.id}:${action.id}`, subjects });
     } catch (error) { slog.warn("A form interaction could not be logged", { formId: context.form.id, error: error instanceof Error ? error.message : String(error) }); }
   };
   if (action.kind === "save_contact") {
