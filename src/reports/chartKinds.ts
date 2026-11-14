@@ -104,6 +104,7 @@ const axisText = (theme: ChartTheme) => ({ color: theme.ink.muted, fontSize: TYP
 function valueAxis(theme: ChartTheme, format: ValueFormat | undefined, options: { grid?: boolean; name?: string } = {}) {
   return {
     type: "value",
+    ...(format === "integer" ? { minInterval: 1 } : {}),
     axisLabel: { ...axisText(theme), formatter: named(`axis:${format ?? "number"}`, (value: number) => compactValue(value, format)) },
     splitLine: { show: options.grid !== false, lineStyle: { color: theme.ink.grid, width: MARKS.grid.width, type: "solid" } },
     axisLine: { show: false }, axisTick: { show: false }
