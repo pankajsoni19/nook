@@ -1360,6 +1360,28 @@ Deferred: editing an existing widget in the builder (Inspect → Edit SQL shows 
 
 ---
 
+### D.9 Audit 2 fixes
+
+#### Forms, Townhall, public pages (lane ft, migration 116; 117 unused)
+
+| # | Decision |
+|---|---|
+| D1100 | **Anonymous means no actor anywhere**: an anonymous townhall question (asked or withdrawn) and an anonymous form response write their audit row (and so the server log line) with no actor and no question or response id, and an anonymous question waiting for review notifies the host with no actor. Named ones are unchanged. |
+| D1101 | **A named question's asker hash is salted with its id** (`townhall-asker-named`): it never equals the person's session-wide anonymous hash, so a named row (author id or typed name) cannot be matched to their anonymous questions. "Mine" on named questions follows `author_id` for members and the salted hash for public participants. Migration 116 gives existing named rows a random hash; public participants lose withdraw on named questions asked before it. Anonymous questions of one person still share one hash within a session (one HMAC per viewer per state, not per question). |
+| D1102 | **Anonymous forms read by the day**: the response list, its cursor, the CSV (web and MCP), and the response view carry the day only; rows sort by day then the (random) id; `since`/`until` move to whole UTC days (`dayFilter`). |
+| D1103 | **Room reads**: a public route registered with `{ room: true }` (Townhall's page, state, and stream) is limited per participant (`p`, 60 a minute) and per address (1200 a minute), not by the 120-a-minute page bucket. The audience page retries a 429 or failed first load after Retry-After, and with the stream open no longer refetches after its own votes, questions, or withdrawals (the stream brings the change). |
+| D1104 | **Guest names say so**: questions carry `authorKind` (`member`, `guest`, or null); every surface shows a typed public name as "Name · guest" (`authorLabel`), recap Markdown and CSV included. Names equal to a member's are not refused. |
+| D1105 | **Refusals carry a fresh render nonce**: `refreshNonceOnRefusal(kind, itemId, run)` / `withFreshNonce` (server/public/limits.ts) add `renderNonce` to any JSON refusal except the uniform 404. Forms' and Townhall's submissions use it; the public form page adopts the nonce from any refusal. |
+| D1106 | **Townhall session list cursor** is `[rank, sort_at, id]` over the list's whole order (live first); an older two-part cursor starts the list over. |
+| D1107 | **A public response reaching the form's limit closes it through `recount`**, like members' responses: status change, item change, audit, schedules, and the poll-closed notice. |
+| D1108 | **Smaller public fixes**: the public time-poll grid shows members by first name and keys rows by position (no response ids); an owner-only poll shows no vote count publicly; confirming a held response checks one-per-browser again; the audience page sends its honeypot's real value. |
+| D1109 | **Recap upvotes** count questions the reader can see (a non-host's total leaves out pending questions). |
+| D1110 | **A public poll is one tap**: its minimum fill time is 1 s (`MIN_FILL_MS.poll`; forms keep 3 s), and the public page, refused as too fast, waits out the minimum with the fresh nonce and sends the same answers once more by itself. |
+| D1111 | **Forms phone and access polish**: the forms sheet sizes apply on desktop only (a phone gets the shared full-screen sheet); the editor's "Questions · N" no longer wraps; someone asked to answer a form who opens its results is told they are the owners' and offered the form, instead of "not shared with you". |
+| D1112 | **Townhall Invite QR** encodes the link beside it: the audience link once one exists ("Scan to join as audience"), else the team link, shown in the team section and labelled so. |
+
+Threats: **T620** anonymity of askers and respondents (D1100, D1101: no actor, id, or hash links an anonymous question or response to a person). **T621** impersonation by a typed public name (D1104). **T622** a room behind one address locking itself out of the live page (D1103). **T623** timing anonymous responses from timestamps, ordering, cursors, or narrow windows (D1102).
+
 ## E. Design and UX guidelines
 
 Nook is dark-only with a warm amber accent (`--yellow #f6c453`, focus `--field-focus`), panels `#111113`/`#18181b`, borders `#29292d`, muted `#929299`, 8–10 px radii, `.84rem` controls, sheets on phones, and lucide icons. New modules must be indistinguishable in craft from Tasks and Reports.

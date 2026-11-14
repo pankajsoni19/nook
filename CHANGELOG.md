@@ -4,6 +4,14 @@ Release notes for Nook, newest first. Upgrade steps for each release are in [doc
 
 ## Unreleased
 
+**Audit fixes: Forms, Townhall, public pages**
+
+- **Anonymous stays anonymous**: anonymous townhall questions and anonymous form responses no longer record who sent them in the audit log or server log, and a named question can no longer be matched to the same person's anonymous ones. Anonymous form exports, response lists, and date filters work by the day only.
+- **Townhall audience page**: a whole room behind one network can load and follow a live session; a busy moment retries instead of leaving the page on "Loading…"; names typed by outside participants show as "Name · guest".
+- **Public forms**: a refused submission (a missing answer, already responded) can be sent again without reloading; a response limit reached from a public link closes the form like any other close; the public time-poll grid shows members by first name only.
+- **Fixes**: the townhall list no longer repeats or skips sessions when paging past live ones; recap upvote totals leave out questions still waiting for review.
+- **Polish**: tapping a public poll right after it opens counts the vote (no more silent "too fast"); Forms sheets fill the screen on phones; the form editor's question count no longer wraps; opening a form's results you were only asked to answer explains that and links to the form; the Townhall Invite QR code is of the link shown beside it.
+
 **Workspace modules working together** (Wave 3)
 
 - **Standups and Goals**: a goal update question shows your goals' key results; numbers you type become goal check-ins when you post. Closed rounds can be added to a note of your choice and published. Cards you logged time on show up in "What did you get done".
