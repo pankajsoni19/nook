@@ -1,8 +1,18 @@
-import { lazy } from "react";
+import { lazy, Suspense } from "react";
 import { MessageCircleQuestion, Plus, Presentation } from "lucide-react";
 import { WORKSPACE_MODULE_LABELS } from "../../shared/workspaceModules";
 import type { WorkspaceClientModule } from "../workspaceModules/types";
 import type { Route } from "../router";
+import { insertEmbedAt, openEmbedPicker } from "../ui/embeds/openEmbedPicker";
+import type { EmbedCardProps } from "../editor/moduleEmbedRegistry";
+import { listSessions } from "./api";
+
+const LiveSessionEmbed = lazy(() => import("./TownhallEmbed"));
+function SessionEmbed(props: EmbedCardProps) {
+  return <Suspense fallback={<div className="ui-embed" role="status" aria-label="Loading">Loading…</div>}><LiveSessionEmbed {...props} /></Suspense>;
+}
+/** A session page (not the home, Insights, or the presenter screen). */
+const isSessionPath = (path: string) => /^\/townhall\/[a-z0-9-]+$/i.test(path.split(/[?#]/)[0]!) && !/^\/townhall\/insights$/i.test(path.split(/[?#]/)[0]!);
 
 /**
  * Townhall (lane TOWNHALL, docs/plan/WORKSPACE_MODULES.md §D.7 Townhall): all-hands and AMA sessions
@@ -50,6 +60,14 @@ export const module: WorkspaceClientModule = {
     }
   },
   quickActions: [{ id: "townhall.new", label: "New townhall", icon: Plus, href: "/townhall?new=1", hiddenFor: ["guest", "viewer"] }],
+  embedRenderers: [{ kind: "townhall_session", match: isSessionPath, component: SessionEmbed }],
+  slashItems: [{
+    label: "Townhall", hint: "Embed a townhall session", keywords: "townhall all-hands ama questions session",
+    run: (editor, range) => openEmbedPicker({
+      title: "Add a townhall", eyebrow: "Townhall", icon: Presentation, emptyTitle: "No sessions", emptyText: "Create a session in Townhall first.",
+      load: () => listSessions("all").then((page) => page.items.map((item) => ({ id: item.id, title: item.title, meta: item.state === "live" ? "Live now" : item.state === "ended" ? "Ended" : "Upcoming", path: item.href })))
+    }, (item) => insertEmbedAt(editor, range, "townhall_session", item.path))
+  }],
   notificationTopics: [
     { id: "townhall.live", label: "A townhall you asked in goes live" },
     { id: "townhall.answered", label: "Your question was answered" },

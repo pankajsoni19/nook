@@ -1,4 +1,4 @@
-import { lazy } from "react";
+import { lazy, Suspense } from "react";
 import { Target, TrendingUp } from "lucide-react";
 import { WORKSPACE_MODULE_LABELS } from "../../shared/workspaceModules";
 import { shortIdOfSegment } from "../../shared/friendlyUrls";
@@ -6,6 +6,14 @@ import { GoalCardSection } from "./GoalCardSection";
 import { goalActivityRenderers } from "./activity";
 import type { WorkspaceClientModule, WorkspaceRoute } from "../workspaceModules/types";
 import type { Route } from "../router";
+import { insertEmbedAt, openEmbedPicker } from "../ui/embeds/openEmbedPicker";
+import type { EmbedCardProps } from "../editor/moduleEmbedRegistry";
+import { listGoals } from "./goalsApi";
+
+const LiveGoalEmbed = lazy(() => import("./GoalEmbed"));
+function GoalEmbedCard(props: EmbedCardProps) {
+  return <Suspense fallback={<div className="ui-embed" role="status" aria-label="Loading">Loading…</div>}><LiveGoalEmbed {...props} /></Suspense>;
+}
 
 /**
  * Goals (lane GOALS, docs/plan/WORKSPACE_MODULES.md §D.3, D900–D929). The client module: the lazy app
@@ -52,6 +60,14 @@ export const module: WorkspaceClientModule = {
   },
   quickActions: [{ id: "goals.checkin", label: "Check in on a goal", icon: TrendingUp, href: "/goals?view=mine", hiddenFor: ["viewer", "guest"] }],
   cardSections: [{ id: "goals.card", area: "side", order: 20, component: GoalCardSection }],
+  embedRenderers: [{ kind: "goal", component: GoalEmbedCard }],
+  slashItems: [{
+    label: "Goal", hint: "Embed a goal and its progress", keywords: "goal okr objective key result progress",
+    run: (editor, range) => openEmbedPicker({
+      title: "Add a goal", eyebrow: "Goals", icon: Target, emptyTitle: "No goals found", emptyText: "Create a goal in Goals first.",
+      load: () => listGoals({ view: "list" }).then((page) => page.goals.map((goal) => ({ id: goal.id, title: goal.title, meta: `${Math.round(goal.progress * 100)}%${goal.period ? ` · ${goal.period.name}` : ""}`, path: goal.href })))
+    }, (item) => insertEmbedAt(editor, range, "goal", item.path))
+  }],
   activityRenderers: goalActivityRenderers,
   searchRenderer: {
     scope: "goals", label: "Goals", icon: Target,

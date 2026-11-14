@@ -1,4 +1,6 @@
-import { lazy, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
+import { insertEmbedAt, openEmbedPicker } from "../ui/embeds/openEmbedPicker";
+import type { ItemSlotProps } from "../ui/itemSlots";
 import { CalendarCheck2, CalendarClock, CalendarPlus, Link2 } from "lucide-react";
 import { WORKSPACE_MODULE_LABELS } from "../../shared/workspaceModules";
 import type { WorkspaceClientModule } from "../workspaceModules/types";
@@ -16,6 +18,16 @@ import type { EmbedCardProps } from "../editor/moduleEmbedRegistry";
  */
 
 const BookingsApp = lazy(() => import("./BookingsApp"));
+const RecordBookingsPanel = lazy(() => import("./RecordBookings"));
+
+function RecordBookings(props: ItemSlotProps) {
+  return <Suspense fallback={null}><RecordBookingsPanel {...props} /></Suspense>;
+}
+
+type MineType = { href: string; title: string; status: string; publicPath: string | null; durations: number[] };
+const loadBookableTypes = () => api<{ types: MineType[] }>("/bookings/types?mine=1").then(({ types }) => types
+  .filter((type) => type.status === "active" && type.publicPath)
+  .map((type) => ({ id: type.href, title: type.title, meta: type.durations.map((minutes) => `${minutes} min`).join(" / "), path: type.href })));
 const BookingPublicPage = lazy(() => import("./public/BookingPublicPage"));
 
 function BookingLinkEmbed({ path }: EmbedCardProps) {
@@ -68,14 +80,13 @@ export const module: WorkspaceClientModule = {
   embedRenderers: [{ kind: "booking_type", component: BookingLinkEmbed }],
   slashItems: [{
     label: "Booking link", hint: "Embed one of your booking types", keywords: "booking book meeting schedule calendly link",
-    run: (editor, range) => {
-      void api<{ types: Array<{ href: string; status: string; publicPath: string | null; ownerId: string }> }>("/bookings/types?mine=1").then(({ types }) => {
-        const type = types.find((item) => item.status === "active" && item.publicPath) ?? types[0];
-        if (!type) return;
-        (editor.chain().focus().deleteRange(range) as unknown as { insertModuleEmbed: (attrs: { kind: string; path: string }) => { run: () => void } }).insertModuleEmbed({ kind: "booking_type", path: type.href }).run();
-      });
-    }
+    // A picker of your active public types (D1059; D1025 embedded the first one).
+    run: (editor, range) => openEmbedPicker({
+      title: "Add a booking link", eyebrow: "Bookings", icon: CalendarPlus, emptyTitle: "No public booking types", emptyText: "Make a booking type public and active in Bookings first.",
+      load: loadBookableTypes
+    }, (item) => insertEmbedAt(editor, range, "booking_type", item.path))
   }],
+  itemSections: [{ id: "bookings.record", kinds: ["contact", "company", "deal"], order: 30, component: RecordBookings }],
   searchRenderer: {
     scope: "bookings", label: "Bookings", icon: CalendarCheck2,
     row: (result) => ({ key: String(result.id), title: String(result.title), meta: typeof result.snippet === "string" ? result.snippet : undefined, href: String(result.href) })

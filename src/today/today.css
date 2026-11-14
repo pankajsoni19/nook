@@ -32,9 +32,11 @@
 .today-section-count { color: #85858c; font-weight: 600; }
 /* Empty sections fold into one muted line each; a group with nothing says All clear. */
 .today-quiet-list { margin: 0; padding: 0 16px; list-style: none; display: grid; }
-.today-quiet { min-height: 32px; display: flex; align-items: center; color: #85858c; font-size: .84rem; }
+/* Block, not flex: the title span and the " · …" text are one run of text, so a long line wraps as a sentence
+   instead of splitting into two narrow flex columns (W3-WIRE, D1059). 7 + 18 + 7 = the old 32 px row. */
+.today-quiet { min-height: 32px; display: block; padding: 7px 0; color: #85858c; font-size: .84rem; line-height: 18px; overflow-wrap: anywhere; }
 .today-quiet + .today-quiet { border-top: 1px solid #1f1f23; }
-.today-quiet-title { margin-right: 4px; color: #b4b4ba; font-weight: 600; }
+.today-quiet-title { color: #b4b4ba; font-weight: 600; }
 .today-all-clear { margin: 0; border: 1px dashed #28282d; border-radius: 16px; padding: 16px; color: #85858c; font-size: .84rem; }
 .today-all-clear strong { color: #c9c9ce; font-weight: 650; }
 @media (min-width: 761px) {
@@ -111,6 +113,7 @@
   .today-group-cards { gap: 8px; }
   .today-section { padding: 16px 12px 8px; }
   .today-quiet { min-height: 44px; }
+  .today-quiet-list > .today-quiet { padding: 13px 0; }
   .today-quiet-list { padding: 0 12px; }
   .today-view-all { min-height: 44px; margin-right: -4px; padding: 0 10px; }
   .today-list { margin: 0 -4px; }
