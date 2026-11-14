@@ -213,7 +213,9 @@ export function RecordPage({ kind, refId, books, canWriteRole, onOpen, onBack, o
         </section>}
         <ItemSectionsOutlet kind={kind} id={detail.id} readOnly={!canWriteRole} onOpen={onOpen} person={kind === "contact" ? { name: title, email } : null} />
         <LinkedItemsPanel item={{ kind, id: detail.id }} canEdit={canEdit} onOpen={onOpen} title="Linked work" />
-        <ItemTimeline kind={kind} id={detail.id} canComment={canWriteRole && detail.canEdit} renderers={CRM_ACTIVITY_RENDERERS} title="Comments" refreshKey={String(tick)} />
+        {/* The record timeline above already shows the history (changes, links, interactions), so the
+            comments come alone here (D988), the same on contact, company, and deal pages. */}
+        <ItemTimeline kind={kind} id={detail.id} canComment={canWriteRole && detail.canEdit} renderers={CRM_ACTIVITY_RENDERERS} title="Comments" refreshKey={String(tick)} history={false} />
       </section>
     </div>
     {sheet === "followup" && <FollowupSheet subject={subject} onClose={() => setSheet(null)} onSaved={() => { setSheet(null); notify.success("We'll remind you"); refresh(); }} />}

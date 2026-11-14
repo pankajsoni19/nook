@@ -116,7 +116,7 @@ function CommentItem({ comment, replies, canComment, onReply, onEdit, onDelete }
   </li>;
 }
 
-export function ItemTimeline({ kind, id, canComment, renderers = {}, title = "Comments", refreshKey }: {
+export function ItemTimeline({ kind, id, canComment, renderers = {}, title = "Comments", refreshKey, history = true }: {
   kind: WorkKind;
   id: string;
   /** The viewer may comment (comment level and up, not a read-only role). */
@@ -126,6 +126,11 @@ export function ItemTimeline({ kind, id, canComment, renderers = {}, title = "Co
   title?: string;
   /** Changes when the item changes, so new activity is read again. */
   refreshKey?: string;
+  /**
+   * Whether the item's history can be shown with the comments (the Activity switch). Pages that already
+   * show that history elsewhere (Contacts' record timeline) pass false: comments only, nothing twice.
+   */
+  history?: boolean;
 }) {
   const headingId = useId();
   const [prefs, setPrefsState] = useState(readItemTimelinePrefs);
@@ -139,8 +144,8 @@ export function ItemTimeline({ kind, id, canComment, renderers = {}, title = "Co
     setError(null);
     itemComments(kind, id).then((body) => setComments(body.comments), (reason) => setError(errorText(reason, "Could not load comments")));
     // History is secondary: a failed read keeps what is shown.
-    itemActivity(kind, id, { order: "desc" }).then((body) => { setActivity(body.entries); setCursor(body.nextCursor); }, () => undefined);
-  }, [kind, id]);
+    if (history) itemActivity(kind, id, { order: "desc" }).then((body) => { setActivity(body.entries); setCursor(body.nextCursor); }, () => undefined);
+  }, [kind, id, history]);
   useEffect(load, [load, refreshKey]);
 
   const olderActivity = async () => {
@@ -162,7 +167,8 @@ export function ItemTimeline({ kind, id, canComment, renderers = {}, title = "Co
     catch (reason) { setError(errorText(reason, "Could not delete the comment")); }
   };
 
-  const items = mergeTimeline(comments ?? [], activity, prefs);
+  const showActivity = history && prefs.showActivity;
+  const items = mergeTimeline(comments ?? [], activity, { ...prefs, showActivity });
   const repliesOf = (parentId: string) => (comments ?? []).filter((comment) => comment.parentId === parentId);
   const newest = prefs.order === "desc";
   const composer = canComment && <CommentBox label="Add a comment" submitLabel="Comment" onSubmit={(body) => add(body)} />;
@@ -171,9 +177,9 @@ export function ItemTimeline({ kind, id, canComment, renderers = {}, title = "Co
     <header className="ui-panel-header">
       <h3 id={headingId}><MessageSquare aria-hidden="true" />{title}</h3>
       <div className="ui-timeline-controls">
-        <button type="button" role="switch" className="ui-switch" aria-checked={prefs.showActivity} onClick={() => setPrefs({ ...prefs, showActivity: !prefs.showActivity })} title={prefs.showActivity ? "Hide the history" : "Show the history with the comments"}>
+        {history && <button type="button" role="switch" className="ui-switch" aria-checked={prefs.showActivity} onClick={() => setPrefs({ ...prefs, showActivity: !prefs.showActivity })} title={prefs.showActivity ? "Hide the history" : "Show the history with the comments"}>
           <span>Activity</span><span className="ui-switch-track" aria-hidden="true"><span className="ui-switch-thumb" /></span>
-        </button>
+        </button>}
         <button type="button" className="icon-button" onClick={() => setPrefs({ ...prefs, order: newest ? "asc" : "desc" })} aria-label={`${newest ? "Newest" : "Oldest"} first. Show ${newest ? "oldest" : "newest"} first`} title={newest ? "Newest first" : "Oldest first"}>
           {newest ? <ArrowDownWideNarrow /> : <ArrowUpNarrowWide />}
         </button>
@@ -183,13 +189,13 @@ export function ItemTimeline({ kind, id, canComment, renderers = {}, title = "Co
     {newest && composer}
     {comments === null && !error
       ? <p className="ui-panel-loading" role="status">Loading…</p>
-      : <ol className="ui-timeline-list" aria-label={prefs.showActivity ? "Comments and activity" : "Comments"}>
+      : <ol className="ui-timeline-list" aria-label={showActivity ? "Comments and activity" : "Comments"}>
         {items.map((item) => item.type === "activity"
           ? <ActivityLine key={item.id} entry={item.entry} renderers={renderers} />
           : <CommentItem key={item.id} comment={item.comment} replies={repliesOf(item.id)} canComment={canComment} onReply={(body) => add(body, item.id)} onEdit={edit} onDelete={remove} />)}
         {items.length === 0 && <li className="ui-timeline-empty">{canComment ? "No comments yet. Start the conversation below." : "No comments yet."}</li>}
       </ol>}
-    {prefs.showActivity && cursor && <button type="button" className="ui-text-button" onClick={() => { void olderActivity().catch(() => undefined); }}>Load earlier activity</button>}
+    {showActivity && cursor && <button type="button" className="ui-text-button" onClick={() => { void olderActivity().catch(() => undefined); }}>Load earlier activity</button>}
     {!newest && composer}
   </section>;
 }
