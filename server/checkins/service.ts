@@ -10,7 +10,8 @@ import { scheduleRuleProblem } from "../../shared/schedules";
 import { isValidTimeZone } from "../../shared/calendarRecurrence";
 import { CHECKIN_DESCRIPTION_MAX, CHECKIN_MAX_GROUPS, CHECKIN_MAX_PARTICIPANTS, CHECKIN_NAME_MAX, CHECKIN_TEMPLATE_DEFS, DATE_PATTERN, type CheckinSchedule, type CheckinTemplate } from "../../shared/checkins";
 import type { QuestionSet } from "../../shared/questions";
-import { CheckinError, checkinLevel, checkinRow, notFound, scheduleOf, type CheckinRow } from "./store";
+import { CheckinError, checkinLevel, checkinRow, notFound, scheduleOf, summaryOptions, type CheckinRow } from "./store";
+import { editableNote } from "../access";
 import { DRIVE_PURPOSE, joinOpenRounds, leaveOpenRounds, rearm, syncGroupParticipants } from "./rounds";
 
 /**
@@ -31,7 +32,7 @@ export type CheckinInput = {
   reminderMinutesBefore?: number | null;
   participants?: ParticipantsInput;
   privateAnswers?: boolean;
-  summary?: { notifyParticipants?: boolean; email?: boolean };
+  summary?: { notifyParticipants?: boolean; email?: boolean; noteId?: string | null };
 };
 export type CheckinPatch = Partial<Omit<CheckinInput, "template" | "participants">> & { status?: "active" | "paused"; expectedRevision?: number };
 
@@ -141,6 +142,11 @@ export function updateCheckin(userId: string, ref: string, patch: CheckinPatch, 
     const reminder = patch.reminderMinutesBefore === undefined ? row.reminder_minutes_before : patch.reminderMinutesBefore;
     checkTimes(deadline, reminder);
     const summary = { ...JSON.parse(row.summary_json) as Record<string, unknown>, ...(patch.summary ?? {}) };
+    // C23 (D1044): a summary note must be one the person setting it can edit.
+    if (typeof patch.summary?.noteId === "string" && patch.summary.noteId !== summaryOptions(row).noteId && !editableNote(patch.summary.noteId.toLowerCase(), userId)) {
+      throw new CheckinError(400, "INVALID", "Choose a note you can edit");
+    }
+    if (typeof summary.noteId === "string") summary.noteId = summary.noteId.toLowerCase();
     const { tz, ...stored } = schedule;
     db.query(`UPDATE checkins SET name = ?, description_md = ?, schedule_json = ?, tz = ?, deadline_minutes = ?, reminder_minutes_before = ?, status = ?, private_answers = ?,
         summary_json = ?, revision = revision + 1, updated_at = ? WHERE id = ?`).run(name, description, JSON.stringify(stored), tz, deadline, reminder, patch.status ?? row.status,

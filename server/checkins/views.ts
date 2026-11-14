@@ -251,6 +251,10 @@ export function prefill(roundId: string, userId: string, nowMs = Date.now()): An
   const done = (db.query(`${cardSelect} JOIN card_activity a ON a.card_id = k.id JOIN board_columns col ON col.id = json_extract(a.payload, '$.to.id')
       WHERE a.actor_id = $userId AND a.kind = 'column' AND a.created_at >= $since AND col.state = 'done' AND ${readable}
       ORDER BY k.title LIMIT 20`).all({ userId, since }) as Parameters<typeof cardSummary>[0][]);
+  // C6 (D1046): cards you logged time on since your last answer count as done work too (Time's entries
+  // name their card in target_kind/target_id, D878).
+  const timed = (db.query(`${cardSelect} JOIN time_entries te ON te.target_kind = 'card' AND te.target_id = k.id
+      WHERE te.user_id = $userId AND te.started_at >= $since AND ${readable} ORDER BY k.title LIMIT 20`).all({ userId, since }) as Parameters<typeof cardSummary>[0][]);
   const today = new Date(nowMs).toISOString().slice(0, 10);
   const planned = db.query(`${cardSelect} JOIN card_assignees ca ON ca.card_id = k.id AND ca.user_id = $userId LEFT JOIN board_columns col ON col.id = k.column_id
       WHERE ${readable} AND k.archived_at IS NULL AND COALESCE(col.state, 'todo') <> 'done'
@@ -262,7 +266,8 @@ export function prefill(roundId: string, userId: string, nowMs = Date.now()): An
   const canRead = (card: { id: string }) => resolveRefs([{ kind: "card", id: card.id }], { userId }).get(`card:${card.id}`) !== null;
   return {
     lastAnswers: last?.answers ?? null, lastPlan,
-    doneCards: done.filter(canRead).slice(0, 10).map(cardSummary), plannedCards: planned.filter(canRead).slice(0, 10).map(cardSummary), openBlockers: blockers.filter(canRead).map(cardSummary),
+    doneCards: [...new Map([...done, ...timed].map((card) => [card.id, card])).values()].filter(canRead).slice(0, 10).map(cardSummary),
+    timeCards: timed.filter(canRead).slice(0, 10).map(cardSummary), plannedCards: planned.filter(canRead).slice(0, 10).map(cardSummary), openBlockers: blockers.filter(canRead).map(cardSummary),
     current: current ? { id: current.id, answers: current.answers, revision: current.revision } : null
   };
 }

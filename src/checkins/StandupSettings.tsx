@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { Pause, Play, Trash2 } from "lucide-react";
+import { FileText, Pause, Play, Trash2 } from "lucide-react";
+import { api } from "../api";
+import { EmbedPickerDialog, type PickItem } from "../ui/embeds/EmbedPicker";
 import { QuestionSetEditor, type SaveState } from "../ui/questions/QuestionSetEditor";
 import { SchedulePicker, viewerZone, type ScheduleValue } from "../ui/schedule/SchedulePicker";
 import { PersonPicker } from "../ui/people/People";
@@ -29,6 +31,36 @@ function Switch({ checked, onChange, label, disabled }: { checked: boolean; onCh
   </button>;
 }
 
+type NoteRow = { id: string; title: string; is_owner: number; current_version: number; updated_at: string };
+const loadMyNotes = (): Promise<PickItem[]> => api<{ notes: NoteRow[] }>("/notes").then((result) => result.notes.filter((note) => note.is_owner === 1)
+  .map((note) => ({ id: note.id, title: note.title || "Untitled note", meta: note.current_version > 0 ? "Published" : "Draft only", path: `/notes/${note.id}` })));
+
+/**
+ * Post each closed round to a note (§C C23, D1044): the round's date, summary line, and (for named
+ * standups whose answers are not private) everyone's answers are appended and published as the
+ * standup's owner. Pick one of your notes; clearing it stops.
+ */
+function SummaryNote({ detail, save }: { detail: CheckinDetail; save: (body: Record<string, unknown>, message: string) => Promise<void> }) {
+  const [picking, setPicking] = useState(false);
+  const [title, setTitle] = useState<string | null>(null);
+  const noteId = detail.summary.noteId ?? null;
+  useEffect(() => {
+    if (!noteId) { setTitle(null); return; }
+    let live = true;
+    api<{ note: { title: string } }>(`/notes/${noteId}`).then((result) => { if (live) setTitle(result.note.title || "Untitled note"); }, () => { if (live) setTitle("A note you can't open"); });
+    return () => { live = false; };
+  }, [noteId]);
+  return <div className="standup-summary-note">
+    <p className="standup-muted"><FileText aria-hidden="true" />{noteId ? <>Each closed round is added to <a href={`/notes/${noteId}`}>{title ?? "the note"}</a> and published.</> : "Add each closed round to a note, published as a new version."}</p>
+    <span className="standup-summary-note-actions">
+      <button type="button" className="action-button secondary" onClick={() => setPicking(true)}>{noteId ? "Change note" : "Post rounds to a note"}</button>
+      {noteId && <button type="button" className="action-button secondary" onClick={() => void save({ summary: { noteId: null } }, "Rounds stop going to the note")}>Stop</button>}
+    </span>
+    {picking && <EmbedPickerDialog title="Post rounds to a note" eyebrow="Standup summaries" icon={FileText} emptyTitle="No notes yet" emptyText="Create a note first, then choose it here."
+      load={loadMyNotes} onClose={() => setPicking(false)} onPick={(item) => { setPicking(false); void save({ summary: { noteId: item.id } }, `Rounds go to ${item.title}`); }} />}
+  </div>;
+}
+
 export function StandupSettings({ detail, canEdit, onChanged, onDeleted, flash, role }: WorkspaceAppProps & { detail: CheckinDetail; canEdit: boolean; onChanged: (next?: CheckinDetail) => void; onDeleted: () => void }) {
   const { ask: askToConfirm, confirmElement } = useConfirm();
   const save = async (body: Record<string, unknown>, message: string) => {
@@ -55,6 +87,7 @@ export function StandupSettings({ detail, canEdit, onChanged, onDeleted, flash, 
         <p className="standup-muted">When a round closes, a summary goes to the inbox of its owner{detail.summary.notifyParticipants ? " and participants" : ""}.</p>
         <Switch checked={detail.summary.notifyParticipants} label="Send summaries to participants" onChange={(value) => void save({ summary: { notifyParticipants: value } }, "Saved")} />
         <Switch checked={detail.summary.email} label="Also by email" onChange={(value) => void save({ summary: { email: value } }, "Saved")} />
+        <SummaryNote detail={detail} save={save} />
       </section>
       {["owner", "manage"].includes(detail.level) && <section className="standup-panel standup-danger" aria-labelledby="standup-delete">
         <h3 id="standup-delete">Move to the Bin</h3>

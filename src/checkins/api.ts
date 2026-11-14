@@ -28,8 +28,8 @@ export const roundByDate = (ref: string, date: string) => api<RoundView>(`/check
 export const standupStats = (ref: string) => api<CheckinStats>(`/checkins/${enc(ref)}/stats`);
 export const unblock = (ref: string, cardId: string) => api<{ unblocked: boolean }>(`/checkins/${enc(ref)}/unblock`, { method: "POST", ...json({ cardId }) });
 export const roundPrefill = (roundId: string) => api<AnswerPrefill>(`/checkin-rounds/${enc(roundId)}/me`);
-export const answerRound = (roundId: string, answers: Answers, expectedRevision?: number) =>
-  api<{ status: string; edited: boolean; blockers: number; round: RoundView }>(`/checkin-rounds/${enc(roundId)}/answer`, { method: "POST", ...json({ answers, ...(expectedRevision ? { expectedRevision } : {}) }) });
+export const answerRound = (roundId: string, answers: Answers, expectedRevision?: number, goalUpdates?: Array<{ goalId: string; values: Record<string, number> }>) =>
+  api<{ status: string; edited: boolean; blockers: number; round: RoundView }>(`/checkin-rounds/${enc(roundId)}/answer`, { method: "POST", ...json({ answers, ...(expectedRevision ? { expectedRevision } : {}), ...(goalUpdates?.length ? { goalUpdates } : {}) }) });
 export const skipRound = (roundId: string) => api<{ status: "skipped" }>(`/checkin-rounds/${enc(roundId)}/skip`, { method: "POST" });
 export const closeRound = (roundId: string) => api<RoundView>(`/checkin-rounds/${enc(roundId)}/close`, { method: "POST" });
 export const nudgeRound = (roundId: string) => api<{ nudged: number }>(`/checkin-rounds/${enc(roundId)}/nudge`, { method: "POST" });

@@ -44,8 +44,8 @@ export const notFound = (what = "Standup") => new CheckinError(404, "NOT_FOUND",
 
 export const scheduleOf = (row: Pick<CheckinRow, "schedule_json" | "tz">): CheckinSchedule => ({ ...(JSON.parse(row.schedule_json) as Omit<CheckinSchedule, "tz">), tz: row.tz });
 export const summaryOptions = (row: Pick<CheckinRow, "summary_json">) => {
-  const parsed = JSON.parse(row.summary_json) as { notifyParticipants?: boolean; email?: boolean };
-  return { notifyParticipants: parsed.notifyParticipants !== false, email: parsed.email === true };
+  const parsed = JSON.parse(row.summary_json) as { notifyParticipants?: boolean; email?: boolean; noteId?: string | null };
+  return { notifyParticipants: parsed.notifyParticipants !== false, email: parsed.email === true, noteId: typeof parsed.noteId === "string" ? parsed.noteId : null };
 };
 
 export const checkinHref = (row: Pick<CheckinRow, "name" | "short_id">) => `/standups/${slugSegment(row.name, row.short_id)}`;

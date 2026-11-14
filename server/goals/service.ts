@@ -884,6 +884,22 @@ export function checkIn(userId: string, ref: string, input: CheckinInput, nowMs 
   })();
 }
 
+/**
+ * Goals a person can check in on from a standup's goal update question (§C5, D1043): open goals they
+ * own, contribute to, or own a key result of, and can edit, with their key results (manual ones take
+ * values; automatic ones are shown for context). At most 20, by last check-in.
+ */
+export function checkinTargets(userId: string): Array<{ id: string; title: string; href: string; health: GoalHealth; progress: number;
+  keyResults: Array<{ id: string; title: string; metric: string; currentValue: number; targetValue: number; unit: string | null; manual: boolean }> }> {
+  const rows = db.query(`SELECT g.* FROM goals g WHERE g.state = 'active' AND ${readableGoalSql("g")}
+    AND (g.owner_id = $userId OR EXISTS (SELECT 1 FROM goal_contributors c WHERE c.goal_id = g.id AND c.user_id = $userId) OR EXISTS (SELECT 1 FROM key_results k WHERE k.goal_id = g.id AND k.owner_id = $userId))
+    ORDER BY COALESCE(g.last_checkin_at, g.created_at) LIMIT 60`).all({ userId }) as GoalRow[];
+  return rows.filter((row) => atLeast(goalLevel(row.id, userId), "edit")).slice(0, 20).map((row) => ({
+    id: row.id, title: row.title, href: goalHref(row), health: row.health as GoalHealth, progress: row.progress,
+    keyResults: krRows(row.id).map((kr) => ({ id: kr.id, title: kr.title, metric: kr.metric, currentValue: kr.current_value, targetValue: kr.target_value, unit: kr.unit, manual: kr.source_kind === "manual" && kr.metric !== "milestones" }))
+  }));
+}
+
 export function listCheckins(userId: string, ref: string, page: { cursor?: string | null; limit?: number } = {}) {
   const { goal } = requireGoal(ref, userId, "view");
   const limit = Math.min(Math.max(1, page.limit ?? 20), 100);

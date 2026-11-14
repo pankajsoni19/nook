@@ -6,6 +6,7 @@ import { CHECKIN_TEMPLATES } from "../../shared/checkins";
 import { CheckinError, checkinLevel, checkinRow, roundRow } from "./store";
 import { createCheckin, deleteCheckin, setParticipants, updateCheckin } from "./service";
 import { answerRound, skipRound } from "./rounds";
+import { goalUpdatesSchema } from "./goalUpdates";
 import { detailOf, dueRounds, feed, listCheckins, roundByDate, roundSummary, roundsPage, roundView, stats } from "./views";
 
 /**
@@ -61,11 +62,11 @@ export const answerTool = defineTool({
   access: { mode: "items", items: [{ arg: "roundId", kind: "checkin_round", ifAbsent: "allow" }, { arg: "checkinId", kind: "checkin", ifAbsent: "allow" }] },
   write: true,
   annotations: { idempotentHint: true },
-  inputSchema: z.object({ ...roundArgs, answers }).strict(),
+  inputSchema: z.object({ ...roundArgs, answers, goalUpdates: goalUpdatesSchema.optional().describe("For a goal_update question: check-ins on your goals, [{ goalId, values: { <keyResultId>: number }, health?, confidence? }] (list_goals mine, get_goal)") }).strict(),
   outputSchema: z.object({ status: z.string(), edited: z.boolean(), blockers: z.number(), roundId: z.string() }),
   handler: (args, key) => run(() => {
     const roundId = roundOf(args, key.userId);
-    const result = answerRound(key.userId, roundId, { answers: args.answers });
+    const result = answerRound(key.userId, roundId, { answers: args.answers, goalUpdates: args.goalUpdates });
     return { status: result.status, edited: result.edited, blockers: result.blockers, roundId };
   })
 });
