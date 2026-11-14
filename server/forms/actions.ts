@@ -185,7 +185,7 @@ export function renderTemplate(template: string, set: QuestionSet, answers: Reco
 
 // ---------------------------------------------------------------- running
 
-type RunContext = { form: FormRow; responseId: string; publicSubmission: boolean; verified: boolean };
+type RunContext = { form: FormRow; responseId: string; publicSubmission: boolean; verified: boolean; runId: string };
 
 const questionFor = (set: QuestionSet, id: string | null | undefined, role: Question["role"], type?: Question["type"]) =>
   (id ? set.questions.find((question) => question.id === id) : undefined) ?? set.questions.find((question) => question.role === role) ?? (type ? set.questions.find((question) => question.type === type) : undefined);
@@ -255,7 +255,11 @@ async function runOne(action: ActionRow, context: RunContext): Promise<string | 
     const value = createDealConfig.parse(config);
     const book = bookRow(value.bookId);
     if (!book || book.deleted_at !== null || !canEditBook(value.bookId, actor)) throw new Error("The contact book is no longer writable");
-    const existing = db.query(`SELECT d.id FROM work_links l JOIN deals d ON d.id = l.a_id WHERE l.a_kind = 'deal' AND l.b_kind = 'response' AND l.b_id = ? AND l.relation = 'source' AND d.book_id = ? LIMIT 1`)
+    // D865: a retry finds the deal it made, by the id recorded on the run (with the deal, in one
+    // transaction) or, for runs from before that, by the deal's source link to the response.
+    const recorded = (db.query("SELECT result_ref FROM form_action_runs WHERE id = ?").get(context.runId) as { result_ref: string | null } | null)?.result_ref ?? null;
+    const recordedDeal = recorded?.startsWith("deal:") ? db.query("SELECT id FROM deals WHERE id = ? AND book_id = ?").get(recorded.slice(5), book.id) as { id: string } | null : null;
+    const existing = recordedDeal ?? db.query(`SELECT d.id FROM work_links l JOIN deals d ON d.id = l.a_id WHERE l.a_kind = 'deal' AND l.b_kind = 'response' AND l.b_id = ? AND l.relation = 'source' AND d.book_id = ? LIMIT 1`)
       .get(response.id, book.id) as { id: string } | null;
     if (existing) return `deal:${existing.id}`;
     const contactId = saveRespondent(book.id, value);
@@ -265,11 +269,17 @@ async function runOne(action: ActionRow, context: RunContext): Promise<string | 
     const raw = value.valueQuestionId ? answers[value.valueQuestionId] : undefined;
     const minor = typeof raw === "number" && Number.isFinite(raw) && raw >= 0 ? Math.round(raw * 10 ** minorDigits(currency)) : null;
     const title = renderTemplate(value.title, set, answers, { markdown: false }).slice(0, 200).trim() || `Response to ${context.form.title}`.slice(0, 200);
-    const deal = createDeal(actor, {
-      bookId: book.id, pipelineId: value.pipelineId ?? null, stageId: value.stageId ?? null, title,
-      value: minor !== null && minor <= MONEY_MAX_MINOR ? minor : null, contactIds: contactId ? [contactId] : []
-    }, "form");
-    try { createLink({ a: { kind: "deal", id: deal.id }, b: { kind: "response", id: response.id }, relation: "source", actorId: actor, via: "web" as never }); } catch { /* already linked */ }
+    // The deal, its source link, and its id on the run commit together (D865): a failed link rolls the
+    // deal back, so a retry never makes a second one.
+    const deal = db.transaction(() => {
+      const made = createDeal(actor, {
+        bookId: book.id, pipelineId: value.pipelineId ?? null, stageId: value.stageId ?? null, title,
+        value: minor !== null && minor <= MONEY_MAX_MINOR ? minor : null, contactIds: contactId ? [contactId] : []
+      }, "form");
+      createLink({ a: { kind: "deal", id: made.id }, b: { kind: "response", id: response.id }, relation: "source", actorId: actor, via: "web" as never });
+      db.query("UPDATE form_action_runs SET result_ref = ?, updated_at = ? WHERE id = ?").run(`deal:${made.id}`, now(), context.runId);
+      return made;
+    })();
     logFormInteraction([{ kind: "deal", id: deal.id }, ...(contactId ? [{ kind: "contact" as const, id: contactId }] : [])]);
     return `deal:${deal.id}`;
   }
@@ -294,7 +304,7 @@ async function execute(runId: string) {
   const meta = response ? JSON.parse(response.meta_json) as { via?: string; verified?: boolean } : {};
   const publicSubmission = meta.via === "public";
   try {
-    const ref = await runOne(run, { form, responseId: run.response_id, publicSubmission, verified: meta.verified === true });
+    const ref = await runOne(run, { form, responseId: run.response_id, publicSubmission, verified: meta.verified === true, runId });
     db.query("UPDATE form_action_runs SET status = 'done', result_ref = ?, error = NULL, attempts = attempts + 1, updated_at = ? WHERE id = ?").run(ref, now(), runId);
     audit(run.created_by, null, "forms.action_run", { formId: form.id, actionId: run.id, responseId: run.response_id, outcome: "done" });
   } catch (error) {

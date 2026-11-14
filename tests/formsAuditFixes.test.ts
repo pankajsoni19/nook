@@ -13,6 +13,7 @@ const settle = async () => { await Promise.all([...pendingActionRuns]); };
  */
 
 let owner: Session;
+let member: Session;
 const api = async (session: Session | null, method: string, path: string, body?: unknown) => {
   const response = await request(path, { method, ...(body === undefined ? (method === "GET" ? {} : { body: "{}" }) : { body: JSON.stringify(body) }) }, session ?? undefined);
   const text = await response.text();
@@ -41,6 +42,7 @@ const submit = (formId: string, token: string, body: Record<string, unknown>) =>
 
 beforeAll(async () => {
   owner = await createUser("Forms audit owner");
+  member = await createUser("Forms audit member");
 });
 afterAll(() => mail.setMailTransportForTests(null));
 
@@ -133,5 +135,39 @@ describe("Create a deal uses the deal's own currency (D986)", () => {
     expect((await api(owner, "POST", `/forms/${formId}/responses`, { answers: { name: "Kenji", budget: 1250 } })).status).toBe(201);
     await settle();
     expect(db.query("SELECT value_minor, currency, pipeline_id FROM deals WHERE book_id = ?").get(bookId)).toEqual({ value_minor: 1250, currency: "JPY", pipeline_id: pipeline.id });
+  });
+});
+
+describe("Create a deal is made once, even when its link fails (D865)", () => {
+  test("the deal, its link, and its id on the run commit together; a retry never makes a second deal", async () => {
+    const bookId = (await api(owner, "POST", "/crm/books", { name: "Once book" })).body.book.id as string;
+    const set: QuestionSet = { version: 1, sections: [], logic: [], endings: [], questions: [{ id: "name", type: "short_text", title: "Your name", role: "contact_name" }] };
+    const formId = (await api(owner, "POST", "/forms", { kind: "form", title: "Once form", questions: set, publish: true })).body.form.id as string;
+    const at = new Date().toISOString();
+    // The action runs as its author, who can edit the book but (for now) cannot read the form's responses, so the link fails.
+    db.query("UPDATE contact_books SET visibility = 'selected' WHERE id = ?").run(bookId);
+    db.query("INSERT INTO item_members (item_kind, item_id, user_id, level, added_by, created_at) VALUES ('contact_book', ?, ?, 'edit', NULL, ?)").run(bookId, member.userId, at);
+    const actionId = crypto.randomUUID();
+    db.query("INSERT INTO form_actions (id, form_id, kind, config_json, enabled, position, created_by, created_at, updated_at) VALUES (?, ?, 'create_deal', ?, 1, 0, ?, ?, ?)")
+      .run(actionId, formId, JSON.stringify({ bookId, title: "Deal: {{Your name}}" }), member.userId, at, at);
+    expect((await api(owner, "POST", `/forms/${formId}/responses`, { answers: { name: "Once" } })).status).toBe(201);
+    await settle();
+    const deals = () => (db.query("SELECT COUNT(*) AS n FROM deals WHERE book_id = ?").get(bookId) as { n: number }).n;
+    const run = () => db.query("SELECT status, result_ref FROM form_action_runs WHERE action_id = ?").get(actionId) as { status: string; result_ref: string | null };
+    // Nothing half-made: no deal without its link.
+    expect(deals()).toBe(0);
+    expect(run().status).toBe("failed");
+    db.query("UPDATE forms SET visibility = 'selected' WHERE id = ?").run(formId);
+    db.query("INSERT INTO item_members (item_kind, item_id, user_id, level, added_by, created_at) VALUES ('form', ?, ?, 'edit', NULL, ?)").run(formId, member.userId, at);
+    await api(owner, "POST", `/forms/${formId}/actions/${actionId}/retry`);
+    expect(deals()).toBe(1);
+    const made = run();
+    expect(made.status).toBe("done");
+    expect(made.result_ref).toMatch(/^deal:/);
+    // A later retry (the link removed meanwhile) finds the deal by the id on the run.
+    db.query("DELETE FROM work_links WHERE a_kind = 'deal' AND a_id = ?").run(made.result_ref!.slice(5));
+    db.query("UPDATE form_action_runs SET status = 'failed' WHERE action_id = ?").run(actionId);
+    await api(owner, "POST", `/forms/${formId}/actions/${actionId}/retry`);
+    expect(deals()).toBe(1);
   });
 });
