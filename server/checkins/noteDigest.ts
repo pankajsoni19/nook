@@ -3,7 +3,7 @@ import { logger } from "../log";
 import { config } from "../config";
 import { editableNote } from "../access";
 import { checksum, storage, withNoteLock } from "../storage";
-import { publishDraft, writeDraftLocked } from "../noteDrafts";
+import { publishDraftLocked, writeDraftLocked } from "../noteDrafts";
 import { recordItemActivity } from "../activity/service";
 import { notify } from "../notify";
 import { checkinHref, checkinRow, roundRow, summaryOptions, type CheckinRow } from "./store";
@@ -73,13 +73,18 @@ export async function appendRoundToNote(checkinId: string, roundId: string): Pro
     if (!saved) return "skipped";
     recordItemActivity({ itemKind: "checkin", itemId: row.id, actorId: null, via: "system", kind: "summary_posted", payload: { item: { id: round.id, label: round.round_date, kind: "checkin_round" } } });
     audit(actor, note.id, "checkins.summary_note", { checkinId: row.id, roundId: round.id, draft: hasDraft });
-    return hasDraft ? "drafted" : "published";
+    if (hasDraft) return "drafted";
+    // Published in the same lock, at the revision just written (D955): nobody's draft can slip in
+    // between, so only the round's own text (on top of the published version) is ever published.
+    try {
+      await publishDraftLocked(actor, note.id, saved.revision, { allowEditors: true });
+      return "published";
+    } catch (error) {
+      slog.warn("A standup summary could not be published to its note", { checkinId: row.id, error: error instanceof Error ? error.message : String(error) });
+      return "drafted";
+    }
   });
-  if (outcome === "published") {
-    const fresh = db.query("SELECT draft_revision FROM notes WHERE id = ?").get(noteId) as { draft_revision: number | null } | null;
-    try { await publishDraft(actor, noteId, fresh?.draft_revision ?? undefined, { allowEditors: true }); }
-    catch (error) { slog.warn("A standup summary could not be published to its note", { checkinId: row.id, error: error instanceof Error ? error.message : String(error) }); return "drafted"; }
-  } else if (outcome === "drafted") {
+  if (outcome === "drafted") {
     db.transaction(() => notify({ userIds: [actor], module: "checkins", topic: "checkins.summary", title: `${row.name} was added to the note's draft`, body: "Someone has unpublished changes there, so it waits in the draft.", href: checkinHref(row), item: { kind: "checkin", id: row.id }, dedupeKey: `checkin-note:${row.id}` }))();
   }
   return outcome;

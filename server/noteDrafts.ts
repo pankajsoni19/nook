@@ -209,69 +209,72 @@ export function noteAudience(noteId: string) {
  * lock, after the draft exists and before the revision compare (D173).
  */
 export async function publishDraft(userId: string, noteId: string, revision: number | undefined, options: PublishOptions = {}) {
-  return withNoteLock(noteId, async () => {
-    // POST /api/notes/:id/publish lets editors publish too (D274); the version is authored by them.
-    const note = options.allowEditors ? editableNote(noteId, userId) : ownedNote(noteId, userId);
-    if (!note) throw new DraftActionError(404, "Note not found", { error: "Note not found" });
-    if (note.draft_revision === null) throw new DraftActionError(409, "There is no draft to publish", { error: "There is no draft to publish", code: "NO_DRAFT" });
-    options.verify?.(note);
-    if (revision === undefined && note.draft_mcp_key_id !== null) {
-      throw new DraftActionError(400, "Invalid request", { error: "Invalid request", details: ["revision is required to publish a draft written through MCP"] });
-    }
-    if (revision !== undefined && revision !== note.draft_revision) {
-      throw new DraftActionError(409, "Draft changed since you last saw it", { error: "Draft changed since you last saw it", code: "DRAFT_CHANGED", currentRevision: note.draft_revision });
-    }
-    const markdown = await storage.readDraft(noteId);
-    if (!note.draft_checksum || checksum(markdown) !== note.draft_checksum) throw new Error("Draft content failed integrity verification");
-    if (!hasDraftDelta(note, note.draft_checksum)) throw new DraftActionError(409, "Draft matches the published version", { error: "Draft matches the published version", code: "NO_CHANGES" });
-    // Review M1 (T350) and M2 (T354): which of the publisher's own files may join the note. A person
-    // confirms their Files items first; a key never links one, nor an attachment outside its reach.
-    const policy: LinkPolicy = options.key ? keyLinkPolicy(options.key, { kind: "note", hostId: noteId }) : personLinkPolicy(options.confirmAttachments ?? []);
-    const unconfirmed = noteLinksNeedingConfirm(noteId, userId, markdown, policy);
-    if (unconfirmed.length) {
-      const names = unconfirmed.map((file) => file.name);
-      const message = `People who can open this note will be able to open ${names.length === 1 ? names[0] : `${names.length} files from your Files`}`;
-      throw new DraftActionError(409, message, {
-        error: message, code: "CONFIRM_REQUIRED",
-        files: unconfirmed.map((file) => ({ id: file.documentId, name: file.name })),
-        audience: noteAudience(noteId)
-      });
-    }
-    const nextVersion = note.current_version + 1;
-    const stagedMetadata = db.query("SELECT id FROM note_versions WHERE note_id = ? AND version_number = ?").get(noteId, nextVersion);
-    if (stagedMetadata) throw new Error("Next version is already committed");
-    await storage.stageVersion(noteId, nextVersion, markdown, true);
-    const timestamp = now();
-    const versionId = crypto.randomUUID();
-    let links: ReturnType<typeof syncNoteLinks> = { linked: [], unlinked: [], skipped: [], binned: [], confirm: [] };
-    db.transaction(() => {
-      db.query("INSERT INTO note_versions (id, note_id, version_number, title, checksum, author_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
-        .run(versionId, noteId, nextVersion, note.title, checksum(markdown), userId, timestamp);
-      const updated = db.query("UPDATE notes SET current_version = ?, draft_revision = NULL, draft_checksum = NULL, draft_mcp_key_id = NULL, updated_at = ? WHERE id = ? AND owner_id = ? AND current_version = ? AND draft_revision = ?")
-        .run(nextVersion, timestamp, noteId, note.owner_id, note.current_version, note.draft_revision);
-      if (updated.changes !== 1) throw new Error("Concurrent note update detected");
-      indexNote(noteId, "published", note.title, markdown, note.draft_checksum!);
-      recordVersionReferences(noteId, nextVersion, markdown);
-      unindexNote(noteId, "draft");
-      resolveNoteDraftProposals(noteId, { kind: "published", revision: note.draft_revision!, userId });
-      // D408 (U4, G1): the published text's files are linked, so the note's readers can open them.
-      // Only the publisher's own documents the policy allows are added; links already there stay
-      // (T350). A file that became unconfirmed since the check above is skipped, never linked.
-      links = syncNoteLinks(noteId, userId, markdown, policy);
-    })();
-    await storage.finalizePublished(noteId, markdown).catch((error) => slog.error(`Could not refresh current Markdown mirror for note ${noteId}`, error));
-    audit(userId, noteId, "note.publish", { version: nextVersion, ...(note.owner_id !== userId ? { editor: true } : {}) });
-    // Knowledge bases (Wave 44, AC-E) that use this note index it again after 60 s of quiet.
-    notePublishedHook(noteId);
-    // `skippedAttachments`: referenced files that are not the publisher's, which readers open only
-    // if the file itself is shared with them (or the cap of 100 was reached). `binnedAttachments`: the
-    // publisher's own referenced files in their Bin (review M3), which the app offers to restore.
-    return {
-      version: nextVersion, publishedAt: timestamp,
-      ...(links.skipped.length ? { skippedAttachments: links.skipped.length } : {}),
-      ...(links.binned.length ? { binnedAttachments: links.binned } : {})
-    };
-  });
+  return withNoteLock(noteId, () => publishDraftLocked(userId, noteId, revision, options));
+}
+
+/** publishDraft's body, for a caller that already holds the note lock (it wrote the draft it publishes). */
+export async function publishDraftLocked(userId: string, noteId: string, revision: number | undefined, options: PublishOptions = {}) {
+  // POST /api/notes/:id/publish lets editors publish too (D274); the version is authored by them.
+  const note = options.allowEditors ? editableNote(noteId, userId) : ownedNote(noteId, userId);
+  if (!note) throw new DraftActionError(404, "Note not found", { error: "Note not found" });
+  if (note.draft_revision === null) throw new DraftActionError(409, "There is no draft to publish", { error: "There is no draft to publish", code: "NO_DRAFT" });
+  options.verify?.(note);
+  if (revision === undefined && note.draft_mcp_key_id !== null) {
+    throw new DraftActionError(400, "Invalid request", { error: "Invalid request", details: ["revision is required to publish a draft written through MCP"] });
+  }
+  if (revision !== undefined && revision !== note.draft_revision) {
+    throw new DraftActionError(409, "Draft changed since you last saw it", { error: "Draft changed since you last saw it", code: "DRAFT_CHANGED", currentRevision: note.draft_revision });
+  }
+  const markdown = await storage.readDraft(noteId);
+  if (!note.draft_checksum || checksum(markdown) !== note.draft_checksum) throw new Error("Draft content failed integrity verification");
+  if (!hasDraftDelta(note, note.draft_checksum)) throw new DraftActionError(409, "Draft matches the published version", { error: "Draft matches the published version", code: "NO_CHANGES" });
+  // Review M1 (T350) and M2 (T354): which of the publisher's own files may join the note. A person
+  // confirms their Files items first; a key never links one, nor an attachment outside its reach.
+  const policy: LinkPolicy = options.key ? keyLinkPolicy(options.key, { kind: "note", hostId: noteId }) : personLinkPolicy(options.confirmAttachments ?? []);
+  const unconfirmed = noteLinksNeedingConfirm(noteId, userId, markdown, policy);
+  if (unconfirmed.length) {
+    const names = unconfirmed.map((file) => file.name);
+    const message = `People who can open this note will be able to open ${names.length === 1 ? names[0] : `${names.length} files from your Files`}`;
+    throw new DraftActionError(409, message, {
+      error: message, code: "CONFIRM_REQUIRED",
+      files: unconfirmed.map((file) => ({ id: file.documentId, name: file.name })),
+      audience: noteAudience(noteId)
+    });
+  }
+  const nextVersion = note.current_version + 1;
+  const stagedMetadata = db.query("SELECT id FROM note_versions WHERE note_id = ? AND version_number = ?").get(noteId, nextVersion);
+  if (stagedMetadata) throw new Error("Next version is already committed");
+  await storage.stageVersion(noteId, nextVersion, markdown, true);
+  const timestamp = now();
+  const versionId = crypto.randomUUID();
+  let links: ReturnType<typeof syncNoteLinks> = { linked: [], unlinked: [], skipped: [], binned: [], confirm: [] };
+  db.transaction(() => {
+    db.query("INSERT INTO note_versions (id, note_id, version_number, title, checksum, author_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run(versionId, noteId, nextVersion, note.title, checksum(markdown), userId, timestamp);
+    const updated = db.query("UPDATE notes SET current_version = ?, draft_revision = NULL, draft_checksum = NULL, draft_mcp_key_id = NULL, updated_at = ? WHERE id = ? AND owner_id = ? AND current_version = ? AND draft_revision = ?")
+      .run(nextVersion, timestamp, noteId, note.owner_id, note.current_version, note.draft_revision);
+    if (updated.changes !== 1) throw new Error("Concurrent note update detected");
+    indexNote(noteId, "published", note.title, markdown, note.draft_checksum!);
+    recordVersionReferences(noteId, nextVersion, markdown);
+    unindexNote(noteId, "draft");
+    resolveNoteDraftProposals(noteId, { kind: "published", revision: note.draft_revision!, userId });
+    // D408 (U4, G1): the published text's files are linked, so the note's readers can open them.
+    // Only the publisher's own documents the policy allows are added; links already there stay
+    // (T350). A file that became unconfirmed since the check above is skipped, never linked.
+    links = syncNoteLinks(noteId, userId, markdown, policy);
+  })();
+  await storage.finalizePublished(noteId, markdown).catch((error) => slog.error(`Could not refresh current Markdown mirror for note ${noteId}`, error));
+  audit(userId, noteId, "note.publish", { version: nextVersion, ...(note.owner_id !== userId ? { editor: true } : {}) });
+  // Knowledge bases (Wave 44, AC-E) that use this note index it again after 60 s of quiet.
+  notePublishedHook(noteId);
+  // `skippedAttachments`: referenced files that are not the publisher's, which readers open only
+  // if the file itself is shared with them (or the cap of 100 was reached). `binnedAttachments`: the
+  // publisher's own referenced files in their Bin (review M3), which the app offers to restore.
+  return {
+    version: nextVersion, publishedAt: timestamp,
+    ...(links.skipped.length ? { skippedAttachments: links.skipped.length } : {}),
+    ...(links.binned.length ? { binnedAttachments: links.binned } : {})
+  };
 }
 
 /**

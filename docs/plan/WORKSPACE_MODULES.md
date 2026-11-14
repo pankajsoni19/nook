@@ -965,6 +965,7 @@ Server `server/checkins/` (store, service, rounds, views, routes, mcp, registrat
 | D951 | **Friendly ids everywhere**: every `:id` takes the UUID, the short id, or the whole segment (`daily-standup-9bpbp3sood`); the app corrects a stale slug with a replace. |
 | D953 | **MCP Bin tools follow the repo's names**: `bin_checkin` and `restore_checkin` (with `bin:write`) instead of the plan's `delete_checkin` (the MCP rules refuse `delete` in a tool name). |
 | D954 | **Today order fix (foundation, one function)**: `registerTodayRenderer` now inserts a module's section after the last section of its group, as its comment always said; it appended at the end, which broke the group order once a module shipped. |
+| D955 | **The note digest publishes inside its own lock** (audit fix to D1044): `appendRoundToNote` writes the round onto the published text and publishes it in the same note lock, at the draft revision its own write returned (`publishDraftLocked`, split out of `publishDraft`), so a draft someone saves right after can never be published with it as the standup's owner; that editor's draft stays theirs. |
 | D952 | **Foundation tests count shipped modules**: `tests/workspaceRegistry.test.ts` and `tests/workspaceRoutes.test.tsx` keep a `SHIPPED` set (each lane adds its id when it sets `ready: true`) instead of expecting every stub hidden; the built-in lists in tests of Settings (the Workspace entry appears once a module ships, D836), the launcher, Today, `/api/today`, and the reaction registry filter out or name the shipped module's additions. |
 
 
