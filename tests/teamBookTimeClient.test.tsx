@@ -79,6 +79,8 @@ describe("Team: Book time with …", () => {
     const sheet = await view.waitFor(() => document.querySelector('[role="dialog"]'));
     expect(sheet.textContent).toContain("Book time with Ada Lovelace");
     expect(sheet.textContent).toContain("Intro call");
+    // D1261: the sheet is on document.body, not inside the row's transformed actions box (it was clipped).
+    expect(sheet.closest(".team-row-actions, .bk-team-book")).toBeNull();
     expect(document.querySelector('[role="menu"]')).toBeNull();
     await view.click(sheet.querySelector('button[aria-label="Close"]')!);
     await view.waitFor(() => !document.querySelector('[role="dialog"]'));

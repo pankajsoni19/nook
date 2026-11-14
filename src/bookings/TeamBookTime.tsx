@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { createPortal } from "react-dom";
 import { CalendarPlus, ChevronDown } from "lucide-react";
 import { api } from "../api";
 import type { MemberActionDef, MemberActionProps } from "../ui/memberSlots";
@@ -75,9 +76,10 @@ export function BookTimeAction({ member, data, variant }: MemberActionProps) {
         </button>
       </li>)}
     </ul>}
-    {chosen && <Suspense fallback={null}>
+    {/* D1261: on document.body, out of the row's transformed actions box, which clipped and offset it. */}
+    {chosen && createPortal(<Suspense fallback={null}>
       <BookTimeSheet type={chosen} hostName={member.displayName} onClose={() => { setChosen(null); buttonRef.current?.focus(); }} />
-    </Suspense>}
+    </Suspense>, document.body)}
   </div>;
 }
 
