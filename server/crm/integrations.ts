@@ -174,7 +174,7 @@ void DAY;
 
 /** Follow-ups due by the end of today, then your open deals whose next step is due. */
 export const crmTodayProvider: TodayProvider = {
-  href: "/contacts?tab=followups",
+  href: "/contacts/followups",
   mcpScope: "crm:read",
   load: (context) => {
     const key = sectionScope(context, "crm:read", { contact_book: "f.book_id" });
