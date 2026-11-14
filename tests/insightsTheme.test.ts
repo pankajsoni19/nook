@@ -54,3 +54,12 @@ describe("insight chart counts (UI7)", () => {
     expect(ratingBuckets([{ value: 7, count: 1 }], 1, 3).map((entry) => entry.value)).toEqual([1, 2, 3, 7]);
   });
 });
+
+describe("insight charts shrink with the window (D1263)", () => {
+  test("the chart card and the insights column use tracks that may shrink below the drawn chart", async () => {
+    const css = await Bun.file(new URL("../src/ui/workspace.css", import.meta.url)).text();
+    expect(css).toContain(".ui-chart-card { grid-template-columns: minmax(0, 1fr); }");
+    expect(css).toContain(".ui-insights { grid-template-columns: minmax(0, 1fr); }");
+    expect(css).toMatch(/\.ui-chart-card \.report-chart-canvas \{ width: 100%; min-width: 0;/);
+  });
+});

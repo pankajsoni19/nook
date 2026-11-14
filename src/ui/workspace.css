@@ -388,7 +388,12 @@ button.ui-person-body:hover .ui-person-name { color: #f5cf79; }
 .ui-filter-chip:hover { border-color: #45454b; color: #f2f2f3; }
 .ui-filter-chip[aria-pressed="true"] { border-color: #6d5a2c; background: #2b261b; color: #ffe19a; }
 .ui-filter-chip svg { width: 14px; height: 14px; }
-.ui-chart-card .report-chart-canvas { width: 100%; }
+/* D1263: one track that may shrink below the chart's drawn width, so the chart host narrows with the
+   window and its ResizeObserver redraws it (an auto track kept the old SVG width: no shrink). */
+.ui-chart-card { grid-template-columns: minmax(0, 1fr); }
+.ui-chart-card .report-chart-canvas { width: 100%; min-width: 0; overflow: hidden; }
+.ui-insights { grid-template-columns: minmax(0, 1fr); }
+.ui-insights > * { min-width: 0; }
 @media (max-width: 760px) { .ui-filter-chip { min-height: 44px; padding: 0 14px; } }
 
 .ui-kanban-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--tone-success-fill); }
