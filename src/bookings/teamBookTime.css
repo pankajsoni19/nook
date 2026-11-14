@@ -1,0 +1,55 @@
+/* "Book time with …" on the Team page and its booking sheet (D1250–D1253). */
+.bk-team-book { flex: none; }
+.bk-team-book-button svg { width: 16px; height: 16px; flex: none; }
+.bk-team-book-button .bk-team-book-caret { width: 14px; height: 14px; margin-left: -2px; opacity: .8; }
+.bk-team-book.row .bk-team-book-button { white-space: nowrap; }
+.bk-team-book.detail { display: flex; }
+.bk-team-book.detail .bk-team-book-button { max-width: 100%; }
+.bk-team-book.detail .bk-team-book-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.bk-team-book.detail .ui-menu { left: 0; right: auto; }
+.bk-team-book-menu { min-width: 240px; }
+.bk-team-book-item { min-height: 48px; align-items: flex-start; padding: 8px 10px; }
+.bk-team-book-dot { width: 10px; height: 10px; margin-top: 4px; flex: none; border-radius: 50%; }
+.bk-team-book-copy { min-width: 0; display: grid; gap: 2px; }
+.bk-team-book-copy strong { overflow: hidden; color: #ededee; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.bk-team-book-copy small { color: #929299; font-size: .76rem; }
+@media (max-width: 760px) {
+  .bk-team-book-item { min-height: 52px; }
+}
+@media (max-width: 420px) {
+  /* Narrow phones: the row's button keeps its icon; the name lives in its accessible label. */
+  .bk-team-book.row .bk-team-book-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .bk-team-book.row .bk-team-book-button { width: 44px; justify-content: center; padding: 0; }
+  .bk-team-book.row .bk-team-book-caret { display: none; }
+}
+
+/* The sheet */
+@media (min-width: 761px) { .file-dialog.bk-book-sheet { width: min(720px, calc(100vw - 32px)); max-height: min(760px, calc(100dvh - 48px)); } }
+.bk-book-body { display: grid; gap: 14px; padding: 4px 20px 20px; }
+.bk-book-facts { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 0; padding: 0; color: #c9c9cd; font-size: .86rem; list-style: none; }
+.bk-book-facts li { display: inline-flex; align-items: center; gap: 6px; }
+.bk-book-facts svg { width: 15px; height: 15px; flex: none; color: #929299; }
+.bk-book-chosen { color: #f5cf79; font-weight: 650; }
+.bk-book-description { margin: 0; color: #a1a1a8; font-size: .86rem; line-height: 1.5; white-space: pre-line; }
+.bk-book-note { margin: 0; color: #a1a1a8; font-size: .84rem; }
+.bk-book-durations { display: flex; flex-wrap: wrap; gap: 6px; }
+.bk-book-durations button { min-height: 36px; border: 1px solid #3a3a3f; border-radius: 999px; padding: 0 14px; background: transparent; color: #e1e1e3; font: inherit; font-size: .84rem; font-weight: 600; cursor: pointer; }
+.bk-book-durations button.selected { border-color: var(--yellow, #f6c453); background: rgb(246 196 83 / 14%); color: #f5cf79; }
+.bk-book-fields { display: grid; gap: 14px; }
+.bk-book-back { justify-self: start; display: inline-flex; align-items: center; gap: 6px; }
+.bk-book-back svg { width: 15px; height: 15px; }
+.bk-book-hint { color: #7c7c83; font-size: .76rem; font-weight: 400; }
+.bk-book-error { color: #ffb4bd; font-size: .78rem; font-weight: 500; }
+.bk-book-form { display: grid; gap: 4px; }
+.bk-book-form .file-dialog-actions { padding: 12px 0 0; }
+.bk-book-done { display: grid; justify-items: center; gap: 6px; padding: 12px 0 0; text-align: center; }
+.bk-book-done h3 { margin: 4px 0; color: #fafafa; font-size: 1.1rem; }
+.bk-book-done p { margin: 0; color: #d6d6d9; font-size: .9rem; }
+.bk-book-done .bk-book-muted { color: #929299; font-size: .84rem; }
+.bk-book-done-icon { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 12px; background: rgb(246 196 83 / 14%); color: #f5cf79; }
+.bk-book-done-icon svg { width: 22px; height: 22px; }
+.bk-book-done .file-dialog-actions { align-self: stretch; justify-content: center; padding: 12px 0 0; }
+.bk-book-done a.secondary-button { display: inline-flex; align-items: center; min-height: 44px; padding: 0 16px; text-decoration: none; font-size: .84rem; font-weight: 650; }
+@media (max-width: 760px) {
+  .bk-book-body { padding: 4px 16px 16px; }
+}

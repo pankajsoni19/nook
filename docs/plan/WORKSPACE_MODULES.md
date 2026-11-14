@@ -1377,6 +1377,18 @@ Deferred: editing an existing widget in the builder (Inspect → Edit SQL shows 
 | D1128 | **Outside-feed all-day blocks follow the schedule's zone**: the feed cache keeps an all-day block's dates, and `feedBusy(…, tz)` places them in the host's schedule zone as Nook calendar all-day events are; blocks cached before keep their stored instants until the next refresh. |
 | D1129 | **A new profile and working hours use the browser's zone** (UI3): `GET /api/bookings/profile` and `/schedules` take `?tz=` and the Bookings app asks for the profile on open; without it, the first non-UTC zone another module stored (mail, then Time), else UTC. An existing profile never moves. The slot calendar's today mark is a whole inset ring (was an inset bottom edge, half a ring on a round cell). |
 
+### D.10 Leftovers built
+
+#### Team page "Book time with …" (branch `feat/team-book-time`, decisions D1250–D1254)
+
+| ID | Decision |
+|---|---|
+| D1250 | **Who offers what.** `GET /api/bookings/bookable?users=…` answers for a whole Team list in one query (no request per member): each member's bookable types for the viewer, at most 20 each. A member offers a type they host on every booking of it: the owner of a single-host type, each host of a collective one. Round robin is left out (the booker cannot pick who they get), and so is anything the viewer owns or hosts. Hosts must be able to host (not blocked; admins and members). Viewers and guests get nothing (they cannot book). |
+| D1251 | **Bookable** = live and active, and either readable by the viewer (its sharing) or open on its public page (public, the workspace allows public booking pages, the owner active with the profile on: the same rule as `/p/book/<handle>/<slug>`). `requireTypeForBooking` applies it to `POST /api/bookings`, `/types/:id/slots` (readers keep any status, the editor's preview), `/types/:id/form`, and MCP `create_booking`/`get_availability`, so a member can book a colleague's public type in the app without it being shared. A hidden type still books only for its owner (D1127). |
+| D1252 | **The in-app sheet** (`src/bookings/BookTimeSheet.tsx`, a dialog on a computer and a bottom sheet on a phone, one history layer): length and time in the shared SlotPicker, then the place when the type asks, guests, and the published intake questions (QuestionRenderer, audience member), then a confirmation. It books as the viewer through `POST /api/bookings` (source `internal`), which now takes `tz`, `location`, `guests`, and `answers` beside the booker it fills in; the viewer reads the booking as its booker (D1022). |
+| D1253 | **Member actions**, a slot like item sections (D1056): a module's `memberActions` (`src/ui/memberSlots.ts`) load their data once for the members on screen and render a button only for members their data names, so a member without types shows nothing. Team renders them beside each row ("Book time", an icon only under 420 px) and on the profile ("Book time with <name>"). One type opens the sheet; several open a small chooser (title, lengths, group, needs approval). Hidden for viewers and guests and while Bookings is off. |
+| D1254 | **MCP `list_bookable_types`** (`bookings:read`, list mode, offered to agents): `{ hostIds? }` → `{ hosts: [{ userId, name, types }] }` by the D1250 rule; a key over chosen types sees only those (T203). Then `get_availability` and `create_booking`. |
+
 ## E. Design and UX guidelines
 
 Nook is dark-only with a warm amber accent (`--yellow #f6c453`, focus `--field-focus`), panels `#111113`/`#18181b`, borders `#29292d`, muted `#929299`, 8–10 px radii, `.84rem` controls, sheets on phones, and lucide icons. New modules must be indistinguishable in craft from Tasks and Reports.

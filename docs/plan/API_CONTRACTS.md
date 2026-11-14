@@ -3063,14 +3063,16 @@ Module routes (session; guests 404). Errors `{ error, code }`; unreadable is `NO
 | `GET/POST /api/bookings/types/:ref/secret-links`, `DELETE …/:linkId` | `{ singleUse?, expiresInDays?, label? }` | `{ link: { id, path } }` (path shown once) |
 | `GET /api/bookings/types/:ref/embed`, `GET /api/bookings/contact-books` | — | embed card / editable books |
 | `GET /api/bookings` | `view=upcoming\|pending\|past\|cancelled`, `type`, `from`, `to`, `cursor`, `limit` | `{ items, nextCursor }` |
-| `POST /api/bookings` | `{ type, start, duration?, booker?, contactId? }` | internal booking; 409 `SLOT_TAKEN` |
+| `POST /api/bookings` | `{ type, start, duration?, booker?, contactId?, tz?, location?, guests?, answers? }` (the last four when booking as yourself, D1252) | internal booking of a type you read or a colleague's public, open type (D1251); 409 `SLOT_TAKEN` |
+| `GET /api/bookings/bookable` | `users=a,b,…` (≤ 500; absent = everyone) | `{ hosts: { userId: [{ id, shortId, title, description, durations, color, locationKind, confirm, assignment, href }] } }`, the Team page's "Book time with …" (D1250); viewers get `{}` |
+| `GET /api/bookings/types/:ref/form` | — | `{ type: { …, locationLabel, location, needsLocation }, hosts, questions }` for the in-app booking sheet (D1252) |
 | `GET /api/bookings/b/:ref`, `GET …/slots` | — | `{ booking }` with answers / reschedule slots |
 | `POST /api/bookings/b/:ref/approve\|decline\|cancel\|reschedule\|no-show` | `{ message? }`, reschedule `{ start, message? }` | `{ booking }` |
 | `GET /api/bookings/insights` | `days, tz` | KPIs and series (dataset `bookings.bookings`) |
 
 Public (no session, strict headers, one 404): `GET /api/public/book/:handle`, `GET /api/public/book/:handle/:slug` and `/api/public/book/link/:token` (`{ meta: { renderNonce }, host, type, questions, verifyEmail, mail }`), `…/slots` (≤ 31 days), `POST …/bookings` (`{ start, duration, tz, name, email, guests?, location?, answers, nonce, website }` → 201 `{ status, manageUrl, mailQueued, booking }` or 202 `{ status: "verify", verificationId }`), `POST …/verify` (`{ id, code }`), `GET /api/public/bookings/manage/:token` (+ `/ics`, `/slots`), `POST …/cancel` (`{ reason?, nonce, website }`), `POST …/reschedule` (`{ start, reason?, nonce, website }` → new `manageUrl`). Pages: `/p/book/:handle`, `/p/book/:handle/:slug`, `/p/book/link/:token`, `/p/book/manage/:token`.
 
-MCP (`bookings:read` / `bookings:write`): `list_booking_types`, `get_booking_type`, `create_booking_type`, `update_booking_type`, `bin_booking_type` and `restore_booking_type` (+ `bin:write`), `get_availability`, `list_bookings`, `get_booking`, `create_booking`, `reschedule_booking`, `cancel_booking`, `confirm_booking_request`, `decline_booking`, `mark_no_show`, `get_booking_link`. Agents: reads, `get_availability`, `create_booking`.
+MCP (`bookings:read` / `bookings:write`): `list_booking_types`, `get_booking_type`, `list_bookable_types` (`{ hostIds? }` → colleagues and the types the user can book with them, D1254), `create_booking_type`, `update_booking_type`, `bin_booking_type` and `restore_booking_type` (+ `bin:write`), `get_availability`, `list_bookings`, `get_booking`, `create_booking`, `reschedule_booking`, `cancel_booking`, `confirm_booking_request`, `decline_booking`, `mark_no_show`, `get_booking_link`. Agents: reads (`list_bookable_types` included), `get_availability`, `create_booking`.
 
 ## Changes to existing note endpoints (Wave 4)
 

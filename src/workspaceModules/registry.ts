@@ -4,6 +4,7 @@ import type { PendingLink } from "../router";
 import { registerBoardHeaderItem, registerCardFaceBadge, registerCardHeaderAction, registerCardSection, registerTimelineDecoration } from "../ui/cardSlots";
 import { registerEmbedKind, registerSlashItem } from "../editor/moduleEmbedRegistry";
 import { registerItemSection } from "../ui/itemSlots";
+import { registerMemberAction } from "../ui/memberSlots";
 import { WORKSPACE_MODULE_IDS, type WorkspaceClientModule, type WorkspaceModuleId, type WorkspaceRoute } from "./types";
 
 /**
@@ -30,6 +31,7 @@ export function registerWorkspaceClientModule(module: WorkspaceClientModule) {
   for (const embed of module.embedRenderers ?? []) registerEmbedKind({ ...embed, module: module.id });
   for (const item of module.slashItems ?? []) registerSlashItem({ ...item, module: module.id });
   for (const section of module.itemSections ?? []) registerItemSection({ ...section, module: module.id });
+  for (const action of module.memberActions ?? []) registerMemberAction({ ...action, module: module.id });
   for (const listener of [...listeners]) listener(module);
 }
 
