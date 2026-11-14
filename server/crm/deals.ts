@@ -6,7 +6,7 @@ import { isCurrency } from "../../shared/money";
 import { crmDealPath, isRotting, weightedValue, type CrmBoard, type CrmDeal, type CrmDealDetail, type CrmPipeline, type CrmStage, type StageKind } from "../../shared/crm";
 import {
   bookCurrency, bookFields, bookSettings, cleanDate, cleanRef, cleanTags, cleanText, cleanUserId, createPipelineRows, CrmError, decodeCursor, encodeCursor, ensureRottingSchedule, invalid,
-  notFound, notifyReaders, parseTags, readableBooksSql, readCustom, refColumn, requireBook, userRef, writeCustom
+  notFound, notifyReaders, parseTags, readableBooksSql, readCustom, refColumn, requireBook, userRef, writeCustom, type BookRow
 } from "./core";
 import { afterCursor, compileFilters, sortSql } from "./query";
 import type { ListInput } from "./records";
@@ -313,6 +313,18 @@ function positionAt(stageId: string, dealId: string, toIndex: number) {
     return index + 0.5;
   }
   return (before + after) / 2;
+}
+
+/**
+ * The currency a new deal in `book` gets when none is given (D986): the pipeline's (the one named, else
+ * the book's first, as createDeal picks it), else the book's. Callers that turn a typed amount into
+ * minor units use it, so the digits match the currency the deal is saved in.
+ */
+export function newDealCurrency(book: Pick<BookRow, "id" | "settings_json">, pipelineId: string | null | undefined): string {
+  const pipeline = (pipelineId
+    ? db.query("SELECT currency FROM pipelines WHERE id = ? AND book_id = ? AND deleted_at IS NULL").get(String(pipelineId).toLowerCase(), book.id)
+    : db.query("SELECT currency FROM pipelines WHERE book_id = ? AND deleted_at IS NULL ORDER BY position, id LIMIT 1").get(book.id)) as { currency: string | null } | null;
+  return pipeline?.currency ?? bookCurrency(book);
 }
 
 export function createDeal(userId: string, input: DealInput, source: "manual" | "import" | "booking" | "form" | "mcp" = "manual"): CrmDeal {

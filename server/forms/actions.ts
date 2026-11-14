@@ -9,9 +9,9 @@ import { notify } from "../notify";
 import { upsertSchedule } from "../schedules/service";
 import { getResponse, setVersion } from "../questions/service";
 import { LEVEL_RANK } from "../access/levels";
-import { createDeal } from "../crm/deals";
+import { createDeal, newDealCurrency } from "../crm/deals";
 import { logInteraction } from "../crm/interactions";
-import { bookCurrency, bookRow } from "../crm/core";
+import { bookRow } from "../crm/core";
 import { minorDigits, MONEY_MAX_MINOR } from "../../shared/money";
 import { FormError, formRowById, host, onResponseSubmitted, requireForm, type FormRow } from "./service";
 import { YES_NO_OPTIONS, type AnswerValue, type Question, type QuestionSet } from "../../shared/questions";
@@ -259,13 +259,14 @@ async function runOne(action: ActionRow, context: RunContext): Promise<string | 
       .get(response.id, book.id) as { id: string } | null;
     if (existing) return `deal:${existing.id}`;
     const contactId = saveRespondent(book.id, value);
-    const pipelineCurrency = value.pipelineId ? (db.query("SELECT currency FROM pipelines WHERE id = ?").get(value.pipelineId) as { currency: string | null } | null)?.currency ?? null : null;
-    const currency = pipelineCurrency ?? bookCurrency(book);
+    // D986: the currency the deal will be saved in (its pipeline's, else the book's), never forced:
+    // the typed amount is scaled by that currency's own minor digits (JPY 0, USD 2, KWD 3).
+    const currency = newDealCurrency(book, value.pipelineId ?? null);
     const raw = value.valueQuestionId ? answers[value.valueQuestionId] : undefined;
     const minor = typeof raw === "number" && Number.isFinite(raw) && raw >= 0 ? Math.round(raw * 10 ** minorDigits(currency)) : null;
     const title = renderTemplate(value.title, set, answers, { markdown: false }).slice(0, 200).trim() || `Response to ${context.form.title}`.slice(0, 200);
     const deal = createDeal(actor, {
-      bookId: book.id, pipelineId: value.pipelineId ?? null, stageId: value.stageId ?? null, title, currency,
+      bookId: book.id, pipelineId: value.pipelineId ?? null, stageId: value.stageId ?? null, title,
       value: minor !== null && minor <= MONEY_MAX_MINOR ? minor : null, contactIds: contactId ? [contactId] : []
     }, "form");
     try { createLink({ a: { kind: "deal", id: deal.id }, b: { kind: "response", id: response.id }, relation: "source", actorId: actor, via: "web" as never }); } catch { /* already linked */ }

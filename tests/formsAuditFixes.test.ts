@@ -117,3 +117,21 @@ describe("hidden fields are not identity on public submissions (D864, T523)", ()
     expect(emailsIn(bookId)).toContain("lead@inside.test");
   });
 });
+
+describe("Create a deal uses the deal's own currency (D986)", () => {
+  test("no pipeline chosen: the book's first pipeline in JPY gets ¥1250 as 1250, not the book's USD scaled by 100", async () => {
+    const book = await api(owner, "POST", "/crm/books", { name: "Yen book" });
+    const bookId = book.body.book.id as string;
+    const pipeline = (await api(owner, "GET", `/crm/pipelines?book=${bookId}`)).body.pipelines[0];
+    expect((await api(owner, "PATCH", `/crm/pipelines/${pipeline.id}`, { currency: "JPY" })).status).toBe(200);
+    const set: QuestionSet = { version: 1, sections: [], logic: [], endings: [], questions: [
+      { id: "name", type: "short_text", title: "Your name", role: "contact_name" },
+      { id: "budget", type: "number", title: "Budget" }
+    ] };
+    const formId = (await api(owner, "POST", "/forms", { kind: "form", title: "Yen quote", questions: set, publish: true })).body.form.id as string;
+    expect((await api(owner, "POST", `/forms/${formId}/actions`, { kind: "create_deal", config: { bookId, title: "Quote: {{Your name}}", valueQuestionId: "budget" } })).status).toBe(201);
+    expect((await api(owner, "POST", `/forms/${formId}/responses`, { answers: { name: "Kenji", budget: 1250 } })).status).toBe(201);
+    await settle();
+    expect(db.query("SELECT value_minor, currency, pipeline_id FROM deals WHERE book_id = ?").get(bookId)).toEqual({ value_minor: 1250, currency: "JPY", pipeline_id: pipeline.id });
+  });
+});
