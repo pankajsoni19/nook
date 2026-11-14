@@ -8,13 +8,15 @@ import type { WorkSummary } from "../../shared/workRefs";
 import type { WorkspaceAppProps } from "../workspaceModules/types";
 import { answerRound, errorText, fieldErrors, roundByDate, roundPrefill, skipRound, unblock } from "./api";
 import { dateText, timeText } from "./parts";
+import { GoalUpdates, goalUpdatesOf, useGoalTargets, type GoalValues } from "./GoalUpdates";
 
 /**
  * The answer sheet (§D.4 UI): a page on desktop, one question per step with progress dots on phones.
  * Roles get smart help (D936): "done" offers the cards you finished and last time's plan, "plan" your
  * cards in progress or due, "blockers" a one-tap "No blockers", your planned cards, and "Unblock" for
- * cards still flagged from last time. Every text question can take "Same as last time". Nothing is
- * posted until you press Submit (⌘/Ctrl+Enter).
+ * cards still flagged from last time, "goal_update" your goals' key results (values become goal
+ * check-ins, C5). Every text question can take "Same as last time". Nothing is posted until you press
+ * Submit (⌘/Ctrl+Enter).
  */
 
 const phoneQuery = "(max-width: 760px)";
@@ -47,6 +49,7 @@ export function AnswerSheet({ detail, date, onDone, onCancel, onOpenPath }: Work
   const [busy, setBusy] = useState(false);
   const [step, setStep] = useState(0);
   const [unblocked, setUnblocked] = useState<string[]>([]);
+  const [goalValues, setGoalValues] = useState<GoalValues>({});
   const phone = usePhone();
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -63,6 +66,7 @@ export function AnswerSheet({ detail, date, onDone, onCancel, onOpenPath }: Work
   }, [detail.id, date]);
 
   const set: QuestionSet | null = round ? round.sets[String(Math.max(...Object.keys(round.sets).map(Number)))] ?? null : null;
+  const goalTargets = useGoalTargets(Boolean(set?.questions.some((question) => question.role === "goal_update")) && !detail.anonymous);
   const visible = useMemo(() => set ? evaluateLogic(set, answers).visible.map((id) => set.questions.find((question) => question.id === id)!).filter(Boolean) : [], [set, answers]);
 
   const submit = async () => {
@@ -77,8 +81,10 @@ export function AnswerSheet({ detail, date, onDone, onCancel, onOpenPath }: Work
     setBusy(true);
     setFailure(null);
     try {
-      const result = await answerRound(round.round.id, answers, prefill?.current?.revision);
-      onDone(result.edited ? "Your answer is updated" : result.blockers ? `Answer posted; ${result.blockers} blocker${result.blockers === 1 ? "" : "s"} linked` : "Answer posted");
+      const goalUpdates = goalUpdatesOf(goalValues);
+      const result = await answerRound(round.round.id, answers, prefill?.current?.revision, goalUpdates);
+      const goals = goalUpdates.length ? `; ${goalUpdates.length} goal${goalUpdates.length === 1 ? "" : "s"} checked in` : "";
+      onDone(result.edited ? `Your answer is updated${goals}` : result.blockers ? `Answer posted; ${result.blockers} blocker${result.blockers === 1 ? "" : "s"} linked${goals}` : `Answer posted${goals}`);
     } catch (reason) {
       setErrors(fieldErrors(reason));
       setFailure(errorText(reason, "Your answer could not be posted"));
@@ -119,6 +125,7 @@ export function AnswerSheet({ detail, date, onDone, onCancel, onOpenPath }: Work
     if (isText && (question.role === "plan" || question.prefill === "suggest_cards_planned" || question.role === "blockers")) chips.push(...prefill.plannedCards.map((card) => ({ card })));
     const unique = chips.filter((chip, index) => chips.findIndex((other) => other.card.id === chip.card.id) === index).slice(0, 8);
     return <div className="standup-helpers">
+      {question.role === "goal_update" && goalTargets && <GoalUpdates targets={goalTargets} values={goalValues} onChange={setGoalValues} onOpenPath={onOpenPath} />}
       {question.role === "blockers" && isText && <button type="button" className="ui-filter-chip" aria-pressed={value === "None"} onClick={() => update(question, "None")}><Check aria-hidden="true" />No blockers</button>}
       {question.role === "done" && isText && prefill.lastPlan && <button type="button" className="ui-filter-chip" onClick={() => update(question, (current) => appendLine(current, prefill.lastPlan!))}><History aria-hidden="true" />Last time's plan</button>}
       {isText && typeof last === "string" && last && <button type="button" className="ui-filter-chip" onClick={() => update(question, last)}><Undo2 aria-hidden="true" />Same as last time</button>}

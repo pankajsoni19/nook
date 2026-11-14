@@ -16,7 +16,8 @@ import { utcToZoned, zonedToUtc } from "../../shared/calendarRecurrence";
 import { ANSWER_GRACE_MS, ANSWER_REF_PATTERN, answerText, type ParticipationState } from "../../shared/checkins";
 import type { QuestionSet, ResponseSummary } from "../../shared/questions";
 import { CheckinError, checkinHref, checkinLevel, checkinRow, notFound, roundRow, scheduleOf, summaryOptions, type CheckinRow, type ParticipantRow, type RoundRow, type RoundParticipantRow } from "./store";
-import { runGoalUpdaters } from "./goalUpdates";
+import { runGoalUpdaters, type StandupGoalUpdate } from "./goalUpdates";
+import { queueRoundNote } from "./noteDigest";
 
 /**
  * Rounds (docs/plan/WORKSPACE_MODULES.md §D.4, D930–D937): when they open, remind, and close, and
@@ -269,6 +270,8 @@ export function closeRound(row: CheckinRow, round: RoundRow, nowMs: number, acto
       ...(options.email ? { email: { template: "checkins.summary", payload: { roundId: round.id }, coalesceKey: `checkin-summary:${round.id}` } } : {})
     });
   }
+  // C23 (D1044): the round goes to the standup's note after this transaction.
+  if (summaryOptions(row).noteId) queueRoundNote(row.id, round.id);
   recordItemActivity({ itemKind: "checkin", itemId: row.id, actorId, via: actorId ? undefined : "system", kind: "round_closed", payload: { item: { id: round.id, label: round.round_date, kind: "checkin_round" } }, at: timestamp });
   audit(actorId, null, "checkins.round_close", { checkinId: row.id, roundId: round.id });
   return true;
@@ -338,7 +341,9 @@ export function nudgeRound(row: CheckinRow, round: RoundRow, actorId: string, no
 
 // ---------------------------------------------------------------- answers
 
-export type AnswerInput = { answers: Record<string, unknown>; expectedRevision?: number; nowMs?: number };
+export type AnswerInput = { answers: Record<string, unknown>; expectedRevision?: number; nowMs?: number;
+  /** New values for the person's key results beside a `goal_update` question (§C5, D1043). */
+  goalUpdates?: readonly StandupGoalUpdate[] };
 
 /** The round a person may answer, with their row; NOT_FOUND for a round they cannot read, 403 when they do not take part. */
 export function answerableRound(roundId: string, userId: string, nowMs: number) {
@@ -371,6 +376,7 @@ export function answerRound(userId: string, roundId: string, input: AnswerInput)
   const nowMs = input.nowMs ?? Date.now();
   return db.transaction(() => {
     const { round, row, participant } = answerableRound(roundId, userId, nowMs);
+    if (row.anonymous && input.goalUpdates?.length) throw new CheckinError(400, "ANONYMOUS", "Anonymous standups can't check in on goals");
     const host = { kind: "checkin" as const, id: row.id };
     const existing = currentResponseId(row, round.id, userId);
     let response: ResponseSummary;
@@ -396,7 +402,7 @@ export function answerRound(userId: string, roundId: string, input: AnswerInput)
       if (text.trim()) db.query("INSERT INTO checkins_fts (response_id, body) VALUES (?, ?)").run(response.id, text.slice(0, 50_000));
       syncMentions({ kind: "checkin_round", id: response.id }, text, userId);
       blockers = syncBlockers(row, round, response, set, userId, nowMs);
-      runGoalUpdaters({ userId, checkinId: row.id, roundId: round.id, responseId: response.id, set, answers: response.answers });
+      runGoalUpdaters({ userId, checkinId: row.id, checkinName: row.name, roundId: round.id, responseId: response.id, set, answers: response.answers, goalUpdates: input.goalUpdates ?? [] });
       recordItemActivity({ itemKind: "checkin_round", itemId: round.id, container: { kind: "checkin", id: row.id }, actorId: userId, kind: existing ? "answer_edited" : "answered", payload: { item: { id: response.id, label: "Answer" } } });
     }
     audit(userId, null, "checkins.answer", { checkinId: row.id, roundId: round.id, edited: Boolean(existing), ...(row.anonymous ? {} : { responseId: response.id }) });

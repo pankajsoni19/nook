@@ -295,5 +295,6 @@ export const formsMcpTools: McpToolSpec[] = [
   })
 ];
 
-export const FORMS_AGENT_ALLOWED = ["list_forms", "search_forms", "get_form", "list_responses", "get_response", "get_form_summary", "export_responses", "submit_response", "create_poll", "vote_poll"] as const;
-export const FORMS_AGENT_NEVER = ["create_form", "update_form", "update_form_questions", "set_form_status", "duplicate_form", "bin_form", "drop_response", "bulk_drop_responses", "create_time_poll", "finalize_time_poll"] as const;
+// create_form is offered as the form_create proposal kind (Wave 3, D1047).
+export const FORMS_AGENT_ALLOWED = ["list_forms", "search_forms", "get_form", "list_responses", "get_response", "get_form_summary", "export_responses", "submit_response", "create_poll", "vote_poll", "create_form"] as const;
+export const FORMS_AGENT_NEVER = ["update_form", "update_form_questions", "set_form_status", "duplicate_form", "bin_form", "drop_response", "bulk_drop_responses", "create_time_poll", "finalize_time_poll"] as const;

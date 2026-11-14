@@ -5,7 +5,7 @@ import type { ModuleRouter } from "../workspaceRegistry";
 import { parseJson } from "../validation";
 import { LinkError, linksOf } from "../links/service";
 import {
-  addKeyResult, checkIn, closeGoal, closePeriod, createGoal, createPeriod, deleteGoal, deleteKeyResult, deletePeriod, ensureSweep, getGoal, goalHistory, goalsOfItem,
+  addKeyResult, checkIn, checkinTargets, closeGoal, closePeriod, createGoal, createPeriod, deleteGoal, deleteKeyResult, deletePeriod, ensureSweep, getGoal, goalHistory, goalsOfItem,
   GoalError, krHistory, listCheckins, listGoals, listPeriods, previewSource, progressSources, reopenGoal, requireGoal, updateGoal, updateKeyResult, updatePeriod
 } from "./service";
 import { checkinSchema, closeSchema, goalInputSchema, goalPatchSchema, krInputSchema, krPatchSchema, periodPatchSchema, periodSchema, sourceSchema } from "./schemas";
@@ -39,6 +39,8 @@ const param = (c: Context<AppEnv>, name: string) => (c.req.param(name) ?? "").sl
 export function registerGoalRoutes(router: ModuleRouter) {
   // Static paths first (the dispatcher matches in registration order).
   router.get("/api/goals/sources", handle(() => ({ sources: progressSources() })));
+  // Goals you can check in on from a standup answer (§C5, D1043).
+  router.get("/api/goals/checkin-targets", handle((_c, userId) => ({ goals: checkinTargets(userId) })));
   router.get("/api/goals/for-item", handle((c, userId) => {
     const kind = c.req.query("kind") ?? "";
     const id = (c.req.query("id") ?? "").toLowerCase();

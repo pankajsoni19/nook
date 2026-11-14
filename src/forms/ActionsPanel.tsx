@@ -15,8 +15,9 @@ import { SelectField, Toggle } from "./fields";
  * Response actions (§C C2, C3, D845): what each new response does. "Create a card" (board, column,
  * title and description templates with {{question}} tokens, a due date from a date question), "Save
  * as a contact" (a contact book; name, email, phone, and company from the questions with those roles),
- * and "Notify people". Each shows its last run; failed runs are retried automatically and can be
- * retried here.
+ * "Create a deal" (a book's pipeline and stage, a title template, the value from a number question;
+ * the respondent becomes its contact, C3, D1045), and "Notify people". Each shows its last run; failed
+ * runs are retried automatically and can be retried here.
  */
 const KIND_LABEL: Record<FormActionKind, string> = { create_card: "Create a card", save_contact: "Save as a contact", notify: "Notify people", create_deal: "Create a deal" };
 const KIND_ICON = { create_card: KanbanSquare, save_contact: Contact, notify: BellRing, create_deal: Workflow } as const;
@@ -38,6 +39,11 @@ export function ActionsPanel({ form, set }: { form: FormDetail; set: QuestionSet
     }
     if (action.kind === "save_contact") return `Into ${targets?.books.find((book) => book.id === config.bookId)?.name ?? "a contact book"}`;
     if (action.kind === "notify") return `${(config.userIds as string[] | undefined)?.length ?? 0} people`;
+    if (action.kind === "create_deal") {
+      const book = targets?.books.find((item) => item.id === config.bookId);
+      const pipeline = book?.pipelines?.find((item) => item.id === config.pipelineId);
+      return `${book?.name ?? "A contact book"}${pipeline ? ` → ${pipeline.name}` : ""} · “${config.title}”`;
+    }
     return "";
   };
   if (actions === null) return <p className="ui-panel-loading">Loading actions…</p>;
@@ -61,6 +67,7 @@ export function ActionsPanel({ form, set }: { form: FormDetail; set: QuestionSet
       : <div className="forms-row-actions">
         <button type="button" className="secondary-button" onClick={() => setAdding("create_card")}><Plus aria-hidden="true" />Create a card</button>
         <button type="button" className="secondary-button" onClick={() => setAdding("save_contact")}><Plus aria-hidden="true" />Save as a contact</button>
+        <button type="button" className="secondary-button" onClick={() => setAdding("create_deal")}><Plus aria-hidden="true" />Create a deal</button>
         <button type="button" className="secondary-button" onClick={() => setAdding("notify")}><Plus aria-hidden="true" />Notify people</button>
       </div>}
     <p className="forms-muted">Tokens: <code>{"{{Question title}}"}</code> or <code>{"{{answers}}"}</code> for every answer. Answers are inserted as plain text.</p>
@@ -78,7 +85,15 @@ function ActionForm({ kind, form, set, targets, onCancel, onSaved, onTargets }: 
   const [bookId, setBookId] = useState<string | null>(targets?.books[0]?.id ?? null);
   const [newBook, setNewBook] = useState("");
   const [people, setPeople] = useState<PersonSummary[]>([]);
+  const [pipelineId, setPipelineId] = useState<string>("__first");
+  const [stageId, setStageId] = useState<string>("__first");
+  const [valueQuestion, setValueQuestion] = useState<string>("__none");
   const [busy, setBusy] = useState(false);
+  const pipelines = targets?.books.find((book) => book.id === bookId)?.pipelines ?? [];
+  const pipeline = pipelines.find((item) => item.id === pipelineId) ?? pipelines[0];
+  const numbers = set.questions.filter((question) => question.type === "number");
+  useEffect(() => { setPipelineId("__first"); setStageId("__first"); }, [bookId]);
+  useEffect(() => { setStageId("__first"); }, [pipelineId]);
   useEffect(() => { setColumnId(board?.columns[0]?.id ?? null); }, [boardId]); // eslint-disable-line react-hooks/exhaustive-deps
   const dates = set.questions.filter((question) => question.type === "date" || question.type === "datetime");
   const save = async () => {
@@ -94,6 +109,8 @@ function ActionForm({ kind, form, set, targets, onCancel, onSaved, onTargets }: 
           onTargets({ ...(targets ?? { boards: [], books: [], calendars: [] }), books: [...(targets?.books ?? []), created.book] });
         }
         config = { bookId: book };
+      } else if (kind === "create_deal") {
+        config = { bookId, title, ...(pipeline ? { pipelineId: pipeline.id, ...(stageId !== "__first" ? { stageId } : {}) } : {}), ...(valueQuestion !== "__none" ? { valueQuestionId: valueQuestion } : {}) };
       } else config = { userIds: people.filter((person) => person.kind === "user").map((person) => (person as { id: string }).id) };
       onSaved((await createAction(form.id, kind, config)).action);
     } catch (error) { notify.error(errorText(error, "Could not add the action")); }
@@ -116,10 +133,22 @@ function ActionForm({ kind, form, set, targets, onCancel, onSaved, onTargets }: 
       <p className="forms-muted">Uses the questions marked as contact email, name, phone, and company (or the first email question). An existing contact is only filled in, never overwritten.</p>
       {!set.questions.some((question) => question.type === "email" || question.type === "contact") && <p className="forms-warn">Add an email question first: contacts are matched by email.</p>}
     </>}
+    {kind === "create_deal" && (targets?.books.length ? <>
+      <div className="forms-two">
+        <SelectField label="Contact book" value={bookId} onChange={setBookId} options={targets.books.map((book) => ({ value: book.id, label: book.name }))} />
+        <SelectField label="Pipeline" value={pipelineId} onChange={setPipelineId} options={[{ value: "__first", label: pipelines[0] ? `${pipelines[0].name} (first)` : "A new sales pipeline" }, ...pipelines.slice(1).map((item) => ({ value: item.id, label: item.name }))]} />
+      </div>
+      <div className="forms-two">
+        <SelectField label="Stage" value={stageId} onChange={setStageId} options={[{ value: "__first", label: "First open stage" }, ...(pipeline?.stages ?? []).map((stage) => ({ value: stage.id, label: stage.name }))]} />
+        <SelectField label="Value from" value={valueQuestion} onChange={setValueQuestion} options={[{ value: "__none", label: "No value" }, ...numbers.map((question) => ({ value: question.id, label: question.title || "Untitled question" }))]} />
+      </div>
+      <label className="ui-field"><span>Deal title</span><input value={title} maxLength={500} onChange={(event) => setTitle(event.target.value)} /></label>
+      <p className="forms-muted">The respondent becomes the deal's contact when the form asks for an email. A number answer is read in the pipeline's currency.</p>
+    </> : <p className="forms-muted">You have no contact book you can add deals to yet.</p>)}
     {kind === "notify" && <PersonPicker label="Who to notify" allow={["user"]} value={people} onChange={setPeople} />}
     <div className="forms-row-actions">
       <button type="button" className="secondary-button" onClick={onCancel} disabled={busy}>Cancel</button>
-      <button type="button" className="primary-button" onClick={() => { void save(); }} disabled={busy || (kind === "create_card" && (!boardId || !columnId)) || (kind === "notify" && !people.length) || (kind === "save_contact" && !bookId && !newBook.trim())}>Add action</button>
+      <button type="button" className="primary-button" onClick={() => { void save(); }} disabled={busy || (kind === "create_card" && (!boardId || !columnId)) || (kind === "notify" && !people.length) || (kind === "save_contact" && !bookId && !newBook.trim()) || (kind === "create_deal" && (!bookId || !title.trim()))}>Add action</button>
     </div>
   </div>;
 }

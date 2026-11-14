@@ -4,6 +4,17 @@ Release notes for Nook, newest first. Upgrade steps for each release are in [doc
 
 ## Unreleased
 
+**Workspace modules working together** (Wave 3)
+
+- **Standups and Goals**: a goal update question shows your goals' key results; numbers you type become goal check-ins when you post. Closed rounds can be added to a note of your choice and published. Cards you logged time on show up in "What did you get done".
+- **Tasks, Contacts, and Goals**: finishing a card made from a contact or deal logs "Task done" on it; key results that count a board's cards update within seconds of a move; a board shows the goal it contributes to in its header.
+- **Forms and Contacts**: a new "Create a deal" response action (pipeline, stage, value from a number answer, the respondent as its contact); form responses appear on the contact's and deal's timeline.
+- **Agents**: agents can propose new contacts and deals, updates, logged calls, goal check-ins, new forms, and townhall questions; you approve them in the Inbox.
+- **Time and Bookings on records**: goals, contacts, companies, deals, and bookings show the time logged on them, with Start and Log time; contact, company, and deal pages list their bookings and copy a booking link prefilled with the contact's name and email.
+- **Sharing**: Goals, Standups, Forms (who sees results), Contacts books, Time projects, Bookings types, and Townhall sessions all use the same Access sheet as notes and boards; booking types can now be shared.
+- **Mail and reminders**: booking confirmations and new times attach a calendar file that updates in place; a finalized time poll emails outside voters the chosen time as a calendar file; Townhall reminders also arrive by email; goal check-in reminders arrive Monday 09:00 in each owner's time zone.
+- **Embeds**: notes and card descriptions can embed a goal or a townhall session; `/` Goal, Townhall, and Booking link let you pick which one. Today's empty-section lines no longer split into narrow columns.
+
 **Goals**
 
 - **Goals with key results**: company, team, and personal goals aligned in a tree, in periods (Q1 2027) or with their own dates; key results as numbers, percents, money, done/not done, or milestones, rising, falling, or staying within a bound, with weights. KPIs keep a number healthy without an end date.

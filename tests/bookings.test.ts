@@ -8,6 +8,7 @@ const { resetPublicLimits } = await import("../server/public/limits");
 const { setMailTransportForTests } = await import("../server/mail");
 const { createContactBook } = await import("../server/people/contacts");
 const { runScheduleTick } = await import("../server/schedules/dispatcher");
+const { runMailDispatch } = await import("../server/mail/dispatcher");
 const { resetPublicSlotCache } = await import("../server/bookings/publicRoutes");
 const { createBooking } = await import("../server/bookings/service");
 const { typeRow } = await import("../server/bookings/model");
@@ -24,7 +25,7 @@ const { createBoard } = await import("../server/tasks/service");
 let host: Session;
 let colleague: Session;
 let outsider: Session;
-const sent: Array<{ to: string; subject: string; text: string }> = [];
+const sent: Array<{ to: string; subject: string; text: string; attachments?: Array<{ filename: string; contentType: string; content: string }> }> = [];
 
 const json = async (response: Response) => { const text = await response.text(); if (!text) return { status: response.status, body: null as any }; try { return { status: response.status, body: JSON.parse(text) as any }; } catch { throw new Error(`${response.status} ${text.slice(0, 300)}`); } };
 const api = async (path: string, session: Session, method = "GET", body?: unknown) => json(await request(path, { method, ...(body === undefined ? {} : { body: JSON.stringify(body) }), ...(method !== "GET" && body === undefined ? { headers: { "Content-Type": "application/json" } } : {}) }, session));
@@ -42,7 +43,7 @@ let typeId = "";
 let bookId = "";
 
 beforeAll(async () => {
-  setMailTransportForTests(async (message) => { sent.push({ to: message.to, subject: message.subject, text: message.text }); return { id: crypto.randomUUID() }; });
+  setMailTransportForTests(async (message) => { sent.push({ to: message.to, subject: message.subject, text: message.text, attachments: message.attachments }); return { id: crypto.randomUUID() }; });
   host = await createUser("Priya Host");
   colleague = await createUser("Sam Colleague");
   outsider = await createUser("Olga Outsider");
@@ -202,6 +203,8 @@ describe("manage link", () => {
     const start = startAt(7, 9);
     const booked = await pub(`/book/${handle}/intro-call/bookings`, "POST", { start, duration: 30, tz: "Asia/Tokyo", name: "Ken Booker", email: "ken@example.org", answers: { topic0001: "x" }, nonce: nonceFor(typeId), website: "" });
     expect(booked.status).toBe(201);
+    // The confirmation goes out while the booking stands (a cancelled one would attach nothing).
+    await runMailDispatch();
     const token = booked.body.manageUrl.split("/").pop();
     const view = await pub(`/bookings/manage/${token}`);
     expect(view.body.booking.status).toBe("confirmed");
@@ -224,6 +227,19 @@ describe("manage link", () => {
     const newToken = moved.body.manageUrl.split("/").pop();
     const newId = (db.query("SELECT id FROM bookings WHERE booker_email_norm = 'ken@example.org' AND status = 'confirmed'").get() as any).id;
     expect(db.query("SELECT template FROM mail_outbox WHERE to_address = 'ken@example.org' AND template = 'bookings.rescheduled'").get()).toBeTruthy();
+    // The confirmation and the new time carry booking.ics (D1054): one UID across the move, SEQUENCE raised.
+    await runMailDispatch();
+    const icsOf = (subject: string) => sent.find((entry) => entry.to === "ken@example.org" && entry.subject.startsWith(subject))?.attachments?.[0];
+    const first = icsOf("Confirmed:")!;
+    const second = icsOf("New time:")!;
+    expect(first.filename).toBe("booking.ics");
+    expect(first.contentType).toBe("text/calendar; charset=utf-8; method=PUBLISH");
+    const uid = (ics: string) => /UID:([^\r\n]+)/.exec(ics.replace(/\r\n /g, ""))?.[1];
+    expect(uid(second.content)).toBe(uid(first.content));
+    expect(first.content).toContain("SEQUENCE:0");
+    expect(second.content).toContain("SEQUENCE:1");
+    expect(second.content).toContain(`DTSTART:${newStart.slice(0, 19).replace(/[-:]/g, "")}Z`);
+    expect(sent.find((entry) => entry.subject.startsWith("New time:"))!.text).toContain("/ics");
     const cancelled = await pub(`/bookings/manage/${newToken}/cancel`, "POST", { reason: "Sorry", nonce: issueRenderNonce("booking_manage", newId, Date.now() - 5000), website: "" });
     expect(cancelled.body.booking.status).toBe("cancelled");
     expect(db.query("SELECT 1 FROM events e JOIN booking_events be ON be.event_id = e.id WHERE be.booking_id = ? AND e.deleted_at IS NULL").get(newId)).toBeNull();

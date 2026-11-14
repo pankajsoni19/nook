@@ -6,7 +6,7 @@ import { appName } from "../../appName";
 import { SlotPicker } from "../SlotPicker";
 import { durationLabel, viewerZone, type SlotDays } from "../api";
 import { HONEYPOT_FIELD } from "../../../shared/publicPages";
-import type { LocationKind, PublicTypeSummary } from "../../../shared/bookings";
+import { bookingPrefillFrom, type LocationKind, type PublicTypeSummary } from "../../../shared/bookings";
 import type { Answers, QuestionSet } from "../../../shared/questions";
 import "./bookingPublic.css";
 
@@ -136,8 +136,10 @@ function TypePageView({ base }: { base: string }) {
 }
 
 function Details({ page, base, start, duration, tz, onBack, onDone, onVerify }: { page: TypePage; base: string; start: string; duration: number; tz: string; onBack: () => void; onDone: (result: Confirmation) => void; onVerify: (id: string) => void }) {
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+  // A link from Contacts (C20, D1058) prefills the two fields; the booker can change them.
+  const [prefill] = useState(() => bookingPrefillFrom(typeof window === "undefined" ? "" : window.location.search));
+  const [name, setName] = useState(prefill.name);
+  const [email, setEmail] = useState(prefill.email);
   const [guests, setGuests] = useState("");
   const [location, setLocation] = useState("");
   const [honeypot, setHoneypot] = useState("");

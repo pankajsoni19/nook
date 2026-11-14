@@ -3,6 +3,7 @@ import { appName, config } from "../config";
 import { notify } from "../notify";
 import { layout, paragraph } from "../mail/layout";
 import { defineTemplate } from "../mail/templates/types";
+import { icsAttachment, singleEventIcs } from "../mail/ics";
 import type { RegisteredMailTemplate } from "../mail/registry";
 import { formRowById, levelOf, onFormClosed, onResponseSubmitted, setFormStatus, settingsOf, type FormRow } from "./service";
 import { retryFailedRuns } from "./actions";
@@ -36,16 +37,20 @@ const responsesTemplate = defineTemplate<ResponsesMail>({
   fixture: () => ({ title: "Onboarding survey", count: 5, href: "https://nook.example/forms/onboarding-survey-0a1b2c3d4e/results" })
 });
 
-type FinalMail = { title: string; when: string; stopHref?: string };
+/** `ics`: the chosen time as a calendar file, built at send time from the payload's UTC times (D1054). */
+type FinalMail = { title: string; when: string; stopHref?: string; ics?: string | null };
 const finalTemplate = defineTemplate<FinalMail>({
   name: "forms.time_final",
   class: "activity",
   category: "forms",
-  render: (data, context) => layout({
-    instanceName: context.instanceName, subject: `The time is set: ${data.title}`, preheader: data.when, eyebrow: "Find a time", title: data.title,
-    lead: `The organizer chose ${data.when}.`, blocks: [paragraph("Thanks for voting. Add it to your calendar.")],
-    footer: { reason: `You voted on a ${appName()} time poll with this address.`, ...(data.stopHref ? { unsubscribe: { href: data.stopHref, label: "Stop emails about this" } } : {}) }
-  }),
+  render: (data, context) => {
+    const rendered = layout({
+      instanceName: context.instanceName, subject: `The time is set: ${data.title}`, preheader: data.when, eyebrow: "Find a time", title: data.title,
+      lead: `The organizer chose ${data.when}.`, blocks: [paragraph(data.ics ? "Thanks for voting. The time is attached: open the file to add it to your calendar." : "Thanks for voting. Add it to your calendar.")],
+      footer: { reason: `You voted on a ${appName()} time poll with this address.`, ...(data.stopHref ? { unsubscribe: { href: data.stopHref, label: "Stop emails about this" } } : {}) }
+    });
+    return data.ics ? { ...rendered, attachments: [icsAttachment(data.ics, "invite.ics")] } : rendered;
+  },
   fixture: () => ({ title: "Team offsite planning", when: "Tue 18 Nov, 14:00–15:00 UTC" })
 });
 
@@ -59,7 +64,12 @@ const responsesRegistered: RegisteredMailTemplate<ResponsesMail> = {
 };
 const finalRegistered: RegisteredMailTemplate<FinalMail> = {
   ...finalTemplate,
-  resolveExternal: (payload) => typeof payload.title === "string" && typeof payload.when === "string" ? { data: { title: payload.title, when: payload.when } } : { skip: "empty" }
+  resolveExternal: (payload) => {
+    if (typeof payload.title !== "string" || typeof payload.when !== "string") return { skip: "empty" };
+    const timed = typeof payload.start === "string" && typeof payload.end === "string" && typeof payload.uid === "string" && Number.isFinite(Date.parse(payload.start)) && Date.parse(payload.end) > Date.parse(payload.start);
+    const ics = timed ? singleEventIcs({ uid: `${payload.uid as string}@nook`, title: payload.title, description: `Chosen in a ${appName()} time poll.`, startUtc: payload.start as string, endUtc: payload.end as string }) : null;
+    return { data: { title: payload.title, when: payload.when, ics } };
+  }
 };
 export const formsMailTemplates: Record<string, RegisteredMailTemplate<never>> = { "forms.responses": responsesRegistered as never, "forms.time_final": finalRegistered as never };
 

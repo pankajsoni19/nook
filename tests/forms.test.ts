@@ -227,7 +227,8 @@ describe("response actions (C2, C3)", () => {
     const card = await api(owner, "POST", `/forms/${formId}/actions`, { kind: "create_card", config: { boardId: board.id, columnId: column.id, title: "Lead: {{Your name}}", description: "Why: {{why}}", dueQuestionId: "when" } });
     expect(card.status).toBe(201);
     expect((await api(owner, "POST", `/forms/${formId}/actions`, { kind: "save_contact", config: { bookId: book.body.book.id } })).status).toBe(201);
-    expect((await api(owner, "POST", `/forms/${formId}/actions`, { kind: "create_deal", config: {} })).body.code).toBe("NOT_AVAILABLE");
+    // Create a deal (W3, D1045) needs its book; an empty config is refused like any other action's.
+    expect((await api(owner, "POST", `/forms/${formId}/actions`, { kind: "create_deal", config: {} })).body.code).toBe("INVALID");
     expect((await api(member, "POST", `/forms/${formId}/actions`, { kind: "notify", config: { userIds: [member.userId] } })).status).toBe(404);
     const answered = await api(member, "POST", `/forms/${formId}/responses`, { answers: { name: "Ana *Silva*", email: "ana@acme.test", why: "[click](http://evil)", when: "2026-12-24" } });
     await settle();
@@ -374,8 +375,8 @@ describe("MCP (forms:read / forms:write)", () => {
     expect((await invokeMcpToolForTests("bin_form", { formId: form.id }, write.id)).isError).toBe(true);
   });
 
-  test("agents: reads, polls, and answers are offered; building and deleting forms is not", () => {
-    for (const name of ["list_forms", "get_form", "create_poll", "vote_poll", "submit_response"]) expect(NOOK_AGENT_TOOLS.has(name)).toBe(true);
-    for (const name of ["create_form", "bin_form", "finalize_time_poll"]) expect(NOOK_NEVER_TOOLS.has(name)).toBe(true);
+  test("agents: reads, polls, answers, and new forms (as form_create proposals, D1047) are offered; changing and deleting forms is not", () => {
+    for (const name of ["list_forms", "get_form", "create_poll", "vote_poll", "submit_response", "create_form"]) expect(NOOK_AGENT_TOOLS.has(name)).toBe(true);
+    for (const name of ["update_form", "bin_form", "finalize_time_poll"]) expect(NOOK_NEVER_TOOLS.has(name)).toBe(true);
   });
 });

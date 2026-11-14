@@ -257,7 +257,7 @@ export const proposalKind: KindDef & { tool: string } = {
   submit: async (key: McpKeyContext, payload: unknown) => {
     const parsed = answerPayload.safeParse(payload ?? {});
     if (!parsed.success) throw new McpToolError("INVALID", "Invalid payload", { details: parsed.error.issues.map((issue) => `${issue.path.join(".") || "payload"}: ${issue.message}`) });
-    const data = parsed.data as { roundId?: string; checkinId?: string; date?: string; answers: Record<string, unknown> };
+    const data = parsed.data as { roundId?: string; checkinId?: string; date?: string; answers: Record<string, unknown>; goalUpdates?: unknown[] };
     let roundId = data.roundId?.toLowerCase() ?? null;
     if (!roundId && data.checkinId && data.date && DATE_PATTERN.test(data.date)) {
       const row = checkinRow(data.checkinId);
@@ -265,7 +265,7 @@ export const proposalKind: KindDef & { tool: string } = {
     }
     if (!roundId) throw new McpToolError("NOT_FOUND", "Round not found");
     try { answerableRound(roundId, key.userId, Date.now()); } catch { throw new McpToolError("NOT_FOUND", "Round not found"); }
-    return { targetType: "checkin_round", targetId: roundId, payload: { roundId, answers: data.answers } };
+    return { targetType: "checkin_round", targetId: roundId, payload: { roundId, answers: data.answers, ...(data.goalUpdates?.length ? { goalUpdates: data.goalUpdates } : {}) } };
   },
   apply: async (approverId, proposal) => {
     const result = await answerTool.handler(proposal.payload as never, { keyId: proposal.key_id ?? "", userId: approverId, name: proposal.key_name, scopes: [], person: true }) as { roundId: string };

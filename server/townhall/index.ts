@@ -8,6 +8,7 @@ import { registerTownhallRoutes, TOWNHALL_READ_ONLY_WRITES } from "./routes";
 import { registerTownhallPublicRoutes } from "./publicRoutes";
 import { townhallMcpTools, TOWNHALL_AGENT_TOOLS } from "./mcp";
 import { townhallBinProvider } from "./bin";
+import { townhallMailTemplates } from "./mail";
 import type { ItemLevel } from "../access/levels";
 
 /**
@@ -76,6 +77,7 @@ registerWorkspaceModule({
   mcpTools: townhallMcpTools,
   agentTools: TOWNHALL_AGENT_TOOLS,
   binProviders: [{ type: "townhall_session", provider: townhallBinProvider }],
+  mailTemplates: townhallMailTemplates,
   scheduleHandlers: {
     // A reminder before the start (D1081); a late one (the server was down) is skipped after the start.
     "townhall.remind": { run: (schedule) => { if (typeof schedule.payload.sessionId === "string") runReminder(schedule.payload.sessionId); }, skipIfLateMs: 30 * 60_000 }

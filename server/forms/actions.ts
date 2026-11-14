@@ -9,6 +9,10 @@ import { notify } from "../notify";
 import { upsertSchedule } from "../schedules/service";
 import { getResponse, setVersion } from "../questions/service";
 import { LEVEL_RANK } from "../access/levels";
+import { createDeal } from "../crm/deals";
+import { logInteraction } from "../crm/interactions";
+import { bookCurrency, bookRow } from "../crm/core";
+import { minorDigits, MONEY_MAX_MINOR } from "../../shared/money";
 import { FormError, formRowById, host, onResponseSubmitted, requireForm, type FormRow } from "./service";
 import { YES_NO_OPTIONS, type AnswerValue, type Question, type QuestionSet } from "../../shared/questions";
 import { formPath, FORM_ACTIONS_MAX, type FormAction, type FormActionKind } from "../../shared/forms";
@@ -28,7 +32,14 @@ const slog = logger("forms");
  * - `save_contact`: upsert by email into a contact book (§B.3, D806), name/phone/company from the
  *   questions with those roles; a hidden field is never used unless the form verifies email (T523).
  * - `notify`: notifications to chosen people.
- * - `create_deal`: needs Contacts' deals (Wave 3); refused until then.
+ * - `create_deal` (C3, D1045): a deal in a book's pipeline and stage, titled from a template, valued from
+ *   a number question (in major units of the pipeline's currency), with the respondent upserted by email
+ *   as its contact when the form asks for one; linked deal → response (`source`). Idempotent per
+ *   response and book: a retried run finds the deal it made.
+ *
+ * `save_contact` and `create_deal` also log a `form` interaction on what they touched (C21), titled
+ * "Form response" (book readers may not read the form, T595); the response itself is in the record's
+ * Linked work (`source` link), which opens only for the form's result readers.
  */
 
 export const createCardConfig = z.object({
@@ -41,7 +52,12 @@ export const saveContactConfig = z.object({
   phoneQuestionId: z.string().max(16).nullish(), companyQuestionId: z.string().max(16).nullish()
 }).strict();
 export const notifyConfig = z.object({ userIds: z.array(z.string().uuid()).min(1).max(20) }).strict();
-const CONFIGS = { create_card: createCardConfig, save_contact: saveContactConfig, notify: notifyConfig } as const;
+export const createDealConfig = z.object({
+  bookId: z.string().uuid(), pipelineId: z.string().uuid().nullish(), stageId: z.string().uuid().nullish(),
+  title: z.string().min(1).max(500), valueQuestionId: z.string().max(16).nullish(),
+  emailQuestionId: z.string().max(16).nullish(), nameQuestionId: z.string().max(16).nullish(), companyQuestionId: z.string().max(16).nullish()
+}).strict();
+const CONFIGS = { create_card: createCardConfig, save_contact: saveContactConfig, notify: notifyConfig, create_deal: createDealConfig } as const;
 
 type ActionRow = { id: string; form_id: string; kind: FormActionKind; config_json: string; enabled: number; position: number; created_by: string | null; created_at: string; updated_at: string };
 const MAX_ATTEMPTS = 5;
@@ -55,7 +71,6 @@ function toAction(row: ActionRow): FormAction {
 
 /** Checks a config now, as the person saving it: the board/column or book must be writable by them. */
 function checkConfig(kind: FormActionKind, config: unknown, userId: string): Record<string, unknown> {
-  if (kind === "create_deal") throw new FormError(400, "NOT_AVAILABLE", "Creating deals arrives with Contacts' deals");
   const parsed = CONFIGS[kind].safeParse(config);
   if (!parsed.success) throw new FormError(400, "INVALID", "This action's settings are not valid", { details: parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`) });
   if (kind === "create_card") {
@@ -65,6 +80,16 @@ function checkConfig(kind: FormActionKind, config: unknown, userId: string): Rec
     if (!listColumns(value.boardId).some((column) => column.id === value.columnId)) throw new FormError(400, "INVALID", "Choose a column of that board");
   }
   if (kind === "save_contact" && !canEditBook((parsed.data as z.infer<typeof saveContactConfig>).bookId, userId)) throw new FormError(400, "INVALID", "Choose a contact book you can add to");
+  if (kind === "create_deal") {
+    const value = parsed.data as z.infer<typeof createDealConfig>;
+    const book = bookRow(value.bookId);
+    if (!book || book.system_kind !== null || !canEditBook(value.bookId, userId)) throw new FormError(400, "INVALID", "Choose a contact book you can add deals to");
+    if (value.pipelineId) {
+      const pipeline = db.query("SELECT id FROM pipelines WHERE id = ? AND book_id = ? AND deleted_at IS NULL").get(value.pipelineId, value.bookId);
+      if (!pipeline) throw new FormError(400, "INVALID", "Choose a pipeline of that book");
+      if (value.stageId && !db.query("SELECT 1 FROM pipeline_stages WHERE id = ? AND pipeline_id = ?").get(value.stageId, value.pipelineId)) throw new FormError(400, "INVALID", "Choose a stage of that pipeline");
+    } else if (value.stageId) throw new FormError(400, "INVALID", "Choose the stage's pipeline too");
+  }
   return parsed.data as Record<string, unknown>;
 }
 
@@ -188,22 +213,60 @@ async function runOne(action: ActionRow, context: RunContext): Promise<string | 
     }
     return cardId ? `card:${cardId}` : null;
   }
-  if (action.kind === "save_contact") {
-    const value = saveContactConfig.parse(config);
-    if (!canEditBook(value.bookId, actor)) throw new Error("The contact book is no longer writable");
-    const emailQuestion = usable(questionFor(set, value.emailQuestionId, "contact_email", "email"));
+  /** Upserts the respondent by their email answer into the book (D806); null without an email. */
+  const saveRespondent = (bookId: string, ids: { emailQuestionId?: string | null; nameQuestionId?: string | null; phoneQuestionId?: string | null; companyQuestionId?: string | null }) => {
+    const emailQuestion = usable(questionFor(set, ids.emailQuestionId, "contact_email", "email"));
     const contactQuestion = set.questions.find((question) => question.type === "contact");
     const contactAnswer = contactQuestion ? answers[contactQuestion.id] as { name?: string; email?: string; phone?: string; company?: string } | undefined : undefined;
     const email = (emailQuestion ? answers[emailQuestion.id] : undefined) ?? contactAnswer?.email;
     if (typeof email !== "string" || !email) return null;
     const pick = (question: Question | undefined) => { const found = usable(question); const answer = found ? answers[found.id] : undefined; return found && answer !== undefined ? plainAnswer(found, answer) : null; };
-    const result = db.transaction(() => upsertContactByEmail(value.bookId, {
-      email, name: pick(questionFor(set, value.nameQuestionId, "contact_name")) ?? contactAnswer?.name ?? null,
-      phone: pick(questionFor(set, value.phoneQuestionId, "contact_phone", "phone")) ?? contactAnswer?.phone ?? null,
-      company: pick(questionFor(set, value.companyQuestionId, "company")) ?? contactAnswer?.company ?? null
+    const result = db.transaction(() => upsertContactByEmail(bookId, {
+      email, name: pick(questionFor(set, ids.nameQuestionId, "contact_name")) ?? contactAnswer?.name ?? null,
+      phone: pick(questionFor(set, ids.phoneQuestionId, "contact_phone", "phone")) ?? contactAnswer?.phone ?? null,
+      company: pick(questionFor(set, ids.companyQuestionId, "company")) ?? contactAnswer?.company ?? null
     }, { source: "form", sourceRef: context.form.id, actor }))();
-    try { createLink({ a: { kind: "contact", id: result.contactId }, b: { kind: "response", id: response.id }, relation: "source", actorId: actor, via: "web" as never }); } catch { /* no contact adapter yet, or already linked */ }
-    return `contact:${result.contactId}`;
+    try { createLink({ a: { kind: "contact", id: result.contactId }, b: { kind: "response", id: response.id }, relation: "source", actorId: actor, via: "web" as never }); } catch { /* already linked */ }
+    return result.contactId;
+  };
+  /** The respondent on the contact (and deal) timeline (C21): one `form` interaction per action and response. */
+  const logFormInteraction = (named: Array<{ kind: "contact" | "deal"; id: string }>) => {
+    // One entry per record and response, whichever action (contact, deal) logs it first.
+    const subjects = named.filter((subject) => !db.query(`SELECT 1 FROM interactions i JOIN interaction_subjects s ON s.interaction_id = i.id
+      WHERE i.source = 'form' AND substr(i.source_ref, 1, 36) = ? AND s.subject_kind = ? AND s.subject_id = ?`).get(response.id, subject.kind, subject.id));
+    if (!subjects.length) return;
+    try {
+      logInteraction(actor, { kind: "form", title: "Form response", body: "A form response came in (see Linked work).", occurredAt: response.submittedAt, source: "form", sourceRef: `${response.id}:${action.id}`, subjects });
+    } catch (error) { slog.warn("A form interaction could not be logged", { formId: context.form.id, error: error instanceof Error ? error.message : String(error) }); }
+  };
+  if (action.kind === "save_contact") {
+    const value = saveContactConfig.parse(config);
+    if (!canEditBook(value.bookId, actor)) throw new Error("The contact book is no longer writable");
+    const contactId = saveRespondent(value.bookId, value);
+    if (!contactId) return null;
+    logFormInteraction([{ kind: "contact", id: contactId }]);
+    return `contact:${contactId}`;
+  }
+  if (action.kind === "create_deal") {
+    const value = createDealConfig.parse(config);
+    const book = bookRow(value.bookId);
+    if (!book || book.deleted_at !== null || !canEditBook(value.bookId, actor)) throw new Error("The contact book is no longer writable");
+    const existing = db.query(`SELECT d.id FROM work_links l JOIN deals d ON d.id = l.a_id WHERE l.a_kind = 'deal' AND l.b_kind = 'response' AND l.b_id = ? AND l.relation = 'source' AND d.book_id = ? LIMIT 1`)
+      .get(response.id, book.id) as { id: string } | null;
+    if (existing) return `deal:${existing.id}`;
+    const contactId = saveRespondent(book.id, value);
+    const pipelineCurrency = value.pipelineId ? (db.query("SELECT currency FROM pipelines WHERE id = ?").get(value.pipelineId) as { currency: string | null } | null)?.currency ?? null : null;
+    const currency = pipelineCurrency ?? bookCurrency(book);
+    const raw = value.valueQuestionId ? answers[value.valueQuestionId] : undefined;
+    const minor = typeof raw === "number" && Number.isFinite(raw) && raw >= 0 ? Math.round(raw * 10 ** minorDigits(currency)) : null;
+    const title = renderTemplate(value.title, set, answers, { markdown: false }).slice(0, 200).trim() || `Response to ${context.form.title}`.slice(0, 200);
+    const deal = createDeal(actor, {
+      bookId: book.id, pipelineId: value.pipelineId ?? null, stageId: value.stageId ?? null, title, currency,
+      value: minor !== null && minor <= MONEY_MAX_MINOR ? minor : null, contactIds: contactId ? [contactId] : []
+    }, "form");
+    try { createLink({ a: { kind: "deal", id: deal.id }, b: { kind: "response", id: response.id }, relation: "source", actorId: actor, via: "web" as never }); } catch { /* already linked */ }
+    logFormInteraction([{ kind: "deal", id: deal.id }, ...(contactId ? [{ kind: "contact" as const, id: contactId }] : [])]);
+    return `deal:${deal.id}`;
   }
   if (action.kind === "notify") {
     const value = notifyConfig.parse(config);

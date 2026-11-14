@@ -1,7 +1,7 @@
 import { audit, db, now } from "../db";
 import { logger } from "../log";
 import { createEvent, deleteEvent, ensurePersonalCalendar } from "../calendar/service";
-import { buildCalendar } from "../calendar/ics";
+import { singleEventIcs } from "../mail/ics";
 import { recordItemActivity, recordItemChange } from "../activity/service";
 import { canEditBook, PeopleError, upsertContactByEmail } from "../people/contacts";
 import { createPublicLink, revokePublicLinksOf } from "../public";
@@ -406,14 +406,29 @@ export function bookingView(booking: BookingRow, viewerId: string | null, option
   };
 }
 
-/** An ICS file of one booking (the booker's "Add to calendar", the manage page). */
+/**
+ * The first booking of a reschedule chain and how many times it moved: a moved booking keeps the
+ * first one's UID with a higher SEQUENCE, so a calendar that imported the first file updates it (D1054).
+ */
+function rescheduleChain(booking: BookingRow): { rootId: string; depth: number } {
+  let rootId = booking.id;
+  let from = booking.rescheduled_from_id;
+  let depth = 0;
+  while (from && depth < 50) {
+    rootId = from;
+    depth += 1;
+    from = (db.query("SELECT rescheduled_from_id FROM bookings WHERE id = ?").get(from) as { rescheduled_from_id: string | null } | null)?.rescheduled_from_id ?? null;
+  }
+  return { rootId, depth };
+}
+
+/** An ICS file of one booking (the booker's "Add to calendar", the manage page, and the mail attachment, D1054). */
 export function bookingIcs(booking: BookingRow) {
-  const startLocal = utcToZoned(Date.parse(booking.start_utc), "UTC");
-  return buildCalendar(booking.type_title, [{
-    id: booking.id, title: `${booking.type_title} with ${userName(booking.host_id)}`, description: `Booking ${booking.short_id}`, location: booking.location_resolved, all_day: 0,
-    start_date: null, end_date: null, start_local: startLocal, tz: "UTC", duration_minutes: booking.duration_min, rrule_json: null, exdates_json: "[]",
-    created_at: booking.created_at, updated_at: booking.updated_at
-  }], "full").replace("METHOD:PUBLISH", booking.status === "cancelled" ? "METHOD:CANCEL" : "METHOD:PUBLISH");
+  const chain = rescheduleChain(booking);
+  return singleEventIcs({
+    uid: `${chain.rootId}@nook`, sequence: chain.depth, title: `${booking.type_title} with ${userName(booking.host_id)}`, description: `Booking ${booking.short_id}`,
+    location: booking.location_resolved, startUtc: booking.start_utc, endUtc: booking.end_utc, stampUtc: booking.updated_at, method: booking.status === "cancelled" ? "CANCEL" : "PUBLISH"
+  });
 }
 
 export const mailOn = () => mailEnabled();

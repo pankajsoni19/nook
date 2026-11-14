@@ -4,7 +4,8 @@ import type { PendingLink, Route } from "../router";
 import type { Role } from "../team/teamRoles";
 import type { TodaySectionDef } from "../today/todaySections";
 import type { EmbedKindDef, SlashItemDef } from "../editor/moduleEmbedRegistry";
-import type { CardFaceBadgeDef, CardHeaderActionDef, CardSectionDef, TimelineDecorationDef } from "../ui/cardSlots";
+import type { BoardHeaderItemDef, CardFaceBadgeDef, CardHeaderActionDef, CardSectionDef, TimelineDecorationDef } from "../ui/cardSlots";
+import type { ItemSectionDef } from "../ui/itemSlots";
 import type { WorkspaceModuleId } from "../../shared/workspaceModules";
 import type { ItemActivityEntry } from "../../shared/itemActivity";
 
@@ -119,6 +120,10 @@ export type WorkspaceClientModule = {
   cardFaceBadges?: readonly CardFaceBadgeDef[];
   cardHeaderActions?: readonly CardHeaderActionDef[];
   timelineDecorations?: readonly TimelineDecorationDef[];
+  /** Items in a board's header after its card count (the board's goal chip, D1048). */
+  boardHeaderItems?: readonly BoardHeaderItemDef[];
+  /** Panels on other modules' item pages (goal, contact, deal, booking…), D1056. */
+  itemSections?: readonly ItemSectionDef[];
   shortcuts?: readonly ShortcutDef[];
   /** Its public pages by path prefix (`/p/f/`, `/p/book/`, `/p/t/`). */
   publicPages?: readonly PublicPageDef[];

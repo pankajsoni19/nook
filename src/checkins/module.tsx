@@ -43,6 +43,7 @@ export const module: WorkspaceClientModule = {
     round_closed: (entry) => `closed the ${entry.payload.item?.label ?? ""} round`,
     answered: () => "answered",
     answer_edited: () => "edited their answer",
+    summary_posted: (entry) => `added the ${entry.payload.item?.label ?? ""} round to its note`,
     settings_changed: () => "changed the settings",
     questions_published: () => "published new questions",
     participants_changed: () => "changed who takes part"

@@ -5,13 +5,15 @@ import type { RegisteredMailTemplate } from "../mail/registry";
 import { appName } from "../config";
 import { formatWhen, LOCATION_LABELS, STATUS_LABELS } from "../../shared/bookings";
 import { bookingAccess, bookingHref, bookingRow, userName } from "./model";
+import { bookingIcs } from "./service";
+import { icsAttachment } from "../mail/ics";
 
 /**
  * Bookings mail (§D.6, §B.7): six templates to the booker's own address (enqueueExternalMail caps,
  * suppression, and a "Stop emails about this booking" link) and one to hosts (notify, the module's
  * mail category). Bookers' mail carries the manage link (reschedule / cancel, D1004) and an "Add to
- * calendar" ICS link of that booking (D1017: linked, not attached; Nook's transport has no
- * attachments). Mail never prints an internal id; the payload's ids are read back at send time,
+ * calendar" ICS link of that booking; confirmations and new times also attach that ICS (D1054, which
+ * replaces D1017's link-only mail; the link stays as a fallback for clients that drop attachments). Mail never prints an internal id; the payload's ids are read back at send time,
  * so a cancelled booking's reminder is skipped.
  */
 
@@ -19,7 +21,12 @@ type BookerMail = {
   kind: "confirmed" | "pending" | "declined" | "cancelled" | "rescheduled" | "reminder";
   typeTitle: string; when: string; previous: string | null; location: string; locationKind: string; hostName: string;
   manageHref: string | null; icsHref: string | null; reason: string | null; by: string | null; stopHref?: string;
+  /** The booking's ICS, read at send time, attached to confirmations and new times (D1054). */
+  ics?: string | null;
 };
+
+/** Kinds whose mail carries the booking as an attachment. */
+export const ICS_ATTACHED_KINDS: ReadonlySet<BookerMail["kind"]> = new Set(["confirmed", "rescheduled"]);
 
 const SUBJECTS: Record<BookerMail["kind"], (data: BookerMail) => string> = {
   confirmed: (data) => `Confirmed: ${data.typeTitle} with ${data.hostName}`,
@@ -52,11 +59,12 @@ function bookerTemplate(kind: BookerMail["kind"]) {
       if (data.reason) blocks.push(paragraph(`Message: ${data.reason}`));
       if (data.icsHref && kind !== "cancelled" && kind !== "declined") blocks.push(paragraph(`Add it to your calendar: ${data.icsHref}`));
       if (!data.manageHref && (kind === "confirmed" || kind === "pending")) blocks.push(note("Keep this email: it is the record of your booking."));
-      return layout({
+      const rendered = layout({
         instanceName: ctx.instanceName, subject: SUBJECTS[kind](data), preheader: `${data.typeTitle}, ${data.when}`, eyebrow: "Booking", title: data.typeTitle, lead: LEADS[kind], blocks,
         ...(data.manageHref && kind !== "cancelled" && kind !== "declined" ? { action: { label: "Reschedule or cancel", href: data.manageHref } } : {}),
         footer: { reason: `You got this because you booked time on ${appName()}.`, ...(data.stopHref ? { unsubscribe: { href: data.stopHref, label: "Stop emails about this booking" } } : {}) }
       });
+      return data.ics && ICS_ATTACHED_KINDS.has(kind) ? { ...rendered, attachments: [icsAttachment(data.ics, "booking.ics")] } : rendered;
     },
     fixture: () => ({ kind, typeTitle: "Intro call", when: "Tue 3 Mar 2026, 09:30–10:00 (Europe/Berlin)", previous: kind === "rescheduled" ? "Mon 2 Mar 2026, 09:30–10:00 (Europe/Berlin)" : null,
       location: "https://meet.example.test/intro", locationKind: "video_link", hostName: "Priya Shah", manageHref: "https://nook.example.test/p/book/manage/TOKEN", icsHref: "https://nook.example.test/api/public/bookings/manage/TOKEN/ics",
@@ -76,7 +84,8 @@ function resolveBooker(kind: BookerMail["kind"]): RegisteredMailTemplate<BookerM
       previous: typeof payload.previousStart === "string" ? formatWhen(payload.previousStart, new Date(Date.parse(payload.previousStart) + booking.duration_min * 60_000).toISOString(), tz) : null,
       location: booking.location_resolved, locationKind: booking.location_kind, hostName: userName(booking.host_id),
       manageHref: manage ? appLink(manage) : null, icsHref: manage ? appLink(`/api/public/bookings/manage/${manage.slice("/p/book/manage/".length)}/ics`) : null,
-      reason: typeof payload.reason === "string" && payload.reason ? payload.reason.slice(0, 500) : null, by: typeof payload.by === "string" ? payload.by : null
+      reason: typeof payload.reason === "string" && payload.reason ? payload.reason.slice(0, 500) : null, by: typeof payload.by === "string" ? payload.by : null,
+      ics: ICS_ATTACHED_KINDS.has(kind) && booking.status === "confirmed" ? bookingIcs(booking) : null
     } };
   };
 }

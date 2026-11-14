@@ -23,6 +23,8 @@ import "./checkins/index";
 import "./crm/index";
 import "./bookings/index";
 import "./townhall/index";
+// Wave 3: flows across two modules (server/wiring, D1040–D1059).
+import "./wiring/index";
 
 export { registerWorkspaceModule, registeredWorkspaceModules, type ModuleRouter, type WorkspaceModuleDef };
 

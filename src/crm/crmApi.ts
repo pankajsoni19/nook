@@ -1,4 +1,4 @@
-import { api, ApiError, getCsrfToken } from "../api";
+import { api, ApiError } from "../api";
 import type {
   CrmBoard, CrmBook, CrmCompany, CrmCompanyDetail, CrmContact, CrmContactDetail, CrmDeal, CrmDealDetail, CrmEntity, CrmFieldDef, CrmFilter, CrmFollowup, CrmInteraction, CrmList,
   CrmPipeline, CrmSort, CrmView, CrmViewConfig, ImportPreview, ImportResult, InteractionKind
@@ -106,12 +106,3 @@ export const queryDataset = (query: StructuredQuery) => api<DatasetResult>("/dat
 /** Board and column picker for "Create task": readable boards and their columns. */
 export const listBoardsForTask = () => api<{ boards: Array<{ id: string; name: string; columns?: Array<{ id: string; name: string }> }> }>("/tasks/boards");
 export const boardColumns = (boardId: string) => api<{ columns: Array<{ id: string; name: string }> }>(`/tasks/boards/${enc(boardId)}/columns`);
-
-/** The workspace access sheet for a book (GET/PUT /api/access/contact_book/:id, D803). */
-export type BookAccess = {
-  etag: string; title: string; owner: { id: string; displayName: string }; audience: "private" | "selected" | "all_users"; audienceLevel: string; audienceLevels: string[]; levels: string[];
-  people: Array<{ id: string; displayName: string; level: string; avatarUrl?: string | null }>; groups: Array<{ id: string; name: string; level: string }>; yourLevel: string;
-};
-export const getBookAccess = (id: string) => api<BookAccess>(`/access/contact_book/${enc(id)}`);
-export const putBookAccess = (id: string, etag: string, body: { audience: string; audienceLevel?: string; people: Array<{ id: string; level: string }>; groups: Array<{ id: string; level: string }> }) =>
-  api<BookAccess>(`/access/contact_book/${enc(id)}`, { method: "PUT", body: JSON.stringify(body), headers: { "If-Match": etag, "X-CSRF-Token": getCsrfToken() } });

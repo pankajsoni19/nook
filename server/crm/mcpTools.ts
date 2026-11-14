@@ -279,6 +279,8 @@ export const crmMcpTools: McpToolSpec[] = [
 ];
 
 export const CRM_AGENT_TOOLS = {
-  allowed: ["list_contact_books", "search_crm", "list_contacts", "get_contact", "list_companies", "get_company", "list_pipelines", "list_deals", "get_deal", "pipeline_summary", "list_interactions"],
-  never: ["create_contact", "update_contact", "create_deal", "update_deal", "log_interaction", "upsert_contact", "merge_contacts", "bulk_upsert_contacts", "create_company", "update_company", "move_deal", "bulk_update_deals", "create_followup"]
+  allowed: ["list_contact_books", "search_crm", "list_contacts", "get_contact", "list_companies", "get_company", "list_pipelines", "list_deals", "get_deal", "pipeline_summary", "list_interactions",
+    // Wave 3 (D1047): proposal kinds contact_create, contact_update, deal_create, deal_update, interaction_log.
+    "create_contact", "update_contact", "create_deal", "update_deal", "log_interaction"],
+  never: ["upsert_contact", "merge_contacts", "bulk_upsert_contacts", "create_company", "update_company", "move_deal", "bulk_update_deals", "create_followup"]
 };

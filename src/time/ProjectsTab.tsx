@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useState } from "react";
-import { Archive, ArrowLeft, Check, FolderClock, Lock, Pencil, Plus, RotateCcw, Trash2, Undo2, UserPlus, X } from "lucide-react";
+import { Archive, ArrowLeft, Check, FolderClock, Lock, Pencil, Plus, RotateCcw, Trash2, Undo2 } from "lucide-react";
 import { ApiError } from "../api";
 import { api } from "../api";
 import { ModalDialog } from "../files/Dialog";
@@ -8,16 +8,15 @@ import { EmptyState } from "../ui/EmptyState";
 import { MoreMenu } from "../ui/MoreMenu";
 import { ProgressBar } from "../ui/progress/Progress";
 import { MoneyInput, MoneyText } from "../ui/money/Money";
-import { PersonPicker } from "../ui/people/People";
 import { KpiRow, KpiTile } from "../ui/insights/Insights";
 import { notify } from "../ui/notify";
 import { useHistoryDialogGuard } from "../ui/useHistoryDialogGuard";
 import { useUnitPreferences, useWorkspaceSettings } from "../ui/units";
 import { formatDuration } from "../../shared/duration";
 import { PROJECT_COLORS, type TimeEntry, type TimeProject } from "../../shared/time";
-import type { PersonSummary } from "../../shared/people";
 import { timeApi, type Approval, type ClientOption, type ProjectBody } from "./api";
 import { invalidateProjects, projectDot } from "./fields";
+import { WorkspaceAccess } from "../access/WorkspaceAccess";
 import { EntrySheet } from "./EntrySheet";
 import { clock, dayLabel, localDay } from "./format";
 import { errorText, onTimeChanged, timeChanged } from "./timerStore";
@@ -249,56 +248,39 @@ export function ProjectPage({ projectId, onBack, onOpen, flashMissing }: { proje
   </div>;
 }
 
-const LEVELS = [{ value: "view", label: "Can see it (guests log time)" }, { value: "edit", label: "Logs time, sees all entries" }, { value: "manage", label: "Manages: rates, approvals" }];
+const LEVEL_WORDS: Record<string, string> = { view: "Can see it", comment: "Can see it", edit: "Logs time", manage: "Manager" };
 
+/**
+ * The project's team: who has access is the shared Access sheet over `/api/access/time_project/:id`
+ * (D891, D1050); this panel keeps what the sheet does not cover, each member's hourly rate (managers).
+ */
 function TeamPanel({ project, onChanged }: { project: TimeProject; onChanged: () => void }) {
   const [access, setAccess] = useState<Access | null>(null);
   const [rates, setRates] = useState<Awaited<ReturnType<typeof timeApi.rates>> | null>(null);
-  const [adding, setAdding] = useState<PersonSummary[]>([]);
-  const [busy, setBusy] = useState(false);
   const manager = project.level === "owner" || project.level === "manage";
   const load = useCallback(async () => {
     if (!manager) return;
-    const response = await fetch(`/api/access/time_project/${project.id}`, { credentials: "same-origin" });
-    if (response.ok) setAccess({ ...(await response.json() as Access), etag: response.headers.get("ETag") ?? undefined });
+    api<Access>(`/access/time_project/${project.id}`).then(setAccess, () => setAccess(null));
     void timeApi.rates(project.id).then(setRates, () => undefined);
   }, [manager, project.id]);
   useEffect(() => { void load(); }, [load]);
   if (!manager) return <p className="time-note">Only the project's managers see the team and rates.</p>;
-  if (!access) return <p className="time-loading" role="status">Loading the team…</p>;
-
-  const put = async (people: Array<{ id: string; level: string }>, audience = people.length ? "selected" : access.audience === "selected" ? "private" : access.audience) => {
-    setBusy(true);
-    try {
-      await api(`/access/time_project/${project.id}`, { method: "PUT", headers: { "If-Match": access.etag ?? "" }, body: JSON.stringify({ audience, people }) });
-      await load();
-      onChanged();
-      invalidateProjects();
-    } catch (reason) {
-      notify.error(errorText(reason, "Could not change the team"));
-    } finally {
-      setBusy(false);
-    }
-  };
-  const current = access.people.map((person) => ({ id: person.id, level: person.level }));
   return <div className="time-team">
-    {access.audience === "all_users" && <p className="time-note">Everyone signed in can {access.audienceLevel === "edit" ? "log time on" : "see"} this project.</p>}
-    {rates && <p className="time-note">Rates are per hour in {rates.currency}; an empty rate uses the project's rate{rates.projectRateMinor === null ? " (none set)" : ""}. Only managers see them.</p>}
-    <ul className="time-team-list">
-      <li><span className="time-team-name">{project.owner.name}</span><span className="ui-health" data-tone="accent">Owner</span>
-        {rates && <RateCell projectId={project.id} userId={project.owner.id} rate={rates.members.find((member) => member.id === project.owner.id)?.rateMinor ?? null} currency={rates.currency} />}</li>
-      {access.people.map((person) => <li key={person.id}>
-        <span className="time-team-name">{person.displayName}</span>
-        <Select label={`${person.displayName}'s access`} variant="chip" value={person.level} options={LEVELS.filter((level) => access.yourLevel === "owner" || level.value !== "manage")}
-          onChange={(level) => { void put(current.map((item) => item.id === person.id ? { ...item, level } : item)); }} />
-        {rates && <RateCell projectId={project.id} userId={person.id} rate={rates.members.find((member) => member.id === person.id)?.rateMinor ?? null} currency={rates.currency} />}
-        <button type="button" className="icon-button" disabled={busy} aria-label={`Remove ${person.displayName}`} onClick={() => { void put(current.filter((item) => item.id !== person.id)); }}><X /></button>
-      </li>)}
-    </ul>
-    <div className="time-team-add">
-      <PersonPicker label="Add people" value={adding} onChange={setAdding} allow={["user"]} placeholder="Add a teammate or guest" />
-      <button type="button" className="action-button ui-small-action" disabled={!adding.length || busy} onClick={() => { void put([...current, ...adding.filter((person) => person.kind === "user" && !current.some((item) => item.id === person.id)).map((person) => ({ id: (person as { id: string }).id, level: "edit" }))]).then(() => setAdding([])); }}><UserPlus aria-hidden="true" />Add</button>
-    </div>
+    <WorkspaceAccess kind="time_project" id={project.id} title={project.name} canManage label="Change who's on it"
+      onSaved={() => { notify.success("Team saved"); void load(); onChanged(); invalidateProjects(); }} />
+    {!access && <p className="time-loading" role="status">Loading the team…</p>}
+    {access && <>
+      {rates && <p className="time-note">Rates are per hour in {rates.currency}; an empty rate uses the project's rate{rates.projectRateMinor === null ? " (none set)" : ""}. Only managers see them.</p>}
+      <ul className="time-team-list">
+        <li><span className="time-team-name">{project.owner.name}</span><span className="ui-health" data-tone="accent">Owner</span>
+          {rates && <RateCell projectId={project.id} userId={project.owner.id} rate={rates.members.find((member) => member.id === project.owner.id)?.rateMinor ?? null} currency={rates.currency} />}</li>
+        {access.people.map((person) => <li key={person.id}>
+          <span className="time-team-name">{person.displayName}</span>
+          <span className="ui-health" data-tone="neutral">{LEVEL_WORDS[person.level] ?? person.level}</span>
+          {rates && <RateCell projectId={project.id} userId={person.id} rate={rates.members.find((member) => member.id === person.id)?.rateMinor ?? null} currency={rates.currency} />}
+        </li>)}
+      </ul>
+    </>}
   </div>;
 }
 

@@ -28,8 +28,8 @@ export const roundByDate = (ref: string, date: string) => api<RoundView>(`/check
 export const standupStats = (ref: string) => api<CheckinStats>(`/checkins/${enc(ref)}/stats`);
 export const unblock = (ref: string, cardId: string) => api<{ unblocked: boolean }>(`/checkins/${enc(ref)}/unblock`, { method: "POST", ...json({ cardId }) });
 export const roundPrefill = (roundId: string) => api<AnswerPrefill>(`/checkin-rounds/${enc(roundId)}/me`);
-export const answerRound = (roundId: string, answers: Answers, expectedRevision?: number) =>
-  api<{ status: string; edited: boolean; blockers: number; round: RoundView }>(`/checkin-rounds/${enc(roundId)}/answer`, { method: "POST", ...json({ answers, ...(expectedRevision ? { expectedRevision } : {}) }) });
+export const answerRound = (roundId: string, answers: Answers, expectedRevision?: number, goalUpdates?: Array<{ goalId: string; values: Record<string, number> }>) =>
+  api<{ status: string; edited: boolean; blockers: number; round: RoundView }>(`/checkin-rounds/${enc(roundId)}/answer`, { method: "POST", ...json({ answers, ...(expectedRevision ? { expectedRevision } : {}), ...(goalUpdates?.length ? { goalUpdates } : {}) }) });
 export const skipRound = (roundId: string) => api<{ status: "skipped" }>(`/checkin-rounds/${enc(roundId)}/skip`, { method: "POST" });
 export const closeRound = (roundId: string) => api<RoundView>(`/checkin-rounds/${enc(roundId)}/close`, { method: "POST" });
 export const nudgeRound = (roundId: string) => api<{ nudged: number }>(`/checkin-rounds/${enc(roundId)}/nudge`, { method: "POST" });
@@ -45,9 +45,6 @@ export const standupFeed = (params: { checkin?: string; person?: string; blocker
 export const setAnswerReaction = (responseId: string, emoji: string, on: boolean) =>
   api<{ reactions: ReactionAggregate[] }>(`/reactions/checkin_answer/${enc(responseId)}/${enc(emoji)}`, { method: on ? "PUT" : "DELETE", headers: { "Content-Type": "application/json" } });
 
-/** The workspace Access endpoint for a standup's audience (who besides participants can read it). */
-export const getStandupAccess = (id: string) => api<{ etag: string; audience: "private" | "selected" | "all_users"; audienceLevel: string; people: Array<{ id: string; level: string }>; groups: Array<{ id: string; level: string }> }>(`/access/checkin/${enc(id)}`);
-export const putStandupAccess = (id: string, body: unknown, etag: string) => api<unknown>(`/access/checkin/${enc(id)}`, { method: "PUT", body: JSON.stringify(body), headers: { "If-Match": etag } });
 
 export const errorText = (reason: unknown, fallback: string) => reason instanceof ApiError ? reason.message : fallback;
 export const errorCode = (reason: unknown) => reason instanceof ApiError && reason.payload && typeof reason.payload === "object" ? (reason.payload as { code?: string }).code : undefined;

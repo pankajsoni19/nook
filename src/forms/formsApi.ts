@@ -59,7 +59,7 @@ export const createAction = (id: string, kind: FormActionKind, config: Record<st
 export const updateAction = (id: string, actionId: string, patch: { config?: Record<string, unknown>; enabled?: boolean }) => api<{ action: FormAction }>(`/forms/${enc(id)}/actions/${enc(actionId)}`, { method: "PATCH", ...json(patch) });
 export const deleteAction = (id: string, actionId: string) => api<void>(`/forms/${enc(id)}/actions/${enc(actionId)}`, { method: "DELETE" });
 export const retryAction = (id: string, actionId: string) => api<{ retried: number }>(`/forms/${enc(id)}/actions/${enc(actionId)}/retry`, { method: "POST", ...json({}) });
-export type Targets = { boards: Array<{ id: string; name: string; columns: Array<{ id: string; name: string }> }>; books: Array<{ id: string; name: string }>; calendars: Array<{ id: string; name: string }> };
+export type Targets = { boards: Array<{ id: string; name: string; columns: Array<{ id: string; name: string }> }>; books: Array<{ id: string; name: string; pipelines?: Array<{ id: string; name: string; stages: Array<{ id: string; name: string }> }> }>; calendars: Array<{ id: string; name: string }> };
 export const getTargets = () => api<Targets>("/forms/targets");
 export const createBook = (name: string) => api<{ book: { id: string; name: string } }>("/forms/contact-books", { method: "POST", ...json({ name }) });
 

@@ -184,3 +184,27 @@
   .standup-templates { grid-template-columns: 1fr 1fr; }
   .standup-answers > .standup-panel-head .ui-segmented { width: 100%; }
 }
+
+/* Goal updates beside a goal update question (C5, D1043). */
+.standup-goals { width: 100%; display: grid; gap: 10px; }
+.standup-goal { min-width: 0; display: grid; gap: 8px; margin: 0; border: 1px solid #2c2c31; border-radius: 10px; padding: 10px 12px 12px; }
+.standup-goal > legend { display: flex; align-items: baseline; gap: 8px; padding: 0 4px; font-weight: 600; font-size: .86rem; }
+.standup-goal > legend a { color: #ececee; text-decoration: none; }
+.standup-goal > legend a:hover { text-decoration: underline; }
+.standup-goal-kr { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 12px; font-size: .84rem; }
+.standup-goal-kr > label { min-width: 0; overflow-wrap: anywhere; color: #d6d6d9; }
+.standup-goal-input { display: inline-flex; align-items: center; gap: 8px; }
+.standup-goal-input input { width: 96px; min-height: 36px; border: 1px solid #3a3a40; border-radius: 8px; padding: 0 10px; background: #151518; color: #ececee; font: inherit; }
+.standup-goal-empty { display: inline-flex; align-items: center; gap: 6px; }
+@media (max-width: 760px) {
+  .standup-goal-kr { grid-template-columns: 1fr; }
+  .standup-goal-input input { min-height: 44px; width: 120px; }
+}
+
+/* Post rounds to a note (C23, D1044). */
+.standup-summary-note { display: grid; gap: 8px; margin-top: 4px; }
+.standup-summary-note > p { display: flex; align-items: flex-start; gap: 6px; margin: 0; }
+.standup-summary-note > p svg { flex: none; width: 16px; height: 16px; margin-top: 2px; }
+.standup-summary-note a { color: #ffe19a; }
+.standup-summary-note-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.standup-goal-input > span { min-width: 4.5em; }

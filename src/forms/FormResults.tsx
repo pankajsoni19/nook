@@ -117,7 +117,7 @@ function ResponsesTab({ rows, set, shown, answerable, onColumns, onOpen, more, a
         <tbody>{rows.map((row) => <tr key={row.id} onClick={() => onOpen(row.id)}>
           <th scope="row"><button type="button" className="forms-link" onClick={(event) => { event.stopPropagation(); onOpen(row.id); }}>{anonymous ? row.submittedAt.slice(0, 10) : row.respondentName}</button>{!anonymous && <small>{new Date(row.submittedAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}{row.setVersion ? ` · v${row.setVersion}` : ""}</small>}</th>
           {columns.map((question) => <td key={question.id}>{answerText(question, row.answers[question.id] as never, ZONE) || <span className="forms-muted">—</span>}</td>)}
-          <td>{row.actions.length ? row.actions.map((action) => <span key={action.kind} className={`forms-run ${action.status}`}>{action.kind === "create_card" ? "Card" : action.kind === "save_contact" ? "Contact" : "Notified"}</span>) : <span className="forms-muted">—</span>}</td>
+          <td>{row.actions.length ? row.actions.map((action) => <span key={action.kind} className={`forms-run ${action.status}`}>{action.kind === "create_card" ? "Card" : action.kind === "save_contact" ? "Contact" : action.kind === "create_deal" ? "Deal" : "Notified"}</span>) : <span className="forms-muted">—</span>}</td>
         </tr>)}</tbody>
       </table>
     </div>
@@ -133,7 +133,7 @@ function ResponseSheet({ formId, row, position, total, canComment, anonymous, on
       {!detail || !detail.set ? <p className="ui-panel-loading">Loading…</p> : <>
         <ResponseViewer set={detail.set} response={detail.response} position={position} total={total} onPrev={onPrev} onNext={onNext} showScore timeZone={ZONE}
           onDelete={detail.canDelete ? () => { void deleteResponse(formId, row.id).then((result) => onDeleted(result.undoTicket)).catch((error) => notify.error(error instanceof ApiError ? error.message : "Could not delete")); } : undefined} />
-        {detail.response.actions.length > 0 && <p className="forms-muted">Actions: {detail.response.actions.map((action) => `${action.kind === "create_card" ? "card" : action.kind === "save_contact" ? "contact" : "notification"} ${action.status}`).join(", ")}</p>}
+        {detail.response.actions.length > 0 && <p className="forms-muted">Actions: {detail.response.actions.map((action) => `${action.kind === "create_card" ? "card" : action.kind === "save_contact" ? "contact" : action.kind === "create_deal" ? "deal" : "notification"} ${action.status}`).join(", ")}</p>}
         {!anonymous && <ItemTimeline kind="response" id={row.id} canComment={canComment} title="Comments" renderers={formsModule.activityRenderers} />}
       </>}
     </div>

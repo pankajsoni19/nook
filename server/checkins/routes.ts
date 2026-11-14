@@ -6,6 +6,7 @@ import type { ModuleRouter } from "../workspaceRegistry";
 import { CHECKIN_TEMPLATES } from "../../shared/checkins";
 import { CheckinError, checkinLevel, checkinRow, notFound, roundRow } from "./store";
 import { createCheckin, deleteCheckin, publishQuestions, readQuestions, saveQuestions, setAutoTimeZone, setMyParticipation, setParticipants, setSubscription, updateCheckin } from "./service";
+import { goalUpdatesSchema } from "./goalUpdates";
 import { answerRound, closeRound, nudgeRound, skipRound, startRoundNow, unblockCard } from "./rounds";
 import { detailOf, dueRounds, feed, listCheckins, prefill, roundByDate, roundSummary, roundsPage, roundView, stats } from "./views";
 import { LEVEL_RANK } from "../access/levels";
@@ -27,7 +28,7 @@ const schedule = z.object({
   tz: z.string().min(1).max(64)
 }).partial().strict();
 const participants = z.object({ people: z.array(z.string().uuid()).max(200).default([]), groups: z.array(z.string().uuid()).max(20).default([]) }).strict();
-const summary = z.object({ notifyParticipants: z.boolean().optional(), email: z.boolean().optional() }).strict();
+const summary = z.object({ notifyParticipants: z.boolean().optional(), email: z.boolean().optional(), noteId: z.string().uuid().nullable().optional() }).strict();
 export const createSchema = z.object({
   name: z.string().min(1).max(120).optional(),
   template: z.enum(CHECKIN_TEMPLATES),
@@ -50,7 +51,7 @@ export const patchSchema = z.object({
   summary: summary.optional(),
   expectedRevision: z.number().int().positive().optional()
 }).strict();
-const answerSchema = z.object({ answers: z.record(z.string(), z.unknown()), expectedRevision: z.number().int().positive().optional() }).strict();
+const answerSchema = z.object({ answers: z.record(z.string(), z.unknown()), expectedRevision: z.number().int().positive().optional(), goalUpdates: goalUpdatesSchema.optional() }).strict();
 
 type Handler = (c: Context<AppEnv>) => Promise<Response> | Response;
 

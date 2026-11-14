@@ -121,7 +121,8 @@ export type LayoutInput = {
   instanceName: string;
 };
 
-export type RenderedMail = { subject: string; html: string; text: string };
+/** A rendered mail; `attachments` (D1053) are added by a template after `layout()`. */
+export type RenderedMail = { subject: string; html: string; text: string; attachments?: import("../mail").MailAttachment[] };
 
 const STYLE = html`<style>
 :root{color-scheme:light dark;supported-color-schemes:light dark}

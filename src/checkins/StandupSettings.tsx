@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { Pause, Play, Trash2 } from "lucide-react";
+import { FileText, Pause, Play, Trash2 } from "lucide-react";
+import { api } from "../api";
+import { EmbedPickerDialog, type PickItem } from "../ui/embeds/EmbedPicker";
 import { QuestionSetEditor, type SaveState } from "../ui/questions/QuestionSetEditor";
 import { SchedulePicker, viewerZone, type ScheduleValue } from "../ui/schedule/SchedulePicker";
 import { PersonPicker } from "../ui/people/People";
@@ -9,7 +11,8 @@ import type { CheckinDetail } from "../../shared/checkins";
 import type { PersonSummary } from "../../shared/people";
 import type { QuestionSet } from "../../shared/questions";
 import type { WorkspaceAppProps } from "../workspaceModules/types";
-import { deleteStandup, errorText, getStandup, getStandupAccess, publishStandupQuestions, putStandupAccess, readStandupQuestions, saveStandupQuestions, setMyStandup, setStandupParticipants, setStandupSubscription, updateStandup } from "./api";
+import { WorkspaceAccess } from "../access/WorkspaceAccess";
+import { deleteStandup, errorText, getStandup, publishStandupQuestions, readStandupQuestions, saveStandupQuestions, setMyStandup, setStandupParticipants, setStandupSubscription, updateStandup } from "./api";
 
 /**
  * A standup's settings (§D.4 UI): your own (time zone, pause, summaries) for everyone taking part, and
@@ -26,6 +29,36 @@ function Switch({ checked, onChange, label, disabled }: { checked: boolean; onCh
   return <button type="button" role="switch" className="ui-switch standup-switch" aria-checked={checked} disabled={disabled} onClick={() => onChange(!checked)}>
     <span>{label}</span><span className="ui-switch-track" aria-hidden="true"><span className="ui-switch-thumb" /></span>
   </button>;
+}
+
+type NoteRow = { id: string; title: string; is_owner: number; current_version: number; updated_at: string };
+const loadMyNotes = (): Promise<PickItem[]> => api<{ notes: NoteRow[] }>("/notes").then((result) => result.notes.filter((note) => note.is_owner === 1)
+  .map((note) => ({ id: note.id, title: note.title || "Untitled note", meta: note.current_version > 0 ? "Published" : "Draft only", path: `/notes/${note.id}` })));
+
+/**
+ * Post each closed round to a note (§C C23, D1044): the round's date, summary line, and (for named
+ * standups whose answers are not private) everyone's answers are appended and published as the
+ * standup's owner. Pick one of your notes; clearing it stops.
+ */
+function SummaryNote({ detail, save }: { detail: CheckinDetail; save: (body: Record<string, unknown>, message: string) => Promise<void> }) {
+  const [picking, setPicking] = useState(false);
+  const [title, setTitle] = useState<string | null>(null);
+  const noteId = detail.summary.noteId ?? null;
+  useEffect(() => {
+    if (!noteId) { setTitle(null); return; }
+    let live = true;
+    api<{ note: { title: string } }>(`/notes/${noteId}`).then((result) => { if (live) setTitle(result.note.title || "Untitled note"); }, () => { if (live) setTitle("A note you can't open"); });
+    return () => { live = false; };
+  }, [noteId]);
+  return <div className="standup-summary-note">
+    <p className="standup-muted"><FileText aria-hidden="true" />{noteId ? <>Each closed round is added to <a href={`/notes/${noteId}`}>{title ?? "the note"}</a> and published.</> : "Add each closed round to a note, published as a new version."}</p>
+    <span className="standup-summary-note-actions">
+      <button type="button" className="action-button secondary" onClick={() => setPicking(true)}>{noteId ? "Change note" : "Post rounds to a note"}</button>
+      {noteId && <button type="button" className="action-button secondary" onClick={() => void save({ summary: { noteId: null } }, "Rounds stop going to the note")}>Stop</button>}
+    </span>
+    {picking && <EmbedPickerDialog title="Post rounds to a note" eyebrow="Standup summaries" icon={FileText} emptyTitle="No notes yet" emptyText="Create a note first, then choose it here."
+      load={loadMyNotes} onClose={() => setPicking(false)} onPick={(item) => { setPicking(false); void save({ summary: { noteId: item.id } }, `Rounds go to ${item.title}`); }} />}
+  </div>;
 }
 
 export function StandupSettings({ detail, canEdit, onChanged, onDeleted, flash, role }: WorkspaceAppProps & { detail: CheckinDetail; canEdit: boolean; onChanged: (next?: CheckinDetail) => void; onDeleted: () => void }) {
@@ -54,6 +87,7 @@ export function StandupSettings({ detail, canEdit, onChanged, onDeleted, flash, 
         <p className="standup-muted">When a round closes, a summary goes to the inbox of its owner{detail.summary.notifyParticipants ? " and participants" : ""}.</p>
         <Switch checked={detail.summary.notifyParticipants} label="Send summaries to participants" onChange={(value) => void save({ summary: { notifyParticipants: value } }, "Saved")} />
         <Switch checked={detail.summary.email} label="Also by email" onChange={(value) => void save({ summary: { email: value } }, "Saved")} />
+        <SummaryNote detail={detail} save={save} />
       </section>
       {["owner", "manage"].includes(detail.level) && <section className="standup-panel standup-danger" aria-labelledby="standup-delete">
         <h3 id="standup-delete">Move to the Bin</h3>
@@ -177,25 +211,12 @@ function Questions({ detail, flash, onChanged }: { detail: CheckinDetail; flash:
 }
 
 function Audience({ detail, flash }: { detail: CheckinDetail; flash: (message: string) => void }) {
-  const [state, setState] = useState<{ etag: string; audience: string } | null>(null);
   const manage = ["owner", "manage"].includes(detail.level);
-  useEffect(() => { if (manage) getStandupAccess(detail.id).then((access) => setState({ etag: access.etag, audience: access.audience })).catch(() => undefined); }, [detail.id, manage]);
-  if (!manage || !state) return null;
-  const everyone = state.audience === "all_users";
-  const setEveryone = async (on: boolean) => {
-    try {
-      await putStandupAccess(detail.id, on ? { audience: "all_users", audienceLevel: "view", people: [], groups: [] } : { audience: "private", people: [], groups: [] }, state.etag);
-      const fresh = await getStandupAccess(detail.id);
-      setState({ etag: fresh.etag, audience: fresh.audience });
-      flash(on ? "Everyone in the workspace can read it" : "Only participants and the owner can read it");
-    } catch (reason) { flash(errorText(reason, "Could not change who can read it")); }
-  };
+  if (!manage) return null;
+  // Taking part is reading (D938): the shared Access sheet adds readers besides the participants (D1050).
   return <section className="standup-panel" aria-labelledby="standup-audience">
     <h3 id="standup-audience">Who can read it</h3>
-    <div className="ui-segmented" role="group" aria-label="Who can read it">
-      <button type="button" aria-pressed={!everyone} onClick={() => void setEveryone(false)}>Participants</button>
-      <button type="button" aria-pressed={everyone} onClick={() => void setEveryone(true)}>Everyone in the workspace</button>
-    </div>
+    <WorkspaceAccess kind="checkin" id={detail.id} title={detail.name} canManage onSaved={() => flash("Access saved")} />
     <p className="standup-muted">{detail.anonymous ? "Anonymous answers are only ever shown without names, from 3 answers on." : detail.privateAnswers ? "Each person sees only their own answers; you see all of them." : "Readers see every answer, blockers, and mood."}</p>
   </section>;
 }

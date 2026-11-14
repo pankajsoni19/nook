@@ -14,6 +14,7 @@ import { availability } from "./availability";
 import { approveBooking, bookingView, cancelBooking, createBooking, declineBooking, markNoShow, rescheduleBooking } from "./service";
 import { addFeed, FeedError, listFeeds, refreshFeed, removeFeed } from "./feeds";
 import { bookingsInsights } from "./insights";
+import { workKindAdapter } from "../links/adapters";
 
 /**
  * The app's Bookings routes (§D.6 HTTP), behind every session, CSRF, two-factor, and role-write
@@ -135,7 +136,28 @@ export function listBookings(userId: string, filter: ListFilter, nowMs = Date.no
   return { items: page.map((row) => bookingView(row, userId)), nextCursor: rows.length > limit && last ? Buffer.from(`${last.start_utc}|${last.id}`).toString("base64url") : null };
 }
 
+const RECORD_CONTACTS: Record<"contact" | "company" | "deal", string> = {
+  contact: "SELECT id FROM contacts WHERE id = $id",
+  company: "SELECT id FROM contacts WHERE company_id = $id",
+  deal: "SELECT contact_id AS id FROM deal_contacts WHERE deal_id = $id"
+};
+
+/**
+ * Bookings of a CRM record (C20, D1058): a contact's, a company's people's, or a deal's contacts', newest
+ * first, at most 20. The viewer must read the record (its work kind's level) and each booking
+ * (readableBookingSql, T583), so a CRM reader never sees bookings they could not open in Bookings.
+ */
+export function bookingsForRecord(userId: string, kind: string, ref: string) {
+  if (kind !== "contact" && kind !== "company" && kind !== "deal") throw new BookingError(400, "INVALID", "Bookings are listed for a contact, a company, or a deal");
+  const id = ref.toLowerCase();
+  if ((workKindAdapter(kind)?.level(id, { userId }) ?? "none") === "none") throw new BookingError(404, "NOT_FOUND", "Record not found");
+  const rows = db.query(`SELECT b.* FROM bookings b WHERE b.contact_id IN (${RECORD_CONTACTS[kind]}) AND ${readableBookingSql("b")} ORDER BY b.start_utc DESC, b.id DESC LIMIT 21`)
+    .all({ id, userId }) as BookingRow[];
+  return { items: rows.slice(0, 20).map((row) => bookingView(row, userId)), truncated: rows.length > 20 };
+}
+
 export function registerBookingRoutes(router: ModuleRouter) {
+  router.get("/api/bookings/for/:kind/:id", handle((c, userId) => c.json(bookingsForRecord(userId, c.req.param("kind") ?? "", c.req.param("id") ?? ""))));
   // Profile and outside calendars
   router.get("/api/bookings/profile", handle((c, userId) => c.json({ profile: ensureProfile(userId), feeds: listFeeds(userId) })));
   router.put("/api/bookings/profile", handle(async (c, userId) => {

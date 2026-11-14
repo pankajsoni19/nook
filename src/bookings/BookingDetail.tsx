@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ArrowLeft, CalendarDays, Check, Clock, Mail, RotateCcw, UserX, Users, X } from "lucide-react";
 import { ItemTimeline } from "../ui/activity/ItemTimeline";
 import { LinkedItemsPanel } from "../ui/links/WorkLinks";
+import { ItemSectionsOutlet } from "../ui/ItemSlotOutlet";
 import { answerText } from "../ui/questions/ResponseViewer";
 import { LOCATION_LABELS } from "../../shared/bookings";
 
@@ -96,6 +97,7 @@ export function BookingDetail({ bookingRef, onBack, onOpenPath, flash, readOnly 
       </div>
       <aside className="bk-detail-side">
         <section className="bk-panel"><LinkedItemsPanel item={{ kind: "booking", id: booking.id }} canEdit={!readOnly} onOpen={onOpenPath} title="Linked" /></section>
+        <ItemSectionsOutlet kind="booking" id={booking.id} readOnly={readOnly} onOpen={onOpenPath} frameClassName="bk-panel" />
       </aside>
     </div>
   </div>;

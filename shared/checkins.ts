@@ -16,6 +16,8 @@ export type ParticipationState = typeof PARTICIPATION_STATES[number];
 
 export const CHECKIN_NAME_MAX = 120;
 export const CHECKIN_DESCRIPTION_MAX = 4000;
+/** Goals one standup answer may check in on (§C5, D1043). */
+export const STANDUP_GOAL_UPDATES_MAX = 10;
 export const CHECKIN_MAX_PARTICIPANTS = 200;
 export const CHECKIN_MAX_GROUPS = 20;
 /** Anonymous standups show results only from this many answers on (T553). */
@@ -124,7 +126,7 @@ export type CheckinDetail = CheckinSummary & {
   privateAnswers: boolean;
   tz: string;
   reminderMinutesBefore: number | null;
-  summary: { notifyParticipants: boolean; email: boolean };
+  summary: { notifyParticipants: boolean; email: boolean; noteId?: string | null };
   ownerId: string;
   groups: Array<{ id: string; name: string }>;
   /** Participants with their zones and pauses (people the viewer may see). */
@@ -190,6 +192,14 @@ export type AnswerPrefill = {
   plannedCards: WorkSummary[];
   openBlockers: WorkSummary[];
   current: { id: string; answers: Answers; revision: number } | null;
+  /** Cards you logged time on since your last answer (C6, D1046), when Time is there; part of doneCards too. */
+  timeCards?: WorkSummary[];
+};
+
+/** A goal with key results a participant can check in on from a `goal_update` question (§C5, D1043). */
+export type StandupGoalTarget = {
+  id: string; title: string; href: string; health: "on_track" | "at_risk" | "off_track" | "none"; progress: number;
+  keyResults: Array<{ id: string; title: string; metric: string; currentValue: number; targetValue: number; unit: string | null; manual: boolean }>;
 };
 
 export type FeedEntry = AnswerView & { checkin: { id: string; name: string; href: string }; round: { id: string; date: string; href: string }; blockers: number; set: QuestionSet };
@@ -220,7 +230,9 @@ export const CHECKIN_ACTIVITY = registerActivityKinds("checkins", {
   round_opened: { shape: "item", coalesce: false },
   round_closed: { shape: "item", coalesce: false },
   answered: { shape: "item", coalesce: false },
-  answer_edited: { shape: "item", coalesce: true }
+  answer_edited: { shape: "item", coalesce: true },
+  /** A closed round was added to the standup's note (C23, D1044). */
+  summary_posted: { shape: "item", coalesce: false }
 });
 
 /** Text of an answer for search and summaries: strings joined (choice ids and numbers left out). */

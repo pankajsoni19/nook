@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from "react";
-import { ArrowLeft, CheckSquare, CircleCheck, GitBranch, Link2, ListChecks, Lock, MessageSquareText, Pencil, Plus, RotateCcw, Square, Target, Trash2, TrendingUp, Zap } from "lucide-react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { ArrowLeft, CheckSquare, CircleCheck, GitBranch, Link2, ListChecks, Lock, MessageSquareText, Pencil, Plus, RotateCcw, Share2, Square, Target, Trash2, TrendingUp, Zap } from "lucide-react";
 import { AccountActions, AppPageName } from "../AppShell";
 import { ReadOnlyBanner } from "../team/roleAccess";
 import { EmptyState } from "../ui/EmptyState";
@@ -7,6 +7,7 @@ import { MoreMenu } from "../ui/MoreMenu";
 import { GoalHealthChip, HealthChip, ProgressBar, ProgressRing } from "../ui/progress/Progress";
 import { InsightChart } from "../ui/insights/Insights";
 import { ItemTimeline } from "../ui/activity/ItemTimeline";
+import { ItemSectionsOutlet } from "../ui/ItemSlotOutlet";
 import { LinkPicker, WorkRefChip } from "../ui/links/WorkLinks";
 import { useModuleShortcuts } from "../ui/moduleKeys";
 import { errorText } from "../ui/notify";
@@ -21,6 +22,8 @@ import { CADENCE_LABEL, formatKrValue, GOAL_STATE_LABEL, KR_DIRECTION_LABEL } fr
 import type { WorkLinkView } from "../../shared/workRefs";
 import type { WorkspaceAppProps } from "../workspaceModules/types";
 import "../ui/workspace.css";
+
+const AccessSheet = lazy(() => import("../access/AccessSheet").then((module) => ({ default: module.AccessSheet })));
 import "./goals.css";
 
 /**
@@ -43,7 +46,7 @@ export default function GoalPage({ segment, navigate, onOpenPath, userId, displa
   const [history, setHistory] = useState<GoalHistory | null>(null);
   const [checkins, setCheckins] = useState<Checkin[] | null>(null);
   const [work, setWork] = useState<WorkLinkView[] | null>(null);
-  const [sheet, setSheet] = useState<null | { kind: "checkin" } | { kind: "edit" } | { kind: "kr"; kr?: KeyResult } | { kind: "close" } | { kind: "link" } | { kind: "child" }>(null);
+  const [sheet, setSheet] = useState<null | { kind: "checkin" } | { kind: "edit" } | { kind: "kr"; kr?: KeyResult } | { kind: "close" } | { kind: "link" } | { kind: "child" } | { kind: "access" }>(null);
   const [refresh, setRefresh] = useState(0);
   const shortId = segment.split("-").pop() ?? segment;
 
@@ -93,6 +96,8 @@ export default function GoalPage({ segment, navigate, onOpenPath, userId, displa
     ...(goal.canEdit && !isClosed ? [{ id: "close", label: "Close goal…", icon: CircleCheck, onSelect: () => setSheet({ kind: "close" }) }] : []),
     ...(goal.canEdit && isClosed ? [{ id: "reopen", label: "Reopen", icon: RotateCcw, onSelect: () => { reopenGoal(goal.id).then((body) => { setGoal(body.goal); flash("Goal reopened"); }, (reason) => flash(errorText(reason, "Could not reopen"))); } }] : []),
     ...(goal.canEdit ? [{ id: "child", label: "Add a sub-goal", icon: GitBranch, onSelect: () => setSheet({ kind: "child" }) }] : []),
+    // Sharing is the shared Access sheet over /api/access/goal/:id (D1050; it replaced the editor's presets, D917).
+    ...(goal.canManage ? [{ id: "access", label: "Who has access…", icon: Share2, onSelect: () => setSheet({ kind: "access" }) }] : []),
     ...(goal.canManage ? [{ id: "bin", label: "Move to Bin", icon: Trash2, danger: true, onSelect: () => { binGoal(goal.id).then(() => { flash(`${goal.title} moved to the Bin`); back(); }, (reason) => flash(errorText(reason, "Could not move it to the Bin"))); } }] : [])
   ];
 
@@ -158,6 +163,7 @@ export default function GoalPage({ segment, navigate, onOpenPath, userId, displa
             {work === null ? <p className="ui-panel-loading" role="status">Loading…</p> : work.length === 0 ? <p className="goals-note">Link cards, boards, notes, or deals that move this goal.</p> :
               <ul className="goals-work">{work.map((link) => <li key={link.id}><WorkRefChip summary={link.other} onOpen={onOpenPath} onRemove={goal.canEdit && link.source === "work_links" ? () => { deleteLink(link.id).then(reload, (reason) => flash(errorText(reason, "Could not remove the link"))); } : undefined} /></li>)}</ul>}
           </section>
+          <ItemSectionsOutlet kind="goal" id={goal.id} readOnly={false} onOpen={onOpenPath} frameClassName="goals-panel" />
           <section className="goals-panel" aria-labelledby="goal-checkins">
             <header><h2 id="goal-checkins"><MessageSquareText aria-hidden="true" />Check-ins</h2></header>
             {checkins === null ? <p className="ui-panel-loading" role="status">Loading…</p> : checkins.length === 0
@@ -176,6 +182,8 @@ export default function GoalPage({ segment, navigate, onOpenPath, userId, displa
     {sheet?.kind === "child" && <GoalEditor me={{ id: userId, name: displayName }} defaults={{ parentId: goal.id, periodId: goal.period?.id ?? null }} onClose={() => setSheet(null)} onSaved={(next) => { setSheet(null); flash(`${next.title} created`); onOpenPath(next.href); }} />}
     {sheet?.kind === "kr" && <KrEditor goal={goal} kr={sheet.kr} onClose={() => setSheet(null)} onSaved={(message) => { setSheet(null); reload(); flash(message); }} />}
     {sheet?.kind === "close" && <CloseSheet goal={goal} onClose={() => setSheet(null)} onSaved={(message, next) => { setSheet(null); setGoal(next); reload(); flash(message); }} />}
+    {sheet?.kind === "access" && <Suspense fallback={null}><AccessSheet kind="goal" id={goal.id} title={goal.title} guardHistory note="Contributors can always open the goal and check in on it." onClose={() => setSheet(null)}
+      onSaved={() => { setSheet(null); reload(); flash("Access saved"); }} /></Suspense>}
     {sheet?.kind === "link" && <LinkPicker title="Link work to this goal" relations={["contributes"]} onClose={() => setSheet(null)} onPick={async (target) => {
       // The work is side A: "MYT-12 contributes to Grow MRR" (§B.4.1).
       await createLink("ref" in target ? target as never : { kind: target.kind, id: target.id }, { kind: "goal", id: goal.id }, "contributes");
