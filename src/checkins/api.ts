@@ -45,9 +45,6 @@ export const standupFeed = (params: { checkin?: string; person?: string; blocker
 export const setAnswerReaction = (responseId: string, emoji: string, on: boolean) =>
   api<{ reactions: ReactionAggregate[] }>(`/reactions/checkin_answer/${enc(responseId)}/${enc(emoji)}`, { method: on ? "PUT" : "DELETE", headers: { "Content-Type": "application/json" } });
 
-/** The workspace Access endpoint for a standup's audience (who besides participants can read it). */
-export const getStandupAccess = (id: string) => api<{ etag: string; audience: "private" | "selected" | "all_users"; audienceLevel: string; people: Array<{ id: string; level: string }>; groups: Array<{ id: string; level: string }> }>(`/access/checkin/${enc(id)}`);
-export const putStandupAccess = (id: string, body: unknown, etag: string) => api<unknown>(`/access/checkin/${enc(id)}`, { method: "PUT", body: JSON.stringify(body), headers: { "If-Match": etag } });
 
 export const errorText = (reason: unknown, fallback: string) => reason instanceof ApiError ? reason.message : fallback;
 export const errorCode = (reason: unknown) => reason instanceof ApiError && reason.payload && typeof reason.payload === "object" ? (reason.payload as { code?: string }).code : undefined;

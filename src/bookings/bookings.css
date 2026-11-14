@@ -165,3 +165,6 @@ fieldset.bk-panel > legend + * { clear: both; }
   .bk-editor-actions { width: 100%; }
   .bk-editor-actions .action-button { margin-left: auto; }
 }
+/* Who in the workspace can see or edit a type (the shared Access control, D1050). */
+.bk-access { display: grid; gap: 8px; margin-top: 6px; padding-top: 12px; border-top: 1px solid #2c2c31; }
+.bk-access > strong { font-size: .86rem; color: #d6d6d9; font-weight: 600; }
