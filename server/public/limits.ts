@@ -15,7 +15,11 @@ import { HONEYPOT_FIELD, MIN_FILL_MS } from "../../shared/publicPages";
 export const PUBLIC_LIMITS = {
   pagePerMinute: 120,
   submitPerMinute: 10,
-  submitPerHour: 60
+  submitPerHour: 60,
+  /** Room reads (a live session's page, state, and stream; D1103, T622): a whole room can sit behind one address. */
+  roomPerMinute: 1200,
+  /** Room reads per participant token (the `p` query value). */
+  roomParticipantPerMinute: 60
 } as const;
 /** A render nonce is good for a day. */
 export const NONCE_TTL_MS = 86_400_000;
@@ -48,6 +52,29 @@ export function publicLimit(kind: "page" | "submit", address: string | null, now
   return take(`submit-h:${who}`, PUBLIC_LIMITS.submitPerHour, 3_600_000, nowMs);
 }
 
+/**
+ * Charges one read of a room path (see `markRoomPath`): per participant (the page's `p` query value,
+ * when it sends one) and per address with a cap high enough for a room behind one NAT. Kept apart from
+ * the 120-a-minute page bucket, so a busy room neither locks itself out nor uses up the address's page
+ * budget for everything else. Returns 0 when allowed, else the seconds to wait.
+ */
+export function roomLimit(address: string | null, participant: string | null, nowMs = Date.now()): number {
+  if (participant) {
+    const wait = take(`room-p:${participant.slice(0, 200)}`, PUBLIC_LIMITS.roomParticipantPerMinute, 60_000, nowMs);
+    if (wait) return wait;
+  }
+  return take(`room-a:${address ?? "unknown"}`, PUBLIC_LIMITS.roomPerMinute, 60_000, nowMs);
+}
+
+/** Paths whose GETs are room reads (registered with the router's `room` option), as patterns. */
+const roomPaths: RegExp[] = [];
+/** Marks a public route path (`/api/public/townhall/:token`) as a room read for the rate limits. */
+export function markRoomPath(path: string) {
+  const pattern = new RegExp(`^${path.split("/").map((part) => part.startsWith(":") ? "[^/]+" : part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("/")}/?$`);
+  roomPaths.push(pattern);
+}
+export const isRoomPath = (path: string) => roomPaths.some((pattern) => pattern.test(path));
+
 /** Test hook: forget every bucket. */
 export function resetPublicLimits() {
   buckets.clear();
@@ -62,6 +89,26 @@ export function setPublicPause(kind: string, pause: boolean) {
 export const publicPaused = (kind: string) => paused.has(kind);
 
 // ---------------------------------------------------------------- render nonces
+
+/**
+ * Adds a fresh render nonce to a refusal (D1105): checkSubmission spends the nonce before the module
+ * validates, so a later 400, 409, or 429 would leave the page holding a dead one and its next try would
+ * fail as a replay. Any JSON refusal except the uniform 404 gets `renderNonce`; successes and the 404
+ * pass through unchanged.
+ */
+export async function withFreshNonce(response: Response, kind: string, itemId: string): Promise<Response> {
+  if (response.status < 400 || response.status === 404 || !(response.headers.get("Content-Type") ?? "").includes("application/json")) return response;
+  const body = await response.clone().json().catch(() => null) as Record<string, unknown> | null;
+  if (!body || typeof body !== "object" || Array.isArray(body)) return response;
+  const headers = new Headers(response.headers);
+  headers.delete("Content-Length");
+  return new Response(JSON.stringify({ ...body, renderNonce: issueRenderNonce(kind, itemId) }), { status: response.status, headers });
+}
+
+/** Runs a public submission handler and gives any refusal it returns a fresh render nonce (`withFreshNonce`). */
+export async function refreshNonceOnRefusal(kind: string, itemId: string, run: () => Response | Promise<Response>): Promise<Response> {
+  return withFreshNonce(await run(), kind, itemId);
+}
 
 /**
  * A signed nonce for one render of a public page: the kind and item it is for, when it was rendered
