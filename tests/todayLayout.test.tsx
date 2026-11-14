@@ -152,3 +152,10 @@ test("sectionCount is empty for nothing and marks a capped list", () => {
   expect(sectionCount([1, 2], false)).toBe("2");
   expect(sectionCount(Array(10).fill(0), true)).toBe("10+");
 });
+
+test("phone app tiles stack the icon over the label so long names stay in their cell (D1266)", async () => {
+  const css = await Bun.file(new URL("../src/today/today.css", import.meta.url)).text();
+  const phone = css.slice(css.indexOf("@media (max-width: 760px)"));
+  expect(phone).toMatch(/\.today-app \{ width: 100%; min-width: 0; min-height: 72px; flex-direction: column;/);
+  expect(phone).toMatch(/\.today-app > span:last-child \{ max-width: 100%; overflow: hidden; text-overflow: ellipsis;/);
+});
