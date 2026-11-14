@@ -19,6 +19,12 @@ export type InteractionKind = typeof INTERACTION_KINDS[number];
 export const INTERACTION_LABELS: Record<InteractionKind, string> = {
   note: "Note", call: "Call", meeting: "Meeting", email: "Email", message: "Message", task: "Task", booking: "Booking", form: "Form response", other: "Other"
 };
+/** What an activity line says after the actor's name when they logged an interaction (D987): "logged a form response", "logged an email". */
+export const INTERACTION_LOGGED: Record<InteractionKind, string> = {
+  note: "logged a note", call: "logged a call", meeting: "logged a meeting", email: "logged an email", message: "logged a message",
+  task: "logged a finished task", booking: "logged a booking", form: "logged a form response", other: "logged an interaction"
+};
+export const interactionLogged = (kind: unknown) => INTERACTION_LOGGED[(INTERACTION_KINDS as readonly unknown[]).includes(kind) ? kind as InteractionKind : "note"];
 export const INTERACTION_SOURCES = ["manual", "booking", "form", "task", "import", "mcp"] as const;
 export type InteractionSource = typeof INTERACTION_SOURCES[number];
 

@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { ItemActivityEntry } from "../../shared/itemActivity";
+import { interactionLogged } from "../../shared/crm";
 
 /** How Contacts' activity reads after the actor's name (ItemTimeline and the record timeline). */
 const value = (entry: ItemActivityEntry, key: "from" | "to") => entry.payload[key]?.label ?? "—";
@@ -9,7 +10,7 @@ export const CRM_ACTIVITY_RENDERERS: Readonly<Record<string, (entry: ItemActivit
   crm_updated: (entry) => <>changed {String(entry.payload.extra?.fields ?? "details").toLowerCase()}</>,
   crm_stage: (entry) => <>moved it from <strong>{value(entry, "from")}</strong> to <strong>{value(entry, "to")}</strong></>,
   crm_merged: (entry) => <>merged <strong>{String(entry.payload.extra?.merged_from ?? "a duplicate")}</strong> into this</>,
-  crm_interaction: (entry) => <>logged a {String(entry.payload.extra?.kind ?? "note")}</>,
+  crm_interaction: (entry) => <>{interactionLogged(entry.payload.extra?.kind)}</>,
   crm_followup: () => <>set a follow-up</>,
   crm_imported: () => <>imported this from a CSV</>,
   contact_created: (entry) => <>added this contact{entry.payload.extra?.source ? ` (from ${String(entry.payload.extra.source)})` : ""}</>,
@@ -25,7 +26,7 @@ export function activityPlain(entry: ItemActivityEntry): string {
     case "crm_stage": return `moved it from ${value(entry, "from")} to ${value(entry, "to")}`;
     case "crm_updated": return `changed ${String(entry.payload.extra?.fields ?? "details").toLowerCase()}`;
     case "crm_merged": return `merged ${String(entry.payload.extra?.merged_from ?? "a duplicate")} into this`;
-    case "crm_interaction": return `logged a ${String(entry.payload.extra?.kind ?? "note")}`;
+    case "crm_interaction": return interactionLogged(entry.payload.extra?.kind);
     case "crm_followup": return "set a follow-up";
     case "created": return "created this";
     case "contact_created": return "added this contact";
