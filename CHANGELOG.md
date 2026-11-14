@@ -4,6 +4,17 @@ Release notes for Nook, newest first. Upgrade steps for each release are in [doc
 
 ## Unreleased
 
+**Fixes: final QA of the modules**
+
+- **Open** on a goal, form, or townhall card in a note, and **Open in Bookings** after booking a colleague, open the page in the app again (they did nothing). Leaving a note saves it first; a module that is off shows its hint on Home.
+- Team → **Book time**: the booking sheet opens whole over the page instead of clipped inside the member's row.
+- Collections: choosing a team member or contact for a row lists the matches inside the sheet, above its buttons, and a click picks one (the list was cut off and clicks missed it).
+- Insights charts in every module shrink when the window gets narrower instead of running off their cards.
+- Goals → Periods: **Add period** twice in a row adds the next quarter instead of a copy, and a period name already in use is refused with a message saying so.
+- Today → Storage says how many items are in the Bin instead of "Nothing in the Bin" when the Bin holds notes, cards, or boards.
+- Home on a phone: app tiles show the icon above the name, so **Whiteboards** fits its tile.
+- Report charts of counts step 0, 1, 2 instead of 0, 0.5, 1.
+
 **Fixes: gaps between the modules plan, the docs, and the app**
 
 - Today's Follow-ups **View all** opens the Contacts Follow-ups tab instead of People, and a submitted week's notification opens the project's Approvals tab.
