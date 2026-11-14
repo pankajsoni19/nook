@@ -113,7 +113,7 @@ describe("GET /api/today", () => {
     expect(view.date).toBe(dateInZone(new Date(view.generatedAt), "Europe/Berlin"));
     expect(view.sections.notesRecent).toMatchObject({ href: "/notes", more: expect.any(Boolean) });
     expect(view.sections.drafts).toEqual({ items: [], more: false, href: "/notes" });
-    expect(view.sections.storage!.items).toEqual([{ usedBytes: 0, binnedBytes: 0, quotaBytes: 12582912 }]);
+    expect(view.sections.storage!.items).toEqual([{ usedBytes: 0, binnedBytes: 0, quotaBytes: 12582912, binnedItems: 0 }]);
     expect(view.sections.binSoon!.href).toBe("/bin");
   });
 
@@ -250,6 +250,8 @@ describe("GET /api/today", () => {
     expect(among((await expectParity(recipient)).sections.notesRecent, all)).toEqual([overridden]);
     expect((await request(`/notes/${overridden}`, { method: "DELETE", body: "{}" }, owner)).status).toBe(200);
     expect(among((await expectParity(recipient)).sections.notesRecent, all)).toEqual([]);
+    // D1265: Storage counts the binned note though it takes no bytes (it said "Nothing in the Bin").
+    expect((await expectParity(owner)).sections.storage!.items[0]).toMatchObject({ binnedBytes: 0, binnedItems: 1 });
     expect(ids((await expectParity(owner)).sections.notesRecent)).not.toContain(overridden);
   });
 
@@ -305,7 +307,7 @@ describe("GET /api/today", () => {
     let view = await expectParity(owner);
     expect(ids(view.sections.files)).not.toContain(privateFile);
     const total = "shared bytes".length + "private".length + "attached".length;
-    expect(view.sections.storage!.items[0]).toEqual({ usedBytes: total, binnedBytes: "private".length, quotaBytes: 12582912 });
+    expect(view.sections.storage!.items[0]).toEqual({ usedBytes: total, binnedBytes: "private".length, quotaBytes: 12582912, binnedItems: 1 });
     // Thirty days away: not "soon". Two days away: soon, and only in the owner's view.
     expect(ids(view.sections.binSoon)).not.toContain(privateFile);
     db.query("UPDATE documents SET purge_after = ? WHERE id = ?").run(new Date(Date.now() + 2 * 86_400_000).toISOString(), privateFile);

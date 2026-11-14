@@ -172,11 +172,15 @@ export function sectionCount(items: readonly unknown[], more: boolean | undefine
 /** The "View all" route: the section's href, parsed like any other in-app URL. */
 export const viewAllRoute = (href: string): Route => parseRoute(href);
 
-export type StorageUsage = { usedBytes: number; binnedBytes: number; quotaBytes: number | null };
+export type StorageUsage = { usedBytes: number; binnedBytes: number; quotaBytes: number | null; /** D1265: every item in the Bin, sized or not. */ binnedItems?: number };
 
-/** "3.2 GB of 10 GB", plus how much of it is in the Bin. */
+/** "3.2 GB of 10 GB", plus how much of it is in the Bin (bytes, or else how many items: a note has no size). */
 export function storageText(usage: StorageUsage) {
   const used = formatBytes(usage.usedBytes) || "0 B";
   const summary = usage.quotaBytes ? `${used} of ${formatBytes(usage.quotaBytes)}` : `${used} used`;
-  return { summary, detail: usage.binnedBytes > 0 ? `${formatBytes(usage.binnedBytes)} of it is in the Bin` : usage.quotaBytes ? "Nothing in the Bin" : "No storage limit" };
+  const items = usage.binnedItems ?? 0;
+  const detail = usage.binnedBytes > 0 ? `${formatBytes(usage.binnedBytes)} of it is in the Bin`
+    : items > 0 ? `${items} ${items === 1 ? "item" : "items"} in the Bin`
+      : usage.quotaBytes ? "Nothing in the Bin" : "No storage limit";
+  return { summary, detail };
 }

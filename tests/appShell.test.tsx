@@ -95,6 +95,10 @@ test("Today rows link to their app routes and show due and storage copy", () => 
   expect(TODAY_SECTIONS.drafts!.row!({ id: "n", title: "T", neverPublished: true, updated_at: new Date().toISOString() }, "").meta).toContain("Never published");
   expect(storageText({ usedBytes: 3.2 * 1024 ** 3, binnedBytes: 0, quotaBytes: 10 * 1024 ** 3 }).summary).toBe("3.2 GB of 10 GB");
   expect(storageText({ usedBytes: 0, binnedBytes: 0, quotaBytes: null })).toEqual({ summary: "0 B used", detail: "No storage limit" });
+  // D1265: notes, cards, and boards in the Bin take no bytes; the line counts them instead of saying it is empty.
+  expect(storageText({ usedBytes: 0, binnedBytes: 0, quotaBytes: 10 * 1024 ** 3, binnedItems: 3 }).detail).toBe("3 items in the Bin");
+  expect(storageText({ usedBytes: 0, binnedBytes: 0, quotaBytes: null, binnedItems: 1 }).detail).toBe("1 item in the Bin");
+  expect(storageText({ usedBytes: 0, binnedBytes: 0, quotaBytes: 10 * 1024 ** 3, binnedItems: 0 }).detail).toBe("Nothing in the Bin");
 });
 
 test("account buttons have 44px hit areas on phones without growing the icon", async () => {
