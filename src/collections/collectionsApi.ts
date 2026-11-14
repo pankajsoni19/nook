@@ -1,9 +1,10 @@
 import { nameItems } from "../routeNames";
 import { api, ApiError } from "../api";
 import type { ItemLevel } from "../access/accessLevels";
+import type { PersonSummary } from "../../shared/people";
 
 /** docs/plan/API_CONTRACTS.md § Collections. */
-export type FieldType = "text" | "number" | "date" | "checkbox" | "select" | "multi_select" | "url" | "note" | "file";
+export type FieldType = "text" | "number" | "date" | "checkbox" | "select" | "multi_select" | "url" | "note" | "file" | "person" | "contact";
 export type OptionColor = "gray" | "red" | "orange" | "yellow" | "green" | "teal" | "blue" | "purple" | "pink";
 export type SelectOption = { id: string; label: string; color: OptionColor };
 export type FieldDefinition = {
@@ -53,6 +54,8 @@ export type CollectionRow = {
   title: string;
   values: Record<string, FieldValue>;
   links: Record<string, NoteLink>;
+  /** Person and contact fields as chips for this viewer; an unreadable contact is hidden (D1201). */
+  people?: Record<string, PersonSummary>;
   files?: Record<string, Attachment[]>;
   revision: number;
   can_undo: boolean;

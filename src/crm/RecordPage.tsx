@@ -28,6 +28,7 @@ import { CRM_ACTIVITY_RENDERERS, activityPlain } from "./activityText";
 import { FollowupSheet, LostReasonSheet, NewDealSheet, TaskSheet } from "./Sheets";
 import { DealCard } from "./DealsView";
 import { dateTime, fieldText, isPast, money, relative, shortDate } from "./format";
+import { cachedPerson, rememberPerson, useRelationNames } from "./relationNames";
 
 /**
  * A contact, company, or deal page (§D.5 "Record page", §E.4): a header with the quick actions (Log,
@@ -326,8 +327,8 @@ function DealContacts({ deal, disabled, onSave }: { deal: CrmDealDetail; disable
 }
 
 function CustomField({ field, value, disabled, team, bookId, onSave }: { field: CrmFieldDef; value: CrmFieldValue | undefined; disabled: boolean; team: Array<{ id: string; name: string }>; bookId: string; onSave: (value: CrmFieldValue | null) => void }) {
-  const [contacts, setContacts] = useState<Array<{ value: string; label: string }>>([]);
-  useEffect(() => { if (field.type === "contact") void listContacts({ book: bookId, limit: 100 }).then((page) => setContacts(page.items.map((contact) => ({ value: contact.id, label: contact.displayName })))); }, [bookId, field.type]);
+  // Person and contact values are ids; their names come from the people resolver (D1206).
+  const names = useRelationNames([field], [{ custom: value === undefined ? {} : { [field.id]: value } }]);
   const labelId = `crm-custom-${field.id}`;
   switch (field.type) {
     case "select": return <div className="crm-field"><span id={labelId}>{field.name}</span><Select labelledBy={labelId} value={typeof value === "string" ? value : ""} disabled={disabled} options={[{ value: "", label: "None" }, ...(field.options ?? []).map((option) => ({ value: option.id, label: option.label }))]} onChange={(next) => onSave(next || null)} /></div>;
@@ -336,8 +337,19 @@ function CustomField({ field, value, disabled, team, bookId, onSave }: { field: 
       return <button key={option.id} type="button" className="ui-filter-chip" aria-pressed={chosen} disabled={disabled} onClick={() => { const current = Array.isArray(value) ? value : []; onSave(chosen ? current.filter((id) => id !== option.id) : [...current, option.id]); }}>{option.label}</button>;
     })}</div></div>;
     case "checkbox": return <div className="crm-field crm-field-check"><label><input type="checkbox" checked={value === true} disabled={disabled} onChange={(event) => onSave(event.target.checked)} /> {field.name}</label></div>;
-    case "person": return <div className="crm-field"><span id={labelId}>{field.name}</span><Select labelledBy={labelId} value={typeof value === "string" ? value : ""} disabled={disabled} options={[{ value: "", label: "Nobody" }, ...team.map((member) => ({ value: member.id, label: member.name }))]} onChange={(next) => onSave(next || null)} /></div>;
-    case "contact": return <div className="crm-field"><span id={labelId}>{field.name}</span><Select labelledBy={labelId} searchable value={typeof value === "string" ? value : ""} disabled={disabled} options={[{ value: "", label: "None" }, ...contacts]} onChange={(next) => onSave(next || null)} /></div>;
+    case "person": {
+      const current = typeof value === "string" ? value : "";
+      // A former member stays listed by name until someone picks another.
+      const extra = current && !team.some((member) => member.id === current) ? [{ value: current, label: names.get(current) ?? "Former member" }] : [];
+      return <div className="crm-field"><span id={labelId}>{field.name}</span><Select labelledBy={labelId} value={current} disabled={disabled} options={[{ value: "", label: "Nobody" }, ...team.map((member) => ({ value: member.id, label: member.name })), ...extra]} onChange={(next) => onSave(next || null)} /></div>;
+    }
+    case "contact": {
+      // Any contact of this book, searched as you type (not only the first page, D1206).
+      const current = typeof value === "string" ? value : null;
+      const chip: PersonSummary[] = current ? [cachedPerson(current) ?? { kind: "contact", id: current, name: names.get(current) ?? "Contact", bookId }] : [];
+      return <div className="crm-field crm-field-contact"><PersonPicker label={field.name} value={chip} allow={["contact"]} bookId={bookId} multiple={false} disabled={disabled}
+        onChange={(people) => { const next = people[0]; if (next) rememberPerson(next); onSave(next && "id" in next ? next.id : null); }} /></div>;
+    }
     case "number": return <EditText label={field.name} type="number" value={value === undefined ? null : String(value)} disabled={disabled} onSave={(next) => onSave(next === null ? null : Number(next))} />;
     case "date": return <EditText label={field.name} type="date" value={typeof value === "string" ? value : null} disabled={disabled} onSave={(next) => onSave(next)} />;
     case "url": return <EditText label={field.name} type="url" value={typeof value === "string" ? value : null} disabled={disabled} onSave={(next) => onSave(next)} />;

@@ -14,9 +14,9 @@ import { z } from "zod";
 
 export const FIELD_TYPES = ["text", "number", "date", "checkbox", "select", "multi_select", "url", "note", "file", "person", "contact"] as const;
 /**
- * Relation types (Contacts lane, D961): `person` holds a team member's id, `contact` a contact's id.
- * Contacts' custom fields use them; Collections refuses to create them (`buildSchema`'s
- * `allowRelations`) and reads them read-only until Wave 3 adds editors there.
+ * Relation types (Contacts lane, D961): `person` holds one team member's id, `contact` one contact's id.
+ * Contacts' custom fields and Collections both create and edit them (D1200); a reader sees a contact's
+ * name only when they can read its book (D1201, T640).
  */
 export const RELATION_FIELD_TYPES = ["person", "contact"] as const;
 export type FieldType = typeof FIELD_TYPES[number];
@@ -137,7 +137,11 @@ const fold = (value: string) => value.normalize("NFC").toLowerCase();
  * (PUT /schema), ids name existing fields and options; fields and options
  * without an id are new and get fresh ids. Throws SchemaError.
  */
-export function buildSchema(input: FieldInput[], previous: CollectionSchema | null = null, options: { allowRelations?: boolean } = {}): CollectionSchema {
+/**
+ * `_options.allowRelations` is accepted for callers written before D1200 (Contacts passes it);
+ * relation fields are allowed everywhere now.
+ */
+export function buildSchema(input: FieldInput[], previous: CollectionSchema | null = null, _options: { allowRelations?: boolean } = {}): CollectionSchema {
   const parsed = fieldsInput.safeParse(input);
   if (!parsed.success) throw new SchemaError("INVALID_SCHEMA", parsed.error.issues[0]?.message ?? "Invalid fields");
   const fields = parsed.data;
@@ -171,7 +175,6 @@ export function buildSchema(input: FieldInput[], previous: CollectionSchema | nu
     const selectLike = field.type === "select" || field.type === "multi_select";
     if (field.options && !selectLike) throw new SchemaError("INVALID_SCHEMA", `“${field.name}” can't have options`);
     if (field.required && field.type === "file") throw new SchemaError("INVALID_SCHEMA", "File fields can't be required");
-    if (!options.allowRelations && (RELATION_FIELD_TYPES as readonly string[]).includes(field.type) && before?.type !== field.type) throw new SchemaError("INVALID_SCHEMA", `“${field.name}”: team member and contact fields are not available here yet`);
 
     const definition: FieldDefinition = { id, name: field.name, type: field.type };
     if (field.required) definition.required = true;

@@ -322,3 +322,12 @@ label.row-field-label { cursor: pointer; }
   .collection-row-sheet { left: 0; right: 0; top: auto; bottom: 0; width: auto; transform: none; border-bottom: 0; border-radius: 18px 18px 0 0; }
   .collection-row-sheet > button { min-height: 52px; }
 }
+
+/* Person and contact fields (D1200): a chip in the cell, the people picker in a sheet. */
+.cell-relation { display: flex; align-items: center; min-width: 0; }
+.cell-relation .ui-person { max-width: 100%; }
+.cell-relation .ui-person-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.field-editor-hint { color: #8d8d94; }
+.relation-picker .ui-person-picker { position: relative; }
+.sort-filter-row .ui-person-picker { flex: 1 1 180px; min-width: 0; margin: 0; }
+.sort-filter-row .ui-person-picker > label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }

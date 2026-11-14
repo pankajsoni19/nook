@@ -1,4 +1,4 @@
-import { Calendar, CheckSquare, ChefHat, Contact, CreditCard, Hash, Link, List, ListChecks, Package, Paperclip, Receipt, StickyNote, Table2, Type } from "lucide-react";
+import { Calendar, CheckSquare, ChefHat, Contact, CreditCard, Hash, Link, List, ListChecks, Package, Paperclip, Receipt, StickyNote, Table2, Type, UserRound } from "lucide-react";
 import type { FieldType } from "./collectionsApi";
 
 // Collection icons are stored as short names; anything unknown shows the table icon.
@@ -18,7 +18,9 @@ const fieldIcons: Record<FieldType, typeof Type> = {
   multi_select: ListChecks,
   url: Link,
   note: StickyNote,
-  file: Paperclip
+  file: Paperclip,
+  person: UserRound,
+  contact: Contact
 };
 
 export function FieldIcon({ type }: { type: FieldType }) {

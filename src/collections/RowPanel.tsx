@@ -3,11 +3,12 @@ import { ArrowLeft, Bot, Ellipsis, Eye, RotateCcw, Undo2, X } from "lucide-react
 import { ApiError } from "../api";
 import { relativeTime } from "../files/format";
 import { errorMessage, getRow, type CollectionDetail, type CollectionRow, type FieldDefinition, type FieldValue } from "./collectionsApi";
-import { CellEditor, checkboxInputId } from "./cells";
+import { CellEditor, checkboxInputId, relationChip } from "./cells";
 import { openLayerCount, useDialogLayer } from "./dialogLayers";
 import { FieldIcon } from "./icons";
 import { NotePicker } from "./NotePicker";
 import { OptionPicker } from "./OptionPicker";
+import { RelationPicker } from "./RelationPicker";
 import { rowTitle } from "./values";
 
 type RowPanelProps = {
@@ -28,7 +29,7 @@ type RowPanelProps = {
   renderFiles?: (row: CollectionRow, field: FieldDefinition, replace: (row: CollectionRow) => void) => ReactNode;
 };
 
-type Picker = { kind: "options" | "note"; fieldId: string };
+type Picker = { kind: "options" | "note" | "relation"; fieldId: string };
 
 /** "Changed by <key>": the last change came through an MCP key (its name, while the key exists). */
 export function changedByKeyText(row: Pick<CollectionRow, "updated_via_key_name">) {
@@ -115,7 +116,7 @@ export function RowPanel({ collection, rowId, editable, listed, conflict, save, 
           {field.type === "file" && renderFiles
             ? renderFiles(row, field, setRow)
             : <CellEditor field={field} row={row} editable={editable && !conflict} variant="panel" labelId={labelId} onSave={saveValues}
-              onOpenPicker={(target) => { if (target.type !== "file") setPicker({ kind: target.type === "note" ? "note" : "options", fieldId: target.id }); }} />}
+              onOpenPicker={(target) => { if (target.type !== "file") setPicker({ kind: target.type === "note" ? "note" : target.type === "person" || target.type === "contact" ? "relation" : "options", fieldId: target.id }); }} />}
         </div>;
       })}
       <p className="row-panel-meta">
@@ -127,5 +128,7 @@ export function RowPanel({ collection, rowId, editable, listed, conflict, save, 
       onClose={closePicker} onSave={(ids) => saveValues({ [pickerField.id]: ids.length ? ids : null })} />}
     {picker?.kind === "note" && pickerField && row && <NotePicker field={pickerField} selected={typeof row.values[pickerField.id] === "string" ? row.values[pickerField.id] as string : null}
       onClose={closePicker} onSave={(noteId) => saveValues({ [pickerField.id]: noteId })} />}
+    {picker?.kind === "relation" && pickerField && row && <RelationPicker field={pickerField} selected={relationChip(pickerField, row)}
+      onClose={closePicker} onSave={(id) => saveValues({ [pickerField.id]: id })} />}
   </aside>;
 }

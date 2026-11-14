@@ -17,13 +17,15 @@ import type { McpKeyContext } from "./mcpToolKit";
  * A context with `person` set is a signed-in person approving a proposal (inbox): the key's reach
  * does not apply to them.
  */
-export type ForeignTargetType = "note" | "card" | "collection_row" | "event";
+export type ForeignTargetType = "note" | "card" | "collection_row" | "event" | "contact";
 
 const TARGET: Record<ForeignTargetType, { scope: McpScope; kind: ItemKind }> = {
   note: { scope: "notes:read", kind: "note" },
   card: { scope: "tasks:read", kind: "card" },
   collection_row: { scope: "collections:read", kind: "row" },
-  event: { scope: "calendar:read", kind: "event" }
+  event: { scope: "calendar:read", kind: "event" },
+  // A collection contact field's contact (D1204, T642).
+  contact: { scope: "crm:read", kind: "contact" }
 };
 
 export function keyMayRead(key: McpKeyContext, target: { type: ForeignTargetType; id: string }): boolean {
