@@ -449,7 +449,7 @@ export function ReportView({ report, canWrite, generating = false, initial, read
     {!readOnly && <div className="report-view-toolbar">
       <p className="report-view-status" role="status">
         {busy ? <span className="report-view-running"><LoaderCircle className="spin" aria-hidden="true" />{!running || running.kind === "generate" ? "Generating…" : previewVersionOf(running.queryKeys) !== null ? `Running v${previewVersionOf(running.queryKeys)} on today's data…` : running.queryKeys?.[0] === PAGE_METRICS_RUN_MARKER ? "Re-reading metrics…" : running.queryKeys?.length ? `Re-running ${running.queryKeys.join(", ")}…` : "Refreshing…"}</span>
-          : <span><Clock3 aria-hidden="true" />{setKey
+          : <span><Clock3 aria-hidden="true" />{view?.live ? "Computed when you opened it, with your access" : setKey
             ? shownSet === setKey ? (setRanAt ? <UpdatedAgo at={setRanAt} /> : "Not run yet") : "Loading…"
             : report.lastRunAt ? <UpdatedAgo at={lastRun?.finishedAt ?? report.lastRunAt} /> : "Not refreshed yet"}</span>}
         {staleCount > 0 && <span className="reports-status reports-status-stale">{`${staleCount} stale`}</span>}

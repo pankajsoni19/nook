@@ -94,6 +94,7 @@ import { warnIfNoActiveAdmin } from "./team/service";
 import { GUEST_SHARE_DISABLED, legacyGuestShareBlocked, legacyShareLevels, writeDirectShares } from "./access/shares";
 import { registerItemAccessRoutes } from "./access/itemAccess";
 import { registerLinkRoutes } from "./friendlyLinks";
+import { mountWorkspaceModules, mountWorkspacePublic, mountWorkspacePublicHeaders, startWorkspaceTimers } from "./workspaceModules";
 import { hashInviteToken, InviteError, inviteForRegistration, previewInvite } from "./team/invites";
 import { can, mcpScopesForRole } from "./team/roles";
 import { ROLE_READ_ONLY_BODY, roleWriteGate } from "./team/writeGate";
@@ -175,6 +176,9 @@ const globalSecureHeaders = secureHeaders({
 // no-store, a CSP allowing only Nook's own files). Registered first, so it writes after secureHeaders.
 app.use("/share/c/*", publicShareHeaders);
 app.use("/api/public/chat-shares/*", publicShareHeaders);
+// Workspace modules' public pages (docs/plan/WORKSPACE_MODULES.md §B.8): /p/* and /api/public/* get the
+// same strict header set, registered here so it writes after the global headers.
+mountWorkspacePublicHeaders(app);
 
 // secureHeaders overwrites headers after next(), so the document content route (and only it)
 // is excluded and sets its own strict header set, including a sandboxing CSP.
@@ -247,6 +251,8 @@ app.post("/api/auth/invite", async (c) => {
 registerPublicMailRoutes(app);
 // A public chat link's snapshot (Wave 43, AC-D, AC-O1): no session; 404 unless the policy is on and the token opens one.
 registerPublicChatShareApi(app);
+// Workspace modules' public routes (§B.8, T500): before the session guards below, never behind them.
+mountWorkspacePublic(app);
 // Forgot / reset password (Wave 30, outbound email §A.5): no session, identical answers (T224).
 registerPasswordResetRoutes(app);
 // Google sign-in (Wave 35): start, callback, second factor, and the invite hand-off; no session needed.
@@ -988,6 +994,9 @@ registerInboxRoutes(app);
 registerItemAccessRoutes(app);
 // Friendly URLs (D775): GET /api/links/:kind/:ref resolves a short id or board code the caller can read.
 registerLinkRoutes(app);
+// Workspace modules (docs/plan/WORKSPACE_MODULES.md D801, T500): the foundation's routes and every
+// module's routes, behind all the guards above (one dispatcher for the modules, server/dynamicRoutes.ts).
+mountWorkspaceModules(app);
 
 app.onError((error, c) => {
   if (error instanceof HTTPException) return c.json({ error: error.message }, error.status);
@@ -1182,6 +1191,8 @@ try {
 }
 startDispatcher();
 startMailDispatcher();
+// Workspace modules (§B.6): the schedules dispatcher (standup rounds, reminders, auto-close).
+startWorkspaceTimers();
 log.info("Listening", { port: config.port, startupMs: Math.round(performance.now()) });
 
 export default {

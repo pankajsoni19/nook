@@ -99,8 +99,28 @@ export const ROLE_READ_ONLY_ALLOWED_WRITES: readonly AllowedWrite[] = [
   // D565: a reader's own saved views of a readable report (personal; the report is never changed).
   { method: "POST", path: "/api/reports/:reportId/views", roles: ["viewer"], why: "own saved view of a readable report" },
   { method: "PATCH", path: "/api/reports/:reportId/views/:viewId", roles: ["viewer"], why: "own saved view" },
-  { method: "DELETE", path: "/api/reports/:reportId/views/:viewId", roles: ["viewer"], why: "own saved view" }
+  { method: "DELETE", path: "/api/reports/:reportId/views/:viewId", roles: ["viewer"], why: "own saved view" },
+  // Workspace modules foundation (W1-CORE): reads sent as POST, and personal unit preferences.
+  { method: "POST", path: "/api/refs/summaries", why: "a read sent as POST (chips for readable items)" },
+  { method: "POST", path: "/api/datasets/query", why: "a read sent as POST (structured dataset query, scoped to readable rows)" },
+  { method: "PUT", path: "/api/preferences/units", why: "own unit preferences (week start, duration format)" }
 ];
+
+/**
+ * Writes a workspace module lets read-only roles make (docs/plan/WORKSPACE_MODULES.md §B.9: guests
+ * answer forms and standups shared with them, ask in townhalls). Registered by the module
+ * (`registerWorkspaceModule({ readOnlyWrites })`); the module's handler still checks who may answer.
+ */
+const registered: Array<AllowedWrite & { regex: RegExp }> = [];
+
+export function registerReadOnlyWrite(entry: AllowedWrite) {
+  if (!entry.path.startsWith("/api/") || entry.path.startsWith("/api/public/")) throw new Error(`Invalid read-only write ${entry.path}`);
+  const compiledEntry = { ...entry, regex: pathRegex(entry.path) };
+  registered.push(compiledEntry);
+  return () => { const index = registered.indexOf(compiledEntry); if (index >= 0) registered.splice(index, 1); };
+}
+
+export const registeredReadOnlyWrites = (): readonly AllowedWrite[] => registered.map(({ regex: _regex, ...entry }) => entry);
 
 /**
  * Routes that enforce roles themselves and so pass the gate: Team answers guests 404 and non-admins
@@ -115,16 +135,17 @@ export const SELF_GATED_WRITE_PREFIXES: readonly string[] = ["/api/team/"];
  */
 const GUEST_SELF_GATED = (path: string) => path === "/api/knowledge" || path.startsWith("/api/knowledge/");
 
-const compiled = ROLE_READ_ONLY_ALLOWED_WRITES.map((entry) => ({
-  ...entry,
-  regex: new RegExp(`^${entry.path.split("/").map((segment) => segment.startsWith(":") ? "[^/]+" : segment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("/")}$`)
-}));
+function pathRegex(path: string) {
+  return new RegExp(`^${path.split("/").map((segment) => segment.startsWith(":") ? "[^/]+" : segment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("/")}$`);
+}
+
+const compiled = ROLE_READ_ONLY_ALLOWED_WRITES.map((entry) => ({ ...entry, regex: pathRegex(entry.path) }));
 
 /** Whether `role` may send this write although it cannot write content. */
 export function isAllowedReadOnlyWrite(role: Role, method: string, path: string) {
   if (SELF_GATED_WRITE_PREFIXES.some((prefix) => path.startsWith(prefix))) return true;
   if (role === "guest" && GUEST_SELF_GATED(path)) return true;
-  return compiled.some((entry) => entry.method === method && entry.regex.test(path) && (!entry.roles || entry.roles.includes(role)));
+  return [...compiled, ...registered].some((entry) => entry.method === method && entry.regex.test(path) && (!entry.roles || entry.roles.includes(role)));
 }
 
 export const ROLE_READ_ONLY_BODY = { error: "Your team role is read-only", code: "ROLE_READ_ONLY" } as const;

@@ -1,3 +1,5 @@
+import type { WorkspaceContainerKind } from "../../shared/workspaceModules";
+
 /**
  * The item level ladder on the client (access plan D266, §C.2, §D.3), mirroring
  * server/access/levels.ts. Chrome only: the server decides every write.
@@ -5,7 +7,26 @@
 export type Level = "view" | "comment" | "edit" | "manage";
 export type ItemLevel = "none" | Level | "owner";
 /** Wave 43 (AC-D): agents (view, manage) and chats (view) use the same sheet. */
-export type AccessKind = "note" | "folder" | "document" | "board" | "task_view" | "collection" | "calendar" | "agent" | "chat" | "knowledge_base";
+/** Every workspace container uses the same sheet over the generic `/api/access/:kind/:id` (D803, D1085, D1050). */
+export type AccessKind = "note" | "folder" | "document" | "board" | "task_view" | "collection" | "calendar" | "agent" | "chat" | "knowledge_base" | WorkspaceContainerKind;
+
+/**
+ * The workspace containers' words in the Access sheet (D1050): one row per kind, so a module joins by
+ * a row here, never a branch in the sheet. `noun` names it in the audience hints, `levels` is the line
+ * under each level, and `privateHint` replaces "Nobody else can open this …" where the module itself
+ * adds people (a standup's participants, a goal's contributors); `defaultLevel` is where a new person starts.
+ */
+export const WORKSPACE_ACCESS: Record<WorkspaceContainerKind, { noun: string; levels: Record<Level, string>; privateHint?: string; defaultLevel?: Level }> = {
+  form: { noun: "form", levels: { view: "See results and responses", comment: "Also comment on responses", edit: "Also edit the questions, settings, and actions", manage: "Also sharing, the public link, and the Bin" } },
+  time_project: { noun: "project", levels: { view: "See the project; guests log their own time", comment: "See the project and comment", edit: "Log time and see everyone's entries", manage: "Also rates, approvals, budgets, and sharing" }, defaultLevel: "edit" },
+  goal: { noun: "goal", levels: { view: "See the goal, its key results, and check-ins", comment: "Also comment and link work", edit: "Also check in, edit, and add key results", manage: "Also sharing and the Bin" }, privateHint: "Only you and its contributors can open this goal" },
+  checkin: { noun: "standup", levels: { view: "Read the answers (as the standup allows)", comment: "Also comment and react", edit: "Also change the questions, schedule, and people", manage: "Also sharing and the Bin" }, privateHint: "Only you and the people taking part can open this standup" },
+  contact_book: { noun: "contact book", levels: { view: "See contacts, companies, and deals", comment: "Also comment on them", edit: "Also add and change records and log interactions", manage: "Also fields, pipelines, settings, and sharing" } },
+  booking_type: { noun: "booking type", levels: { view: "See the type and its bookings", comment: "Also comment on bookings", edit: "Also change the type's details and questions", manage: "Also hosts, calendars, links, and sharing" } },
+  townhall_session: { noun: "townhall", levels: { view: "Ask, upvote, and vote in polls", comment: "Also reply under questions", edit: "Host: moderate, run polls, change the session", manage: "Also sharing and delete" } }
+};
+
+export const isWorkspaceAccessKind = (kind: AccessKind): kind is WorkspaceContainerKind => Object.prototype.hasOwnProperty.call(WORKSPACE_ACCESS, kind);
 
 const RANK: Record<ItemLevel, number> = { none: 0, view: 1, comment: 2, edit: 3, manage: 4, owner: 5 };
 
@@ -39,6 +60,8 @@ export function levelDescription(kind: AccessKind, level: Level): string {
       return "Read the conversation, tool calls and results included, and continue in their own copy";
     case "knowledge_base":
       return level === "manage" ? "Also add and remove sources, re-index, attach it to agents, and share it at Can view; never delete it" : "Search it (Try it); attaching it to agents needs Manage";
+    default:
+      return WORKSPACE_ACCESS[kind].levels[level];
   }
 }
 

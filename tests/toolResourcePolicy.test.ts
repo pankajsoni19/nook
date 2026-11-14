@@ -112,6 +112,8 @@ describe("tool resource policy", () => {
         return [item.arg, isArray ? [outside] : outside];
       }));
       for (const surface of ["mcp", "rest"] as const) {
+        // Fresh rate windows per call: with every module's tools the owner's per-user write and Bin budgets would otherwise run out.
+        resetMcpLimits();
         const result = await invokeMcpToolForTests(spec.name, args, created.id, surface);
         const text = result.content[0]!.text;
         expect({ tool: spec.name, surface, code: (JSON.parse(text) as { code?: string }).code }).toEqual({ tool: spec.name, surface, code: "NOT_FOUND" });

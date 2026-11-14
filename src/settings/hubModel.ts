@@ -4,6 +4,7 @@ import { readHistoryDepth } from "../appShellNavigation";
 import type { AiTab, KeysTab, Route, SettingsSection } from "../router";
 import { AI_TAB_LABELS, AI_TABS, aiTabPath, formatRoute, KEYS_TABS, keysTabPath, SETTINGS_SECTION_NAMES } from "../router";
 import { canManageTeam, canSeeTeam, type Role } from "../team/teamRoles";
+import { readyWorkspaceModules } from "../workspaceModules/registry";
 
 export type TeamEntryId = "members" | "invites" | "groups" | "integrations" | "keys" | "policies" | "templates" | "activity" | "email";
 export type HubEntryId = SettingsSection | "bin" | `team-${TeamEntryId}`;
@@ -21,6 +22,15 @@ const team = (flags: Partial<TeamRoute> = {}): TeamRoute => ({ app: "team", user
 
 /** Account entries, in nav order. My access, Agents, and Knowledge are for every role but guest; AI is for admins. */
 const ACCOUNT_ORDER: readonly SettingsSection[] = ["security", "notifications", "access", "mcp", "agents", "knowledge", "ai", "datasources", "reportowners", "backups", "modules", "about"];
+
+/**
+ * Settings → Workspace (D836): in the Workspace group once a workspace module ships (none: Settings is
+ * as before), for every role but guest. Members and viewers set their own units there; the currency and
+ * public page policies on the same page are for admins only. Guests never get Time, Contacts, or
+ * Bookings (D832), where units matter, so they have no entry and its URL opens Security.
+ */
+const WORKSPACE_ENTRY: HubEntry = { id: "workspace", group: "workspace", label: SETTINGS_SECTION_NAMES.workspace, route: { app: "settings", section: "workspace" } };
+export const workspaceEntryShown = (role: Role | undefined) => role !== "guest" && readyWorkspaceModules().length > 0;
 // Report data sources (Wave 45), Report owners (D500), and Backups (lane BACKUP) are for admins too.
 const ADMIN_ONLY_SECTIONS: readonly SettingsSection[] = ["ai", "datasources", "reportowners", "backups"];
 
@@ -66,7 +76,10 @@ export function hubEntries(role: Role | undefined, options: { teamModuleEnabled:
     .filter((section) => (section !== "access" && section !== "agents" && section !== "knowledge") || role !== "guest")
     .filter((section) => !ADMIN_ONLY_SECTIONS.includes(section) || role === "admin")
     .map((section) => ({ id: section, group: "account", label: SETTINGS_SECTION_NAMES[section], route: { app: "settings", section } }));
-  const workspace: HubEntry[] = !binEntryShown(role, options.binModuleEnabled !== false) ? [] : [options.binCount ? { ...BIN_ENTRY, badge: options.binCount } : BIN_ENTRY];
+  const workspace: HubEntry[] = [
+    ...(workspaceEntryShown(role) ? [WORKSPACE_ENTRY] : []),
+    ...(!binEntryShown(role, options.binModuleEnabled !== false) ? [] : [options.binCount ? { ...BIN_ENTRY, badge: options.binCount } : BIN_ENTRY])
+  ];
   if (!teamGroupShown(role, options.teamModuleEnabled)) return [...account, ...workspace];
   const admin = canManageTeam(role);
   const team = TEAM_ENTRIES.filter((entry) => admin || !entry.adminOnly).map((entry): HubEntry => ({ id: `team-${entry.id}`, group: "team", label: entry.label, route: entry.route }));

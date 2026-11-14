@@ -3033,6 +3033,45 @@ No migration. Wire types: `shared/backups.ts` (`BackupsView`, `BackupRun`, `Dril
 
 **CLI** (`server/backup-admin.ts`): `backup`, `list`, `status`, `restore-drill [--from latest|<name>|<path>|litestream[@<RFC 3339>]] [--strict] [--keep]`, `restore --from … --to <empty folder> [--files-from …] [--db-only]`; since 0.47.0 (D689) `--from-dir <folder>` on `restore` and `restore-drill` looks for archives (`--from`, `--files-from`) in that folder only, never BACKUP_DIR or the bucket, with `--from` defaulting to `latest` on `restore` (exit 1 when the folder is missing or not a folder). `server/litestream.ts prepare <file>` (exit 0 written, 3 off or no bucket, 1 refused) and `config`.
 
+## Townhall (lane TOWNHALL, D1070–D1099)
+
+The full table is in [WORKSPACE_MODULES.md §D.7 Townhall](WORKSPACE_MODULES.md#d7-townhall-lane-townhall-module-townhall). In short, under `/api/townhall` (session, CSRF, and role guards; guests and viewers may ask, vote, withdraw their own question, and answer polls):
+
+- `GET/POST /sessions` (list: `state=upcoming|live|ended|all`, `q`, `cursor`, live first; create: `{ title, description?, startsAt?, endsAt?, eventId?, questionsOpen?, allowAnonymous?, moderation?: "off"|"review", allowComments?, reminderMinutes? }` → 201 `{ session }`).
+- `GET /sessions/:id` (id, short id, or `<slug>-<shortid>`) → `{ session, you, questions, polls, stats, publicUrl?, publicAllowed? }` for the caller; `GET /sessions/:id/live` is the same JSON as server-sent `event: state` frames (and `event: gone`).
+- `PATCH /sessions/:id` (`expectedRevision` → 409 `CONFLICT`), `DELETE /sessions/:id` (Bin; 403 `OWNER_ONLY` below manage), `POST /sessions/:id/state { state: "live"|"ended" }`, `PUT /sessions/:id/public-link { enabled }` → `{ publicUrl }` (403 `POLICY_OFF`), `PUT /sessions/:id/screen { pollId|null }`.
+- `POST /sessions/:id/questions { text ≤ 500, anonymous? }` → 201 `{ question }` (400 `ANONYMOUS_OFF`, 409 `SESSION_ENDED`, `QUESTIONS_CLOSED`, `LIMIT_REACHED`); `PUT /questions/:qid/vote { upvote }` → `{ questionId, votes, voted }`; `DELETE /questions/:qid` (own only; 409 `ANSWERED`); `POST /questions/:qid/moderate { action, targetId? }` (hosts; 400 `MERGE_TARGET`, 409 `HIDDEN`).
+- Polls: `POST /sessions/:id/polls { kind: single|multi|word_cloud|rating|open_text, title, options?, resultsHidden?, launch? }` → 201 `{ pollId }`; `POST …/polls/:pid/launch|close`; `PATCH …/polls/:pid { resultsHidden }`; `DELETE …/polls/:pid`; `POST …/polls/:pid/vote { optionIds? | rating? | text? }` (409 `POLL_CLOSED`, `WORD_LIMIT`).
+- `GET /sessions/:id/recap` → `{ recap }`; `?format=markdown|csv` → the file; `POST /sessions/:id/recap/note` → 201 `{ noteId, href }`; `POST /sessions/:id/cards { boardId, columnId, questionIds ≤ 50 }` → 201 `{ cards: [{ questionId, cardId, href }] }`.
+- Public (no session, strict headers, uniform 404): `GET /api/public/townhall/:token?p=` → state + `{ participant, renderNonce, meta }`; `GET …/live?p=`; `POST …/questions { participant, text, name?, nonce, website }`; `POST …/questions/:qid/vote { participant, upvote }`; `POST …/questions/:qid/withdraw { participant }`; `POST …/polls/:pid/vote { participant, … }`. Page: `/p/t/:token`.
+- MCP and REST v1: `list_townhall_sessions`, `get_townhall_session`, `create_townhall_session`, `ask_townhall_question`, `upvote_townhall_question`, `moderate_townhall_question`, `launch_townhall_poll`, `close_townhall_poll`, `export_townhall_recap`.
+
+## Bookings (lane BOOK, D1000–D1039)
+
+Module routes (session; guests 404). Errors `{ error, code }`; unreadable is `NOT_FOUND`. Wire types: `shared/bookings.ts`, `src/bookings/api.ts`.
+
+| Route | Body / query | Returns |
+| --- | --- | --- |
+| `GET/PUT /api/bookings/profile` | `{ handle?, displayName?, welcome?, tz?, enabled?, busyCalendarIds? }` | `{ profile, feeds }` / `{ profile }`; 409 `HANDLE_TAKEN` |
+| `POST /api/bookings/profile/:userId/reset-handle` | — | admins only |
+| `GET/POST /api/bookings/feeds`, `POST /api/bookings/feeds/:id/refresh`, `DELETE /api/bookings/feeds/:id` | `{ label, url }` | `{ feed: { id, label, hint, status, error, busyCount, lastFetchedAt } }` (never the URL) |
+| `GET/POST /api/bookings/schedules`, `PUT/DELETE /api/bookings/schedules/:id` | `{ name, tz, weekly: { mon: [{ from, to }] … }, isDefault? }` | `{ schedule(s) }` |
+| `PUT /api/bookings/schedules/:id/overrides`, `DELETE …/overrides/:date` | `{ date, ranges: [...] \| null, note? }` | `{ schedule }` |
+| `GET/POST /api/bookings/types`, `GET/PATCH/DELETE /api/bookings/types/:ref` | type fields (D1022), `expectedRevision` | `{ type }`; 409 `TYPE_CHANGED`; DELETE → Bin |
+| `GET/PUT /api/bookings/types/:ref/questions` | `{ set, publish? }` | draft and published sets |
+| `GET /api/bookings/types/:ref/slots` | `from, to, tz, duration` (≤ 62 days) | `{ tz, duration, days: { date: [iso] } }` |
+| `GET/POST /api/bookings/types/:ref/secret-links`, `DELETE …/:linkId` | `{ singleUse?, expiresInDays?, label? }` | `{ link: { id, path } }` (path shown once) |
+| `GET /api/bookings/types/:ref/embed`, `GET /api/bookings/contact-books` | — | embed card / editable books |
+| `GET /api/bookings` | `view=upcoming\|pending\|past\|cancelled`, `type`, `from`, `to`, `cursor`, `limit` | `{ items, nextCursor }` |
+| `POST /api/bookings` | `{ type, start, duration?, booker?, contactId? }` | internal booking; 409 `SLOT_TAKEN` |
+| `GET /api/bookings/b/:ref`, `GET …/slots` | — | `{ booking }` with answers / reschedule slots |
+| `POST /api/bookings/b/:ref/approve\|decline\|cancel\|reschedule\|no-show` | `{ message? }`, reschedule `{ start, message? }` | `{ booking }` |
+| `GET /api/bookings/insights` | `days, tz` | KPIs and series (dataset `bookings.bookings`) |
+
+Public (no session, strict headers, one 404): `GET /api/public/book/:handle`, `GET /api/public/book/:handle/:slug` and `/api/public/book/link/:token` (`{ meta: { renderNonce }, host, type, questions, verifyEmail, mail }`), `…/slots` (≤ 31 days), `POST …/bookings` (`{ start, duration, tz, name, email, guests?, location?, answers, nonce, website }` → 201 `{ status, manageUrl, mailQueued, booking }` or 202 `{ status: "verify", verificationId }`), `POST …/verify` (`{ id, code }`), `GET /api/public/bookings/manage/:token` (+ `/ics`, `/slots`), `POST …/cancel` (`{ reason?, nonce, website }`), `POST …/reschedule` (`{ start, reason?, nonce, website }` → new `manageUrl`). Pages: `/p/book/:handle`, `/p/book/:handle/:slug`, `/p/book/link/:token`, `/p/book/manage/:token`.
+
+MCP (`bookings:read` / `bookings:write`): `list_booking_types`, `get_booking_type`, `create_booking_type`, `update_booking_type`, `bin_booking_type` and `restore_booking_type` (+ `bin:write`), `get_availability`, `list_bookings`, `get_booking`, `create_booking`, `reschedule_booking`, `cancel_booking`, `confirm_booking_request`, `decline_booking`, `mark_no_show`, `get_booking_link`. Agents: reads, `get_availability`, `create_booking`.
+
 ## Changes to existing note endpoints (Wave 4)
 
 - `DELETE /api/notes/:id`:
@@ -3044,3 +3083,190 @@ No migration. Wire types: `shared/backups.ts` (`BackupsView`, `BackupRun`, `Dril
   - Content → moved to the Bin with the draft file and `draft_revision`/`draft_checksum` **kept** (today this route deletes them). The response still returns `{ ok: true }`, plus `binned: true`, so the client can pick the right toast.
 - "Blank" means `current_version = 0` and the draft is absent or empty after `trim()` (DEVELOPMENT_PLAN §9.1).
 - Unchanged: every read endpoint continues to exclude `deleted_at IS NOT NULL`. So do all MCP tools.
+
+## Goals (lane GOALS, D900–D922; migrations 096–097)
+
+JSON under `/api`, errors `{ error, code }`; a goal the caller cannot open is `404 NOT_FOUND`; `:id` takes a goal's UUID or short id. Writes need `edit` on the goal (owners, contributors, editors) unless noted.
+
+| Method | Path | Body / query | Returns |
+| --- | --- | --- | --- |
+| GET | `/api/goals` | `period` (id, `none`), `owner`, `team`, `parent` (id, `root`), `state`, `health`, `mine=1`, `q`, `closed=1`, `view=tree\|list`, `cursor`, `limit` | `{ goals: GoalSummary[], nextCursor }` (tree: ≤ 500, no cursor) |
+| POST | `/api/goals` | `{ title, description?, kind?, parentId?, periodId?, teamId?, ownerId?, startOn?, dueOn?, state?, progressMode?, cadence?, visibility?, shareRole?, contributorIds?, keyResults? }` | `201 { goal: GoalDetail }` |
+| GET / PATCH / DELETE | `/api/goals/:id` | PATCH: any of the above plus `health`, `progress` (manual mode), `expectedRevision` (409 `CONFLICT`); owner/visibility need manage | `{ goal }`; DELETE moves it to the Bin (manage) |
+| POST | `/api/goals/:id/key-results` | `{ title, metric?, direction?, startValue?, targetValue?, currentValue?, unit?, currency?, weight?, ownerId?, source?: { kind, config }, milestones? }` | `201 { keyResult }` |
+| PATCH / DELETE | `/api/key-results/:id` | PATCH: the same fields, partial, `expectedRevision` | `{ keyResult }`; DELETE `{ undoTicket }` (POST `/api/undo/:ticket`) |
+| GET | `/api/key-results/:id/values?from=&to=` | — | `{ values: [{ at, value, progress, source }] }` |
+| POST | `/api/goals/:id/preview-source` | `{ kind, config }` | `{ preview: { value, target, detail, description } }` |
+| POST | `/api/goals/:id/checkins` | `{ health, confidence?, note?, values?: { krId: number \| boolean }, milestonesDone?: { krId: milestoneId[] } }` | `201 { checkin, goal }` |
+| GET | `/api/goals/:id/checkins?cursor=` | — | `{ checkins, nextCursor }` |
+| GET | `/api/goals/:id/history` | — | `{ keyResults: [{ id, title, points }], checkins, current, ideal }` |
+| POST | `/api/goals/:id/close` · `/api/goals/:id/reopen` | `{ state: achieved\|missed\|dropped\|carried_over, carryOver?: { periodId } }` | `{ goal, carriedOver }` / `{ goal }` |
+| GET | `/api/goals/:id/work` | — | `{ links: WorkLinkView[] }` |
+| GET | `/api/goals/for-item?kind=&id=` | — | `{ goals }` the item contributes to (the card slot) |
+| GET | `/api/goals/sources` | — | `{ sources: [{ kind, label, module }] }` |
+| GET / POST | `/api/goal-periods` | `archived=1`; POST `{ name, startsOn, endsOn }` (members, admins) | `{ periods }` / `201 { period }` |
+| PATCH / DELETE | `/api/goal-periods/:id` | `{ name?, startsOn?, endsOn?, archived? }` (its creator or an admin) | `{ period }` / `{ deleted }` |
+| POST | `/api/goal-periods/:id/close` | `{ carryOverTo? }` | `{ closed: { achieved, missed, carried_over, skipped } }` |
+
+Sharing: `GET/PUT /api/access/goal/:id` (the generic container sheet). Links: `POST /api/links` with `a` the work and `b` the goal, relation `contributes`. Datasets: `goals.key_results`, `goals.kr_values`, `goals.checkins`. Search scope `goals`. Today sections `goalsCheckin`, `goalsAtRisk`. Notification topics `goals.checkin_due`, `goals.health_changed`, `goals.source_failing`, `goals.period_ending`.
+
+MCP (`goals:read` / `goals:write`; REST v1 exposes the same): `list_goals`, `get_goal`, `get_goal_tree`, `list_goal_checkins`, `list_goal_periods`, `list_goal_sources`, `create_goal`, `update_goal`, `add_kr`, `update_kr`, `check_in_goal`, `close_goal`, `create_goal_period`, `bin_goal` (also `bin:write`). Key results anchor on their goal for chosen-item keys.
+
+## Standups (module `checkins`, lane CHECKINS, D930–D952)
+
+JSON under `/api`, errors `{ error, code }`; `:id` is the UUID, short id, or friendly segment; anything unreadable is 404. Guests and viewers may send only the answering writes (answer, skip, `participants/me`, timezone, subscription).
+
+| Method | Path | Body / query | Returns |
+| --- | --- | --- | --- |
+| GET | `/api/checkins?mine=participant\|all&cursor=` | — | `{ items: CheckinSummary[], nextCursor }` |
+| POST | `/api/checkins` | `{ template, name?, description?, schedule?, deadlineMinutes?, reminderMinutesBefore?, participants?: { people, groups }, privateAnswers?, summary? }` | 201 `{ checkin }` |
+| GET / PATCH / DELETE | `/api/checkins/:id` | PATCH: settings, `schedule`, `status`, `expectedRevision` (409 `CHECKIN_CHANGED`) | `{ checkin }` / `{ binned }` |
+| GET / PUT | `/api/checkins/:id/questions` | PUT `{ set }` (draft) | `{ current, version, draft }` |
+| POST | `/api/checkins/:id/questions/publish` | — | `{ version, set }` (409 `NO_DRAFT`) |
+| GET / PUT | `/api/checkins/:id/participants` | `{ people, groups }` | `{ participants, added, removed }` |
+| PATCH | `/api/checkins/:id/participants/me` | `{ tz?, pausedUntil? }` | `{ tz, paused_until }` |
+| PUT | `/api/checkins/:id/subscription` | `{ summaries }` | `{ summaries }` |
+| PUT | `/api/checkin-participation/timezone` | `{ tz }` | `{ updated }` |
+| GET / POST | `/api/checkins/:id/rounds` | GET `?cursor=<date>`; POST starts today's round | rounds page / 201 `{ round }` (409 `ROUND_EXISTS`) |
+| GET | `/api/checkins/:id/rounds/:date` | — | `RoundView` |
+| GET | `/api/checkins/:id/stats?from=&to=` | — | `CheckinStats` |
+| POST | `/api/checkins/:id/unblock` | `{ cardId }` | `{ unblocked }` |
+| GET | `/api/checkins/due` | — | `{ items: DueRound[] }` |
+| GET | `/api/checkins/feed?checkin=&person=&blockers=1&q=&cursor=` | — | `{ items: FeedEntry[], nextCursor }` |
+| GET | `/api/checkin-rounds/:rid` · `/me` · `/summary` | — | `RoundView` · prefill · structured summary |
+| POST / PUT | `/api/checkin-rounds/:rid/answer` | `{ answers, expectedRevision? }` | 201/200 `{ status, edited, blockers, round }` (400 `INVALID_ANSWERS` with `errors`, 403 `NOT_PARTICIPANT`, 409 `ROUND_CLOSED`) |
+| POST | `/api/checkin-rounds/:rid/skip` · `/close` · `/nudge` | — | `{ status }` · `RoundView` · `{ nudged }` |
+| PUT / DELETE | `/api/reactions/checkin_answer/:responseId/:emoji` | — | `{ reactions }` |
+
+MCP (`checkins:read` / `checkins:write`): `list_checkins`, `get_checkin`, `list_checkin_rounds`, `get_checkin_round`, `summarize_checkin_round`, `get_due_checkins`, `get_checkin_feed`, `checkin_stats`, `answer_checkin`, `skip_checkin`, `create_checkin`, `update_checkin`, `set_checkin_participants`, `bin_checkin` and `restore_checkin` (+ `bin:write`); resource `nook://checkin_round/<id>`; proposal kind `checkin_answer`. Datasets `checkins.participation`, `checkins.answers`; search scope `standups`; Today section `checkinsDue`; digest section "Standups you missed".
+
+## Contacts (lane CRM, module `crm`, D960–D985)
+
+All JSON under `/api/crm`, behind the session, CSRF, and role write gates; errors `{ error, code, ...details }`; unreadable is 404 `NOT_FOUND`; `:id` takes a UUID or a short id.
+
+| Method | Path | Body / query | Returns |
+| --- | --- | --- | --- |
+| GET / POST | `/books` | `{ name, visibility? }` | `{ books }` / 201 `{ book }` (with a five-stage pipeline) |
+| GET / PATCH / DELETE | `/books/:id` | `{ name?, color?, settings?: { linkCompaniesByDomain, lifecycles, rottingDays, currency } }` | `{ book }`; DELETE moves it to the Bin (owner) |
+| PUT | `/books/:id/fields/:entity` | `{ fields: FieldInput[] }` (Collections engine + `person`, `contact`) | `{ book }` (managers) |
+| GET / POST | `/contacts` | `?book=&q=&list=&filter=<json>&sort=<json>&cursor=&limit=` / contact fields | `{ items, nextCursor }` / 201 `{ contact }`; 409 `EXISTS` with `contactId` |
+| GET | `/contacts/duplicates?book=` | — | `{ pairs: [{ a, b, reason }] }` |
+| GET / PATCH / DELETE | `/contacts/:id` | partial fields, `expectedRevision?` | `{ contact }` (detail: channels, deals, lists, duplicates); 409 `CONFLICT`; DELETE → Bin |
+| POST | `/contacts/:id/merge` | `{ intoId }` | `{ contact }`; 400 `OTHER_BOOK` |
+| GET | `/contacts/:id/vcard` | — | `text/vcard` |
+| GET / POST, GET / PATCH / DELETE, POST merge | `/companies[/:id][/merge]` | as contacts; 409 `EXISTS` with `companyId` on a taken domain | |
+| GET / POST | `/pipelines?book=` | `{ bookId, name, currency?, stages? }` | `{ pipelines }` / 201 `{ pipeline }` (managers) |
+| PATCH / PUT stages / DELETE | `/pipelines/:id`, `/pipelines/:id/stages` | `{ name?, currency?, stages?: [{ id?, name, kind, probability, rotDays?, color? }], moveDealsTo? }` | `{ pipeline }`; 409 `STAGE_IN_USE`, `PIPELINE_IN_USE`, `LAST_PIPELINE` |
+| GET | `/pipelines/:id/board?owner=me&q=` | — | `{ board: { pipeline, currency, columns: [{ stage, count, sum, weighted, deals ≤ 200 }], totals } }` |
+| GET / POST | `/deals` | `?book=&pipeline=&stage=&owner=&status=&company=&list=&q=&filter=&sort=&cursor=` / `{ bookId \| pipelineId, stageId \| stageName, title, value (minor units), currency?, expectedCloseOn?, ownerId?, companyId?, contactIds?, nextStep?, nextStepOn?, tags?, custom? }` | `{ items, nextCursor }` / 201 `{ deal }` |
+| GET / PATCH / DELETE | `/deals/:id` | partial fields, `stageId \| stageName`, `position` (index in the stage), `lostReason`, `expectedRevision?` | `{ deal }` |
+| GET / POST | `/interactions?subject=kind:id&book=&kind=&cursor=` | `{ kind, direction?, occurredAt?, durationS?, title?, body?, subjects: [{ kind, id }] }` | `{ items, nextCursor }` / 201 `{ interaction }` |
+| PATCH / DELETE | `/interactions/:id` | partial | `{ interaction }` / `{ undoTicket }` (`POST /api/undo/:ticket`) |
+| GET / POST / PATCH | `/followups[?subject=kind:id]`, `/followups/:id` | `{ subject, dueAt, note? }` / `{ done?, dueAt?, note? }` | the caller's follow-ups |
+| POST | `/tasks` | `{ subject, boardId, columnId, title, dueOn? }` | 201 `{ cardId, linkId }` |
+| GET | `/records/:kind/:id/timeline?cursor=` | — | `{ interactions, nextCursor, activity, links, followups }` |
+| CRUD | `/lists[/:id]`, POST `/lists/:id/members` | `{ bookId, name, entity }`, `{ add?, remove? }` | `{ lists }` / `{ list }` |
+| CRUD | `/views[/:id]` | `{ bookId, entity, name, kind?, config, shared? }` | `{ views }` / `{ view }` |
+| POST | `/import` | `{ bookId, entity: contact \| company, csv }` | 201 `{ preview: { jobId, header, mapping, total, creates, duplicates, duplicatesInFile, invalid, sample } }` |
+| POST | `/import/:jobId/preview`, `/commit`, `/undo` | `{ mapping }`, `{ duplicates: update \| skip, mapping? }` | `{ preview }`, `{ result }`, `{ deleted, restored }`; 409 `IMPORT_DONE`, `UNDO_EXPIRED` |
+| GET | `/export.csv?book=&entity=&q=&list=&filter=` | — | `text/csv`; 429 `RATE_LIMITED` past 30 a day |
+
+MCP (`crm:read` / `crm:write`; `bin_*` also `bin:write`): see D982. Datasets: `crm.contacts`, `crm.deals`, `crm.deal_stage_changes`, `crm.interactions`. Search scope `contacts`. Today section `crmFollowups`. Schedules `crm.followup`, `crm.rotting`. Progress sources `crm_won_value`, `crm_won_count`, `crm_pipeline_value`.
+
+## Time (lane TIME, docs/plan/WORKSPACE_MODULES.md §D.2, D870–D899)
+
+Migrations **093** (`time_projects`, `time_member_rates`, `time_entries`, `time_tags`, `time_approvals`, `time_user_settings`) and **094** (`time_entry_fts`, purge triggers). Every route is under the module dispatcher (behind every guard); errors are `{ error, code }`; anything the caller cannot read is 404 `NOT_FOUND`. Money is minor units; durations are seconds (or text such as `1h30`, `90m`, `1:30` where noted). Guests may send the writes marked †, for their own time on projects they belong to.
+
+| Method | Path | Body / query | Returns |
+| --- | --- | --- | --- |
+| GET | `/api/time/timer?tz=` | — | `{ entry \| null, today: { date, seconds, entries } }` |
+| POST | `/api/time/timer/start` † | `{ description?, projectId?, target?, billable?, tags?, startedAt?, tz? }`; `target` is a key (`MYT-12`), an in-app URL, `{ kind, id }`, or `{ ref }` | 201 `{ entry, stopped }` (the previous timer's id when one was running); 409 `PROJECT_ARCHIVED`, `WEEK_LOCKED`; 400 `PROJECT_REQUIRED` (guests), `DESCRIPTION_REQUIRED` |
+| POST | `/api/time/timer/stop` † | `{ at? }` | `{ entry \| null }` (past 24 h it is split into entries of at most 24 h) |
+| GET | `/api/time/entries` | `from, to` (dates in `tz` or instants), `user=me\|all\|<id>`, `project=<id>\|none`, `target=kind:id`, `billable`, `tag`, `q`, `cursor`, `limit ≤ 200` | `{ entries, nextCursor }` (visible entries only, D872) |
+| GET | `/api/time/recent` | — | `{ entries }` (distinct recent ones to continue) |
+| POST | `/api/time/entries` † | `{ startedAt, duration \| endedAt, description?, projectId?, target?, billable?, tags?, tz?, source? }` | 201 `{ entry }`; 400 `TOO_LONG` (> 24 h), `DURATION_REQUIRED` |
+| PATCH | `/api/time/entries/:id` † | any of the above plus `expectedRevision` | `{ entry }`; 409 `LOCKED`, `WEEK_LOCKED`, `ENTRY_CHANGED`; 403 `READ_ONLY` |
+| DELETE | `/api/time/entries/:id` † | — | `{ undoTicket }` (`POST /api/undo/:ticket` restores) |
+| POST | `/api/time/entries/:id/split` † | `{ at }` | `{ entries: [first, second] }` |
+| POST | `/api/time/entries/bulk` | `{ op: create\|update\|delete, items ≤ 100, dryRun? }` | `{ dryRun, count, entries, undoTicket? }` (all or nothing; errors name the item) |
+| GET | `/api/time/timesheet` | `week` (any date in it), `tz`, `carry=1` (keep last week's rows) | `{ weekStart, days, rows: [{ key, project, target, days[7], locked[7] }], totals, approvals }` |
+| PUT | `/api/time/timesheet/cell` † | `{ day, projectId \| null, target \| null, duration (seconds or text) \| null, tz }` | `{ timesheet, undoTicket? }`; 409 `CELL_HAS_DETAILS` (lowering below timer entries), `LOCKED`, `TIMER_RUNNING` |
+| GET | `/api/time/summary` | entry filters (`user` defaults to `all`), `groupBy` (up to two of `project, client, user, target, tag, day, week, month, billable`), `rounding=0\|6\|15\|30`, `roundingMode=nearest\|up` | `{ rows: [{ key, label, seconds, billableSeconds, amountMinor, entries, sub? }], totals, currency, mixedCurrency, rounding }` |
+| GET | `/api/time/export.csv` | as summary | CSV (formula-safe, BOM), audited `time.export` |
+| GET / POST | `/api/time/projects` | `archived=0`, `q`, `loggable=1` / `{ name, code?, color?, clientId? \| newClient?, boardId?, billableDefault?, rateMinor?, currency?, budget?, settings?, visibility?, memberIds? }` | `{ projects }` / 201 `{ project }` (members and admins) |
+| GET / PATCH / DELETE | `/api/time/projects/:id` (id or short id) | PATCH as POST plus `archived`, `expectedRevision` (managers) | `{ project }`; DELETE (owner) moves it to the Bin |
+| GET | `/api/time/projects/:id/rates` | — | managers: `{ currency, projectRateMinor, members: [{ id, name, level, rateMinor }] }` |
+| PUT | `/api/time/projects/:id/rates/:userId` | `{ rateMinor \| null }` | the same |
+| GET / POST | `/api/time/clients` | `q` / `{ name }` | companies in readable books / a company in the caller's hidden Clients book |
+| GET | `/api/time/tags` | — | `{ tags }` |
+| GET | `/api/time/approvals` | `project`, `status`, `mine=1` | `{ approvals }` (managed projects, or the caller's) |
+| POST | `/api/time/approvals` † | `{ projectId, weekStart, note? }` | 201 submitted (managers notified) |
+| PATCH | `/api/time/approvals/:id` | `{ decision: approve\|reject\|unlock, note? }` | `{ status, entries }` (approve locks the person's entries of that week on the project) |
+| GET | `/api/time/targets/:kind/:id` | — | `{ target, totalSeconds, mySeconds, estimateSeconds, entries, byPerson, privateEntries, defaultProject }` |
+| GET | `/api/time/cards?ids=` | ≤ 500 card ids | `{ cards: { [id]: { seconds, estimateSeconds, running } } }` (readable cards only) |
+| GET | `/api/time/suggestions?date=&tz=` | — | `{ suggestions }`: the day's events on your own calendars and cards you changed, not yet logged |
+| GET / PUT | `/api/time/settings` † | `{ dailyReminder, reminderAt, reminderDays, longTimerHours, tz }` | `{ settings }` |
+
+**MCP** (`time:read` / `time:write`): `get_running_timer`, `start_timer`, `stop_timer`, `log_time`, `list_time_entries`, `update_time_entry`, `discard_time_entry` (destructive; named `discard_` because tool names never say delete or remove, D265), `bulk_log_time` (dry run), `time_summary`, `list_time_projects`, `create_time_project`, `update_time_project`, `get_time_for_item`, `suggest_time_entries`. REST v1 exposes the same at `/api/v1/tools/<name>`. Chat agents: reads and `log_time` (as an Inbox proposal `time_log` unless the agent's mode allows writes). Dataset `time.entries`; Goals progress source `time`; Today section `timeToday`; search scope `time`; Bin type `time_project`; schedules `time.long_timer`, `time.daily_reminder`.
+
+## Forms, polls, and find-a-time (lane FORMS, D840–D869)
+
+All under the session, CSRF, and role guards; `:id` is a form's UUID, short id, or friendly segment; unreadable and missing are the same 404; errors `{ error, code }`. Readers of results need `view` on the form (the generic `/api/access/form/:id` sheet); answering is the form's audience.
+
+| Method | Path | Body / query | Returns |
+| --- | --- | --- | --- |
+| GET | `/api/forms` | `tab=mine\|shared\|answer\|all`, `kind`, `status`, `q`, `cursor`, `limit ≤ 100` | `{ items: FormListItem[], nextCursor }` |
+| GET | `/api/forms/counts` | — | `{ mine, answer }` |
+| GET | `/api/forms/targets` | — | boards (with columns), contact books, and calendars the caller can write |
+| POST | `/api/forms/contact-books` | `{ name }` | `{ book }` (201) |
+| POST | `/api/forms` | `{ kind, title?, description?, template?, questions? (QuestionSet or Question[]), publish?, settings? }` | `{ form: FormDetail }` (201) |
+| POST | `/api/forms/polls` | `{ question, options[2–20], multiple?, anonymous?, closesAt?, resultsVisibility?, audience? … }` | open poll (201) |
+| POST | `/api/forms/time-polls` | `{ title, slots[{start,end}] ≤ 60, allowMaybe?, calendarId?, closesAt?, audience? … }` | open time poll (201) |
+| GET / PATCH / DELETE | `/api/forms/:id` | PATCH: any settings field, `status: open\|closed`, `expectedRevision` (409 `FORM_CHANGED`); DELETE moves it to the Bin (manage) | `{ form }` |
+| GET / PUT / DELETE | `/api/forms/:id/draft` | PUT `{ set }` (validated; ids keep their type) | `{ set, hasDraft, version }` |
+| POST | `/api/forms/:id/publish` | — | new version; opens a draft form (409 `NO_DRAFT`) |
+| POST | `/api/forms/:id/duplicate` | — | a new draft copy (201) |
+| GET | `/api/forms/:id/respond` | — | `RespondView`: current set, your response, `closedReason`, poll results when visible |
+| POST / PUT | `/api/forms/:id/responses[/:rid]` | `{ answers, responseId?, hidden?, expectedRevision? }` | `{ responseId, ending, updated, view }`; 409 `ALREADY_RESPONDED`, `FORM_CLOSED`, `FORM_FULL`, `NOT_OPEN_YET`; 400 `INVALID_ANSWERS { errors }` |
+| DELETE | `/api/forms/:id/vote` | — | removes your named poll vote |
+| POST | `/api/forms/:id/visit` | — | 204 (funnel: started) |
+| GET | `/api/forms/:id/responses` | `question`+`option` filter, `since`, `until`, `cursor`, `limit` | `{ items, nextCursor, total }` (readers) |
+| GET / DELETE | `/api/forms/:id/responses/:rid` | — | one response with its set version / `{ undoTicket }` (edit) |
+| GET | `/api/forms/:id/summary` | filter | per-question aggregates, funnel, responses per day, `textHidden` |
+| GET | `/api/forms/:id/export.csv` | filter | UTF-8 CSV with BOM, formula-safe (T514) |
+| GET / POST / PATCH / DELETE | `/api/forms/:id/actions[/:aid]`, `POST …/:aid/retry` | `{ kind: create_card\|save_contact\|notify, config, enabled? }` | actions with their last run |
+| POST | `/api/forms/:id/finalize` | `{ slotId, calendarId?, tz?, inviteUserIds?, emailGuests? }` | `{ form, eventId, emailed, when }` (409 `ALREADY_FINALIZED`) |
+| POST / DELETE | `/api/forms/:id/public-link` | — | `{ token, path, link }` once (manage; 403 `POLICY_OFF`) / revoke |
+| GET | `/p/f/:token` | — | the public page shell (uniform 404) |
+| GET | `/api/public/forms/:token` | `browser?` | public definition (no roles, no member-only questions), `renderNonce`, results when public |
+| POST | `/api/public/forms/:token/responses` | `{ answers, hidden?, respondent?{name,email}, browser?, nonce, website }` | 201 `{ ending, results }`; 202 `{ verificationId, mailQueued }`; 400 `TOO_FAST`/`HONEYPOT`/`REPLAY`/`INVALID`/`INVALID_ANSWERS`; 409 `ALREADY_RESPONDED`/`FORM_CLOSED`; 429 |
+| POST | `/api/public/forms/:token/verify` | `{ id, code }` | 201 or 400 |
+| GET | `/api/public/forms/:token/results`, POST `…/visit` | — | results when visible / 204 |
+
+**MCP** (`forms:read`/`forms:write`; REST v1 the same): `list_forms`, `search_forms`, `get_form`, `create_form`, `update_form`, `update_form_questions`, `set_form_status`, `duplicate_form`, `bin_form` (+ `bin:write`), `list_responses`, `get_response`, `drop_response`, `bulk_drop_responses` (≤ 100, all or nothing, `dryRun`), `get_form_summary`, `export_responses` (≤ 1 MiB), `submit_response`, `create_poll` (`embedIn: { kind: "note", id }` appends to the owner's note draft), `vote_poll`, `create_time_poll`, `finalize_time_poll`. Datasets `forms.responses`, `forms.answers`; Goals progress source `form_metric`; search scope `forms`; Today sections `formsResponses`, `pollsToVote`.
+
+## Workspace wiring (W3-WIRE, D1040–D1059)
+
+Plan: `docs/plan/WORKSPACE_MODULES.md` §D.8. JSON under `/api`, errors `{ error, code }`; unreadable is `404 NOT_FOUND`.
+
+| Method | Path | Body / query | Returns |
+| --- | --- | --- | --- |
+| GET | `/api/goals/checkin-targets` | — | `{ goals: [{ id, title, href, health, progress, keyResults: [{ id, title, metric, currentValue, targetValue, unit, manual }] }] }`: open goals you can edit and own, contribute to, or own a KR of (≤ 20, D1043) |
+| POST / PUT | `/api/checkin-rounds/:rid/answer` | adds `goalUpdates?: [{ goalId, values?: { <krId>: number \| boolean }, health?, confidence? }]` (≤ 10) | as before; 400 `NO_GOAL_QUESTION`, `ANONYMOUS`, `NOT_AVAILABLE`, or Goals' own error (403 `READ_ONLY`, 404, 400 `INVALID`) and nothing is saved (D1043) |
+| PATCH | `/api/checkins/:id` | `summary.noteId?: uuid \| null` | 400 `INVALID` when you cannot edit that note (D1044) |
+| GET | `/api/checkin-rounds/:rid/me` | — | adds `timeCards: WorkSummary[]` (cards you logged time on since your last answer; also in `doneCards`, D1046) |
+| POST | `/api/forms/:id/actions` | `{ kind: "create_deal", config: { bookId, pipelineId?, stageId?, title, valueQuestionId?, emailQuestionId?, nameQuestionId?, companyQuestionId? } }` | `201 { action }`; 400 `INVALID` for a book you cannot edit or a pipeline/stage of another book (D1045; no longer `NOT_AVAILABLE`) |
+| GET | `/api/forms/targets` | — | each book gains `pipelines: [{ id, name, stages: [{ id, name }] }]` (open stages) |
+| GET | `/api/bookings/for/:kind/:id` | kind = `contact` \| `company` \| `deal` | `{ items: Booking[], truncated }`; 404 unreadable record, 400 other kinds; guests 404 (D1058) |
+| GET / PUT | `/api/access/:kind/:id` | — | unchanged; the web Access sheet now uses it for all seven workspace containers (D1050) |
+| GET | `/api/public/bookings/manage/:token/ics` | — | unchanged path; the file's UID is stable across a reschedule chain, with SEQUENCE (D1054) |
+
+**Inbox proposal kinds** (`submit_proposals`; payload = the tool's arguments; module read scope + `inbox:write`; applied as the approver, D1047): `contact_create` (`create_contact`, target `bookId`), `contact_update` (`update_contact`, `contactId`), `deal_create` (`create_deal`, `bookId`), `deal_update` (`update_deal`, `dealId`), `interaction_log` (`log_interaction`, no target: whole-module keys only), `goal_checkin` (`check_in_goal`, `goalId`), `form_create` (`create_form`, no target), `townhall_question` (`ask_townhall_question`, `sessionId`). Chat agents are now offered those tools (as proposals unless their mode writes directly).
+
+**MCP**: `answer_checkin` takes `goalUpdates` (as above); with it the key needs `goals:write` on the whole module (`SCOPE_REQUIRED`).
+
+**Mail** (internal): a rendered mail may carry `attachments` (`text/calendar` `.ics`, ≤ 3, ≤ 256 KiB, D1053); booking confirmation and new-time mail attach `booking.ics`, a finalized time poll's outside voters get `invite.ics`; new template `townhall.reminder` (category `townhall`, D1055).
+
+**Client registries**: `registerBoardHeaderItem` / `boardHeaderItems` (board header, D1048), `registerItemSection` / `itemSections` (workspace item pages, D1056), the `/` embed picker (D1059).
+
+**Server hooks**: `onCardChange(listener)` (`server/tasks/cardEvents.ts`, D1040): batches of `{ activityId, cardId, boardId, actorId, kind, at }` after the change commits.

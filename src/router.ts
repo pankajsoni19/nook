@@ -5,6 +5,8 @@ import { appName } from "./appName";
 import { normalizeBoardCode, parseCardKey } from "../shared/boardKeys";
 import { shortIdOfSegment, type LinkKind } from "../shared/friendlyUrls";
 import { boardCodeOf, boardIdForCode, cardForKey, cardKeyOf, itemFolderSlug, itemIdForShortId, itemSegment, type ItemKind } from "./routeNames";
+import { formatWorkspaceRoute, parseWorkspaceRoute, workspaceModuleForSegment } from "./workspaceModules/registry";
+import { isWorkspaceModuleId, type WorkspaceRoute } from "./workspaceModules/types";
 
 /**
  * Friendly URLs (D773): a URL that names an item by short id, board code, or card key the tab has no
@@ -159,7 +161,11 @@ export type Route =
   // Wave 44 (AC-E): Settings → Knowledge has a page per base below it at /settings/knowledge/:kbId.
   // Settings → AI is tabbed: /settings/ai/providers, /settings/ai/tools, /settings/ai/policy (`aiTab`).
   // API keys too: /settings/keys/general, /settings/keys/vault, /settings/keys/agents (`keysTab`).
-  | { app: "settings"; section: SettingsSection | null; agentId?: string; aiTab?: AiTab; keysTab?: KeysTab; kbId?: string };
+  | { app: "settings"; section: SettingsSection | null; agentId?: string; aiTab?: AiTab; keysTab?: KeysTab; kbId?: string }
+  // The workspace modules (D833, docs/plan/WORKSPACE_MODULES.md §B.1): one generic shape, `/<segment>/…`
+  // parsed and written by the module's own parseRoute/formatRoute (src/<module>/module.tsx). Only a
+  // ready module's segment parses; anything else opens Home like any unknown path.
+  | WorkspaceRoute;
 
 /** The Audit log's filters in its URL (Wave 42 QA L4); anything malformed is dropped. */
 export type AuditQuery = { key?: string; agent?: string; status?: string; from?: string; to?: string };
@@ -378,7 +384,7 @@ export function parseRoute(pathname: string, search = ""): Route {
     if (rest.length === 2 && reportId === "lists" && folderId !== undefined && isRouteId(folderId)) return list(reportsListView(folderId));
     return list();
   }
-  return { app: "home" };
+  return parseWorkspaceRoute(segments, search) ?? { app: "home" };
 }
 
 export const NEW_AGENT = "new";
@@ -491,6 +497,7 @@ function formatCollection(base: string, kind: ItemKind, folder: string, itemId: 
 export function formatRoute(route: Route): string {
   // A link still resolving keeps its URL as it came (D773).
   if ("pending" in route && route.pending) return route.pending.url;
+  if (isWorkspaceModuleId(route.app)) return formatWorkspaceRoute(route as WorkspaceRoute);
   if (route.app === "notes") return formatCollection("/notes", "note", route.folder, route.noteId);
   if (route.app === "files") return formatCollection("/files", "file", route.folder, route.documentId);
   if (route.app === "tasks") {
@@ -590,7 +597,8 @@ function formatTasksHome(home: TasksHome) {
 // `datasources` (Wave 45): Settings → Report data sources (admins).
 // `reportowners` (D500): Settings → Report owners (admins), at /settings/report-owners.
 // `backups` (lane BACKUP, D618): Settings → Backups (admins).
-export const SETTINGS_SECTIONS = ["security", "modules", "mcp", "access", "notifications", "agents", "knowledge", "ai", "datasources", "reportowners", "backups", "about"] as const;
+// `workspace` (D836): Settings → Workspace, units and the workspace modules' settings; listed once a module ships.
+export const SETTINGS_SECTIONS = ["security", "modules", "mcp", "access", "notifications", "agents", "knowledge", "ai", "datasources", "reportowners", "backups", "workspace", "about"] as const;
 export type SettingsSection = typeof SETTINGS_SECTIONS[number];
 
 /** Settings → AI's tabs, in tab order; each is its own URL under /settings/ai. */
@@ -606,7 +614,7 @@ export const aiTabPath = (tab: AiTab) => `${settingsPath("ai")}/${tab}`;
  * The URL slug of each section. API keys (section id "mcp" since Wave 8) lives at `/settings/keys`
  * (C3); the old `/settings/mcp` still opens it and is rewritten in place (no extra history entry).
  */
-const SETTINGS_SLUGS: Record<SettingsSection, string> = { security: "security", modules: "modules", mcp: "keys", access: "access", notifications: "notifications", agents: "agents", knowledge: "knowledge", ai: "ai", datasources: "datasources", reportowners: "report-owners", backups: "backups", about: "about" };
+const SETTINGS_SLUGS: Record<SettingsSection, string> = { security: "security", modules: "modules", mcp: "keys", access: "access", notifications: "notifications", agents: "agents", knowledge: "knowledge", ai: "ai", datasources: "datasources", reportowners: "report-owners", backups: "backups", workspace: "workspace", about: "about" };
 const LEGACY_SETTINGS_SLUGS: Record<string, SettingsSection> = { mcp: "mcp" };
 
 function settingsSectionForSlug(slug: string): SettingsSection | null {
@@ -627,7 +635,7 @@ export function isLegacySettingsPath(pathname: string) {
   return section !== null && pathname !== settingsPath(section);
 }
 
-export const SETTINGS_SECTION_NAMES: Record<SettingsSection, string> = { security: "Security", modules: "Modules", mcp: "API keys", access: "My access", notifications: "Notifications", agents: "Agents", knowledge: "Knowledge", ai: "AI", datasources: "Report data sources", reportowners: "Report owners", backups: "Backups", about: "About" };
+export const SETTINGS_SECTION_NAMES: Record<SettingsSection, string> = { security: "Security", modules: "Modules", mcp: "API keys", access: "My access", notifications: "Notifications", agents: "Agents", knowledge: "Knowledge", ai: "AI", datasources: "Report data sources", reportowners: "Report owners", backups: "Backups", workspace: "Workspace", about: "About" };
 
 /**
  * The tabs of Settings → API keys: general keys, vault keys (`nkv_`), and keys that only run agents.
@@ -667,6 +675,8 @@ const REPORT_PAGE_PATH = /^\/reports\/(?!(?:unfiled|shared|favorites)\/?$)[^/]+$
 export function locationUrl(location: { pathname: string; search: string }) {
   // A report page keeps only its parameter values (D489), in the order formatRoute writes them.
   if (REPORT_PAGE_PATH.test(location.pathname)) return `${location.pathname}${formatReportParams(parseReportParams(location.search))}`;
+  // A workspace module's URLs carry whatever query its parseRoute keeps (D833), as formatRoute writes it.
+  if (workspaceModuleForSegment(location.pathname.split("/")[1])) return formatRoute(parseRoute(location.pathname, location.search));
   // Tasks URLs carry the board query; /chat/new carries the preselected agent (Wave 40); the Audit log its filters (Wave 42);
   // the Reports list its filters (report organization phase 1); a report page its parameter values (D489).
   return /^\/tasks(\/|$)/.test(location.pathname) || location.pathname === "/chat/new" || /^\/chat\/audit(\/|$)/.test(location.pathname) || REPORTS_LIST_PATH.test(location.pathname)

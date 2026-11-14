@@ -1,0 +1,173 @@
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { createUser, db, request, type Session } from "./support/harness";
+import type { QuestionSet } from "../shared/questions";
+
+const { issueRenderNonce, resetPublicLimits } = await import("../server/public/limits");
+const mail = await import("../server/mail");
+const { pendingActionRuns } = await import("../server/forms/actions");
+const settle = async () => { await Promise.all([...pendingActionRuns]); };
+
+/**
+ * Forms audit fixes (§D.1): email verification with mail off (D863); hidden fields never give a
+ * public respondent their identity (D864, T523).
+ */
+
+let owner: Session;
+let member: Session;
+const api = async (session: Session | null, method: string, path: string, body?: unknown) => {
+  const response = await request(path, { method, ...(body === undefined ? (method === "GET" ? {} : { body: "{}" }) : { body: JSON.stringify(body) }) }, session ?? undefined);
+  const text = await response.text();
+  let json: unknown = null;
+  try { json = JSON.parse(text); } catch { json = text; }
+  return { status: response.status, body: json as Record<string, any> };
+};
+
+const SET: QuestionSet = {
+  version: 1, sections: [], endings: [], logic: [],
+  questions: [
+    { id: "name", type: "short_text", title: "Your name", required: true, role: "contact_name" },
+    { id: "email", type: "email", title: "Email", role: "contact_email" }
+  ]
+};
+
+async function publicForm(title: string, patch: Record<string, unknown> = {}) {
+  const created = await api(owner, "POST", "/forms", { kind: "form", title, questions: SET, publish: true });
+  const formId = created.body.form.id as string;
+  const link = await api(owner, "POST", `/forms/${formId}/public-link`);
+  if (Object.keys(patch).length) expect((await api(owner, "PATCH", `/forms/${formId}`, patch)).status).toBe(200);
+  return { formId, token: link.body.token as string };
+}
+const submit = (formId: string, token: string, body: Record<string, unknown>) =>
+  api(null, "POST", `/public/forms/${token}/responses`, { nonce: issueRenderNonce("form", formId, Date.now() - 10_000), website: "", ...body });
+
+beforeAll(async () => {
+  owner = await createUser("Forms audit owner");
+  member = await createUser("Forms audit member");
+});
+afterAll(() => mail.setMailTransportForTests(null));
+
+describe("confirm email with mail off (D863)", () => {
+  test("mail off: the response counts unverified at once, the page asks no code, the editor says why", async () => {
+    mail.setMailTransportForTests(null);
+    resetPublicLimits();
+    const { formId, token } = await publicForm("Mail-off intake", { verifyEmail: true });
+    const detail = await api(owner, "GET", `/forms/${formId}`);
+    expect(detail.body.form).toMatchObject({ verifyEmail: true, mailEnabled: false });
+    expect((await api(null, "GET", `/public/forms/${token}`)).body.form.verifyEmail).toBe(false);
+    const sent = await submit(formId, token, { answers: { name: "Ada", email: "ada@outside.test" } });
+    expect(sent.status).toBe(201);
+    expect(db.query("SELECT COUNT(*) AS n FROM public_verifications WHERE item_id = ?").get(formId)).toEqual({ n: 0 });
+    const meta = JSON.parse((db.query("SELECT meta_json FROM responses WHERE host_kind = 'form' AND host_id = ?").get(formId) as { meta_json: string }).meta_json);
+    expect(meta.verified).toBeUndefined();
+  });
+
+  test("mail on: the response is held for a code", async () => {
+    mail.setMailTransportForTests(async () => ({ id: "msg" }));
+    resetPublicLimits();
+    const { formId, token } = await publicForm("Mail-on intake", { verifyEmail: true });
+    expect((await api(null, "GET", `/public/forms/${token}`)).body.form.verifyEmail).toBe(true);
+    const held = await submit(formId, token, { answers: { name: "Ada", email: "ada@outside.test" } });
+    expect(held.status).toBe(202);
+    mail.setMailTransportForTests(null);
+  });
+});
+
+describe("hidden fields are not identity on public submissions (D864, T523)", () => {
+  const HIDDEN_SET: QuestionSet = {
+    version: 1, sections: [], endings: [], logic: [],
+    questions: [
+      { id: "name", type: "short_text", title: "Your name", required: true, role: "contact_name" },
+      { id: "email", type: "email", title: "Email", role: "contact_email" },
+      { id: "ref", type: "hidden", title: "Referrer email", hiddenKey: "ref" }
+    ]
+  };
+  async function hiddenForm(title: string, verifyEmail: boolean) {
+    const book = await api(owner, "POST", "/forms/contact-books", { name: `${title} book` });
+    const created = await api(owner, "POST", "/forms", { kind: "form", title, questions: HIDDEN_SET, publish: true });
+    const formId = created.body.form.id as string;
+    const link = await api(owner, "POST", `/forms/${formId}/public-link`);
+    if (verifyEmail) await api(owner, "PATCH", `/forms/${formId}`, { verifyEmail: true });
+    expect((await api(owner, "POST", `/forms/${formId}/actions`, { kind: "save_contact", config: { bookId: book.body.book.id, emailQuestionId: "ref" } })).status).toBe(201);
+    return { formId, token: link.body.token as string, bookId: book.body.book.id as string };
+  }
+  const emailsIn = (bookId: string) => (db.query("SELECT ch.value_norm AS email FROM contacts c JOIN contact_channels ch ON ch.contact_id = c.id WHERE c.book_id = ? AND ch.kind = 'email' ORDER BY 1").all(bookId) as Array<{ email: string }>).map((row) => row.email);
+
+  test("a verified public response saves the address that confirmed the code, not the URL's hidden value", async () => {
+    mail.setMailTransportForTests(async () => ({ id: "msg" }));
+    resetPublicLimits();
+    const { formId, token, bookId } = await hiddenForm("Verified hidden", true);
+    const held = await submit(formId, token, { answers: { name: "Mallory", email: "mallory@outside.test" }, hidden: { ref: "victim@outside.test" } });
+    expect(held.status).toBe(202);
+    const outbox = db.query("SELECT payload FROM mail_outbox WHERE template = 'public.verification' AND to_address = 'mallory@outside.test' ORDER BY created_at DESC LIMIT 1").get() as { payload: string };
+    const code = JSON.parse(outbox.payload).code as string;
+    const verified = await api(null, "POST", `/public/forms/${token}/verify`, { id: held.body.verificationId, code });
+    expect(verified.status).toBe(201);
+    await settle();
+    expect(emailsIn(bookId)).toEqual(["mallory@outside.test"]);
+    mail.setMailTransportForTests(null);
+  });
+
+  test("an unverified public response ignores the hidden email; a member's own response may use it", async () => {
+    resetPublicLimits();
+    const { formId, token, bookId } = await hiddenForm("Unverified hidden", false);
+    expect((await submit(formId, token, { answers: { name: "Mallory", email: "mallory2@outside.test" }, hidden: { ref: "victim2@outside.test" } })).status).toBe(201);
+    await settle();
+    expect(emailsIn(bookId)).not.toContain("victim2@outside.test");
+    const own = await api(owner, "POST", `/forms/${formId}/responses`, { answers: { name: "Owner" }, hidden: { ref: "lead@inside.test" } });
+    expect(own.status).toBe(201);
+    await settle();
+    expect(emailsIn(bookId)).toContain("lead@inside.test");
+  });
+});
+
+describe("Create a deal uses the deal's own currency (D986)", () => {
+  test("no pipeline chosen: the book's first pipeline in JPY gets ¥1250 as 1250, not the book's USD scaled by 100", async () => {
+    const book = await api(owner, "POST", "/crm/books", { name: "Yen book" });
+    const bookId = book.body.book.id as string;
+    const pipeline = (await api(owner, "GET", `/crm/pipelines?book=${bookId}`)).body.pipelines[0];
+    expect((await api(owner, "PATCH", `/crm/pipelines/${pipeline.id}`, { currency: "JPY" })).status).toBe(200);
+    const set: QuestionSet = { version: 1, sections: [], logic: [], endings: [], questions: [
+      { id: "name", type: "short_text", title: "Your name", role: "contact_name" },
+      { id: "budget", type: "number", title: "Budget" }
+    ] };
+    const formId = (await api(owner, "POST", "/forms", { kind: "form", title: "Yen quote", questions: set, publish: true })).body.form.id as string;
+    expect((await api(owner, "POST", `/forms/${formId}/actions`, { kind: "create_deal", config: { bookId, title: "Quote: {{Your name}}", valueQuestionId: "budget" } })).status).toBe(201);
+    expect((await api(owner, "POST", `/forms/${formId}/responses`, { answers: { name: "Kenji", budget: 1250 } })).status).toBe(201);
+    await settle();
+    expect(db.query("SELECT value_minor, currency, pipeline_id FROM deals WHERE book_id = ?").get(bookId)).toEqual({ value_minor: 1250, currency: "JPY", pipeline_id: pipeline.id });
+  });
+});
+
+describe("Create a deal is made once, even when its link fails (D865)", () => {
+  test("the deal, its link, and its id on the run commit together; a retry never makes a second deal", async () => {
+    const bookId = (await api(owner, "POST", "/crm/books", { name: "Once book" })).body.book.id as string;
+    const set: QuestionSet = { version: 1, sections: [], logic: [], endings: [], questions: [{ id: "name", type: "short_text", title: "Your name", role: "contact_name" }] };
+    const formId = (await api(owner, "POST", "/forms", { kind: "form", title: "Once form", questions: set, publish: true })).body.form.id as string;
+    const at = new Date().toISOString();
+    // The action runs as its author, who can edit the book but (for now) cannot read the form's responses, so the link fails.
+    db.query("UPDATE contact_books SET visibility = 'selected' WHERE id = ?").run(bookId);
+    db.query("INSERT INTO item_members (item_kind, item_id, user_id, level, added_by, created_at) VALUES ('contact_book', ?, ?, 'edit', NULL, ?)").run(bookId, member.userId, at);
+    const actionId = crypto.randomUUID();
+    db.query("INSERT INTO form_actions (id, form_id, kind, config_json, enabled, position, created_by, created_at, updated_at) VALUES (?, ?, 'create_deal', ?, 1, 0, ?, ?, ?)")
+      .run(actionId, formId, JSON.stringify({ bookId, title: "Deal: {{Your name}}" }), member.userId, at, at);
+    expect((await api(owner, "POST", `/forms/${formId}/responses`, { answers: { name: "Once" } })).status).toBe(201);
+    await settle();
+    const deals = () => (db.query("SELECT COUNT(*) AS n FROM deals WHERE book_id = ?").get(bookId) as { n: number }).n;
+    const run = () => db.query("SELECT status, result_ref FROM form_action_runs WHERE action_id = ?").get(actionId) as { status: string; result_ref: string | null };
+    // Nothing half-made: no deal without its link.
+    expect(deals()).toBe(0);
+    expect(run().status).toBe("failed");
+    db.query("UPDATE forms SET visibility = 'selected' WHERE id = ?").run(formId);
+    db.query("INSERT INTO item_members (item_kind, item_id, user_id, level, added_by, created_at) VALUES ('form', ?, ?, 'edit', NULL, ?)").run(formId, member.userId, at);
+    await api(owner, "POST", `/forms/${formId}/actions/${actionId}/retry`);
+    expect(deals()).toBe(1);
+    const made = run();
+    expect(made.status).toBe("done");
+    expect(made.result_ref).toMatch(/^deal:/);
+    // A later retry (the link removed meanwhile) finds the deal by the id on the run.
+    db.query("DELETE FROM work_links WHERE a_kind = 'deal' AND a_id = ?").run(made.result_ref!.slice(5));
+    db.query("UPDATE form_action_runs SET status = 'failed' WHERE action_id = ?").run(actionId);
+    await api(owner, "POST", `/forms/${formId}/actions/${actionId}/retry`);
+    expect(deals()).toBe(1);
+  });
+});

@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { TodayGroups } from "../src/today/TodayHome";
 import type { TodayResponse, TodaySection } from "../src/today/todayApi";
-import { DEFAULT_SECTION_ORDER, groupTodaySections, sectionCount, TODAY_GROUPS, TODAY_SECTIONS } from "../src/today/todaySections";
+import { DEFAULT_SECTION_ORDER, groupTodaySections, registerTodayRenderer, sectionCount, TODAY_GROUPS, TODAY_SECTIONS } from "../src/today/todaySections";
 
 const empty = (href = "/"): TodaySection => ({ items: [], more: false, href });
 const card = (id: string, title: string) => ({ cardId: id, boardId: "b1", boardName: "Home", title, dueOn: "2026-09-28" });
@@ -25,11 +25,31 @@ test("every client section names one of the three fixed groups, listed in group 
   const order = DEFAULT_SECTION_ORDER.map((name) => ids.indexOf(TODAY_SECTIONS[name]!.group));
   expect(order.every((index) => index >= 0)).toBe(true);
   expect(order).toEqual([...order].sort((a, b) => a - b));
-  expect(groupTodaySections(DEFAULT_SECTION_ORDER).map((group) => [group.id, group.names])).toEqual([
+  // The built-in sections; a shipped workspace module adds its own (D836), in its group.
+  expect(groupTodaySections(DEFAULT_SECTION_ORDER.filter((name) => !TODAY_SECTIONS[name]!.module)).map((group) => [group.id, group.names])).toEqual([
     ["today", ["tasksDue", "upcoming", "tasksMine", "proposals"]],
     ["recent", ["notesRecent", "files", "collectionsRecent", "whiteboardsRecent"]],
     ["housekeeping", ["drafts", "binSoon", "storage"]]
   ]);
+});
+
+test("a registered module section slots in after the last section of its group, not at the end (D836, D923)", () => {
+  const probes = [["probeToday", "today"], ["probeRecent", "recent"], ["probeHousekeeping", "housekeeping"]] as const;
+  try {
+    for (const [name, group] of probes) registerTodayRenderer(name, { title: name, group, empty: "none", app: "Test" });
+    const groupOf = (name: string) => TODAY_SECTIONS[name]!.group;
+    for (const [name, group] of probes) {
+      const at = DEFAULT_SECTION_ORDER.indexOf(name);
+      expect(groupOf(DEFAULT_SECTION_ORDER[at - 1]!)).toBe(group);
+      const next = DEFAULT_SECTION_ORDER[at + 1];
+      if (next) expect(groupOf(next)).not.toBe(group);
+    }
+  } finally {
+    for (const [name] of probes) {
+      delete TODAY_SECTIONS[name];
+      DEFAULT_SECTION_ORDER.splice(DEFAULT_SECTION_ORDER.indexOf(name), 1);
+    }
+  }
 });
 
 test("grouping ignores server order and unknown names, and drops a group with nothing shown", () => {
@@ -93,6 +113,22 @@ test("storage usage is a card without a count", () => {
   const markup = render(["storage"], data);
   expect(cardsIn(markup)).toEqual(["storage"]);
   expect(markup).toContain('<h3 id="today-storage">Storage</h3>');
+});
+
+test("a module section with its own renderer is a card without a count", () => {
+  const name = "probeRendered";
+  registerTodayRenderer(name, { title: "Probe", group: "today", empty: "none", app: "Test", render: () => <p className="probe-body">Total</p> });
+  try {
+    const data = response({ [name]: { items: [{ id: "today:2026-09-27", seconds: 60 }], more: false, href: "/time" } });
+    const markup = render([name], data);
+    expect(cardsIn(markup)).toEqual([name]);
+    expect(markup).toContain(`<h3 id="today-${name}">Probe</h3>`);
+    expect(markup).not.toContain("today-section-count");
+    expect(markup).toContain('<p class="probe-body">Total</p>');
+  } finally {
+    delete TODAY_SECTIONS[name];
+    DEFAULT_SECTION_ORDER.splice(DEFAULT_SECTION_ORDER.indexOf(name), 1);
+  }
 });
 
 test("groups are one column on phones, two from 761 px with Housekeeping below, three from 1100 px", async () => {

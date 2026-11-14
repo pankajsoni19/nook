@@ -126,6 +126,8 @@ export function NewReportSheet({ sources, role = "member", onCancel, onCreated, 
   const [browse, setBrowse] = useState<string[]>([]);
   const [title, setTitle] = useState(blankSeed?.title ?? "");
   const [source, setSource] = useState<string | null>(initialSource ?? sources[0]?.id ?? null);
+  // W3-REPORTS (D1067): This workspace (structured queries, each reader's access) or a SQL data source.
+  const workspace = sources.find((item) => item.id === source)?.kind === "workspace";
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
@@ -312,7 +314,7 @@ export function NewReportSheet({ sources, role = "member", onCancel, onCreated, 
         {firstServer?.synced && <BrowseToolsPicker server={firstServer} value={browse} onChange={setBrowse} disabled={busy} />}
       </>}
       <span className="reports-label" id={ids.source}>Data source</span>
-      <Select labelledBy={ids.source} label="Data source" value={source} onChange={setSource} options={sources.map((item) => ({ value: item.id, label: item.name, description: `Default database ${item.database}` }))} />
+      <Select labelledBy={ids.source} label="Data source" value={source} onChange={setSource} options={sources.map((item) => ({ value: item.id, label: item.name, description: item.kind === "workspace" ? "Forms, Time, Goals, Standups, Contacts, Bookings, and more, with each reader's own access" : `Default database ${item.database}` }))} />
       {!reportId && folders && <div className="new-report-folder">
         <span id={ids.folder}>In: <strong>{folders.find((item) => item.id === folderId)?.label ?? "Unfiled"}</strong></span>
         {changingFolder
@@ -324,7 +326,10 @@ export function NewReportSheet({ sources, role = "member", onCancel, onCreated, 
         <label htmlFor={ids.title}>Title{mode === "doc" ? " (optional)" : ""}</label>
         <input id={ids.title} value={title} maxLength={REPORT_LIMITS.title} autoFocus={mode === "blank"} autoComplete="off" placeholder={mode === "doc" ? "From the doc" : "Weekly revenue"} onChange={(event) => setTitle(event.target.value)} />
       </>}
-      <p className="file-dialog-hint">{mode === "doc"
+      <p className="file-dialog-hint">{workspace ? (mode === "doc"
+        ? `The AI reads ${docs.length ? "the docs" : "the doc"} and builds the report from this workspace's datasets with structured queries (no SQL). Everyone who opens it sees the numbers their own access allows. It uses your AI budget.`
+        : "The report starts empty: Add widget builds each chart from a dataset, without SQL. Everyone who opens it sees the numbers their own access allows.")
+        : mode === "doc"
         ? `The AI reads ${docs.length ? "the docs" : "the doc"} (up to ${REPORT_DOC_LIMITS.docs}: Add puts another in the list), writes read-only SQL against the tables an admin allowed, checks it, and builds the report. It uses your AI budget.`
         : blankSeed ? "The report starts with the chat's query as a table, and a chart when the data fits one; it runs on that data source, read-only, on the tables an admin allowed."
         : "The report starts as a draft with a SQL console. Queries run on that data source, read-only, on the tables an admin allowed."}</p>

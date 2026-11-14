@@ -4,6 +4,7 @@ import { createUser, db, origin, request, type Session } from "./support/harness
 import { startFakeProvider } from "./support/fakeProvider";
 import { startFakeMcpServer } from "./support/fakeMcpServer";
 import { retireUsersAfterFile } from "./support/retireUsers";
+import { workspaceMigrations } from "../server/migrations/workspace";
 
 const { shareLevel, shareReadableSql } = await import("../server/agents/sharing");
 const { resetPublicLimitsForTests } = await import("../server/agents/publicShares");
@@ -396,6 +397,8 @@ describe("review 5: migration 041 on a 040 database", () => {
     database.exec("PRAGMA foreign_keys = ON");
     database.exec("CREATE TABLE IF NOT EXISTS schema_migrations (id INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL)");
     database.query("INSERT INTO schema_migrations (id, name, applied_at) VALUES (41, 'skipped', '2026-10-06T00:00:00.000Z')").run();
+    // A v0.28.0 database has none of the workspace modules' migrations either (085 widens access_grants_v after 041).
+    for (const migration of workspaceMigrations) database.query("INSERT INTO schema_migrations (id, name, applied_at) VALUES (?, 'skipped', '2026-10-06T00:00:00.000Z')").run(migration.id);
     runMigrations(database);
     // A v0.28.0 database: the 025 view, with rows in every source table.
     const before040 = (database.query("SELECT sql FROM sqlite_master WHERE type = 'view' AND name = 'access_grants_v'").get() as { sql: string }).sql;

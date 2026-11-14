@@ -4,6 +4,46 @@ Release notes for Nook, newest first. Upgrade steps for each release are in [doc
 
 ## Unreleased
 
+**Workspace modules working together** (Wave 3)
+
+- **Standups and Goals**: a goal update question shows your goals' key results; numbers you type become goal check-ins when you post. Closed rounds can be added to a note of your choice and published. Cards you logged time on show up in "What did you get done".
+- **Tasks, Contacts, and Goals**: finishing a card made from a contact or deal logs "Task done" on it; key results that count a board's cards update within seconds of a move; a board shows the goal it contributes to in its header.
+- **Forms and Contacts**: a new "Create a deal" response action (pipeline, stage, value from a number answer, the respondent as its contact); form responses appear on the contact's and deal's timeline.
+- **Agents**: agents can propose new contacts and deals, updates, logged calls, goal check-ins, new forms, and townhall questions; you approve them in the Inbox.
+- **Time and Bookings on records**: goals, contacts, companies, deals, and bookings show the time logged on them, with Start and Log time; contact, company, and deal pages list their bookings and copy a booking link prefilled with the contact's name and email.
+- **Sharing**: Goals, Standups, Forms (who sees results), Contacts books, Time projects, Bookings types, and Townhall sessions all use the same Access sheet as notes and boards; booking types can now be shared.
+- **Mail and reminders**: booking confirmations and new times attach a calendar file that updates in place; a finalized time poll emails outside voters the chosen time as a calendar file; Townhall reminders also arrive by email; goal check-in reminders arrive Monday 09:00 in each owner's time zone.
+- **Embeds**: notes and card descriptions can embed a goal or a townhall session; `/` Goal, Townhall, and Booking link let you pick which one. Today's empty-section lines no longer split into narrow columns.
+
+**Goals**
+
+- **Goals with key results**: company, team, and personal goals aligned in a tree, in periods (Q1 2027) or with their own dates; key results as numbers, percents, money, done/not done, or milestones, rising, falling, or staying within a bound, with weights. KPIs keep a number healthy without an end date.
+- **Automatic progress**: a key result can count done cards (or estimate points or hours) of a board, saved view, filter, sprint, tag, or epic, as its owner sees them; other modules add their own sources. Progress rolls up to the goal and to the goals it aligns to.
+- **Check-ins**: health, confidence, a note, and new values in one sheet; weekly, fortnightly, or monthly reminders; a progress chart against the ideal line; comments and history on every goal.
+- **Views and work**: Tree, List, Timeline, Mine, and Insights; link cards and other work to a goal, and see a card's goals in the card itself. Close goals as achieved, missed, or dropped, or carry them over to the next period. MCP tools for agents (`list_goals`, `get_goal`, `create_goal`, `check_in_goal`, `get_goal_tree`, …).
+
+**Standups**
+
+- **Standups** (`/standups`): daily standups, weekly updates, retros, and anonymous pulse surveys from templates, on weekdays at a time in each person's own zone (or one zone), with a deadline, a reminder, nudges, and "Start a round now". Answer from the round, Today ("Standups due"), a notification, or MCP; the answer sheet suggests the cards you finished or are working on, offers "Same as last time" and "No blockers", and is one question per step on phones.
+- Card keys in answers become chips; blockers link the cards and flag them Blocked (when you can edit them), with card history and an "Unblock" offer next time. Rounds show participation, blockers on top, mood, and answers by person or by question, with reactions and threads; the team feed filters by standup, person, words, and blockers. Insights, round summaries (inbox, optional email), datasets, search, MCP tools, and the Bin.
+
+**Bookings** (lane BOOK): booking pages people outside the workspace can use (`/p/book/<you>`), booking types with lengths, buffers, notice, limits and date ranges, weekly hours with date overrides in any time zone, busy times from Nook calendars and outside ICS calendars (Google/Outlook secret addresses), round robin and collective team types, manual approval, intake questions, confirmation and reminder mail with Add to calendar and a reschedule/cancel link, the booker saved as a contact, the event on your calendar, an optional prep card, Insights, and MCP tools.
+
+**Contacts (new module)**: contact books shared like other containers; people and companies with custom fields (including team member and contact fields), dedupe by email and domain, duplicate finder and merge; deals on pipelines with stage probabilities, a drag-and-drop board with totals and weighted totals, rotting deals, won/lost reasons; a timeline of notes, calls, meetings, and emails with linked cards and comments; follow-up reminders and tasks; lists and saved views; CSV import with mapping, duplicate handling, and undo; CSV and vCard export; Insights (pipeline, win rate, stage conversion, activity); search, Today, goal progress sources, and 27 MCP tools.
+
+**Time** (new module): a one-click timer in every header (Alt+T; one per person, it survives reloads and other devices), timers and worklogs on Tasks cards (time against the hours estimate on the card, its face, and the Timeline), manual entries with typed durations, a keyboard-first week timesheet with approvals that lock a week, projects with clients, rates, and budgets, reports by project, client, person, work item, or tag with rounding and CSV, reminders, and MCP tools (`start_timer`, `log_time`, `time_summary`, …).
+
+**Townhall** (new module)
+
+- All-hands and AMA sessions: people ask before and during the meeting (named, or anonymously when the host allows), upvote, and reply; hosts review, approve, hide, merge duplicates, star, pin the current question, and mark questions answered.
+- Live polls (single and multiple choice, word cloud, rating, open text) with results that update as people vote; a high-contrast presenter view with a QR code to join; an audience link for people without an account (public pages policy).
+- After the session: a recap (answered and open questions, poll results, attendance) to download or post as a note, and open questions turned into cards. Reminders, notifications, Insights, and MCP tools (`list/get/create` sessions, ask, upvote, moderate, launch and close polls, export the recap).
+
+**Forms, polls, and find a time** (new module, Forms)
+
+- Build forms with every question type, sections, logic, endings, a live preview, and **Publish changes** (old responses keep their questions); share with the workspace, chosen people, or anyone with a public link (QR code, light public page, bot checks, optional email code); results with per-question charts, a responses table, one response with comments, filters, and CSV export; actions turn responses into cards, contacts, or notifications.
+- Quick polls (live results, anonymous or named, results after voting or after close) and find-a-time polls (yes / if need be / no, best slot, pick a time to create the event); both embed in notes (`/poll`, `/form`) and work over MCP and REST.
+
 **Friendly, shareable URLs**
 
 - **Cards and boards**: the address bar shows `/tasks/KAN-1` for an open card (dialog or full page, `/tasks/KAN-1/full`) and `/tasks/KAN` for a board, keeping the board's view in the query when it is not the default. Old `/tasks/<id>/card/<id>` links, board ids, old card keys of moved cards, and a board's former code still open and turn into the current URL without an extra history entry.

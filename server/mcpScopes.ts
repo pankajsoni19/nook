@@ -6,6 +6,8 @@
  * Scopes come in `<module>:read` / `<module>:write…` pairs. A write scope
  * implies its read scope. Scopes are fixed when a key is created.
  */
+import { WORKSPACE_SCOPES } from "../shared/workspaceModules";
+
 export const MCP_SCOPES = [
   "notes:read", "notes:write-draft",
   // Wave 19 (D170): publish drafts; opt-in, since notes:write-draft promises "never publishes".
@@ -33,7 +35,11 @@ export const MCP_SCOPES = [
   // Analytics reports (Wave 45, D420): list reports and data source names. reports:write is the pair's
   // write half (wave 48 gives it tools: create, refresh, schedule, instructions). SQL over MCP:
   // update_report_query runs guarded SELECTs, saved as a version (T383).
-  "reports:read", "reports:write"
+  "reports:read", "reports:write",
+  // Workspace modules (docs/plan/WORKSPACE_MODULES.md §0, D800): Forms, Time, Goals, Standups
+  // (checkins), Contacts (crm), Bookings, Townhall; a read and a write scope each, pre-registered by
+  // Wave 1 so each module's lane only adds tools.
+  ...WORKSPACE_SCOPES
 ] as const;
 export type McpScope = typeof MCP_SCOPES[number];
 
@@ -49,7 +55,14 @@ export const IMPLIED_READ_SCOPE: Partial<Record<McpScope, McpScope>> = {
   "collections:write": "collections:read",
   "inbox:write": "inbox:read",
   "whiteboards:write": "whiteboards:read",
-  "reports:write": "reports:read"
+  "reports:write": "reports:read",
+  "forms:write": "forms:read",
+  "time:write": "time:read",
+  "goals:write": "goals:read",
+  "checkins:write": "checkins:read",
+  "crm:write": "crm:read",
+  "bookings:write": "bookings:read",
+  "townhall:write": "townhall:read"
 };
 
 /**
@@ -59,7 +72,8 @@ export const IMPLIED_READ_SCOPE: Partial<Record<McpScope, McpScope>> = {
  * classified exactly once.
  */
 export const MCP_WRITE_SCOPES: readonly McpScope[] = [
-  "notes:write-draft", "notes:publish", "files:write", "tasks:write", "calendar:write", "collections:write", "bin:write", "inbox:write", "whiteboards:write", "reports:write"
+  "notes:write-draft", "notes:publish", "files:write", "tasks:write", "calendar:write", "collections:write", "bin:write", "inbox:write", "whiteboards:write", "reports:write",
+  "forms:write", "time:write", "goals:write", "checkins:write", "crm:write", "bookings:write", "townhall:write"
 ];
 
 export const isWriteScope = (scope: McpScope) => MCP_WRITE_SCOPES.includes(scope);

@@ -85,7 +85,9 @@ describe("preferences", () => {
     const session = await createUser("Prefs user");
     const initial = await call(session, "GET", "/mail/settings");
     expect(initial.body).toMatchObject({ configured: true, address: session.email, verified: false, suppressed: false, prefs: { enabled: true, revision: 0, digest: "off", tz: "UTC" } });
-    expect(initial.body.prefs.categories).toEqual({ assignments: true, comments: true, sharing: true, proposals: true, sprints: false, bin: false, reminders: true });
+    expect(initial.body.prefs.categories).toEqual({ assignments: true, comments: true, sharing: true, proposals: true, sprints: false, bin: false, reminders: true,
+      // Workspace modules (D809): one category per module, on by default.
+      forms: true, time: true, goals: true, checkins: true, crm: true, bookings: true, townhall: true });
     const input = { enabled: true, categories: { ...initial.body.prefs.categories, comments: false }, digest: "off", digestLocalTime: "08:00", quietHours: { start: "22:00", end: "07:30" }, tz: "Europe/Berlin", revision: 0 };
     const saved = await call(session, "PUT", "/mail/settings", input);
     expect(saved.status).toBe(200);

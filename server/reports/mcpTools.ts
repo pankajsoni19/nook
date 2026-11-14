@@ -12,7 +12,10 @@ import { docViews } from "./reportDocs";
 import { versionSourceLabel, versionWhoLabel } from "../../shared/reportVersions";
 import { isReportOwner, ownedReport, readableReport, reportLevel } from "./access";
 import { listVersions, previousVersion, versionDiff } from "./versions";
-import { datasourceChoices } from "./datasources";
+import { datasourceChoicesFor } from "./datasources";
+import { isWorkspaceReport, missingDatasetScope } from "./workspaceSource";
+import { WORKSPACE_SOURCE_ID } from "../../shared/reportsWorkspace";
+import { hasScope, type McpScope } from "../mcpScopes";
 import { ReportError } from "./errors";
 import { startGenerate } from "./generate";
 import { addInstruction, applyProposal, getInstruction, proposalView, rejectProposal } from "./instructions";
@@ -22,7 +25,7 @@ import { QUERY_EDIT_LIMITS } from "../../shared/reportsQueryEdit";
 import { catalogRow, metricCatalogView, saveCatalogEdit } from "./metricCatalog";
 import { usableDatasource } from "./datasources";
 import { METRIC_ID, METRIC_LIMITS, type CatalogMetricInput } from "../../shared/reportsMetrics";
-import { queryResults, reportRun, startRefresh } from "./refresh";
+import { reportRun, startRefresh } from "./refresh";
 import { OPTION_SEARCH, paramResults, runParamSet, searchParamOptions } from "./params";
 import { DATE_PRESETS, excludableIds, optionParentsOf, reachOf } from "../../shared/reportParams";
 import { requestAddFilter } from "./filterRequest";
@@ -135,7 +138,7 @@ export const reportTools: McpToolSpec[] = [
       query: z.string().min(1).max(200).optional().describe("Only reports whose title contains this"),
       ownerId: z.union([z.literal("me"), z.string().uuid()]).optional().describe("Only this person's reports (\"me\" for the user's own)"),
       statuses: z.array(z.enum(REPORT_STATUSES)).min(1).max(REPORT_STATUSES.length).optional().describe("Only reports in one of these statuses"),
-      datasourceId: z.string().uuid().optional().describe("Only reports on this data source (from list_report_datasources)"),
+      datasourceId: z.union([z.string().uuid(), z.literal(WORKSPACE_SOURCE_ID)]).optional().describe("Only reports on this data source (from list_report_datasources; \"workspace\" is This workspace)"),
       scheduled: z.boolean().optional().describe("true: only reports that refresh on a schedule; false: only those that do not"),
       favorites: z.boolean().optional().describe("true: only the reports the user starred"),
       shared: z.boolean().optional().describe("true: only reports other people share with the user"),
@@ -172,7 +175,8 @@ export const reportTools: McpToolSpec[] = [
     access: { mode: "global" },
     write: false,
     inputSchema: z.object({}),
-    handler: (_args, key) => ({ datasources: ownerHasReports(key.userId) ? datasourceChoices() : [] })
+    // W3-REPORTS (D1066): "This workspace" (id `workspace`) first when any module dataset is open to the owner.
+    handler: (_args, key) => ({ datasources: ownerHasReports(key.userId) ? datasourceChoicesFor(key.userId) : [] })
   }),
   defineTool({
     name: "list_report_folders",
@@ -257,7 +261,13 @@ export const reportTools: McpToolSpec[] = [
       // Spec v3 (D489): other parameter values read that set's results, running it first when it has none yet (read access is enough).
       let setView = parameters ? paramResults(id, key.userId, parameters) : null;
       if (setView && !setView.set.isDefault && setView.set.missing.includes(block.queryKey)) setView = await runParamSet(key.userId, id, parameters, { trigger: "mcp" });
-      const view = (setView ? setView.results : queryResults(id, spec)).find((item) => item.queryKey === block.queryKey) ?? null;
+      // W3-REPORTS (D1061, T603): a workspace report's results are the key owner's own, computed now, and
+      // only for datasets whose module read scope the key holds.
+      if (query && isWorkspaceReport(report)) {
+        const lacking = missingDatasetScope(query.sql, (scope) => hasScope(key.scopes, scope as McpScope));
+        if (lacking) throw new McpToolError("SCOPE_REQUIRED", `This block reads workspace data this key cannot read; it needs the ${lacking} scope`);
+      }
+      const view = (setView ?? paramResults(id, key.userId, null)).results.find((item) => item.queryKey === block.queryKey) ?? null;
       const shown = view?.result ?? view?.failed ?? null;
       return {
         block: withoutProvenance(block),
@@ -383,7 +393,7 @@ export const reportTools: McpToolSpec[] = [
   defineTool({
     name: "create_report",
     title: "Create a report from a doc",
-    description: "Starts generating a new report from one document (docRef and serverId) or up to 8 (docs, in order): Nook reads each doc through a tool server (its id from the person's Settings → AI → Tool servers) or, with serverId \"nook\", a note or file in this Nook the key's owner can read, then its AI writes ClickHouse SQL against the data source (list_report_datasources) and builds the report. Answers at once with the report and the run; follow it with get_report_run. Uses the key owner's AI budget.",
+    description: "Starts generating a new report from one document (docRef and serverId) or up to 8 (docs, in order): Nook reads each doc through a tool server (its id from the person's Settings → AI → Tool servers) or, with serverId \"nook\", a note or file in this Nook the key's owner can read, then its AI writes ClickHouse SQL against the data source (list_report_datasources), or structured dataset queries on \"workspace\", and builds the report. Answers at once with the report and the run; follow it with get_report_run. Uses the key owner's AI budget.",
     scopes: ["reports:write"],
     access: { mode: "global", related: ["serverId", "datasourceId", "docs"] },
     write: true,
@@ -392,7 +402,7 @@ export const reportTools: McpToolSpec[] = [
       docRef: z.string().min(1).max(2048).optional().describe("The doc's link or id (one doc; or use docs)"),
       serverId: z.union([z.string().uuid(), z.literal("nook")]).optional().describe("The tool server to read the doc through, or \"nook\" (one doc; or use docs)"),
       docs: z.array(mcpDoc).min(1).max(REPORT_DOC_LIMITS.docs).optional().describe("Several docs, in order (at most 8): the first is the main one"),
-      datasourceId: z.string().uuid().describe("The data source (from list_report_datasources)"),
+      datasourceId: z.union([z.string().uuid(), z.literal(WORKSPACE_SOURCE_ID)]).describe("The data source (from list_report_datasources); \"workspace\" builds on this workspace's own data (structured dataset queries, each reader's access)"),
       title: z.string().min(1).max(REPORT_LIMITS.title).optional().describe("The report's title; default the doc's title")
     }),
     handler: (args, key) => asOwner(key, async (role) => {

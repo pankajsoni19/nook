@@ -143,7 +143,8 @@ export class McpToolError extends Error {
   }
 }
 
-export type ToolResult = { content: Array<{ type: "text"; text: string }>; isError?: boolean };
+/** `structuredContent` is set for tools that declare an `outputSchema` (D814): the same value as the text. */
+export type ToolResult = { content: Array<{ type: "text"; text: string }>; isError?: boolean; structuredContent?: Record<string, unknown> };
 
 export function textResult(value: unknown): ToolResult {
   return { content: [{ type: "text", text: JSON.stringify(value, null, 2) }] };
@@ -199,7 +200,22 @@ export type McpToolSpec<Schema extends z.ZodObject = z.ZodObject> = {
   access: ToolAccess;
   inputSchema: Schema;
   handler: (args: z.infer<Schema>, key: McpKeyContext) => Promise<unknown> | unknown;
+  /**
+   * MCP tool annotations (D814, docs/plan/WORKSPACE_MODULES.md §B.15). Defaults come from `write`
+   * (`toolAnnotations`): reads are read-only and idempotent; nothing is destructive or open-world unless
+   * a tool says so. Every workspace module tool sets the ones that differ (a delete is destructive).
+   */
+  annotations?: ToolAnnotations;
+  /** The JSON shape of a successful result; when set, the result is also returned as `structuredContent`. */
+  outputSchema?: z.ZodObject;
 };
+
+export type ToolAnnotations = { readOnlyHint?: boolean; destructiveHint?: boolean; idempotentHint?: boolean; openWorldHint?: false };
+
+/** A tool's annotations with the defaults filled in from `write`. */
+export const toolAnnotations = (spec: Pick<McpToolSpec, "write" | "annotations">) => ({
+  readOnlyHint: !spec.write, destructiveHint: false, idempotentHint: !spec.write, openWorldHint: false as const, ...spec.annotations
+});
 
 /** Keeps each spec's handler typed against its own schema. */
 export const defineTool = <Schema extends z.ZodObject>(spec: McpToolSpec<Schema>) => spec as unknown as McpToolSpec;

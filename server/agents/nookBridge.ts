@@ -97,15 +97,38 @@ export const NOOK_NEVER_TOOLS: ReadonlySet<string> = new Set([
   // D627: hiding a card from a board (and back) is for people and their own keys, not chat agents.
   "archive_card", "unarchive_card"
 ]);
+/**
+ * Classifies a workspace module's tools (docs/plan/WORKSPACE_MODULES.md §B.1, §B.15): `allowed` are
+ * offered to chat agents (writes become proposals where the module registered a proposal kind for the
+ * tool, or run directly where the agent's mode allows, D353/D359); `never` are never offered (public
+ * links, cancelling bookings, bulk deletes, sharing changes, public responses). A tool in neither set
+ * is excluded (tests/agentsToolsFixes.test.ts fails on an unclassified tool).
+ */
+export function registerAgentTools(classes: { allowed?: readonly string[]; never?: readonly string[] }) {
+  for (const name of classes.allowed ?? []) {
+    if (NOOK_NEVER_TOOLS.has(name)) throw new Error(`Tool ${name} is classified as never offered`);
+    (NOOK_AGENT_TOOLS as Set<string>).add(name);
+  }
+  for (const name of classes.never ?? []) {
+    if (NOOK_AGENT_TOOLS.has(name)) throw new Error(`Tool ${name} is classified as offered`);
+    (NOOK_NEVER_TOOLS as Set<string>).add(name);
+  }
+  return () => {
+    for (const name of classes.allowed ?? []) (NOOK_AGENT_TOOLS as Set<string>).delete(name);
+    for (const name of classes.never ?? []) (NOOK_NEVER_TOOLS as Set<string>).delete(name);
+  };
+}
+
 export const isBinTool = (name: string) => name.startsWith("bin_") || name.startsWith("restore_");
 const agentMayUse = (name: string) => NOOK_AGENT_TOOLS.has(name) && !NOOK_NEVER_TOOLS.has(name) && !isBinTool(name);
 
 /** The proposal kind a write tool's call becomes (plan §5.4). */
-const TOOL_KIND: Record<string, ProposalKind> = {
-  ...Object.fromEntries(Object.entries(KIND_TOOL).map(([kind, tool]) => [tool, kind as ProposalKind])),
-  update_note_draft: "note_draft",
-  create_note: "note_draft"
-};
+const BUILTIN_TOOL_KIND: Record<string, ProposalKind> = { update_note_draft: "note_draft", create_note: "note_draft" };
+/** Read live, so a workspace module's proposal kind (registered after this file loads) maps its tool too. */
+const TOOL_KIND: Record<string, ProposalKind> = new Proxy(BUILTIN_TOOL_KIND, {
+  get: (target, name) => typeof name === "string" ? target[name] ?? (Object.entries(KIND_TOOL).find(([, tool]) => tool === name)?.[0] as ProposalKind | undefined) : undefined,
+  has: (target, name) => typeof name === "string" && (name in target || Object.values(KIND_TOOL).includes(name))
+});
 
 export const nookToolSpec = (name: string): McpToolSpec | null => mcpToolSpecs.find((spec) => spec.name === name) ?? null;
 

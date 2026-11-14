@@ -14,6 +14,7 @@ import { queryIdFor } from "./clickhouse";
 import type { DatasourceRow } from "./datasources";
 import { asReportError, ReportError } from "./errors";
 import { runGuarded } from "./runner";
+import { isWorkspaceRow } from "./workspaceSource";
 import { sanityChecks, type SanityContext, type SanityResult } from "./sanity";
 import { parseSpec } from "./service";
 import { backfillVersion } from "./versionBackfill";
@@ -730,10 +731,15 @@ function roundTwoRules(block: ChartBlock, result: Rows, say: (rule: number, text
  * The whole check: shape, references, each query run through the guard (selects only), columns, and
  * the design rules. A spec that passes comes back with its auto-fixes recorded.
  */
-export async function validateSpec(row: DatasourceRow, raw: unknown, context: { userId: string; runId: string; signal?: AbortSignal; /** E2: run the result sanity checks (generation). */ sanity?: Pick<SanityContext, "metricOf"> & { /** E6: queries an edit changed (their blocks are checked too). */ changedQueryKeys?: Iterable<string> } } & DesignOptions): Promise<SpecCheck> {
+export async function validateSpec(row: DatasourceRow, raw: unknown, context: { userId: string; runId: string; signal?: AbortSignal; /** E2: run the result sanity checks (generation). */ sanity?: Pick<SanityContext, "metricOf"> & { /** E6: queries an edit changed (their blocks are checked too). */ changedQueryKeys?: Iterable<string> };
+  /** D1068: the text was written by the agent (generation, AI edits): on This workspace it may state no data values (an edit passes the sections it started from). */ aiText?: true | { sectionsBefore: ReportSpec["sections"] } } & DesignOptions): Promise<SpecCheck> {
   const shape = checkSpecShape(raw);
   if (!shape.ok) return shape;
   const spec = shape.spec;
+  if (context.aiText && isWorkspaceRow(row)) {
+    const textErrors = workspaceTextErrors(spec, context.changedBlockIds, context.aiText === true ? undefined : context.aiText.sectionsBefore);
+    if (textErrors.length) return { ok: false, errors: textErrors.slice(0, MAX_ERRORS) };
+  }
   const used = new Set(spec.blocks.flatMap(blockKeys));
   const results = new Map<string, QueryOutcome>();
   const errors: string[] = [];
@@ -793,8 +799,46 @@ export async function validateSpec(row: DatasourceRow, raw: unknown, context: { 
     for (const block of design.spec.blocks) if (blocks.has(block.id)) for (const key of blockKeys(block)) queries.add(key);
     scope = { blocks, queries };
   }
-  const sanity = context.sanity ? await sanityChecks(row, design.spec, results, { userId: context.userId, runId: context.runId, signal: context.signal, metricOf: context.sanity.metricOf, scope }) : undefined;
+  // W3-REPORTS: the sanity checks read ClickHouse (fan-out, FINAL); a workspace report has none.
+  const sanity = context.sanity && !isWorkspaceRow(row) ? await sanityChecks(row, design.spec, results, { userId: context.userId, runId: context.runId, signal: context.signal, metricOf: context.sanity.metricOf, scope }) : undefined;
   return { ok: true, spec: design.spec, results, ...(sanity ? { sanity } : {}) };
+}
+
+/**
+ * W3-REPORTS audit fix (D1068, T604): on a This workspace report every reader's numbers are their own
+ * (D1061), but text is the same for everyone, so AI-written markdown blocks and section summaries must
+ * state no data values (a figure the owner's access computed would reach readers with less access).
+ * A number counts as data unless it is a year (1900–2100) or a span of the report's time range ("30
+ * days", "2 weeks"); a number glued to letters (Q4, H1, 7d) is a label. Figures belong in KPI, chart,
+ * and table blocks bound to a query. With `changedBlockIds`, only the blocks an edit touched are
+ * checked, and with `sectionsBefore` only the summaries it changed.
+ */
+const TEXT_NUMBER = /(?<![\p{L}\p{N}_.,-])-?\d+(?:[.,]\d+)*(?![\p{L}\p{N}_])(?:\s*(days?|weeks?|months?|quarters?|years?)\b)?/giu;
+export function textDataValues(text: string): string[] {
+  const found: string[] = [];
+  for (const match of text.matchAll(TEXT_NUMBER)) {
+    const token = match[0];
+    if (match[1]) continue;
+    if (/^(19|20)\d\d$/.test(token) || /^2100$/.test(token)) continue;
+    found.push(token.trim());
+  }
+  return found;
+}
+export function workspaceTextErrors(spec: Pick<ReportSpec, "blocks" | "sections">, changedBlockIds?: Iterable<string> | null, sectionsBefore?: ReportSpec["sections"]): string[] {
+  const changed = changedBlockIds ? new Set(changedBlockIds) : null;
+  const errors: string[] = [];
+  const advice = "on This workspace each reader sees the numbers their own access allows, but text is the same for everyone: state no figures in text; put them in KPI, chart, or table blocks bound to a query and describe them in words";
+  for (const block of spec.blocks) {
+    if (block.type !== "markdown" || (changed && !changed.has(block.id))) continue;
+    const values = textDataValues(block.markdown);
+    if (values.length) errors.push(`block ${block.id}: a markdown block states data values (${values.slice(0, 3).map((value) => `"${value}"`).join(", ")}); ${advice}`);
+  }
+  for (const section of spec.sections) {
+    if (sectionsBefore?.some((before) => before.id === section.id && (before.summary ?? "") === (section.summary ?? ""))) continue;
+    const values = textDataValues(section.summary ?? "");
+    if (values.length) errors.push(`section ${section.id}: its summary states data values (${values.slice(0, 3).map((value) => `"${value}"`).join(", ")}); ${advice}`);
+  }
+  return errors;
 }
 
 /** A result's rows as stored: at most `storedRows` rows and 2 MiB of JSON (halved until they fit). */

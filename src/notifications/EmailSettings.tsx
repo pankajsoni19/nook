@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { readyWorkspaceModules } from "../workspaceModules/registry";
 import { CheckCircle2, Mail, MailWarning, RotateCcw, Send, ShieldCheck } from "lucide-react";
 import { ApiError } from "../api";
 import { appName } from "../appName";
@@ -24,6 +25,14 @@ const CATEGORY_ROWS: Array<{ id: EmailCategory; title: string; help: string }> =
   { id: "sprints", title: "Sprints", help: "A sprint with your cards in it started or was completed. Off by default." },
   { id: "bin", title: "Bin clean-up", help: "Items in your Bin are deleted for good within 3 days. At most once a week. Off by default." }
 ];
+
+/**
+ * One row per workspace module that shipped (D809, §B.7): its email category, described by the topics
+ * it registered. None while every module is hidden, so this page is as before.
+ */
+export function moduleEmailRows(): Array<{ id: EmailCategory; title: string; help: string }> {
+  return readyWorkspaceModules().map((module) => ({ id: module.id, title: module.label, help: module.notificationTopics?.length ? `Email about ${module.notificationTopics.map((topic) => topic.label.toLowerCase()).join(", ")}.` : `Email from ${module.label}.` }));
+}
 
 const DIGEST_OPTIONS: Array<{ value: "off" | "daily" | "weekly"; label: string }> = [
   { value: "off", label: "Off" },
@@ -195,12 +204,12 @@ export function EmailSettings() {
 
     <h4 className="notification-settings-subheading">What to email</h4>
     <ul className="modules-list email-list">
-      {CATEGORY_ROWS.map((row) => <li key={row.id} className={`modules-row email-row${prefs.categories[row.id] && prefs.enabled ? "" : " off"}`}>
+      {[...CATEGORY_ROWS, ...moduleEmailRows()].map((row) => <li key={row.id} className={`modules-row email-row${prefs.categories[row.id] !== false && prefs.enabled ? "" : " off"}`}>
         <span className="modules-row-text">
           <strong id={`email-${row.id}-label`}>{row.title}</strong>
           <small id={`email-${row.id}-help`}>{row.help}</small>
         </span>
-        <Switch checked={prefs.categories[row.id]} disabled={locked || !prefs.enabled} labelledBy={`email-${row.id}-label`} describedBy={`email-${row.id}-help`}
+        <Switch checked={prefs.categories[row.id] !== false} disabled={locked || !prefs.enabled} labelledBy={`email-${row.id}-label`} describedBy={`email-${row.id}-help`}
           onChange={(on) => { void save({ categories: { ...prefs.categories, [row.id]: on } }); }} />
       </li>)}
       <li className="modules-row email-row">

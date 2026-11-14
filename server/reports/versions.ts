@@ -6,12 +6,14 @@ import type { QueryResultView } from "../../shared/reportsView";
 import { logger, shortId } from "../log";
 import { isReportOwner, ownedReport, readableReport } from "./access";
 import { ReportError } from "./errors";
-import { capRows, paramsJson, resultView, runningRun, runResults, startPreview, startRefresh, abandonExpiredReportRuns } from "./refresh";
+import { capRows, defaultBound, paramsJson, resultView, runningRun, runResults, startPreview, startRefresh, abandonExpiredReportRuns } from "./refresh";
 import { parseSpec } from "./service";
 import { usableDatasource } from "./datasources";
 import { assertRunnableNow } from "./specCheck";
 import { backfillVersion } from "./versionBackfill";
 import { nextVersion } from "./versionNumbers";
+import { isWorkspaceReport, liveResults } from "./workspaceSource";
+import { reportTimeZone, reportToday } from "./paramZone";
 
 /**
  * Spec versions (plan wave 48, D452): every spec a report has had is a `report_versions` row, numbered
@@ -208,7 +210,8 @@ export function getVersion(reportId: string, version: number, userId: string): V
   const before = earlier[0] ? parseSpec(earlier[0].spec_json) : null;
   const changeSummary = before ? diffSpecVersions(before, spec, { from: earlier[0]!.version, to: version, withText: false }).summary : sizeLine(spec);
   const regenerated = isRegenerated(row.source, version, earlier.some((item) => parseSpec(item.spec_json).blocks.length > 0), earlier.length > 0);
-  const results: QueryResultView[] = spec.queries.map((query) => {
+  // W3-REPORTS (D1062): a workspace report keeps no rows; an older version shows today's numbers, the reader's own.
+  const results: QueryResultView[] = isWorkspaceReport(report) ? liveResults(spec, userId, defaultBound(spec, reportToday(reportId)), reportTimeZone(reportId)) : spec.queries.map((query) => {
     const stored = RESULT_AT().get({ reportId, key: query.key, sql: query.sql, until: next?.created_at ?? null }) as StoredResult | null;
     return { queryKey: query.key, result: stored ? resultView(stored) : null, failed: null, stale: false };
   });
@@ -253,6 +256,7 @@ export async function previewVersion(userId: string, reportId: string, version: 
   const started = startPreview(userId, reportId, version, spec);
   slog.info("Report version preview", { report: shortId(reportId), version, queries: spec.queries.length, ...(via.keyId ? { via: "mcp" } : {}) });
   const run = await started.done;
+  if (isWorkspaceReport(report)) return { runId: run.id, status: run.status, results: liveResults(spec, userId, defaultBound(spec, reportToday(reportId)), reportTimeZone(reportId)) };
   const stored = runResults(run.id);
   const results: QueryResultView[] = spec.queries.map((query) => {
     const result = stored.get(started.keys.get(query.key)!) ?? null;

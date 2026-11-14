@@ -1,4 +1,5 @@
 import { audit, db, ensureDefaultFolder, now } from "./db";
+import { WORKSPACE_BIN_TYPES, type WorkspaceBinType } from "../shared/workspaceModules";
 import { removeObject } from "./documentStorage";
 import { storage, withResourceLock } from "./storage";
 import { emptyTaskBin, listTaskBin, sweepTaskBin, type TaskBinType } from "./tasks/bin";
@@ -15,10 +16,11 @@ export const BIN_RETENTION_MS = 30 * 86_400_000;
 /** Types stored in the core tables below. */
 export type CoreBinType = "note" | "document";
 /** Types whose module registers a BinProvider (Collections and Calendar, WAVES_10-12.md D68; the Vault, D225). */
-export type ProvidedBinType = "collection" | "collection_row" | "calendar" | "event" | "vault" | "vault_environment" | "vault_secret" | "chat" | "agent" | "knowledge_base" | "report" | "report_folder" | "report_list";
+// Workspace modules (§B.13): their types are pre-added; each lane registers its provider.
+export type ProvidedBinType = "collection" | "collection_row" | "calendar" | "event" | "vault" | "vault_environment" | "vault_secret" | "chat" | "agent" | "knowledge_base" | "report" | "report_folder" | "report_list" | WorkspaceBinType;
 export type BinType = CoreBinType | ProvidedBinType;
 const CORE_BIN_TYPES: readonly CoreBinType[] = ["note", "document"];
-const PROVIDED_BIN_TYPES: readonly ProvidedBinType[] = ["collection", "collection_row", "calendar", "event", "vault", "vault_environment", "vault_secret", "chat", "agent", "knowledge_base", "report", "report_folder", "report_list"];
+const PROVIDED_BIN_TYPES: readonly ProvidedBinType[] = ["collection", "collection_row", "calendar", "event", "vault", "vault_environment", "vault_secret", "chat", "agent", "knowledge_base", "report", "report_folder", "report_list", ...WORKSPACE_BIN_TYPES];
 /**
  * Why an item was purged, as recorded in the audit metadata. "resumed" marks a
  * purge the sweeper finished after it was interrupted: the original reason
@@ -141,6 +143,8 @@ const providers = binProviders;
 
 /** Registered by server/collections/bin.ts and server/calendar/calendarBin.ts when their module loads. */
 export function registerBinProvider(type: ProvidedBinType, provider: BinProvider) {
+  // Two modules claiming one Bin type would silently replace each other's restore and purge: fail at startup.
+  if (providers.has(type)) throw new Error(`Bin type ${type} is already registered`);
   providers.set(type, provider);
 }
 

@@ -2,11 +2,12 @@ import { api } from "../api";
 
 /** Settings → Notifications → Email (Wave 28, outbound email §B.1, §E.2). */
 export const EMAIL_CATEGORIES = ["assignments", "comments", "sharing", "proposals", "sprints", "bin", "reminders"] as const;
-export type EmailCategory = typeof EMAIL_CATEGORIES[number];
+// The workspace modules' categories (D809): one per module, optional on the server; rows only for modules that shipped.
+export type EmailCategory = typeof EMAIL_CATEGORIES[number] | import("../../shared/workspaceModules").WorkspaceModuleId;
 
 export type EmailPrefs = {
   enabled: boolean;
-  categories: Record<EmailCategory, boolean>;
+  categories: Partial<Record<EmailCategory, boolean>>;
   digest: "off" | "daily" | "weekly";
   digestLocalTime: string;
   quietStart: string | null;
@@ -24,7 +25,7 @@ export type EmailSettings = { configured: boolean; address: string; verified: bo
 
 export type EmailPrefsInput = {
   enabled: boolean;
-  categories: Record<EmailCategory, boolean>;
+  categories: Partial<Record<EmailCategory, boolean>>;
   digest: "off" | "daily" | "weekly";
   digestLocalTime: string;
   quietHours: { start: string; end: string } | null;

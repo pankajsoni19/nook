@@ -35,7 +35,9 @@ test("mcpScopesForRole: admins all, members all but team:read, viewers read scop
   expect(mcpScopesForRole("admin")).toEqual([...MCP_SCOPES]);
   expect(mcpScopesForRole("member")).toEqual(MCP_SCOPES.filter((scope) => scope !== "team:read"));
   // Viewers get no inbox scopes (D152), not even inbox:read.
-  expect(mcpScopesForRole("viewer")).toEqual(["notes:read", "files:read", "tasks:read", "today:read", "calendar:read", "collections:read", "whiteboards:read", "agents:read", "reports:read"]);
+  expect(mcpScopesForRole("viewer")).toEqual(["notes:read", "files:read", "tasks:read", "today:read", "calendar:read", "collections:read", "whiteboards:read", "agents:read", "reports:read",
+    // Workspace modules (D800): their read scopes.
+    "forms:read", "time:read", "goals:read", "checkins:read", "crm:read", "bookings:read", "townhall:read"]);
   expect(normalizeScopes(["inbox:write"])).toEqual(["inbox:read", "inbox:write"]);
   expect(hasScope(["inbox:write"], "inbox:read")).toBe(true);
   expect(hasScope(["inbox:read"], "inbox:write")).toBe(false);
@@ -68,7 +70,9 @@ test("alsoRequires is all-of: bin:write alone satisfies nothing that also needs 
 
 test("viewers can hold none of the Wave 19 scopes (snapshot, T144)", async () => {
   const { effectiveMcpScopes, mcpScopesForRole } = await import("../server/team/roles");
-  expect(mcpScopesForRole("viewer")).toEqual(["notes:read", "files:read", "tasks:read", "today:read", "calendar:read", "collections:read", "whiteboards:read", "agents:read", "reports:read"]);
+  expect(mcpScopesForRole("viewer")).toEqual(["notes:read", "files:read", "tasks:read", "today:read", "calendar:read", "collections:read", "whiteboards:read", "agents:read", "reports:read",
+    // Workspace modules (D800): their read scopes.
+    "forms:read", "time:read", "goals:read", "checkins:read", "crm:read", "bookings:read", "townhall:read"]);
   expect(effectiveMcpScopes(["notes:publish", "files:write", "bin:write", "notes:read"], "viewer")).toEqual(["notes:read"]);
   expect(mcpScopesForRole("member")).toContain("bin:write");
 });

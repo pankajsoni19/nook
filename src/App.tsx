@@ -58,12 +58,13 @@ const ReportsApp = lazy(() => import("./reports/ReportsApp").then((module) => ({
 const ReportDataSources = lazy(() => import("./settings/ReportDataSources").then((module) => ({ default: module.ReportDataSources })));
 const ReportOwnerReview = lazy(() => import("./settings/ReportOwnerReview").then((module) => ({ default: module.ReportOwnerReview })));
 // Lane BACKUP: Settings → Backups (admins).
+const WorkspaceSettings = lazy(() => import("./settings/WorkspaceSettings").then((module) => ({ default: module.WorkspaceSettings })));
 const Backups = lazy(() => import("./settings/Backups").then((module) => ({ default: module.Backups })));
 import { lineDiff } from "./diff/lineDiff";
 import { TeamSection } from "./team/TeamApp";
 import { useBlockedCount } from "./team/blockedCount";
 import { SettingsHubShell } from "./settings/SettingsHub";
-import { aiTabRedirect, aiTabsFor, binEntryShown, hubBackAction, hubBackSteps, hubEntries, hubEntryLabel, hubEntryOf, hubListGoesUnder, hubPopRoute, isHubRoute, isNestedHubRoute, keysTabRedirect, keysTabsFor, leaveGuardAction, settingsRoute, teamGroupShown, type HubEntry, type HubEntryId } from "./settings/hubModel";
+import { aiTabRedirect, aiTabsFor, binEntryShown, workspaceEntryShown, hubBackAction, hubBackSteps, hubEntries, hubEntryLabel, hubEntryOf, hubListGoesUnder, hubPopRoute, isHubRoute, isNestedHubRoute, keysTabRedirect, keysTabsFor, leaveGuardAction, settingsRoute, teamGroupShown, type HubEntry, type HubEntryId } from "./settings/hubModel";
 import { HubBeforeLeaveContext, type BeforeHubLeave } from "./settings/hubLeave";
 import { InviteRegister, InviteWhileSignedIn, type InviteRegisterBody } from "./auth/InviteRegister";
 import { initialInvite } from "./auth/inviteLink";
@@ -139,6 +140,8 @@ import { FileSearchResults, useFileSearch } from "./search/FileSearchResults";
 import { ModulesSettings } from "./ModulesSettings";
 import { hiddenEntryStep, hiddenModuleForApp, normalizeDisabledModules, recordPopDepth, isAppEnabled, isModuleEnabled, moduleOffHint, ModulesContext, parsePreferences, routeGateModules, unavailableModules, type ModuleId, moduleDef } from "./modules";
 import { usePreferences, type PreferencesStatus } from "./usePreferences";
+import { isWorkspaceModuleId, workspaceHomeRoute, workspaceModule } from "./workspaceModules";
+import { WorkspaceModuleHost } from "./workspaceModules/WorkspaceModuleHost";
 import { errorText, flash as flashToast, notify } from "./ui/notify";
 
 type TotpState = { enabled: boolean; required: boolean; setupRequired: boolean };
@@ -550,9 +553,12 @@ function SettingsPage({ session, modules, googleResult = null, navigate, flash, 
   const listScreen = route.app === "settings" && route.section === null;
   // Q6: guests have no My access; its URL opens Security (replaced below).
   const guestAccess = route.app === "settings" && route.section === "access" && session.user.role === "guest";
-  const section: SettingsSection | null = route.app === "settings" ? guestAccess ? "security" : route.section ?? "security" : null;
-  const selected: HubEntryId = guestAccess ? "security" : hubEntryOf(route) ?? "security";
+  // Nor Settings → Workspace (D836) where it has no entry: for guests, or before a workspace module ships.
+  const workspaceHidden = route.app === "settings" && route.section === "workspace" && !workspaceEntryShown(session.user.role);
+  const section: SettingsSection | null = route.app === "settings" ? guestAccess || workspaceHidden ? "security" : route.section ?? "security" : null;
+  const selected: HubEntryId = guestAccess || workspaceHidden ? "security" : hubEntryOf(route) ?? "security";
   useEffect(() => { if (guestAccess) go(settingsRoute("security"), { replace: true }); }, [go, guestAccess]);
+  useEffect(() => { if (workspaceHidden) go(settingsRoute("security"), { replace: true }); }, [go, workspaceHidden]);
   // Wave 38: with the Bin module off (D92), or for a guest, the Bin has no entry, and /settings/bin opens Security in place.
   const binHidden = route.app === "bin" && !binShown;
   useEffect(() => { if (binHidden) go(settingsRoute("security"), { replace: true }); }, [binHidden, go]);
@@ -745,6 +751,7 @@ function SettingsPage({ session, modules, googleResult = null, navigate, flash, 
     : section === "datasources" ? (session.user.role === "admin" ? <Suspense fallback={<section className="settings-content" aria-busy="true"><p className="sr-only" role="status">Loading data sources…</p></section>}><ReportDataSources /></Suspense> : <section className="settings-content"><p className="settings-warning">That section is for admins.</p></section>)
     : section === "reportowners" ? (session.user.role === "admin" ? <Suspense fallback={<section className="settings-content" aria-busy="true"><p className="sr-only" role="status">Loading reports…</p></section>}><ReportOwnerReview /></Suspense> : <section className="settings-content"><p className="settings-warning">That section is for admins.</p></section>)
     : section === "backups" ? (session.user.role === "admin" ? <Suspense fallback={<section className="settings-content" aria-busy="true"><p className="sr-only" role="status">Loading backups…</p></section>}><Backups /></Suspense> : <section className="settings-content"><p className="settings-warning">That section is for admins.</p></section>)
+    : section === "workspace" ? <Suspense fallback={<section className="settings-content" aria-busy="true"><p className="sr-only" role="status">Loading workspace settings…</p></section>}><WorkspaceSettings role={session.user.role} /></Suspense>
     : section === "about" ? <section className="settings-content about-settings" aria-labelledby="about-heading"><div className="settings-section-heading"><span className="settings-icon"><Info /></span><div><h3 id="about-heading">About {appName()}</h3><p>A private, self-hosted workspace for notes, files, and ideas.</p></div></div><div className="about-card"><div className="brand-mark"><Sparkles /></div><div><h4>{appName()}</h4><p>{appName() === "Nook" ? "Built by Pankaj" : "Built on Nook by Pankaj"}</p></div><dl><div><dt>Version</dt><dd>{appInfo.version}</dd></div><div><dt>Git SHA</dt><dd><code>{appInfo.gitSha}</code></dd></div></dl><a href="https://github.com/pankajsoni19" target="_blank" rel="noopener noreferrer">github.com/pankajsoni19</a></div></section>
     : securitySection;
 
@@ -1244,7 +1251,7 @@ export function App() {
   useEffect(() => {
     // The Settings hub names its own screens (Team's sections and the Bin too).
     if (activeApp === "settings" || activeApp === "team" || activeApp === "bin") return;
-    const sectionName = { home: "Home", notes: "Notes", files: "Files", tasks: "Tasks", collections: "Collections", calendar: "Calendar", notifications: "Notifications", inbox: "Inbox", whiteboards: "Whiteboards", vault: "Vault", chat: "Chat", reports: "Reports" }[activeApp];
+    const sectionName = isWorkspaceModuleId(activeApp) ? workspaceModule(activeApp)?.label ?? "Home" : { home: "Home", notes: "Notes", files: "Files", tasks: "Tasks", collections: "Collections", calendar: "Calendar", notifications: "Notifications", inbox: "Inbox", whiteboards: "Whiteboards", vault: "Vault", chat: "Chat", reports: "Reports" }[activeApp];
     const detail = activeApp === "notes" && note && note.id === selectedNoteId ? note.title || "Untitled" : null;
     document.title = session ? `${detail ? `${detail} · ` : ""}${sectionName} · ${appName()}` : `Sign in · ${appName()}`;
   }, [activeApp, note, selectedNoteId, session]);
@@ -1817,6 +1824,8 @@ export function App() {
     if (section === "vault") return { app: "vault", vaultId: null, envId: null, secretId: null, page: null };
     if (section === "chat") return { app: "chat", chatId: null };
     if (section === "reports") return { app: "reports", reportId: null };
+    // A workspace module's home (D833).
+    if (isWorkspaceModuleId(section)) return workspaceHomeRoute(section);
     return { app: section };
   }
 
@@ -2360,6 +2369,8 @@ export function App() {
       : shownApp === "chat" ? <Suspense fallback={<main className="app-page" aria-busy="true"><p className="sr-only" role="status">Loading chat…</p></main>}><ChatApp {...account} role={session.user.role ?? "member"} navigate={navigate} flash={flash} onHome={() => { void openHome(); }} onOpenAgents={(agentId) => { void openRoute({ app: "settings", section: "agents", ...(agentId ? { agentId } : {}) }); }} onOpenPath={openInboxPath} /></Suspense>
       : shownApp === "reports" ? <FriendlyLinkGate app="reports" listRoute={{ app: "reports", reportId: null }} navigate={navigate}><Suspense fallback={<main className="app-page" aria-busy="true"><p className="sr-only" role="status">Loading reports…</p></main>}><ReportsApp {...account} role={session.user.role ?? "member"} navigate={navigate} flash={flash} onHome={() => { void openHome(); }} onOpenDatasources={() => { void openRoute({ app: "settings", section: "datasources" }); }} onOpenToolServers={() => { void openRoute({ app: "settings", section: "ai", aiTab: "tools" }); }} /></Suspense></FriendlyLinkGate>
       : shownApp === "whiteboards" ? <FriendlyLinkGate app="whiteboards" listRoute={{ app: "whiteboards", folder: "all", boardId: null }} navigate={navigate}><Suspense fallback={<main className="app-page" aria-busy="true"><p className="sr-only" role="status">Loading whiteboards…</p></main>}><WhiteboardsApp {...account} userId={session.user.id} navigate={navigate} flash={flash} onHome={() => { void openHome(); }} onOpenPath={openInboxPath} /></Suspense></FriendlyLinkGate>
+      // The workspace modules (D833): one generic branch, the module's lazy app with the standard props.
+      : isWorkspaceModuleId(shownApp) ? <WorkspaceModuleHost key={shownApp} id={shownApp} {...account} userId={session.user.id} role={session.user.role ?? "member"} navigate={navigate} flash={flash} onHome={() => { void openHome(); }} onOpenPath={openInboxPath} />
       // Settings, Team, and the Bin (Wave 38) are the hub's routes.
       : settingsPage(false)}
     {toastStatus}

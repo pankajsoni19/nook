@@ -625,6 +625,133 @@ Plan: `docs/plan/WAVES_45-48_REPORTS.md` (D410–D422). Reports run SQL that peo
 | T490 | **Friendly URL resolution as an existence or title oracle** (lane URLS, D775: short ids are random but board codes are guessable; a resolver that answered differently for an item the caller cannot read would reveal that it exists, or its title) | `GET /api/links/:kind/:ref` reads the item's id by short id or code without an access check, then applies the module's own read check (`readableNote`, `readableDocumentSummary`, `readableWhiteboard`, `readableCollection`, `readableReport`, `readableBoard`); the title or code is read only after it passes. Unknown, binned, unreadable, and malformed are the same 404 `{"error":"Not found"}` (the body is identical; `tests/friendlyUrls.test.ts` compares them). Notes resolve a pending link only from the reader's own list. A short id is not a capability: knowing one grants nothing. Card keys keep T460. | Required (built) |
 | T491 | **Titles in server logs** (D784: friendly URLs carry titles, folder names, board codes, and card keys in the path) | The request log writes an app page (anything outside /api and /mcp) as its first segment only (`/notes/:path`, `server/httpLog.ts` `templatePath`); API routes log their templates (`/api/links/:kind/:ref`); queries were never logged. Audit rows never held paths. | Required (built) |
 | T492 | **Titles in browser history, Referer, and shared links** (D772–D777) | `Referrer-Policy: no-referrer` (app-wide and on file responses) keeps the URL from other sites. A shared link carries the title that every reader of the item already sees; kinds whose titles are sensitive or personal stay opaque (Vault, chats, calendar events, Inbox, Team; D782). Server-written note links never carry a folder name (D776); bell notices stay id-only (T68). Slugs are `[a-z0-9-]` only, so they cannot inject markup or a path (T223). The tab's name registry is memory only and cleared at sign-out (D783). | Accepted (documented) |
+| T500 | **A module route skips the session/CSRF guards, or a public route sits behind none** (workspace modules, D815) | Module routes are served by one dispatcher mounted after every guard; the router refuses paths outside `/api/` and any `/api/public/` path. Public routes only through `registerPublicRoutes`, whose router accepts `/p/…` and `/api/public/…` only, mounted before the guards behind the strict public headers. `tests/workspaceRegistry.test.ts` enumerates every registered path and proves 401/403/ROLE_READ_ONLY on a module route. | Required (built) |
+| T501 | **Links leak titles across access** | The resolver returns null for anything the viewer cannot read; the other side of a link is `{kind, hidden: true}`; link activity names the kind word only (D824). `tests/workLinks.test.ts`. | Required (built) |
+| T502 | **A dataset query bypasses access** | Structured queries only; every column, function, operator, and bucket comes from the dataset's own definition; values are bound; the dataset's `scope(viewer)` is always ANDed in. `tests/datasets.test.ts` (injection attempts as values and names). | Required (built) |
+| T503 | **Contact details leak through chips** | `contactSummaries` returns details only for contacts in books the viewer can read, else `{kind: "contact", hidden: true}`. `tests/peopleNotify.test.ts`. | Required (built) |
+| T504 | **A schedule handler runs twice** | The fire row (`schedule_fires`, primary key per occurrence) is written in the claim's transaction before the handler; a crash leaves it, and the next tick skips that occurrence. `tests/schedules.test.ts`. | Required (built) |
+| T505 | **Audit or activity leaks personal data** | Audit metadata and item activity payloads carry ids, counts, and sources only (no answers, contact details, tokens). | Required (built) |
+| T506 | **Public endpoint abuse** | Per-address page and submit limits, a durable per-link hourly limit, a 64 KiB body cap, honeypot, minimum fill time, single-use signed nonces, a per-kind pause, optional email verification; outcomes logged with salted IP hashes for 30 days. `tests/publicPages.test.ts`. | Required (built) |
+| T507 | **Public token guessing and timing** | 32-byte tokens, SHA-256 lookup, one uniform 404 body for unknown, malformed, revoked, expired, policy-off, and closed. | Required (built) |
+| T508 | **Outside mail used to spam** | Only templates registered for outside addresses; 10 an hour and 50 a day per address, 30 a day per item; verification codes count under their own per-item key sized to the item's public limits (7,200 a day, D822a), so code requests cannot exhaust an item's mail (`tests/publicAuditFixes.test.ts`); suppressions and stop links honoured (a stop is a POST from the confirmation page or RFC 8058 one-click, never a GET a link scanner could trigger, D822b); nothing queued while mail is off. | Required (built) |
+| T509 | **Notification href injection** | `notify()` refuses anything but a relative in-app path, and 085's CHECK refuses `//`, schemes, and backslashes in the column. | Required (built) |
+| T510 | **The 085 rebuilds lose grants, proposals, or notifications** | The 12-step rebuild copies every column, re-creates indexes and triggers from their stored SQL, and fails on a count difference; `tests/workspaceMigrations.test.ts` migrates a copy of a production-shaped 083 file database and compares every row and `access_grants_v`. | Required (built) |
+| T511 | **Cross-kind confusion in the generic member tables** | Composite primary keys with `item_kind`; every query filters `item_kind`; a CHECK limits it to the seven container kinds. | Required (built) |
+| T512 | **Undo replays another person's later delete** | Tickets are bound to the deleter, single use, 10 minutes; a key clash refuses (409). | Required (built) |
+| T513 | **Embeds reveal titles** | Embed lines always carry the neutral kind word (`shared/embeds.ts` `neutralizeEmbeds`). | Required (built) |
+| T514 | **CSV formula injection** | `csvCell` prefixes `'` to cells starting with `= + - @`, tab, or CR. | Required (built) |
+| T550 | **Participants read others' answers when they should not** | Participants read by default (D938); `private_answers` limits every answer surface (round, feed, search, datasets, comments on an answer, reactions) to the author and managers; tests cover round, feed. | Required (built) |
+| T551 | **MCP `answer_checkin` impersonation** | Answers only as the key's owner, only rounds they take part in; another person's round is NOT_FOUND; agents propose (`checkin_answer`) for the person to approve. | Required (built) |
+| T552 | **Schedule storms** | One drive schedule per standup handles every participant and zone in one handler run (D939). | Required (built) |
+| T553 | **Small-n deanonymization of pulses** | No user link on anonymous responses (keyed hash only), no times, no comments or reactions, results from three answers on, dataset rows only for rounds with three answers or more. | Required (built) |
+| T554 | **Blockers flag cards the author cannot edit** | The flag needs edit on the board and a writing role; otherwise only the link; card readers only (an unreadable ref resolves to nothing). | Required (built) |
+| T555 | **Blocker notifications leak the standup** | Assignees get "KAN-12 was named as a blocker in a standup" with the card's link, never the standup's name or text. | Required (built) |
+| T556 | **Guests write beyond answering** | The module's read-only writes are only answer, skip, own zone and pause, own summaries; handlers check participation; guests cannot comment or react (role cap). | Required (built) |
+
+### Goals (lane GOALS, migrations 096–097)
+
+Plan: `docs/plan/WORKSPACE_MODULES.md` §D.3 (D900–D922).
+
+| ID | Threat | Mitigation | Status |
+| --- | --- | --- | --- |
+| T540 | **An auto source counts items someone cannot read** (a KR pointed at a private board, through the owner or another editor) | Sources compute as the KR's owner (`ProgressContext.ownerId`, `readableBoardPredicate` with the owner's id); saving a config requires it to compute for the owner **and** the editor; results are numbers only; the description names a board only for viewers who can read it ("a board you can't open"). `tests/goals.test.ts` (refused config). | Mitigated |
+| T541 | **Roll-up leaks hidden children's progress** | Accepted (§G.1 Q4): the parent's stored progress includes them; lists show only readable children plus a count, and the goal page says the progress includes goals you can't open. | Accepted |
+| T542 | **Check-in or edit spoofing through MCP for goals you cannot edit** | Every write calls `requireGoal(…, "edit")` with the person's live level (contributors and editors), plus the Team role write gate; MCP tools run as the key's person and anchor key results on their goal for chosen-item keys; unreadable is NOT_FOUND. Tests: 403 for readers and viewers, NOT_FOUND through another person's key. | Mitigated |
+| T543 | **Recompute denial of service** (huge boards, many KRs) | One bounded SUM per KR over indexed columns; 60 s debounce on reads; a 5-minute sweep capped at 200 KRs; a compute over 2 s records `source_error`. No per-card triggers. | Mitigated |
+| T544 | **Titles leak through links, search, datasets, notifications** | The work kind adapters resolve a goal only for readers (null otherwise, T501); search and datasets AND `readableGoalSql`; notifications go only to people who can open the goal; activity payloads carry labels the item's readers may see, never check-in notes (T505). | Mitigated |
+| T545 | **Purge leaves orphans** (links, activity, comments, grants, schedules, search rows) | 097 triggers on `goals` and `key_results`; KRs, milestones, values, check-ins, contributors cascade. Test: Bin → purge → zero rows. | Mitigated |
+
+### Workspace wiring (W3-WIRE, D1040–D1059)
+
+Plan: `docs/plan/WORKSPACE_MODULES.md` §D.8.
+
+| ID | Threat | Mitigation | Status |
+| --- | --- | --- | --- |
+| T595 | **Automatic interactions leak titles** (Task done, Form response tell a book's readers about a card or form they cannot read) | Fixed plain-text titles and bodies; the card and response are only work links, which redact for non-readers (T501); written as someone who may edit the book, else nothing. Test: the Task done body never holds the card title. | Mitigated |
+| T596 | **Standup wiring oversteps** (check-ins on goals the person cannot edit; a Standups-only key writing goals; answers copied to a note with a wider audience) | Goal updates call Goals' `checkIn` as the person inside the answer's transaction (refusal fails the answer); `answer_checkin` with goal updates needs whole-module `goals:write`; only a standup editor who can edit the note sets it, and it is written as the owner who must still edit it; private-answer and anonymous standups add the summary line only; blocker cards never named. Tests in `tests/wiring.test.ts`. | Mitigated; a note's audience seeing named answers is the owner's choice |
+| T597 | **Card-change listeners act on a refused or rolled-back change** (an interaction or KR update for a move that never happened) | Delivered after the transaction; entries whose activity row is gone are dropped (a folded change is rewritten under a fresh id, so a rolled-back fold is dropped too, D1059c); listeners re-read state (Task done checks the card is in a done column now) and check access themselves. The shared Access sheet (D1050) needed no threat: `/api/access/:kind/:id` and its checks are unchanged. | Mitigated |
+| T598 | **Calendar-file injection or abuse through mail attachments** | TEXT escaped, control characters dropped, CRLF folding; UID sanitized; URL only when plain http(s); content type and file name allowlisted; ≤ 3 files, ≤ 256 KiB; built from re-read data at send time; no internal ids to outside addresses. | Mitigated |
+| T599 | **A prefilled booking link leaks a contact's details** | Name and email only, capped and checked; query strings never logged; `no-referrer`; copied by the person, never sent by Nook. | Mitigated |
+
+### Workspace data in Reports (W3-REPORTS, D1060–D1069)
+
+T600–T603 are listed in WORKSPACE_MODULES.md §D.8.
+
+| ID | Threat | Mitigation | Status |
+| --- | --- | --- | --- |
+| T604 | **An owner's numbers reach readers through AI-written text** on a This workspace report (text is the same for everyone; numbers are each reader's own, D1061) | The generation and edit prompts forbid figures in text; `validateSpec` with `aiText` refuses a markdown block or section summary holding a data value (anything but a year, a time span, or a label), so figures go in query-bound blocks (D1068, `tests/reportsWorkspaceText.test.ts`) | Mitigated (words describing a trend, "billable hours lead", remain possible: accepted) |
+
+### Townhall (lane TOWNHALL, migration 115)
+
+Details and decisions in [WORKSPACE_MODULES.md §D.7 Townhall](WORKSPACE_MODULES.md#d7-townhall-lane-townhall-module-townhall).
+
+| ID | Threat | Mitigation | Status |
+| --- | --- | --- | --- |
+| T610 | **Deanonymizing anonymous askers or voters** | No author id for anonymous questions; upvotes, poll answers, attendance as keyed hashes; exports and MCP say "Anonymous"; audit rows carry ids only. | Required (built) |
+| T611 | **Public spam and vote stuffing** (incl. a room behind one NAT) | Ask: nonce, honeypot, fill time, per-address and per-link limits; votes: per-participant (60/min) and per-address (1200/min) buckets; review mode, hide, link off. Clearing storage mints a new participant only up to 60 per address and session in 10 minutes, then the address gets its last token again; attendance counts only participants who act or stay 30 s, never a bare page load (D1088, `tests/townhallAuditFixes.test.ts`). | Required (built) |
+| T612 | **Audience link leakage or reuse** | Hashed 43-character token, uniform 404, policy gate; the token is re-derived from a seed that revoking deletes; hosts only. | Required (built) |
+| T613 | **Reading pending, hidden, draft, or results-hidden content** | Per-viewer state; NOT_FOUND for unreadable sessions and questions; chosen-session keys. | Required (built) |
+| T614 | **Live streams as DoS** | Stream caps per person (8), address (300), session (3000); coalesced pushes; access re-check every 15 s. | Required (built) |
+| T615 | **Names shown to outsiders** | Named questions show the name to the session's audience, the public link included; the ask box says so; anonymous when allowed; no user ids in the public state. | Accepted (by design) |
+| T616 | **Moderation beyond rights over MCP/agents** | Host level at call time; agents get reads only. | Required (built) |
+| T617 | **Questions → cards leaking session content** | Hosts only, boards they can edit, through the Tasks service. | Required (built) |
+| T618 | **Export injection** | CSV cells neutralized (T514); Markdown escaped. | Required (built) |
+| T619 | **Notification href/body injection** | Server-built relative hrefs (T509); clipped text bodies. | Required (built) |
+
+### Bookings (lane BOOK, migrations 106–107, T575–T594)
+
+Plan: `docs/plan/WORKSPACE_MODULES.md` §D.6 (decisions as built D1009–D1026). Public booking pages are an anonymous write surface (§B.8).
+
+| ID | Threat | Mitigation | Status |
+| --- | --- | --- | --- |
+| T575 | Public slot scraping reveals calendar patterns | Slots only (instants), never event titles; 31-day windows; 120 page requests/min per address; a 30 s cache; the feed cache stores intervals without titles | Mitigated |
+| T576 | Double booking under concurrent requests | Slot recomputed inside an IMMEDIATE transaction; `bookings_host_slot` partial unique index; tested with three concurrent HTTP bookings and four in-process ones | Mitigated |
+| T577 | Spam bookings / mail bombing third parties | Per-email upcoming cap (3 per type), per-type hourly cap, honeypot, 5 s fill time, single-use signed nonce, optional email verification, outside-mail caps and stop links | Mitigated |
+| T578 | Manage token leakage | `no-referrer`; token in the path on our origin only; one booking per token; expires at the booking's end; revoked on reschedule | Mitigated |
+| T579 | Handle squatting / impersonation | Reserved words; admin reset (`POST /api/bookings/profile/:userId/reset-handle`); old handles kept as aliases 90 days only | Mitigated |
+| T580 | Intake answers injected into event descriptions | Stored and rendered as plain text | Mitigated |
+| T581 | Time zone manipulation to bypass notice | All checks in UTC on the server; the booker's zone only labels | Mitigated |
+| T582 | Private details on a shared calendar | Default target is the owner's own first calendar; the editor warns when the target is shared | Mitigated |
+| T583 | Enumerating bookings across teams (MCP, search, datasets) | `readableBookingSql`: host, co-hosts, internal booker, type managers; applied before LIMIT in lists, search, Today, digest, dataset | Mitigated |
+| T584 | ICS secret address leakage | Sealed at rest (AES-256-GCM, HKDF key from AGENT_SECRETS_KEY or the workspace key); only a hint is returned; never logged or audited | Mitigated (key in DATA_DIR without AGENT_SECRETS_KEY: accepted) |
+| T585 | SSRF through a feed URL | `egressFetch` on every fetch: https only, private ranges refused unless allowlisted, pinned address, no redirects, Nook's own origin refused | Mitigated |
+| T586 | Hostile or huge ICS | 2 MiB, 10 s, 5000 events and intervals, bounded recurrence expansion, malformed lines ignored | Mitigated |
+| T587 | Manage-page CSRF or replay | Signed single-use render nonce and honeypot on cancel/reschedule; no session on public routes | Mitigated |
+| T588 | A single-use secret link used twice | The use is counted in the booking's own transaction | Mitigated |
+| T589 | A secret booking link keeps booking a blocked owner or a switched-off profile | `byLink` requires an active owner and an enabled profile (one uniform 404); `hostPlans` gives a blocked owner no slots (D1029); `tests/bookingsAuditFixes.test.ts` | Mitigated |
+
+| T560 | **Contact details reach people without the book** (lane CRM) | Every Contacts read joins the reader's books (`readableContainerSql('contact_book')`, system books excluded) before LIMIT; search joins the live rows and the books; chips redact (T503); notifications go only to readers of the book (`notifyReaders`). `tests/crm.test.ts` (other user 404, viewer read-only). | Required (built) |
+| T561 | **CSV import abuse or formula injection** | CSV only, 5 MiB, 10,000 rows, 60 columns, the Collections parser's limits; export cells neutralized (`'=`), import cells restored. `tests/crm.test.ts`. | Required (built) |
+| T562 | **Merge across books** | Refused (`OTHER_BOOK`); both records must be readable and the target's book editable. | Required (built) |
+| T563 | **Upserts overwrite people's edits** | Edits mark fields (`markContactEdited`); upserts fill empty fields only (D806). Tested. | Required (built) |
+| T564 | **Mass export by a compromised session** | 30 exports a day per person, ≤ 10,000 rows, `crm.export` audited with counts only. | Required (built) |
+| T565 | **vCard / CSV header injection** | vCard values escape `\ , ;` and drop line breaks; filenames are slugged. | Required (built) |
+| T566 | **Agents or keys pull channels in bulk** | List tools omit emails and phones; only `get_contact` returns them; chosen-book keys narrow lists before LIMIT and item tools anchor on the book. Agents get read tools only. | Required (built) |
+| T567 | **A merge rewrites another lane's table** | Only fixed `(table, column)` pairs, only when the table and column exist. | Required (built) |
+| T568 | **Import jobs keep personal data** | The CSV stays only on a preview job (deleted after a day) and is cleared on commit; undo data is the changed rows only, cleared on undo. | Accepted (24 h undo window) |
+| T569 | **Dataset alias collisions return 500s** | Dimension names never equal a joined column; a test groups by every dimension. | Required (built) |
+
+| T530 | **Rates and billable amounts leak** (Time, D873) | Money is computed server-side and returned only for the entry's author and the project's managers (`moneyVisibleSql`); everyone else gets `rateMinor`/`amountMinor`/`currency` null, project rates and money budgets null, `GET …/rates` 403; the `time.entries` dataset's `amount_minor` and `currency` columns are null for them; summaries and CSV use the same rule. `tests/time.test.ts`. | Required (built) |
+| T531 | **Chosen-project keys reach entries without a project** | Entries anchor on their project (`registerItemKind("time_entry")`); an entry without one anchors on nothing, so only a whole-module key reaches it. `start_timer` and `log_time` require `projectId` from a chosen-project key; list tools AND the key's reach before LIMIT. `tests/time.test.ts`. | Required (built) |
+| T532 | **Editing other people's time** | Only the author (while unlocked) or a `manage` member of the entry's project changes an entry; a manager never moves someone's entry to another project; others get 403 (or 404 when they cannot see it). Same rule on HTTP, MCP, bulk, and the timesheet. | Required (built) |
+| T533 | **Bypassing an approved (locked) week** | The lock check lives in the service (`editRight`, `weekLocked`): updates, deletes, splits, bulk, timesheet cells, and new entries in an approved week are refused for the author over every surface; unlocking is a manager action, audited (`time.approval_unlock`). | Required (built) |
+| T534 | **Two running timers through a race across devices** | Partial unique index `time_entries(user_id) WHERE ended_at IS NULL`; start stops the previous one in the same transaction; clients re-read the timer on focus, visibility, and a BroadcastChannel message. | Required (built) |
+| T535 | **Card readers learn private project time** | A project's "Card readers see totals only" setting (`privateEntries`) hides entries (description, person) from card readers who are not project members; they see the card's total only. | Required (built) |
+| T536 | **Search leaks entry descriptions** | The `time` search scope joins the FTS hits to the entry visibility predicate before LIMIT; projects by `readableContainerSql`. | Required (built) |
+| T537 | **A guest logs time outside their projects** | Guests' writes pass the role gate only for Time's own routes (`readOnlyWrites`), and the service requires a project the guest is a member of; no MCP keys for guests (D817). | Required (built) |
+| T538 | **Clients (companies) of other people's books leak** | A project's client is picked from companies in books the person can read or created in their own hidden Clients book; the client's name is shown to the project's readers as part of the project (D886), never its book or contacts. | Required (built) |
+
+| T515 | **Public form spam** (lane FORMS, `/api/public/forms/:token/responses`) | Every submission passes the foundation's checks first (§B.8: per-address limits, signed single-use render nonce, honeypot, 3-second minimum fill time, 64 KiB body), then the per-link hourly limit, then the engine's public-audience validation; "one per browser" adds a keyed hash of a random browser id (best effort); optional email verification holds the response until a 6-digit code is entered. | Required (built) |
+| T516 | **Public file upload abuse** | `file`, `person`, and `card` questions are members-only: a public form cannot publish with them (MEMBERS_ONLY_TYPES / the engine's public audience), the public definition drops them, and the engine refuses them on a public submission. | Required (built) |
+| T517 | **Responses shown to people who only answer or edit settings** | Results need `view` on the form (the generic container access); answering is the separate audience (D842). Respondents see poll aggregates only as `results_visibility` allows, never other people's text answers; named voters only to result readers. | Required (built) |
+| T518 | **De-anonymizing anonymous responses** | Anonymous forms store no user id, name, email, or browser id (one-per-person uses a keyed HMAC, D843); readers, CSV, and datasets see the day only, never the time; text answers are hidden from summaries below 3 responses; activity is not recorded per anonymous response. Residual: the server holds the HMAC key, and a person can still be guessed from what they wrote. | Required (built) |
+| T519 | **Search leaks answers** | `forms_fts` indexes titles, descriptions, and question titles only; the scope and `search_forms` apply the reader/respondent predicate before LIMIT; drafts are never offered to the audience. | Required (built) |
+| T520 | **Action templates inject Markdown or links into cards** | Answers are escaped (`escapeMarkdown`) in card descriptions and kept plain in titles; only `url` answers that are http(s) become autolinks. Actions run as the person who configured them and are re-checked against the board or book at run time. | Required (built) |
+| T521 | **Time-poll guest emails used for spam** | Only voters' own typed addresses get the one "time is set" mail, through `enqueueExternalMail` (per-address and per-item caps, suppressions, stop link); finalizing is editors-only and once per poll. | Required (built) |
+| T522 | **Vote stuffing** | One response per person per form in the service (named votes replace, anonymous keep the first); MCP votes count against the write limit; public polls are limited per browser and per address. | Required (built) |
+| T523 | **Hidden fields used to impersonate** | Hidden values are stored as typed and never used for a public respondent's identity or a contact or deal upsert, verified or not; a verified public response uses the address that confirmed the code; members' own submissions may use them (D864, `tests/formsAuditFixes.test.ts`). | Required (built) |
+| T524 | **Public results leak voters** | Public poll results are aggregates only; a public time poll's grid shows names as voters typed them (they chose to be listed), never emails. | Required (built) |
+| T525 | **Closed or binned form still accepts public responses** | `readPublicLink` opens only live, public-audience, non-draft forms; submissions re-check `accepting` (status, dates, limit) inside the request; binned forms 404 everywhere; turning the link off or choosing another audience revokes it at once. | Required (built) |
 
 ## Notes on shipped behaviour (v0.3.0–v0.4.0)
 

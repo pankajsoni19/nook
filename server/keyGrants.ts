@@ -10,16 +10,19 @@
  * them; every MCP tool declares what it touches (D281, Wave 34) and runTool enforces it.
  */
 import { MCP_SCOPES, normalizeScopes, type McpScope } from "./mcpScopes";
+import { WORKSPACE_CONTAINER_KINDS, WORKSPACE_MODULE_IDS } from "../shared/workspaceModules";
 
 // `reports` (Wave 45): the table accepts it since 050.
-export const GRANT_MODULES = ["notes", "files", "tasks", "today", "calendar", "collections", "team", "inbox", "bin", "whiteboards", "vault", "agents", "reports"] as const;
+// Workspace modules (D800): the table accepts them since 085.
+export const GRANT_MODULES = ["notes", "files", "tasks", "today", "calendar", "collections", "team", "inbox", "bin", "whiteboards", "vault", "agents", "reports", ...WORKSPACE_MODULE_IDS] as const;
 export type GrantModule = typeof GRANT_MODULES[number];
 
 // `run` (agent chat, D364): the `agents:run` scope since Wave 42 (AC-C); the table accepts it since 039.
 export const KEY_PERMISSIONS = ["read", "comment", "write", "draft", "publish", "create", "run"] as const;
 export type KeyPermission = typeof KEY_PERMISSIONS[number];
 
-export const RESOURCE_KINDS = ["folder", "note", "document", "board", "task_view", "collection", "calendar", "routine", "whiteboard", "vault", "agent", "knowledge_base", "report"] as const;
+// Workspace containers (§B.9): the table accepts them since 085.
+export const RESOURCE_KINDS = ["folder", "note", "document", "board", "task_view", "collection", "calendar", "routine", "whiteboard", "vault", "agent", "knowledge_base", "report", ...WORKSPACE_CONTAINER_KINDS] as const;
 export type ResourceKind = typeof RESOURCE_KINDS[number];
 
 export type KeyKind = "general" | "vault";
@@ -63,7 +66,22 @@ export const SCOPE_GRANTS: Record<McpScope, { module: GrantModule; permission: K
   "agents:read": { module: "agents", permission: "read" },
   "agents:run": { module: "agents", permission: "run" },
   "reports:read": { module: "reports", permission: "read" },
-  "reports:write": { module: "reports", permission: "write" }
+  "reports:write": { module: "reports", permission: "write" },
+  // Workspace modules (D800).
+  "forms:read": { module: "forms", permission: "read" },
+  "forms:write": { module: "forms", permission: "write" },
+  "time:read": { module: "time", permission: "read" },
+  "time:write": { module: "time", permission: "write" },
+  "goals:read": { module: "goals", permission: "read" },
+  "goals:write": { module: "goals", permission: "write" },
+  "checkins:read": { module: "checkins", permission: "read" },
+  "checkins:write": { module: "checkins", permission: "write" },
+  "crm:read": { module: "crm", permission: "read" },
+  "crm:write": { module: "crm", permission: "write" },
+  "bookings:read": { module: "bookings", permission: "read" },
+  "bookings:write": { module: "bookings", permission: "write" },
+  "townhall:read": { module: "townhall", permission: "read" },
+  "townhall:write": { module: "townhall", permission: "write" }
 };
 
 export const scopeToGrant = (scope: McpScope) => SCOPE_GRANTS[scope];
@@ -104,7 +122,15 @@ export const SELECTOR_KINDS: Partial<Record<GrantModule, readonly ResourceKind[]
   // bases (PERMISSION_KINDS); reading agents and chats always covers every one.
   agents: ["agent", "knowledge_base"],
   // Wave 45: chosen reports (list_reports narrows to them).
-  reports: ["report"]
+  reports: ["report"],
+  // Workspace modules (§B.9): each module's container; its contents anchor on it (registerItemKind).
+  forms: ["form"],
+  time: ["time_project"],
+  goals: ["goal"],
+  checkins: ["checkin"],
+  crm: ["contact_book"],
+  bookings: ["booking_type"],
+  townhall: ["townhall_session"]
 };
 
 /**
@@ -228,7 +254,8 @@ export function dedupeGrants(grants: readonly Grant[]): Grant[] {
 
 const ADDED_MODULE_WORDS: Record<string, string> = {
   notes: "Notes", files: "Files", tasks: "Tasks", today: "Today", calendar: "Calendar", collections: "Collections", team: "Team", inbox: "Inbox",
-  bin: "Bin", whiteboards: "Whiteboards", agents: "Chat", reports: "Reports", vault: "Vault"
+  bin: "Bin", whiteboards: "Whiteboards", agents: "Chat", reports: "Reports", vault: "Vault",
+  forms: "Forms", time: "Time", goals: "Goals", checkins: "Standups", crm: "Contacts", bookings: "Bookings", townhall: "Townhall"
 };
 const ADDED_PERMISSION_WORDS: Record<string, string> = { read: "read", comment: "comment", write: "write", draft: "write drafts", publish: "publish", create: "create", run: "run agents" };
 

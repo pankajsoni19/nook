@@ -25,6 +25,8 @@ import { scheduleDocumentIndex } from "./documentSearch";
 import { sweepAutoArchive } from "./tasks/archive";
 import { logger } from "./log";
 import { backupInProgress } from "./backup/service";
+import { sweepScheduleFires } from "./schedules/dispatcher";
+import { sweepPublicLog } from "./public/limits";
 
 const slog = logger("sweeper");
 
@@ -133,6 +135,14 @@ export function runSweep(options: { boot?: boolean; nowMs?: number } = {}) {
         if (removed.notifications || removed.reminders) slog.info(`Notification sweep: ${removed.notifications} notifications and ${removed.reminders} fired reminders removed`);
       } catch (error) {
         slog.error("Notification sweep failed", error);
+      }
+      try {
+        // Workspace modules (§B.6, §B.8): schedule fire history (90 days), the public submissions log (30 days), used nonces, held verifications.
+        const fires = sweepScheduleFires(options.nowMs);
+        const publicLog = sweepPublicLog(options.nowMs);
+        if (fires || publicLog.log || publicLog.verifications) slog.info(`Workspace sweep: ${fires} schedule fires, ${publicLog.log} public log rows, ${publicLog.verifications} verifications removed`);
+      } catch (error) {
+        slog.error("Workspace sweep failed", error);
       }
       try {
         // Task boards (D604): cards in a done column past the board's auto-archive days are archived, never deleted.

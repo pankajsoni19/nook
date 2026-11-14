@@ -4,6 +4,8 @@ import { allowlistOf, type DatasourceRow } from "./datasources";
 import { ReportError } from "./errors";
 import { checkSpecShape, specSchema } from "./specValidate";
 import { assertTablesAllowed, classify, GuardError } from "./sqlGuard";
+import { isWorkspaceRow } from "./workspaceSource";
+import { parseDatasetQuery } from "../../shared/reportsWorkspace";
 
 /**
  * Wave 48 review fixes around specValidate (H1, H2): what a spec looks like to the validator (no
@@ -80,6 +82,14 @@ export function assertRunnableNow(datasource: DatasourceRow, spec: ReportSpec, c
   const shape = checkSpecShape(forValidation(spec));
   if (!shape.ok) throw new ReportError(409, code, `The spec no longer passes the checks: ${shape.errors[0] ?? "invalid"}`, { details: shape.errors });
   const allowlist = allowlistOf(datasource);
+  // W3-REPORTS: a workspace report's queries are structured queries; the registry checks them when they run.
+  if (isWorkspaceRow(datasource)) {
+    for (const query of spec.queries) {
+      const parsed = parseDatasetQuery(query.sql);
+      if (!parsed.ok) throw new ReportError(409, code, `Query ${query.key} is no longer allowed: ${parsed.error}`, { queryKey: query.key });
+    }
+    return;
+  }
   for (const query of spec.queries) {
     try {
       const classified = classify(query.sql, { params: true });

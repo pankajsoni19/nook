@@ -7,6 +7,8 @@ import { REPORT_LIMITS, type ConnectionTest, type DatasourceAgentUse, type Datas
 import { normalizeAllowlist, tableAllowed } from "./allowlist";
 import { chQuery, ChError, queryIdFor, type ChTarget } from "./clickhouse";
 import { datasourceNotFound, ReportError } from "./errors";
+import { WORKSPACE_SOURCE_ID, WORKSPACE_SOURCE_NAME } from "../../shared/reportsWorkspace";
+import { WORKSPACE_ROW, workspaceAvailable } from "./workspaceSource";
 
 /**
  * Report data sources (plan wave 45, D413, D415, T358, T360): admin-configured ClickHouse endpoints.
@@ -18,7 +20,7 @@ import { datasourceNotFound, ReportError } from "./errors";
  */
 
 export type DatasourceRow = {
-  id: string; name: string; kind: "clickhouse"; url: string; username: string; password_ct: string | null; database: string; allowlist_json: string;
+  id: string; name: string; kind: "clickhouse" | "workspace"; url: string; username: string; password_ct: string | null; database: string; allowlist_json: string;
   max_rows: number; timeout_s: number; enabled: number; schema_synced_at: string | null; schema_table_count: number; schema_truncated: number;
   schema_error: string | null; revision: number; created_by: string | null; created_at: string; updated_at: string;
   /** Lane AGENTSQL (073, D590): chat agents' use; absent on a database before 073. */
@@ -35,6 +37,8 @@ export type DatasourcePatch = Partial<DatasourceInput> & { expectedRevision: num
 export const DATABASE_NAME = /^[A-Za-z0-9_]{1,128}$/;
 
 export function datasourceRow(id: string): DatasourceRow {
+  // W3-REPORTS (D1060): "This workspace" is no row of the table; reports on it name it by this id.
+  if (id === WORKSPACE_SOURCE_ID) return WORKSPACE_ROW;
   const row = db.query("SELECT * FROM report_datasources WHERE id = ?").get(id) as DatasourceRow | null;
   if (!row) throw datasourceNotFound();
   return row;
@@ -51,7 +55,7 @@ export function allowlistOf(row: Pick<DatasourceRow, "allowlist_json">): string[
 
 export function datasourceSummary(row: DatasourceRow): DatasourceSummary {
   return {
-    id: row.id, name: row.name, kind: row.kind, url: row.url, username: row.username, database: row.database, allowlist: allowlistOf(row),
+    id: row.id, name: row.name, kind: "clickhouse", url: row.url, username: row.username, database: row.database, allowlist: allowlistOf(row),
     maxRows: row.max_rows, timeoutS: row.timeout_s, enabled: row.enabled === 1, agentUse: row.agent_use ?? "off", hasPassword: row.password_ct !== null,
     schema: { syncedAt: row.schema_synced_at, tables: row.schema_table_count, error: row.schema_error, truncated: row.schema_truncated === 1 },
     revision: row.revision, createdAt: row.created_at, updatedAt: row.updated_at
@@ -62,6 +66,16 @@ export const listDatasources = (): DatasourceSummary[] => (db.query("SELECT * FR
 
 /** What an author may pick: enabled data sources, names only. */
 export const datasourceChoices = (): DatasourceChoice[] => db.query("SELECT id, name, database FROM report_datasources WHERE enabled = 1 ORDER BY name COLLATE NOCASE").all() as DatasourceChoice[];
+
+/**
+ * W3-REPORTS (D1060): what this person may pick: "This workspace" first when any module dataset is
+ * open to their role (always present for members once a module registers one), then the enabled
+ * ClickHouse sources.
+ */
+export const datasourceChoicesFor = (userId: string): DatasourceChoice[] => [
+  ...(workspaceAvailable(userId) ? [{ id: WORKSPACE_SOURCE_ID, name: WORKSPACE_SOURCE_NAME, database: "", kind: "workspace" as const }] : []),
+  ...datasourceChoices()
+];
 
 function requireKey() {
   if (!config.agents.key) throw new ReportError(503, "NOT_CONFIGURED", "Set AGENT_SECRETS_KEY on the server to store data source passwords (see docs/OPERATIONS.md)");
@@ -158,6 +172,7 @@ export function datasourceTarget(row: DatasourceRow): ChTarget {
 /** An enabled data source for running queries (authors), or 404 / 409. */
 export function usableDatasource(id: string | null): DatasourceRow {
   if (!id) throw new ReportError(409, "NO_DATASOURCE", "Pick a data source for this report");
+  if (id === WORKSPACE_SOURCE_ID) return WORKSPACE_ROW;
   const row = datasourceRow(id);
   if (row.enabled !== 1) throw new ReportError(409, "DATASOURCE_DISABLED", "An admin turned this data source off");
   return row;
