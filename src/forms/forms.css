@@ -46,8 +46,14 @@
 }
 
 /* ── Sheets ────────────────────────────────────────────────────────────────────────────────────── */
-.file-dialog.forms-sheet { width: min(560px, calc(100vw - 32px)); max-height: min(760px, calc(100dvh - 48px)); }
-.file-dialog.forms-sheet.wide { width: min(720px, calc(100vw - 32px)); }
+/* The editor's "Questions · 5" stays on one line; the bar's buttons wrap below it instead (D1111). */
+.forms-page .ui-q-editor-bar h2 { flex: 1 0 auto; white-space: nowrap; }
+
+/* Desktop sizes only: on a phone the sheet is the shared full-screen sheet (D1111). */
+@media (min-width: 761px) {
+  .file-dialog.forms-sheet { width: min(560px, calc(100vw - 32px)); max-height: min(760px, calc(100dvh - 48px)); }
+  .file-dialog.forms-sheet.wide { width: min(720px, calc(100vw - 32px)); }
+}
 .forms-sheet-body { display: grid; align-content: start; gap: 14px; padding: 4px 20px 0; }
 .forms-fieldset { min-width: 0; display: grid; gap: 10px; margin: 0; border: 1px solid #29292d; border-radius: 12px; padding: 12px 14px 14px; }
 .forms-fieldset legend { padding: 0 6px; color: #d6d6d9; font-size: .82rem; font-weight: 650; }

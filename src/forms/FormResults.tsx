@@ -10,7 +10,7 @@ import { ModalDialog } from "../files/Dialog";
 import { notify } from "../ui/notify";
 import { YES_NO_OPTIONS, type QuestionSet } from "../../shared/questions";
 import type { FormSummaryView } from "../../shared/forms";
-import { deleteResponse, exportUrl, getResponse, getSummary, listResponses, undo, type ResponseFilterInput, type ResponseRow } from "./formsApi";
+import { deleteResponse, exportUrl, getResponse, getSummary, listResponses, respondView, undo, type ResponseFilterInput, type ResponseRow } from "./formsApi";
 import { FormFrame, MissingForm, useFormDetail, type FormsNav } from "./FormsApp";
 import { SelectField } from "./fields";
 import { TimePollGrid } from "./PollViews";
@@ -24,6 +24,25 @@ import { module as formsModule } from "./module";
  */
 const ZONE = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"; } catch { return "UTC"; } })();
 type Tab = "summary" | "responses";
+
+/**
+ * Results a person cannot read (D1111): someone asked to answer the form is told the results are its
+ * owners' and gets a way to it, instead of "not shared with you"; anyone else sees the usual not-found.
+ */
+function ResultsNotShared({ nav, formRef }: { nav: FormsNav; formRef: string }) {
+  const [respondent, setRespondent] = useState<{ href: string; title: string } | null | undefined>(undefined);
+  useEffect(() => {
+    let live = true;
+    respondView(formRef).then((view) => { if (live) setRespondent({ href: view.form.href, title: view.form.title }); }, () => { if (live) setRespondent(null); });
+    return () => { live = false; };
+  }, [formRef]);
+  if (respondent === undefined) return <p className="ui-panel-loading" role="status">Loading…</p>;
+  if (respondent === null) return <MissingForm nav={nav} />;
+  const segment = respondent.href.split("/").filter(Boolean).pop() ?? formRef;
+  return <FormFrame nav={nav} form={null} view="respond" title={respondent.title}>
+    <EmptyState icon={BarChart3} title="Results are for the form's owners" action={{ label: "Open the form", onClick: () => nav.go([segment]) }}>You were asked to answer this form. When its owner shares results with people who answered, they show after you respond.</EmptyState>
+  </FormFrame>;
+}
 
 export default function FormResults({ nav, formRef, search }: { nav: FormsNav; formRef: string; search: string }) {
   const { form, state } = useFormDetail(formRef, nav, "results");
@@ -52,7 +71,7 @@ export default function FormResults({ nav, formRef, search }: { nav: FormsNav; f
   const filterQuestion = filterable.find((question) => question.id === filter.question);
   const openIndex = rows?.findIndex((row) => row.id === openId) ?? -1;
 
-  if (state === "missing") return <MissingForm nav={nav} />;
+  if (state === "missing") return <ResultsNotShared nav={nav} formRef={formRef} />;
   const timePoll = form?.kind === "time_poll";
   return <FormFrame nav={nav} form={form} view="results"
     primary={form ? { label: "Export CSV", icon: Download, shortcut: false, onClick: () => { window.location.assign(exportUrl(form.id, filter)); } } : undefined}>

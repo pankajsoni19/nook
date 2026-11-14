@@ -292,7 +292,14 @@ function filterSql(host: QuestionHost, filter: ResponseFilter = {}) {
   return { sql: terms.join(" AND "), params };
 }
 
-const encodeCursor = (row: { submitted_at: string; id: string }) => Buffer.from(JSON.stringify([row.submitted_at, row.id])).toString("base64url");
+/**
+ * Day-only reading of an anonymous host (D1102, T623): timestamps are the day, rows are ordered by day
+ * then id (random), and the cursor carries the day only, so nothing returns a submission's time of day
+ * or its order within the day.
+ */
+export type ResponseReadOptions = { dayOnly?: boolean };
+const SORT_AT = (dayOnly: boolean | undefined) => dayOnly ? "substr(r.submitted_at, 1, 10)" : "r.submitted_at";
+const encodeCursor = (row: { submitted_at: string; id: string }, dayOnly?: boolean) => Buffer.from(JSON.stringify([dayOnly ? row.submitted_at.slice(0, 10) : row.submitted_at, row.id])).toString("base64url");
 function decodeCursor(value: string | null | undefined): [string, string] | null {
   if (!value || value.length > 200) return null;
   try {
@@ -303,17 +310,18 @@ function decodeCursor(value: string | null | undefined): [string, string] | null
   }
 }
 
-/** Newest first, keyset-paged (`submitted_at`, `id`). */
-export function responsesPage(host: QuestionHost, filter: ResponseFilter = {}, cursor?: string | null, limit = 50): { items: ResponseSummary[]; nextCursor: string | null } {
+/** Newest first, keyset-paged (`submitted_at`, `id`; the day and `id` with `dayOnly`). */
+export function responsesPage(host: QuestionHost, filter: ResponseFilter = {}, cursor?: string | null, limit = 50, options: ResponseReadOptions = {}): { items: ResponseSummary[]; nextCursor: string | null } {
   const bounded = Math.min(Math.max(1, limit), 100);
   const where = filterSql(host, filter);
   const after = decodeCursor(cursor);
-  const rows = db.query(`SELECT r.* FROM responses r WHERE ${where.sql}${after ? " AND (r.submitted_at, r.id) < ($cursorAt, $cursorId)" : ""} ORDER BY r.submitted_at DESC, r.id DESC LIMIT $limit`)
+  const sortAt = SORT_AT(options.dayOnly);
+  const rows = db.query(`SELECT r.* FROM responses r WHERE ${where.sql}${after ? ` AND (${sortAt}, r.id) < ($cursorAt, $cursorId)` : ""} ORDER BY ${sortAt} DESC, r.id DESC LIMIT $limit`)
     .all({ ...where.params, ...(after ? { cursorAt: after[0], cursorId: after[1] } : {}), limit: bounded + 1 }) as ResponseRow[];
   const page = rows.slice(0, bounded);
   const sets = new Map<number, QuestionSet | null>();
   const setOf = (version: number) => { if (!sets.has(version)) sets.set(version, setVersion(host, version)); return sets.get(version)!; };
-  return { items: page.map((row) => toSummary(row, setOf(row.set_version))), nextCursor: rows.length > bounded ? encodeCursor(page[page.length - 1]!) : null };
+  return { items: page.map((row) => toSummary(row, setOf(row.set_version))), nextCursor: rows.length > bounded ? encodeCursor(page[page.length - 1]!, options.dayOnly) : null };
 }
 
 const STOP_WORDS = new Set(["the", "and", "for", "that", "with", "this", "was", "are", "but", "not", "you", "have", "had", "our", "its", "it's", "from", "they", "were", "been", "has", "will", "would", "there", "their", "what", "about", "which", "when", "your", "can", "all", "just", "more", "some", "very", "also"]);
@@ -421,21 +429,22 @@ function answerText(question: Question, value: AnswerValue | undefined): string 
 
 /**
  * Every submitted response as CSV (UTF-8, CRLF), one column per question of the current set, oldest
- * first, at most 100 000 rows. `identity: false` leaves out respondent names and emails.
+ * first, at most 100 000 rows. `identity: false` leaves out respondent names and emails; `dayOnly`
+ * writes the day only and orders rows by day then id (anonymous hosts, D1102).
  */
-export function exportCsv(host: QuestionHost, filter: ResponseFilter = {}, options: { identity?: boolean } = {}): string {
+export function exportCsv(host: QuestionHost, filter: ResponseFilter = {}, options: { identity?: boolean } & ResponseReadOptions = {}): string {
   const set = currentSet(host)?.set;
   const questions = (set?.questions ?? []).filter((question) => QUESTION_TYPES[question.type].answers);
   const header = ["Submitted at", ...(options.identity === false ? [] : ["Respondent", "Email"]), "Score", ...questions.map((question) => question.title)];
   const lines = [header.map(csvCell).join(",")];
   const where = filterSql(host, filter);
-  const rows = db.query(`SELECT r.* FROM responses r WHERE ${where.sql} ORDER BY r.submitted_at, r.id LIMIT 100000`).all(where.params) as ResponseRow[];
+  const rows = db.query(`SELECT r.* FROM responses r WHERE ${where.sql} ORDER BY ${SORT_AT(options.dayOnly)}, r.id LIMIT 100000`).all(where.params) as ResponseRow[];
   const sets = new Map<number, QuestionSet | null>();
   for (const row of rows) {
     if (!sets.has(row.set_version)) sets.set(row.set_version, setVersion(host, row.set_version));
     const summary = toSummary(row, sets.get(row.set_version)!);
     const who = row.respondent_user_id ? (db.query("SELECT display_name FROM users WHERE id = ?").get(row.respondent_user_id) as { display_name: string } | null)?.display_name ?? "Former member" : row.respondent_name ?? (row.respondent_kind === "anonymous" ? "Anonymous" : "");
-    const cells = [row.submitted_at, ...(options.identity === false ? [] : [who, row.respondent_email ?? ""]), row.score ?? "", ...questions.map((question) => answerText(question, summary.answers[question.id]))];
+    const cells = [options.dayOnly ? row.submitted_at.slice(0, 10) : row.submitted_at, ...(options.identity === false ? [] : [who, row.respondent_email ?? ""]), row.score ?? "", ...questions.map((question) => answerText(question, summary.answers[question.id]))];
     lines.push(cells.map(csvCell).join(","));
   }
   return `${lines.join("\r\n")}\r\n`;

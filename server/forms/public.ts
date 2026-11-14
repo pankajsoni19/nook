@@ -6,14 +6,14 @@ import { appName } from "../config";
 import { clientIp } from "../clientAddress";
 import { mailEnabled } from "../mail";
 import {
-  checkSubmission, confirmEmailVerification, consumePublicLink, issueRenderNonce, publicLimit, publicNotFound, readPublicJson, readPublicLink, startEmailVerification,
+  checkSubmission, confirmEmailVerification, consumePublicLink, issueRenderNonce, publicLimit, publicNotFound, readPublicJson, readPublicLink, refreshNonceOnRefusal, startEmailVerification,
   type PublicLink, type PublicRouter
 } from "../public";
 import { currentSet, submitResponse, QuestionError } from "../questions/service";
 import { normalizeEmail, isEmail, QUESTION_TYPES, type Question, type QuestionSet } from "../../shared/questions";
 import { HONEYPOT_FIELD, MIN_FILL_MS, NONCE_FIELD } from "../../shared/publicPages";
 import {
-  accepting, browserHash, closedReason, endingOf, formRowById, host, pollResults, recordVisit, responseCommitted, settingsOf, themeOf, type FormRow, type SubmitOutcome
+  accepting, browserHash, closedReason, endingOf, formRowById, host, pollResults, recordVisit, recount, responseCommitted, settingsOf, themeOf, type FormRow, type SubmitOutcome
 } from "./service";
 import { recordItemActivity } from "../activity/service";
 
@@ -36,6 +36,8 @@ const opensFor = (link: PublicLink) => {
   const row = formRowById(link.itemId);
   return row !== null && row.deleted_at === null && row.audience === "public" && row.status !== "draft";
 };
+/** A poll is one tap, so it waits 1 s, not a form's 3 s (D1110); the page also retries a too-fast tap by itself. */
+export const minFillOf = (row: Pick<FormRow, "kind">) => row.kind === "poll" ? MIN_FILL_MS.poll : MIN_FILL_MS.form;
 /** Email verification applies only when this server can send the code (D863). */
 const verifying = (row: FormRow) => row.verify_email === 1 && mailEnabled();
 
@@ -56,8 +58,11 @@ function publicResults(row: FormRow, browser: string | null) {
   const voted = browser ? db.query("SELECT 1 FROM responses WHERE host_kind = 'form' AND host_id = ? AND dedupe_hash = ? AND status = 'submitted'").get(row.id, browserHash(row.id, browser)) !== null : false;
   const visible = row.results_visibility === "live" || (row.results_visibility === "after_vote" && voted) || (row.results_visibility === "after_close" && !accepting(row));
   // Named voters are never public; a time poll's grid shows first names as people typed them.
-  return visible ? pollResults(row, null, { withVoters: row.kind === "time_poll" }) : null;
+  return visible ? pollResults(row, null, { withVoters: row.kind === "time_poll", publicView: true }) : null;
 }
+
+/** The vote count a visitor sees: none on forms, and none while the poll's results are the owner's only (D1108). */
+const publicCount = (row: FormRow) => row.kind === "form" || row.results_visibility === "owner_only" ? null : row.response_count;
 
 const submitSchema = z.object({
   answers: z.record(z.string().max(16), z.unknown()),
@@ -90,11 +95,11 @@ function save(row: FormRow, link: PublicLink, body: SubmitBody, address: string 
   if (!row.anonymous && body.browser) db.query("UPDATE responses SET dedupe_hash = ? WHERE id = ?").run(browserHash(row.id, body.browser), response.id);
   const meta = JSON.parse((db.query("SELECT meta_json FROM responses WHERE id = ?").get(response.id) as { meta_json: string }).meta_json) as { ending?: string };
   recordVisit(row.id, "submits");
-  const counts = db.query("SELECT COUNT(*) AS n, MAX(submitted_at) AS last FROM responses WHERE host_kind = 'form' AND host_id = ? AND status = 'submitted'").get(row.id) as { n: number; last: string | null };
-  db.query("UPDATE forms SET response_count = ?, last_response_at = ?, updated_at = ? WHERE id = ?").run(counts.n, counts.last, response.submittedAt, row.id);
-  if (row.max_responses !== null && counts.n >= row.max_responses && row.status === "open") db.query("UPDATE forms SET status = 'closed', closed_at = ?, revision = revision + 1 WHERE id = ?").run(response.submittedAt, row.id);
+  // The count, and a reached response limit closing the form the one way every close goes (item change,
+  // audit, schedules, the "poll closed" notice; D1107), as for members.
+  recount(row.id, response.submittedAt);
   recordItemActivity({ itemKind: "response", itemId: response.id, container: { kind: "form", id: row.id }, actorId: null, via: "public" as never, kind: "submitted" });
-  audit(null, null, "forms.response_submit", { formId: row.id, responseId: response.id, via: "public", linkId: link.id });
+  audit(null, null, "forms.response_submit", { formId: row.id, ...(row.anonymous ? { anonymous: true } : { responseId: response.id }), via: "public", linkId: link.id });
   void address;
   return { response, ending: meta.ending ?? null, created: true, form: formRowById(row.id)! };
 }
@@ -119,7 +124,7 @@ export function registerFormsPublicRoutes(router: PublicRouter) {
       form: {
         kind: row.kind, title: row.title, description: row.description_md, display: row.display, theme: themeOf(row), ending: endingOf(row), showProgress: settingsOf(row).showProgress,
         anonymous: row.anonymous === 1, verifyEmail: verifying(row), limitPer: row.limit_per, resultsVisibility: row.results_visibility, closesAt: row.closes_at,
-        accepting: reason === null, closedReason: reason, finalizedSlotId: row.finalized_slot_id, responseCount: row.kind === "form" ? null : row.response_count
+        accepting: reason === null, closedReason: reason, finalizedSlotId: row.finalized_slot_id, responseCount: publicCount(row)
       },
       set: publicSet(current.set),
       renderNonce: reason === null ? issueRenderNonce("form", row.id) : null,
@@ -132,7 +137,7 @@ export function registerFormsPublicRoutes(router: PublicRouter) {
     const link = linkOf(c);
     if (!link) return publicNotFound(c);
     const row = formRowById(link.itemId)!;
-    return c.json({ results: publicResults(row, c.req.query("browser") ?? null), responseCount: row.kind === "form" ? null : row.response_count, accepting: accepting(row) });
+    return c.json({ results: publicResults(row, c.req.query("browser") ?? null), responseCount: publicCount(row), accepting: accepting(row) });
   });
 
   router.post("/api/public/forms/:token/visit", async (c) => {
@@ -148,40 +153,43 @@ export function registerFormsPublicRoutes(router: PublicRouter) {
     if (!link) return publicNotFound(c);
     const row = formRowById(link.itemId)!;
     const body = await readPublicJson(c, submitSchema);
-    if (!body) return c.json({ error: "Invalid request", code: "INVALID" }, 400);
-    const address = clientIp(c);
-    const check = checkSubmission({ kind: "form", itemId: row.id, linkId: link.id, address, body: body as Record<string, unknown>, minFillMs: MIN_FILL_MS.form });
-    if (!check.ok) {
-      if (check.retryAfter) c.header("Retry-After", String(check.retryAfter));
-      return check.status === 404 ? publicNotFound(c) : c.json({ error: check.outcome === "rate_limited" ? "Too many submissions. Try again in a minute." : "This submission was not accepted. Reload the page and try again.", code: check.outcome.toUpperCase() }, check.status);
-    }
-    if (!accepting(row)) return c.json({ error: "This form is not accepting responses", code: "FORM_CLOSED" }, 409);
-    const set = currentSet(host(row.id))!.set;
-    if (row.kind === "time_poll" && !row.anonymous && !body.respondent?.name?.trim()) return c.json({ error: "Enter your name", code: "INVALID_ANSWERS", errors: { _name: "Enter your name" } }, 400);
-    if (row.limit_per !== "none" && body.browser) {
-      const seen = db.query("SELECT 1 FROM responses WHERE host_kind = 'form' AND host_id = ? AND dedupe_hash = ?").get(row.id, browserHash(row.id, body.browser));
-      if (seen) return c.json({ error: row.kind === "form" ? "You already responded from this browser" : "You already voted from this browser", code: "ALREADY_RESPONDED" }, 409);
-    }
-    try {
-      if (verifying(row)) {
-        const email = identity(row, set, body).email;
-        if (!email) return c.json({ error: "Enter your email address to get a code", code: "INVALID_ANSWERS", errors: { [emailQuestion(set)?.id ?? "_email"]: "Enter your email address" } }, 400);
-        // Validate now, so the code is only sent for a response that will be accepted.
-        const probe = db.transaction(() => { submitResponse({ host: host(row.id), respondent: { kind: "guest", name: "probe" }, answers: body.answers, hidden: body.hidden, audience: "public" }); throw new RollbackProbe(); });
-        try { probe(); } catch (error) { if (!(error instanceof RollbackProbe)) throw error; }
-        const started = db.transaction(() => startEmailVerification({ kind: "form", itemId: row.id, linkId: link.id, email, payload: { ...body, [NONCE_FIELD]: undefined }, address }))();
-        return c.json({ verificationId: started.verificationId, mailQueued: started.mailQueued }, 202);
+    // Every refusal from here on carries a fresh render nonce: the checks below spend the one sent (D1105).
+    return refreshNonceOnRefusal("form", row.id, async () => {
+      if (!body) return c.json({ error: "Invalid request", code: "INVALID" }, 400);
+      const address = clientIp(c);
+      const check = checkSubmission({ kind: "form", itemId: row.id, linkId: link.id, address, body: body as Record<string, unknown>, minFillMs: minFillOf(row) });
+      if (!check.ok) {
+        if (check.retryAfter) c.header("Retry-After", String(check.retryAfter));
+        return check.status === 404 ? publicNotFound(c) : c.json({ error: check.outcome === "rate_limited" ? "Too many submissions. Try again in a minute." : "This submission was not accepted. Reload the page and try again.", code: check.outcome.toUpperCase() }, check.status);
       }
-      const outcome = db.transaction(() => {
-        if (!consumePublicLink(link)) return null;
-        return save(row, link, body, address);
-      })();
-      if (!outcome) return c.json({ error: "This form is getting too many responses. Try again later.", code: "RATE_LIMITED" }, 429);
-      responseCommitted(outcome, { actorId: null, via: "public" });
-      return c.json({ ok: true, ending: outcome.ending, results: publicResults(outcome.form, body.browser ?? null) }, 201);
-    } catch (error) {
-      return refuse(c, error);
-    }
+      if (!accepting(row)) return c.json({ error: "This form is not accepting responses", code: "FORM_CLOSED" }, 409);
+      const set = currentSet(host(row.id))!.set;
+      if (row.kind === "time_poll" && !row.anonymous && !body.respondent?.name?.trim()) return c.json({ error: "Enter your name", code: "INVALID_ANSWERS", errors: { _name: "Enter your name" } }, 400);
+      if (row.limit_per !== "none" && body.browser) {
+        const seen = db.query("SELECT 1 FROM responses WHERE host_kind = 'form' AND host_id = ? AND dedupe_hash = ?").get(row.id, browserHash(row.id, body.browser));
+        if (seen) return c.json({ error: row.kind === "form" ? "You already responded from this browser" : "You already voted from this browser", code: "ALREADY_RESPONDED" }, 409);
+      }
+      try {
+        if (verifying(row)) {
+          const email = identity(row, set, body).email;
+          if (!email) return c.json({ error: "Enter your email address to get a code", code: "INVALID_ANSWERS", errors: { [emailQuestion(set)?.id ?? "_email"]: "Enter your email address" } }, 400);
+          // Validate now, so the code is only sent for a response that will be accepted.
+          const probe = db.transaction(() => { submitResponse({ host: host(row.id), respondent: { kind: "guest", name: "probe" }, answers: body.answers, hidden: body.hidden, audience: "public" }); throw new RollbackProbe(); });
+          try { probe(); } catch (error) { if (!(error instanceof RollbackProbe)) throw error; }
+          const started = db.transaction(() => startEmailVerification({ kind: "form", itemId: row.id, linkId: link.id, email, payload: { ...body, [NONCE_FIELD]: undefined }, address }))();
+          return c.json({ verificationId: started.verificationId, mailQueued: started.mailQueued }, 202);
+        }
+        const outcome = db.transaction(() => {
+          if (!consumePublicLink(link)) return null;
+          return save(row, link, body, address);
+        })();
+        if (!outcome) return c.json({ error: "This form is getting too many responses. Try again later.", code: "RATE_LIMITED" }, 429);
+        responseCommitted(outcome, { actorId: null, via: "public" });
+        return c.json({ ok: true, ending: outcome.ending, results: publicResults(outcome.form, body.browser ?? null) }, 201);
+      } catch (error) {
+        return refuse(c, error);
+      }
+    });
   });
 
   router.post("/api/public/forms/:token/verify", async (c) => {
@@ -195,6 +203,10 @@ export function registerFormsPublicRoutes(router: PublicRouter) {
     if (!accepting(row)) return c.json({ error: "This form is not accepting responses", code: "FORM_CLOSED" }, 409);
     try {
       const held = submitSchema.parse(result.payload);
+      // One per browser holds here too: a second held response from the same browser is refused when confirmed (D1108).
+      if (row.limit_per !== "none" && held.browser && db.query("SELECT 1 FROM responses WHERE host_kind = 'form' AND host_id = ? AND dedupe_hash = ?").get(row.id, browserHash(row.id, held.browser))) {
+        return c.json({ error: row.kind === "form" ? "You already responded from this browser" : "You already voted from this browser", code: "ALREADY_RESPONDED" }, 409);
+      }
       const outcome = db.transaction(() => consumePublicLink(link) ? save(row, link, held, clientIp(c), true) : null)();
       if (!outcome) return c.json({ error: "This form is getting too many responses. Try again later.", code: "RATE_LIMITED" }, 429);
       responseCommitted(outcome, { actorId: null, via: "public" });
