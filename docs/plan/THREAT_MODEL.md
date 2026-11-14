@@ -673,6 +673,14 @@ Plan: `docs/plan/WORKSPACE_MODULES.md` §D.8.
 | T598 | **Calendar-file injection or abuse through mail attachments** | TEXT escaped, control characters dropped, CRLF folding; UID sanitized; URL only when plain http(s); content type and file name allowlisted; ≤ 3 files, ≤ 256 KiB; built from re-read data at send time; no internal ids to outside addresses. | Mitigated |
 | T599 | **A prefilled booking link leaks a contact's details** | Name and email only, capped and checked; query strings never logged; `no-referrer`; copied by the person, never sent by Nook. | Mitigated |
 
+### Workspace data in Reports (W3-REPORTS, D1060–D1069)
+
+T600–T603 are listed in WORKSPACE_MODULES.md §D.8.
+
+| ID | Threat | Mitigation | Status |
+| --- | --- | --- | --- |
+| T604 | **An owner's numbers reach readers through AI-written text** on a This workspace report (text is the same for everyone; numbers are each reader's own, D1061) | The generation and edit prompts forbid figures in text; `validateSpec` with `aiText` refuses a markdown block or section summary holding a data value (anything but a year, a time span, or a label), so figures go in query-bound blocks (D1068, `tests/reportsWorkspaceText.test.ts`) | Mitigated (words describing a trend, "billable hours lead", remain possible: accepted) |
+
 ### Townhall (lane TOWNHALL, migration 115)
 
 Details and decisions in [WORKSPACE_MODULES.md §D.7 Townhall](WORKSPACE_MODULES.md#d7-townhall-lane-townhall-module-townhall).

@@ -420,6 +420,7 @@ export function workspaceQueryRules(): string[] {
     "- timeRange on the dataset's time column: {\"preset\": one of today, yesterday, 7d, 30d, 90d, this_week, last_week, mtd, last_month, qtd, last_quarter, ytd, 12m} (it moves with the calendar; prefer it), or {from, to} as YYYY-MM-DD days.",
     "- Results are at most 1000 rows. Money columns are in minor units (cents); duration columns are seconds (format duration). Every query is one dataset: there are no joins.",
     "- Each person who opens the report sees the numbers their own access allows: never write a query that assumes it sees everything.",
+    "- Text is the same for every reader, so markdown blocks and section summaries state no figures from the data (no counts, totals, amounts, hours, or percentages, not even rounded or worked out from results): put every figure in a KPI, chart, or table block bound to a query, and describe it in words in text (\"Billable hours lead\", never \"Billable hours are 120\"). Years and the time range (\"the last 30 days\") are fine. Nook refuses a spec whose text states data values.",
     "- Report parameters (below) are read by placing a placeholder as a whole value: a date range `period` as timeRange {\"from\": \"{period_from:Date}\", \"to\": \"{period_to:Date}\"}; a multi-select `clients` (chType Array(String)) as a filter {\"column\": \"client\", \"op\": \"in\", \"value\": \"{clients:Array(String)}\"} (nothing picked filters nothing); a select's optionsQuery is a structured query whose first output column is the choices (one dimension and a count)."
   ];
 }
@@ -883,7 +884,7 @@ async function executeGeneration(run: Execution) {
         submits += 1;
         const metricOf = (block: { id: string; queryKey?: string }) => planner.plan?.todos.find((todo) => todo.blockId === block.id)?.metric
           ?? planner.plan?.todos.find((todo) => todo.queryKey && todo.queryKey === block.queryKey && todo.metric)?.metric ?? null;
-        const check = await validateSpec(datasource, raw, { userId, runId, signal: controller.signal, sanity: { metricOf } });
+        const check = await validateSpec(datasource, raw, { userId, runId, signal: controller.signal, sanity: { metricOf }, aiText: true });
         if (check.ok && check.sanity) {
           // E2: the Runs view shows every round of checks and its extra queries; E4: catalog metrics use their definition.
           const sanity = { ...check.sanity, hints: [...check.sanity.hints, ...metricHints(check.spec, planner.plan?.todos ?? [], metrics, datasource.database)] };

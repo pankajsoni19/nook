@@ -515,7 +515,7 @@ async function executeEdit(run: Execution) {
     // never refuses a filter the agent cannot fix it for. A block it gives a clickFilter is checked.
     const ownChanged = (id: string) => JSON.stringify(run.spec.blocks.find((block) => block.id === id) ?? null) !== JSON.stringify(applied.spec.blocks.find((block) => block.id === id) ?? null);
     const designBlocks = run.filter ? changedBlockIds(touched).filter(ownChanged) : changedBlockIds(touched);
-    const check = await validateSpec(datasource, forValidation(applied.spec), { userId, runId, signal: controller.signal, changedBlockIds: designBlocks, ...(run.filter ? {} : { sanity: { metricOf, changedQueryKeys: changedQueryKeys(touched) } }) });
+    const check = await validateSpec(datasource, forValidation(applied.spec), { userId, runId, signal: controller.signal, changedBlockIds: designBlocks, aiText: { sectionsBefore: run.spec.sections }, ...(run.filter ? {} : { sanity: { metricOf, changedQueryKeys: changedQueryKeys(touched) } }) });
     if (!check.ok) return refuse(check.errors);
     let filterView: ProposalFilterView | undefined;
     if (run.filter) {
