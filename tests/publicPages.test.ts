@@ -122,7 +122,7 @@ describe("public pages", () => {
 
   test("email verification: the submission counts only after the code mailed to the address", async () => {
     resetPublicLimits();
-    const sent: Array<{ to: string; text: string; subject: string }> = [];
+    const sent: Array<{ to: string; text: string; subject: string; headers?: Record<string, string> }> = [];
     mail.setMailTransportForTests(async (message) => { sent.push(message); return { id: `msg_${sent.length}` }; });
     try {
       const held = await submit(widget.token, { answers: { ...answers, email: "verify@outside.test" }, nonce: nonceFor(widget.id), verify: true });
@@ -141,9 +141,21 @@ describe("public pages", () => {
       expect((await verify({ id: verificationId, code })).status).toBe(400);
       expect((db.query("SELECT COUNT(*) AS count FROM responses WHERE host_id = ?").get(widget.id) as { count: number }).count).toBe(before + 1);
       // The stop link in the mail ends further mail about the item to that address.
-      const stop = /\/api\/public\/mail-stop\/([A-Za-z0-9_.-]+)/.exec(message.text)?.[1];
+      // It opens a confirmation page; opening it (or the old API link) stops nothing (link scanners, D822b).
+      const stop = /\/p\/mail-stop\/([A-Za-z0-9_.-]+)/.exec(message.text)?.[1];
       expect(stop).toBeTruthy();
-      expect((await page(`/api/public/mail-stop/${stop}`)).status).toBe(200);
+      expect((await page(`/p/mail-stop/${stop}`)).status).toBe(200);
+      const legacy = await page(`/api/public/mail-stop/${stop}`, { redirect: "manual" });
+      expect(legacy.status).toBe(303);
+      expect(legacy.headers.get("location")).toBe(`/p/mail-stop/${stop}`);
+      const before2 = await submit(widget.token, { answers: { ...answers, email: "verify@outside.test" }, nonce: nonceFor(widget.id), verify: true });
+      expect(((await before2.json()) as { mailQueued: boolean }).mailQueued).toBe(true);
+      // RFC 8058 one-click: the header names the POST target; the mailbox provider's form POST stops it.
+      expect(message.headers?.["List-Unsubscribe-Post"]).toBe("List-Unsubscribe=One-Click");
+      const target = /^<(.+)>$/.exec(message.headers?.["List-Unsubscribe"] ?? "")?.[1] ?? "";
+      expect(new URL(target).pathname).toBe(`/api/public/mail-stop/${stop}`);
+      expect((await page(new URL(target).pathname, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: "List-Unsubscribe=One-Click" })).status).toBe(200);
+      expect((await page("/api/public/mail-stop/not-a-token", { method: "POST" })).status).toBe(200);
       const again = await submit(widget.token, { answers: { ...answers, email: "verify@outside.test" }, nonce: nonceFor(widget.id), verify: true });
       expect(((await again.json()) as { mailQueued: boolean }).mailQueued).toBe(false);
     } finally {

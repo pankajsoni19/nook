@@ -1,8 +1,10 @@
 import type { Context, Handler, Hono } from "hono";
 import type { AppEnv } from "../auth";
 import { DynamicRoutes } from "../dynamicRoutes";
-import { applyExternalStop } from "../notify/external";
+import { applyExternalStop, mailStopPagePath } from "../notify/external";
 import { publicShell } from "./middleware";
+import { publicLimit } from "./limits";
+import { clientIp } from "../clientAddress";
 
 /**
  * Public routes of the workspace modules (§B.8, T500): a module registers them with
@@ -23,7 +25,7 @@ export const publicRoutes = new DynamicRoutes("public");
 /** Every public path registered, with its owner, for tests (T500). */
 export const publicRoutePaths: Array<{ owner: string; method: "GET" | "POST"; path: string }> = [];
 
-const RESERVED = ["/api/public/chat-shares/", "/api/public/mail-stop/"];
+const RESERVED = ["/api/public/chat-shares/", "/api/public/mail-stop/", "/p/mail-stop/"];
 
 function routerFor(owner: string): PublicRouter {
   const check = (path: string, prefix: "/p/" | "/api/public/") => {
@@ -53,12 +55,21 @@ export function registerPublicRoutes(owner: string, mount: (router: PublicRouter
   mount(routerFor(owner));
 }
 
-// "Stop emails about this" from outside mail (§B.7, T508): a sealed token; the answer is the same whether or not it matched.
-publicRoutes.add("GET", "/api/public/mail-stop/:token", (c) => {
-  applyExternalStop(c.req.param("token") ?? "");
-  return c.html("<!doctype html><meta charset=utf-8><title>Emails stopped</title><p>You will not get more emails about this.</p>");
-});
+// "Stop emails about this" from outside mail (§B.7, T508, D822b): a sealed token. A GET never changes
+// anything (link scanners open every link in a mail): the mail links to the public page
+// `/p/mail-stop/<token>`, whose button POSTs the token here, and the same POST is the RFC 8058 one-click
+// target of the mail's List-Unsubscribe header. The answer is the same whether or not the token matched.
+publicRoutes.add("GET", "/p/mail-stop/:token", (c) => publicShell(c, true));
+publicRoutePaths.push({ owner: "core", method: "GET", path: "/p/mail-stop/:token" });
+// Links in mail sent before the page existed land on the page too (nothing is stopped by the GET).
+publicRoutes.add("GET", "/api/public/mail-stop/:token", (c) => c.redirect(mailStopPagePath(encodeURIComponent(c.req.param("token") ?? "")), 303));
 publicRoutePaths.push({ owner: "core", method: "GET", path: "/api/public/mail-stop/:token" });
+publicRoutes.add("POST", "/api/public/mail-stop/:token", (c) => {
+  if (publicLimit("page", clientIp(c))) return c.body(null, 429);
+  applyExternalStop(c.req.param("token") ?? "");
+  return c.body(null, 200);
+});
+publicRoutePaths.push({ owner: "core", method: "POST", path: "/api/public/mail-stop/:token" });
 
 /** Mounts the public dispatcher (server/index.ts, before the session guards and after the public headers). */
 export function mountPublicRoutes(app: Hono<AppEnv>) {

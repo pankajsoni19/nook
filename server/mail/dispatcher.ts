@@ -5,7 +5,7 @@ import { suppressionOf, sweepSoftBounces } from "./suppression";
 import { appLink, paths } from "./links";
 import { prefsAllow, quietHoursEnd, readEmailPrefs } from "./prefs";
 import { isTemplateName, registeredMailTemplate, renderTemplate, TEMPLATES, type RegisteredMailTemplate, type TemplateName } from "./registry";
-import { externalMailStopped, externalStopToken } from "../notify/external";
+import { externalMailStopped, externalStopToken, mailStopApiPath, mailStopPagePath } from "../notify/external";
 import { resolvePayload, type Recipient } from "./resolve";
 import type { MailCategory, MailClass } from "./templates/types";
 import { createUnsubscribeToken } from "./unsubscribe";
@@ -208,9 +208,12 @@ async function handleRegistered(row: Row, template: RegisteredMailTemplate, nowM
     }
     const resolved = template.resolveExternal(payload, nowMs);
     if ("skip" in resolved) return skip(row, resolved.skip, nowMs);
-    const stopHref = item?.kind && item.id ? appLink(`/api/public/mail-stop/${externalStopToken(address, item.kind, item.id)}`) : undefined;
+    const stopToken = item?.kind && item.id ? externalStopToken(address, item.kind, item.id) : null;
+    // The footer links to the confirmation page; the header is RFC 8058 one-click (a POST) (D822b).
+    const stopHref = stopToken ? appLink(mailStopPagePath(stopToken)) : undefined;
+    const stopHeaders = stopToken ? { "List-Unsubscribe": `<${appLink(mailStopApiPath(stopToken))}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" } : undefined;
     const rendered = template.render({ ...(resolved.data as object), stopHref } as never, { instanceName: config.mail.instanceName, tz: typeof payload.tz === "string" ? payload.tz : "UTC" });
-    const outcome = await sendMail({ to: address, subject: rendered.subject, text: rendered.text, html: rendered.html, ...(rendered.attachments?.length ? { attachments: rendered.attachments } : {}) }, { purpose: row.template, senderId: null, recipient: "address", idempotencyKey: row.idempotency_key });
+    const outcome = await sendMail({ to: address, subject: rendered.subject, text: rendered.text, html: rendered.html, ...(stopHeaders ? { headers: stopHeaders } : {}), ...(rendered.attachments?.length ? { attachments: rendered.attachments } : {}) }, { purpose: row.template, senderId: null, recipient: "address", idempotencyKey: row.idempotency_key });
     return finishOutcome(row, outcome, nowMs);
   }
   if (!template.resolve) {

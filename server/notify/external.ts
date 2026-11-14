@@ -77,6 +77,11 @@ export function externalMailStopped(address: string, kind: string, id: string) {
 /** The signed token of a "stop emails about this" link: the address hash and the item's keyed hash only. */
 export const externalStopToken = (address: string, kind: string, id: string) => signedToken(STOP, `${addressHash(address)}.${itemHash(kind, id)}`);
 
+/** The confirmation page a stop link opens (its button POSTs to `mailStopApiPath`, D822b). */
+export const mailStopPagePath = (token: string) => `/p/mail-stop/${token}`;
+/** The POST that records a stop: the page's button and RFC 8058 one-click (List-Unsubscribe-Post). */
+export const mailStopApiPath = (token: string) => `/api/public/mail-stop/${token}`;
+
 /** Records a stop from its token; true when the token was ours. Idempotent. */
 export function applyExternalStop(token: string, nowMs = Date.now()) {
   const text = readSignedToken(STOP, token);

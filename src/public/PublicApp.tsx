@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { appName } from "../appName";
 import { readyWorkspaceModules } from "../workspaceModules";
 import { PublicNotFound } from "./PublicPageShell";
+import { MailStopPage } from "./MailStopPage";
 import "../ui/workspace.css";
 
 /**
@@ -19,6 +20,8 @@ export function publicPageFor(pathname: string) {
 }
 
 export function PublicApp({ pathname, search }: { pathname: string; search: string }) {
+  // The core's own page: "Stop emails about this" (D822b).
+  if (pathname.startsWith("/p/mail-stop/")) return <MailStopPage path={pathname} appName={appName()} />;
   const page = publicPageFor(pathname);
   if (!page) return <PublicNotFound appName={appName()} />;
   const Page = page.component;
