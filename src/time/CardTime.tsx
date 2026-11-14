@@ -8,6 +8,7 @@ import { useUnitPreferences } from "../ui/units";
 import { formatDuration } from "../../shared/duration";
 import type { TargetTime } from "../../shared/time";
 import type { CardSlotCard, CardSlotProps } from "../ui/cardSlots";
+import type { ItemSlotProps } from "../ui/itemSlots";
 import { timeApi } from "./api";
 import { dayLabel, localDay } from "./format";
 import { errorText, onTimeChanged, startTimer, stopTimer, timeChanged, useTimer } from "./timerStore";
@@ -107,6 +108,25 @@ export function CardTimerAction({ card }: CardSlotProps) {
 
 /** The card dialog's Time section. */
 export function CardTimeSection({ card, idPrefix }: CardSlotProps) {
+  return <ItemTimePanel kind="card" id={card.id} headingId={`${idPrefix}-time`} reloadKey={card.estimate} variant="card" />;
+}
+
+/** Time on another module's item page (src/ui/itemSlots.ts, D1056): goals, contacts, companies, deals, bookings. */
+export function ItemTimeSection({ kind, id, readOnly }: ItemSlotProps) {
+  return <ItemTimePanel kind={kind} id={id} readOnly={readOnly} />;
+}
+
+const isThisItem = (entryTarget: { kind: string; id?: string; hidden?: true } | null | undefined, kind: string, id: string) => Boolean(entryTarget && !("hidden" in entryTarget && entryTarget.hidden) && entryTarget.kind === kind && entryTarget.id === id);
+const NOUN: Record<string, string> = { card: "card", goal: "goal", key_result: "key result", contact: "contact", company: "company", deal: "deal", booking: "booking", event: "event" };
+
+/**
+ * Time on one work item (C12 cards; C15 goals, contacts, companies, deals, bookings; D1056): the total
+ * logged (against the estimate on hours boards), Start/Stop on this item, Log time inline (to the
+ * item's default project: a card's board project, a CRM record's client project, D1057), and the
+ * worklog. `variant="card"` keeps the card dialog's frame and classes exactly; `page` is the item
+ * section frame other modules' pages render through src/ui/itemSlots.ts.
+ */
+export function ItemTimePanel({ kind, id, headingId, reloadKey, variant = "page", readOnly = false }: { kind: string; id: string; headingId?: string; reloadKey?: unknown; variant?: "card" | "page"; readOnly?: boolean }) {
   const prefs = useUnitPreferences();
   const { entry: running, busy } = useTimer();
   const { role } = useRole();
@@ -118,19 +138,24 @@ export function CardTimeSection({ card, idPrefix }: CardSlotProps) {
   const [saving, setSaving] = useState(false);
   const [all, setAll] = useState(false);
   const fieldId = useId();
-  const load = useCallback(() => { timeApi.target("card", card.id).then((body) => { setData(body); setFailed(false); }, () => setFailed(true)); }, [card.id]);
-  useEffect(() => { load(); return onTimeChanged(load); }, [load, card.estimate]);
+  const autoHeading = useId();
+  const load = useCallback(() => { timeApi.target(kind, id).then((body) => { setData(body); setFailed(false); }, () => setFailed(true)); }, [kind, id]);
+  useEffect(() => { load(); return onTimeChanged(load); }, [load, reloadKey]);
   if (failed) return null;
-  const here = isThisCard(running?.target, card.id);
-  const canLog = role !== "viewer";
-  const headingId = `${idPrefix}-time`;
+  const card = variant === "card";
+  const small = card ? "task-small-button" : "ui-small-button";
+  const here = isThisItem(running?.target, kind, id);
+  const canLog = role !== "viewer" && !readOnly;
+  const heading = headingId ?? `${autoHeading}-time`;
+  const target = { kind, id };
+  const noun = NOUN[kind] ?? "item";
 
   const log = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!duration) { notify.warning("Type how long, such as 1h30 or 45m"); return; }
     setSaving(true);
     try {
-      await timeApi.create({ startedAt: new Date(Date.now() - duration * 1000).toISOString(), duration, description, target: { kind: "card", id: card.id }, ...(data?.defaultProject ? { projectId: data.defaultProject.id } : {}) });
+      await timeApi.create({ startedAt: new Date(Date.now() - duration * 1000).toISOString(), duration, description, target, ...(data?.defaultProject ? { projectId: data.defaultProject.id } : {}) });
       timeChanged();
       notify.success(`Logged ${formatDuration(duration, prefs.durationFormat)}`);
       setDuration(null);
@@ -144,17 +169,19 @@ export function CardTimeSection({ card, idPrefix }: CardSlotProps) {
   };
 
   const shown = all ? data?.entries ?? [] : (data?.entries ?? []).slice(0, 5);
-  return <section className="task-card-section time-card-section" aria-labelledby={headingId}>
-    <header>
-      <h3 id={headingId}><Clock aria-hidden="true" />Time</h3>
-      {canLog && <span className="time-card-buttons">
-        <button type="button" className={`secondary-button task-small-button${here ? " time-running-button" : ""}`} disabled={busy} onClick={() => { void (here ? stopTimer() : startTimer({ target: { kind: "card", id: card.id } })); }}>
-          {here ? <><Square aria-hidden="true" />Stop</> : <><Play aria-hidden="true" />Start</>}
-        </button>
-        {!logging && <button type="button" className="secondary-button task-small-button" onClick={() => setLogging(true)}><Plus aria-hidden="true" />Log time</button>}
-      </span>}
+  const buttons = canLog && <span className="time-card-buttons">
+    <button type="button" className={`secondary-button ${small}${here ? " time-running-button" : ""}`} disabled={busy} {...(card ? {} : { "aria-label": here ? `Stop the timer on this ${noun}` : `Start a timer on this ${noun}` })}
+      onClick={() => { void (here ? stopTimer() : startTimer({ target })); }}>
+      {here ? <><Square aria-hidden="true" />Stop</> : <><Play aria-hidden="true" />Start</>}
+    </button>
+    {!logging && <button type="button" className={`secondary-button ${small}`} onClick={() => setLogging(true)}><Plus aria-hidden="true" />Log time</button>}
+  </span>;
+  return <section className={card ? "task-card-section time-card-section" : "ui-item-section time-item-section"} aria-labelledby={heading}>
+    <header className={card ? undefined : "ui-panel-header"}>
+      <h3 id={heading}><Clock aria-hidden="true" />Time</h3>
+      {buttons}
     </header>
-    {!data && <p className="task-comment-empty" role="status">Loading time…</p>}
+    {!data && <p className={card ? "task-comment-empty" : "ui-panel-loading"} role="status">Loading time…</p>}
     {data && <>
       {data.estimateSeconds !== null
         ? <ProgressBar value={data.estimateSeconds ? data.totalSeconds / data.estimateSeconds : 0} label="Logged against the estimate" meter
@@ -169,11 +196,11 @@ export function CardTimeSection({ card, idPrefix }: CardSlotProps) {
         </div>
         {data.defaultProject && <p className="time-note">Goes to {data.defaultProject.name}.</p>}
         <div className="time-card-log-actions">
-          <button type="button" className="secondary-button task-small-button" onClick={() => setLogging(false)}>Cancel</button>
-          <button type="submit" className="action-button task-small-button" disabled={saving}>Log</button>
+          <button type="button" className={`secondary-button ${small}`} onClick={() => setLogging(false)}>Cancel</button>
+          <button type="submit" className={`action-button ${small}`} disabled={saving}>Log</button>
         </div>
       </form>}
-      {data.privateEntries && <p className="time-note">Some time is on a project that shows card readers totals only.</p>}
+      {data.privateEntries && <p className="time-note">Some time is on a project that shows {noun} readers totals only.</p>}
       {data.entries.length > 0
         ? <ul className="time-worklog" aria-label="Worklog">
           {shown.map((item) => <li key={item.id}>
@@ -184,7 +211,7 @@ export function CardTimeSection({ card, idPrefix }: CardSlotProps) {
           </li>)}
           {data.entries.length > 5 && <li><button type="button" className="ui-text-button" onClick={() => setAll(!all)}>{all ? "Show fewer" : `Show all ${data.entries.length}`}</button></li>}
         </ul>
-        : !logging && data.totalSeconds === 0 && <p className="task-comment-empty">No time logged yet.{canLog ? " Start the timer or log time." : ""}</p>}
+        : !logging && data.totalSeconds === 0 && <p className={card ? "task-comment-empty" : "time-note"}>No time logged yet.{canLog ? " Start the timer or log time." : ""}</p>}
     </>}
   </section>;
 }

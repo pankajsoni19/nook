@@ -129,6 +129,7 @@ fieldset.bk-panel > legend + * { clear: both; }
 .bk-detail { display: grid; gap: 12px; }
 .bk-detail-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
 .bk-detail-main { display: grid; gap: 16px; min-width: 0; }
+.bk-detail-side { display: grid; gap: 16px; align-content: start; min-width: 0; }
 .bk-detail-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .bk-detail-head h2 { flex: 1 1 240px; margin: 0; color: #ededee; font-size: 1.15rem; font-weight: 700; }
 .bk-detail .bk-panel:first-child { box-shadow: inset 0 3px 0 var(--bk-color, transparent); }
@@ -168,3 +169,11 @@ fieldset.bk-panel > legend + * { clear: both; }
 /* Who in the workspace can see or edit a type (the shared Access control, D1050). */
 .bk-access { display: grid; gap: 8px; margin-top: 6px; padding-top: 12px; border-top: 1px solid #2c2c31; }
 .bk-access > strong { font-size: .86rem; color: #d6d6d9; font-weight: 600; }
+
+/* Bookings on a contact, company, or deal page (C20, D1058). */
+.bk-record-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.bk-record-list a { min-height: 44px; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 4px 12px; border: 1px solid #29292d; border-radius: 10px; padding: 6px 12px; background: #151518; color: #ececee; text-decoration: none; font-size: .84rem; }
+.bk-record-list a:hover { border-color: #45454b; background: #1a1a1d; }
+.bk-record-title { min-width: 0; overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.bk-record-when { color: #a1a1a8; white-space: nowrap; }
+@media (max-width: 760px) { .bk-record-list a { grid-template-columns: minmax(0, 1fr) auto; } .bk-record-when { grid-column: 1; grid-row: 2; } }

@@ -3,7 +3,7 @@ import { Clock, FolderClock, Play, Timer } from "lucide-react";
 import { WORKSPACE_MODULE_LABELS } from "../../shared/workspaceModules";
 import type { WorkspaceClientModule, WorkspaceRoutePart } from "../workspaceModules/types";
 import { TimerTopBar } from "./TimerBar";
-import { CardTimerAction, CardTimeSection, TimelineTimeFill } from "./CardTime";
+import { CardTimerAction, CardTimeSection, ItemTimeSection, TimelineTimeFill } from "./CardTime";
 import { TodayTimeSection } from "./TodayTime";
 import { startTimer } from "./timerStore";
 
@@ -47,6 +47,7 @@ export const module: WorkspaceClientModule = {
   cardSections: [{ id: "time.section", area: "side", order: 20, component: CardTimeSection }],
   cardHeaderActions: [{ id: "time.start", order: 10, component: CardTimerAction }],
   timelineDecorations: [{ id: "time.fill", order: 10, component: TimelineTimeFill }],
+  itemSections: [{ id: "time.item", kinds: ["goal", "contact", "company", "deal", "booking"], order: 20, component: ItemTimeSection }],
   shortcuts: [{ keys: "Alt+T", label: "Start or stop the timer" }, { keys: "n", label: "Log time (in Time)" }, { keys: "j / k", label: "Move between entries" }],
   notificationTopics: [
     { id: "time.long_timer", label: "A timer has been running for hours" },
