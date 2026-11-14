@@ -159,7 +159,8 @@ export function bookingsForRecord(userId: string, kind: string, ref: string) {
 export function registerBookingRoutes(router: ModuleRouter) {
   router.get("/api/bookings/for/:kind/:id", handle((c, userId) => c.json(bookingsForRecord(userId, c.req.param("kind") ?? "", c.req.param("id") ?? ""))));
   // Profile and outside calendars
-  router.get("/api/bookings/profile", handle((c, userId) => c.json({ profile: ensureProfile(userId), feeds: listFeeds(userId) })));
+  // `?tz=` is the browser's zone: a first visit makes the profile and working hours there, not in UTC (D1129).
+  router.get("/api/bookings/profile", handle((c, userId) => c.json({ profile: ensureProfile(userId, c.req.query("tz")?.slice(0, 64)), feeds: listFeeds(userId) })));
   router.put("/api/bookings/profile", handle(async (c, userId) => {
     const input = await body(c, z.object({ handle: z.string().max(40).optional(), displayName: z.string().max(80).optional(), welcome: z.string().max(2000).optional(), tz: z.string().max(64).optional(), enabled: z.boolean().optional(), busyCalendarIds: z.array(uuid).max(20).optional() }).strict());
     return c.json({ profile: updateProfile(userId, input) });
@@ -184,7 +185,7 @@ export function registerBookingRoutes(router: ModuleRouter) {
   router.delete("/api/bookings/feeds/:id", handle((c, userId) => { removeFeed(userId, c.req.param("id") ?? ""); return c.body(null, 204); }));
 
   // Schedules and overrides
-  router.get("/api/bookings/schedules", handle((c, userId) => c.json({ schedules: listSchedules(userId) })));
+  router.get("/api/bookings/schedules", handle((c, userId) => c.json({ schedules: listSchedules(userId, c.req.query("tz")?.slice(0, 64)) })));
   router.post("/api/bookings/schedules", handle(async (c, userId) => {
     const input = await body(c, z.object({ name: z.string().max(60), tz: z.string().max(64), weekly: weekly.optional(), isDefault: z.boolean().optional() }).strict());
     return c.json({ schedule: createSchedule(userId, input) }, 201);

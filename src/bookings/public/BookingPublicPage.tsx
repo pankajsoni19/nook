@@ -33,6 +33,15 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
   return body as T;
 }
 
+/**
+ * Whether a refused submission spent the page's render nonce (D1121): every refusal after the nonce
+ * check does (the time was taken, the answers need fixing, a link was used, a cap was hit). Only "too
+ * fast" keeps it: that nonce is unspent and older than a fresh one, so nearer the minimum fill time.
+ */
+function renewsNonce(error: unknown) {
+  return !(error instanceof PublicError && error.code === "TOO_FAST");
+}
+
 const LOCATION_ICONS: Record<LocationKind, typeof Video> = { video_link: Video, phone: Phone, in_person: MapPin, custom: PencilLine, ask: CircleHelp };
 
 export default function BookingPublicPage({ path }: { path: string; search: string }) {
@@ -147,6 +156,8 @@ function Details({ page, base, start, duration, tz, onBack, onDone, onVerify }: 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [failure, setFailure] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  // The render nonce is single use: a refused booking (time taken, answers to fix) fetches a fresh one for the next try (D1121).
+  const [nonce, setNonce] = useState(page.meta.renderNonce);
   const questions = page.questions && page.questions.questions.length ? page.questions : null;
 
   const submit = async (checked: Answers) => {
@@ -163,11 +174,12 @@ function Details({ page, base, start, duration, tz, onBack, onDone, onVerify }: 
     try {
       const result = await call<Confirmation & { status: string; verificationId?: string }>(`${base}/bookings`, { method: "POST", body: JSON.stringify({
         start, duration, tz, name: name.trim(), email: email.trim(), guests: guestList, location: page.type.needsLocation ? location.trim() : null, answers: checked,
-        nonce: page.meta.renderNonce, [HONEYPOT_FIELD]: honeypot
+        nonce, [HONEYPOT_FIELD]: honeypot
       }) });
       if (result.status === "verify" && result.verificationId) onVerify(result.verificationId);
       else onDone(result);
     } catch (error) {
+      if (renewsNonce(error)) void call<TypePage>(base).then((fresh) => setNonce(fresh.meta.renderNonce), () => undefined);
       if (error instanceof PublicError && error.code === "INVALID_ANSWERS" && error.body?.errors) setErrors(error.body.errors as Record<string, string>);
       setFailure(error instanceof PublicError && error.code === "SLOT_TAKEN" ? "That time was just taken. Go back and choose another." : error instanceof Error ? error.message : "Could not book");
     } finally {
@@ -221,7 +233,8 @@ function Confirmed({ done, mail }: { done: Confirmation; mail: boolean }) {
       {pending && <p>The host will confirm it. You'll get an email when they do.</p>}
       <p>{done.mailQueued ? "A confirmation is on its way to your inbox." : mail ? "We could not email you this time; keep this page's link." : "No email will be sent: save the link below to change or cancel."}</p>
       <div className="bk-pub-actions">
-        <a className="bk-pub-button" href={`/api/public/bookings/manage/${encodeURIComponent(token)}/ics`} rel="noreferrer" download="booking.ics"><CalendarPlus aria-hidden="true" />Add to calendar</a>
+        {/* A request is added to a calendar once the host confirms it (D1122). */}
+        {!pending && <a className="bk-pub-button" href={`/api/public/bookings/manage/${encodeURIComponent(token)}/ics`} rel="noreferrer" download="booking.ics"><CalendarPlus aria-hidden="true" />Add to calendar</a>}
         <a className="bk-pub-link" href={done.manageUrl} rel="noreferrer">Reschedule or cancel</a>
       </div>
     </div>
@@ -250,6 +263,8 @@ function ManagePage({ token }: { token: string }) {
       setView(result);
       setMode("view");
     } catch (reasonError) {
+      // The refused change spent the nonce: the page's current state brings a fresh one for the next try (D1121).
+      if (renewsNonce(reasonError)) void call<ManageView>(`/bookings/manage/${encodeURIComponent(token)}`).then(setView, () => undefined);
       setFailure(reasonError instanceof PublicError && reasonError.code === "SLOT_TAKEN" ? "That time is no longer free. Choose another." : reasonError instanceof Error ? reasonError.message : "Could not change the booking");
     }
   };
@@ -266,7 +281,7 @@ function ManagePage({ token }: { token: string }) {
       </ul>
       {booking.cancelReason && cancelled && <p className="ui-public-text">Reason: {booking.cancelReason}</p>}
       {mode === "view" && !cancelled && <div className="bk-pub-actions">
-        <a className="bk-pub-button secondary" href={`/api/public/bookings/manage/${encodeURIComponent(token)}/ics`} rel="noreferrer" download="booking.ics"><CalendarPlus aria-hidden="true" />Add to calendar</a>
+        {(booking.status === "confirmed" || booking.status === "completed") && <a className="bk-pub-button secondary" href={`/api/public/bookings/manage/${encodeURIComponent(token)}/ics`} rel="noreferrer" download="booking.ics"><CalendarPlus aria-hidden="true" />Add to calendar</a>}
         {current.canReschedule && <button type="button" className="bk-pub-button secondary" onClick={() => setMode("reschedule")}>Reschedule</button>}
         {current.canCancel && <button type="button" className="bk-pub-button danger" onClick={() => setMode("cancel")}>Cancel booking</button>}
       </div>}

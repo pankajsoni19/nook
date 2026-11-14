@@ -203,6 +203,8 @@ export const bookingTools: McpToolSpec[] = [
     }),
     handler: (args, key) => run(key, async () => {
       const { type } = requireType(args.typeId, key.userId);
+      // As POST /api/bookings: a hidden type books only for its owner (D1127).
+      if (type.status !== "active" && type.owner_id !== key.userId) throw new BookingError(404, "NOT_FOUND", "Booking type not found");
       const duration = args.duration ?? (JSON.parse(type.durations_json) as number[])[0]!;
       let booker = args.booker ? { name: args.booker.name, email: args.booker.email, tz: args.booker.tz ?? "UTC" } : null;
       let contactId: string | null = null;

@@ -59,11 +59,51 @@ describe("ICS busy", () => {
   });
   test("all-day events become whole days in the host's zone, flagged", () => {
     const { intervals } = icsBusy(ics(event("UID:h", "DTSTART;VALUE=DATE:20260305", "DTEND;VALUE=DATE:20260307")), FROM, TO, "Asia/Tokyo");
-    expect(intervals).toEqual([{ start: Date.parse("2026-03-04T15:00:00Z"), end: Date.parse("2026-03-06T15:00:00Z"), allDay: true }]);
+    expect(intervals).toEqual([{ start: Date.parse("2026-03-04T15:00:00Z"), end: Date.parse("2026-03-06T15:00:00Z"), allDay: true, dates: ["2026-03-05", "2026-03-07"] }]);
   });
   test("only the window is returned, and garbage is ignored", () => {
     const { intervals } = icsBusy(ics(event("UID:x", "DTSTART:garbage"), event("UID:y", "DTSTART:20250101T100000Z", "DTEND:20250101T110000Z")), FROM, TO, "UTC");
     expect(intervals).toEqual([]);
     expect(icsBusy("not a calendar", FROM, TO, "UTC").intervals).toEqual([]);
+  });
+});
+
+describe("RRULE expansion (audit 2, D1120)", () => {
+  const NOV = Date.parse("2026-11-01T00:00:00Z");
+  const JAN = Date.parse("2027-01-01T00:00:00Z");
+  const starts = (...lines: string[]) => icsBusy(ics(event("UID:r", ...lines)), NOV, JAN, "UTC").intervals.map((item) => new Date(item.start).toISOString().slice(0, 16));
+  test("weekly BYDAY not including DTSTART's weekday: DTSTART is the first instance and COUNT is not spent on invented ones (BK1)", () => {
+    expect(starts("DTSTART:20261102T150000Z", "DTEND:20261102T160000Z", "RRULE:FREQ=WEEKLY;BYDAY=TU,TH;COUNT=4"))
+      .toEqual(["2026-11-02T15:00", "2026-11-03T15:00", "2026-11-05T15:00", "2026-11-10T15:00"]);
+    // Daily on weekdays, starting on a Sunday: no extra Sundays.
+    expect(starts("DTSTART:20261101T150000Z", "DURATION:PT1H", "RRULE:FREQ=DAILY;BYDAY=MO,WE;COUNT=4"))
+      .toEqual(["2026-11-01T15:00", "2026-11-02T15:00", "2026-11-04T15:00", "2026-11-09T15:00"]);
+    // Every other week on Tuesday and Thursday.
+    expect(starts("DTSTART:20261103T150000Z", "DURATION:PT1H", "RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=TU,TH;COUNT=4"))
+      .toEqual(["2026-11-03T15:00", "2026-11-05T15:00", "2026-11-17T15:00", "2026-11-19T15:00"]);
+  });
+  test("monthly BYMONTHDAY and monthly BYDAY without an ordinal are expanded (BK2)", () => {
+    expect(starts("DTSTART:20261101T150000Z", "DURATION:PT1H", "RRULE:FREQ=MONTHLY;BYMONTHDAY=1,15"))
+      .toEqual(["2026-11-01T15:00", "2026-11-15T15:00", "2026-12-01T15:00", "2026-12-15T15:00"]);
+    expect(starts("DTSTART:20261102T150000Z", "DURATION:PT1H", "RRULE:FREQ=MONTHLY;BYDAY=MO;COUNT=6"))
+      .toEqual(["2026-11-02T15:00", "2026-11-09T15:00", "2026-11-16T15:00", "2026-11-23T15:00", "2026-11-30T15:00", "2026-12-07T15:00"]);
+    expect(starts("DTSTART:20261130T150000Z", "DURATION:PT1H", "RRULE:FREQ=MONTHLY;BYMONTHDAY=-1")).toEqual(["2026-11-30T15:00", "2026-12-31T15:00"]);
+    // The 31st skips months without one; yearly in a month on its 4th Thursday.
+    expect(starts("DTSTART:20261031T150000Z", "DURATION:PT1H", "RRULE:FREQ=MONTHLY")).toEqual(["2026-12-31T15:00"]);
+    expect(starts("DTSTART:20201126T150000Z", "DURATION:PT1H", "RRULE:FREQ=YEARLY;BYMONTH=11;BYDAY=4TH")).toEqual(["2026-11-26T15:00"]);
+    expect(icsBusy(ics(event("UID:r", "DTSTART:20261101T150000Z", "DURATION:PT1H", "RRULE:FREQ=MONTHLY;BYMONTHDAY=1")), NOV, JAN, "UTC").unsupported).toBe(0);
+  });
+  test("a UTC UNTIL is compared as an instant: no extra day west of UTC (BK3)", () => {
+    // Daily 19:00 Los Angeles through 30 November (Google writes the end of that local day in UTC).
+    expect(starts("DTSTART;TZID=America/Los_Angeles:20261126T190000", "DTEND;TZID=America/Los_Angeles:20261126T200000", "RRULE:FREQ=DAILY;UNTIL=20261201T075959Z"))
+      .toEqual(["2026-11-27T03:00", "2026-11-28T03:00", "2026-11-29T03:00", "2026-11-30T03:00", "2026-12-01T03:00"]);
+    // A date UNTIL includes that date.
+    expect(starts("DTSTART:20261128T100000Z", "DURATION:PT1H", "RRULE:FREQ=DAILY;UNTIL=20261130")).toEqual(["2026-11-28T10:00", "2026-11-29T10:00", "2026-11-30T10:00"]);
+  });
+  test("a long-running series without COUNT finds the window's instances", () => {
+    const daily = starts("DTSTART;TZID=Europe/Berlin:20150105T090000", "DURATION:PT15M", "RRULE:FREQ=DAILY;INTERVAL=3");
+    expect(daily.length).toBe(20);
+    expect(daily[0]).toBe("2026-11-03T08:00"); // 2015-01-05 + 4320 days (3 × 1440), 09:00 CET
+    expect(starts("DTSTART:20100215T100000Z", "DURATION:PT1H", "RRULE:FREQ=MONTHLY;INTERVAL=2")).toEqual(["2026-12-15T10:00"]); // 202 months on
   });
 });

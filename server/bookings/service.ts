@@ -5,6 +5,7 @@ import { singleEventIcs } from "../mail/ics";
 import { recordItemActivity, recordItemChange } from "../activity/service";
 import { canEditBook, PeopleError, upsertContactByEmail } from "../people/contacts";
 import { createPublicLink, revokePublicLinksOf } from "../public";
+import { keyedHash } from "../public/secret";
 import { currentSet, getResponse, setVersion, submitResponse } from "../questions/service";
 import { cancelSchedules, upsertSchedule } from "../schedules/service";
 import { notify, enqueueExternalMail } from "../notify";
@@ -312,6 +313,8 @@ export function declineBooking(booking: BookingRow, actorId: string | null, reas
 export function cancelBooking(booking: BookingRow, by: "host" | "booker", actorId: string | null, reason: string | null, nowMs = Date.now(), options: { silent?: boolean } = {}) {
   if (!LIVE_STATUSES.includes(booking.status)) throw new BookingError(409, "NOT_LIVE", "This booking is already over or cancelled");
   if (Date.parse(booking.end_utc) <= nowMs) throw new BookingError(409, "NOT_LIVE", "This booking is already over");
+  // The booker cancels before the start, as the manage page offers; the host may still cancel one under way (D1126).
+  if (by === "booker" && Date.parse(booking.start_utc) <= nowMs) throw new BookingError(409, "NOT_LIVE", "This booking has already started");
   return db.transaction(() => {
     const updated = transition(booking, "cancelled", { reason: reason?.slice(0, 500) ?? null, by }, actorId);
     removeBookingEvents(booking);
@@ -422,11 +425,21 @@ function rescheduleChain(booking: BookingRow): { rootId: string; depth: number }
   return { rootId, depth };
 }
 
-/** An ICS file of one booking (the booker's "Add to calendar", the manage page, and the mail attachment, D1054). */
+/**
+ * Whether the booker gets a calendar file of this booking (D1122): a confirmed (or held, completed)
+ * booking, or a cancelled one (METHOD:CANCEL removes an imported copy). A request awaiting approval,
+ * and one declined or expired, has nothing to add: its file would say CONFIRMED.
+ */
+export const bookingHasIcs = (booking: Pick<BookingRow, "status">) => ["confirmed", "completed", "no_show", "cancelled"].includes(booking.status);
+
+/**
+ * An ICS file of one booking (the booker's "Add to calendar", the manage page, and the mail attachment, D1054).
+ * The UID is a keyed hash of the chain's first booking, never its internal id (T598, D1123).
+ */
 export function bookingIcs(booking: BookingRow) {
   const chain = rescheduleChain(booking);
   return singleEventIcs({
-    uid: `${chain.rootId}@nook`, sequence: chain.depth, title: `${booking.type_title} with ${userName(booking.host_id)}`, description: `Booking ${booking.short_id}`,
+    uid: `${keyedHash("booking-ics", chain.rootId).slice(0, 32)}@nook`, sequence: chain.depth, title: `${booking.type_title} with ${userName(booking.host_id)}`, description: `Booking ${booking.short_id}`,
     location: booking.location_resolved, startUtc: booking.start_utc, endUtc: booking.end_utc, stampUtc: booking.updated_at, method: booking.status === "cancelled" ? "CANCEL" : "PUBLISH"
   });
 }

@@ -32,12 +32,13 @@ const send = (method: string, body?: unknown): RequestInit => ({ method, ...(bod
 const enc = encodeURIComponent;
 
 export const bookingsApi = {
-  profile: () => api<{ profile: Profile; feeds: Feed[] }>("/bookings/profile"),
+  // The browser's zone goes along: the first call makes the profile and working hours in it (D1129).
+  profile: () => api<{ profile: Profile; feeds: Feed[] }>(`/bookings/profile?tz=${enc(viewerZone())}`),
   saveProfile: (input: Partial<Profile>) => api<{ profile: Profile }>("/bookings/profile", send("PUT", input)),
   addFeed: (input: { label: string; url: string }) => api<{ feed: Feed }>("/bookings/feeds", send("POST", input)),
   refreshFeed: (id: string) => api<{ feed: Feed }>(`/bookings/feeds/${enc(id)}/refresh`, send("POST", {})),
   removeFeed: (id: string) => api<void>(`/bookings/feeds/${enc(id)}`, send("DELETE")),
-  schedules: () => api<{ schedules: Schedule[] }>("/bookings/schedules"),
+  schedules: () => api<{ schedules: Schedule[] }>(`/bookings/schedules?tz=${enc(viewerZone())}`),
   createSchedule: (input: { name: string; tz: string; weekly?: WeeklyRules }) => api<{ schedule: Schedule }>("/bookings/schedules", send("POST", input)),
   saveSchedule: (id: string, input: { name?: string; tz?: string; weekly?: WeeklyRules; isDefault?: boolean }) => api<{ schedule: Schedule }>(`/bookings/schedules/${enc(id)}`, send("PUT", input)),
   deleteSchedule: (id: string) => api<void>(`/bookings/schedules/${enc(id)}`, send("DELETE")),
