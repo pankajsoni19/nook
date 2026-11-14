@@ -95,7 +95,10 @@ export function TimerSheet({ entry, onClose }: { entry: TimeEntry | null; onClos
   const formId = useId();
   const [description, setDescription] = useState(entry?.description ?? "");
   const [projectId, setProjectId] = useState<string | null>(entry?.project?.id ?? null);
-  const [target, setTarget] = useState<PickedTarget>(targetOf(entry));
+  const [target, setTargetState] = useState<PickedTarget>(targetOf(entry));
+  // The running timer keeps a work item the person cannot open unless they change it here (TG1, D1140).
+  const [targetTouched, setTargetTouched] = useState(entry === null);
+  const setTarget = (next: PickedTarget) => { setTargetState(next); setTargetTouched(true); };
   const [billable, setBillable] = useState(entry?.billable ?? false);
   const [tags, setTags] = useState<string[]>(entry?.tags ?? []);
   const [startText, setStartText] = useState(entry ? clock(entry.startedAt) : "");
@@ -113,7 +116,7 @@ export function TimerSheet({ entry, onClose }: { entry: TimeEntry | null; onClos
       if (at === null) throw new Error("Write the start as HH:MM");
       startedAt = new Date(at).toISOString();
     }
-    return { description, projectId, target: target ? { kind: target.kind, id: target.id } : null, billable, tags, ...(startedAt ? { startedAt } : {}) };
+    return { description, projectId, ...(targetTouched ? { target: target ? { kind: target.kind, id: target.id } : null } : {}), billable, tags, ...(startedAt ? { startedAt } : {}) };
   };
 
   const save = async (event: React.FormEvent) => {
