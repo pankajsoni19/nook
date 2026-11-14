@@ -4,6 +4,14 @@ Release notes for Nook, newest first. Upgrade steps for each release are in [doc
 
 ## Unreleased
 
+**Fixes: gaps between the modules plan, the docs, and the app**
+
+- Today's Follow-ups **View all** opens the Contacts Follow-ups tab instead of People, and a submitted week's notification opens the project's Approvals tab.
+- Standup Settings → Who can read it has a **Private answers** switch (owner and managers), saying who sees whose answers; editors who are not managers can no longer change it through the API.
+- Settings → Notifications names every module notification: deals lost (Contacts), nudges (Standups), and responses a form's Notify people action sends you (Forms).
+- Guests see Time once they are on a time project (tile, Today, and its Settings → Modules switch), and no longer see Contacts or Bookings, whose pages and API refuse guests.
+- Calendar events as standup answer suggestions are listed as not built yet.
+
 **Fixes: Standups and Contacts**
 
 - A standup whose round run failed or was interrupted by a restart picks up again within 15 minutes instead of stopping for good.
