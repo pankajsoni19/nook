@@ -1,5 +1,5 @@
 import type { Question, QuestionSet, QuestionSummary as Summary, SetSummary } from "../../../shared/questions";
-import { InsightChart, KpiTile } from "../insights/Insights";
+import { InsightChart, KpiTile, ratingBuckets } from "../insights/Insights";
 import { inlineText } from "./inline";
 import "./questions.css";
 
@@ -34,15 +34,21 @@ function SummaryBody({ question, summary }: { question: Question; summary: Summa
       return <ol className="ui-summary-ranking">{[...summary.options].sort((a, b) => b.borda - a.borda).map((option) => <li key={option.optionId}>
         <span>{option.removed ? "Removed option" : option.label}</span><span className="ui-tabular">{option.averageRank !== null ? `average rank ${option.averageRank.toFixed(1)}` : "not ranked"}</span>
       </li>)}</ol>;
-    case "numeric":
+    case "numeric": {
+      // A rating or scale shows every bucket of its scale, zeros included (D1182); a number its values.
+      const min = question.scale?.min ?? 1;
+      const distribution = question.type === "rating" || question.type === "scale"
+        ? ratingBuckets(summary.distribution, min, Math.min(10, Math.max(min + 1, question.scale?.max ?? 5)))
+        : summary.distribution;
       return <>
         <div className="ui-kpis">
           <KpiTile label="Average" value={summary.mean} />
           <KpiTile label="Median" value={summary.median} />
           <KpiTile label="Range" value={null} text={summary.min !== null && summary.max !== null ? `${summary.min}–${summary.max}` : undefined} />
         </div>
-        {summary.distribution.length > 0 && <InsightChart title={`${question.type === "number" ? "Values" : "Ratings"}`} kind="bar" categories={summary.distribution.map((entry) => String(entry.value))} series={[{ name: "Answers", values: summary.distribution.map((entry) => entry.count) }]} height={180} />}
+        {distribution.length > 0 && <InsightChart title={`${question.type === "number" ? "Values" : "Ratings"}`} kind="bar" categories={distribution.map((entry) => String(entry.value))} series={[{ name: "Answers", values: distribution.map((entry) => entry.count) }]} height={180} />}
       </>;
+    }
     case "nps":
       return <>
         <div className="ui-kpis">

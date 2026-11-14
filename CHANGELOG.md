@@ -49,6 +49,9 @@ Release notes for Nook, newest first. Upgrade steps for each release are in [doc
 
 - **Team member and contact fields**: collections can have a Team member or a Contact field; pick someone in the cell or row panel, filter by them, sort by member name, and import or export them by name or email. Someone who can't read a contact's book sees "A contact", never the name. Contacts' custom fields of these types now show names in tables and on records, and a contact field searches the whole book. MCP tools take an id, email, or name and return names.
 
+- **Fixed**: starting a standup round, removing a key result, deleting a time entry, moving a form or contact to the Bin, and other one-click actions no longer fail with "Content-Type must be application/json" (D1180).
+- **Fixed**: Insights charts use the app's theme for labels and axes, show goal health in its own colours, count in whole numbers, and show every rating from 1 to the top of the scale (D1181, D1182).
+
 **Workspace modules working together** (Wave 3)
 
 

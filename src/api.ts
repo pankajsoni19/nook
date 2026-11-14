@@ -35,13 +35,27 @@ export function noteRequestOutcome(ok: boolean) {
   }
 }
 
-export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
+/**
+ * The request api() sends (D1180). The server refuses every mutation without a JSON Content-Type
+ * (server/auth.ts requireMutationSafety), so a non-GET with no body is sent as `{}` with the
+ * header; a bodyless DELETE or POST ("start a round", "move to Bin") would otherwise answer 415.
+ * Exported for tests.
+ */
+export function apiRequestInit(options: RequestInit = {}): RequestInit {
+  const method = (options.method ?? "GET").toUpperCase();
+  const mutation = !["GET", "HEAD", "OPTIONS"].includes(method);
   const headers = new Headers(options.headers);
-  if (options.body) headers.set("Content-Type", "application/json");
-  if (csrfToken && options.method && options.method !== "GET") headers.set("X-CSRF-Token", csrfToken);
+  let body = options.body;
+  if (mutation && (body === undefined || body === null || body === "")) body = "{}";
+  if (body) headers.set("Content-Type", "application/json");
+  if (csrfToken && mutation) headers.set("X-CSRF-Token", csrfToken);
+  return { ...options, ...(body ? { body } : {}), headers, credentials: "same-origin" };
+}
+
+export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`/api${path}`, { ...options, headers, credentials: "same-origin" });
+    response = await fetch(`/api${path}`, apiRequestInit(options));
   } catch (error) {
     noteRequestOutcome(false);
     throw error;

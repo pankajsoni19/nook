@@ -1392,6 +1392,15 @@ Deferred (editing an existing widget in the builder was built later: §D.10, D12
 | D1149 | **Goal sheet fields top-align** (UI9): the Start field's hint made the row taller and the Due input stretched to fill it. |
 | D1150 | **The `time.entries` dataset's money columns are built per query** (like D1143's project columns): built at load, the access predicate read as "0", so a project's managers saw amounts and currency of their own entries only, against D873. |
 
+#### Shared client: api() and Insights (lane uc)
+
+| # | Decision |
+|---|---|
+| D1180 | **Every mutation from `api()` is JSON** (audit 2 UI1): the server refuses any non-GET without `Content-Type: application/json` (`requireMutationSafety`), so `api()` sends a bodyless POST/PUT/PATCH/DELETE as `{}` with the header (and the CSRF token). Fixed once in `src/api.ts` (`apiRequestInit`), not per call: ~35 module calls (start a round, remove a key result, delete a time entry, Bin a form or contact, delete a link, undo) answered 415. A test fails if a client module calls `/api` with its own `fetch` mutation and no JSON header. |
+| D1181 | **Insight charts follow the theme and keep status colours** (UI6): `InsightChart` reads the root's `color-scheme` as Reports does; labels, axes, tooltip, and palette come from that mode's `shared/reportTheme.ts` tokens (pie labels in the theme ink with no text halo). An optional `tones` map colours categories by status tone; Goals → Insights "Goals by health" uses it (on track green, at risk amber, off track red). |
+| D1182 | **Counts in whole steps; ratings on their whole scale** (UI7): a `number` insight chart's value axis has `minInterval: 1`; a rating or scale question's results chart shows every bucket from its min to its max, zeros included (`ratingBuckets`). |
+| D1183 | **The app stays dark when the browser asks for light** (audit 2 note): not a bug. Nook is dark-only (§E; `src/styles.css` and `index.html` set `color-scheme: dark`), and there is no theme setting to fall back from; only public pages follow `prefers-color-scheme`. A light app theme is a feature, not a default fix. |
+
 ---
 
 #### Bookings (branch `fix/audit2-bookings`, decisions D1120–D1129)
