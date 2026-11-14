@@ -48,6 +48,8 @@ export default function BookingsApp(props: WorkspaceAppProps) {
   const tab: TabId = (TABS.some((item) => item.id === segment) ? segment : "upcoming") as TabId;
   const [query, setQuery] = useState("");
   const [creating, setCreating] = useState(false);
+  // Opening Bookings makes the profile and working hours in the browser's zone before anything else can make them in UTC (D1129).
+  useEffect(() => { if (!readOnly) void bookingsApi.profile().catch(() => undefined); }, [readOnly]);
 
   const createType = async () => {
     if (readOnly || creating) return;

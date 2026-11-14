@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { useState } from "react";
-import { installDom, mockApi, render } from "./support/dom";
+import { installDom, mockApi, render, reply } from "./support/dom";
 import { AvailabilityEditor, nextRange } from "../src/ui/schedule/AvailabilityEditor";
 import { SlotPicker } from "../src/bookings/SlotPicker";
 import BookingsApp from "../src/bookings/BookingsApp";
@@ -118,5 +118,59 @@ describe("public booking page", () => {
     } finally {
       globalThis.fetch = original;
     }
+  });
+
+  test("a refused booking fetches a fresh render nonce for the retry; a request has no Add to calendar (D1121, D1122)", async () => {
+    let served = 0;
+    const api = mockApi({
+      "GET /public/book/priya/intro-call": () => ({ meta: { appName: "Nook", workspaceName: "Nook", logoUrl: null, renderNonce: `nonce-${++served}` }, host: { name: "Priya Shah", welcome: "", handle: "priya", tz: "UTC" },
+        type: { slug: "intro-call", title: "Intro call", description: "", durations: [30], locationKind: "video_link", color: "#f6c453", locationLabel: "Video call", location: "", needsLocation: false, confirm: "manual", assignment: "single" },
+        questions: null, verifyEmail: false, mail: true }),
+      "POST /public/book/priya/intro-call/bookings": (call) => call.body.nonce === "nonce-1"
+        ? reply(409, { error: "That time was just taken. Choose another.", code: "SLOT_TAKEN" })
+        : reply(201, { status: "pending", mailQueued: true, manageUrl: "/p/book/manage/TOKEN", booking: { typeTitle: "Intro call", hostName: "Priya Shah", start: "", end: "", tz: "UTC", when: "Tue 28, 09:00–09:30 (UTC)", location: "", locationKind: "video_link" } })
+    });
+    const mocked = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => String(input).includes("/slots?")
+      ? Response.json({ tz: "UTC", durations: [30], duration: 30, days: { [`${new Date().toISOString().slice(0, 7)}-28`]: [`${new Date().toISOString().slice(0, 7)}-28T09:00:00.000Z`] } })
+      : mocked(input, init)) as typeof fetch;
+    try {
+      const view = await render(<BookingPublicPage path="/p/book/priya/intro-call" search="" />);
+      await view.waitFor(() => view.container.querySelector(".bk-slots-time"));
+      await view.click(view.container.querySelector(".bk-slots-time")!);
+      const set = (selector: string, value: string) => { const input = view.container.querySelector<HTMLInputElement>(selector)!; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value); input.dispatchEvent(new Event("input", { bubbles: true })); };
+      set("input[autocomplete=name]", "Ana Silva");
+      set("input[type=email]", "ana@example.org");
+      await view.click(view.button("Request booking")!);
+      await view.waitFor(() => view.container.textContent?.includes("That time was just taken"));
+      await view.waitFor(() => served === 2);
+      await view.click(view.button("Request booking")!);
+      await view.waitFor(() => view.container.textContent?.includes("Request sent"));
+      expect(api.calls.filter((call) => call.method === "POST").map((call) => call.body.nonce)).toEqual(["nonce-1", "nonce-2"]);
+      expect(view.container.textContent).not.toContain("Add to calendar");
+    } finally {
+      globalThis.fetch = mocked;
+    }
+  });
+
+  test("manage: a pending request offers no calendar file; a refused change brings a fresh nonce (D1121, D1122)", async () => {
+    let served = 0;
+    const manage = (status: string) => ({ meta: { appName: "Nook", workspaceName: "Nook", logoUrl: null, renderNonce: `m-${++served}` },
+      booking: { typeTitle: "Intro call", hostName: "Priya Shah", start: "2030-03-04T09:00:00.000Z", end: "2030-03-04T09:30:00.000Z", durationMin: 30, tz: "UTC", when: "Mon 4 Mar, 09:00–09:30 (UTC)", status,
+        location: "", locationKind: "video_link", locationLabel: "Video call", bookerName: "Ana Silva", guests: [], cancelReason: null }, canCancel: true, canReschedule: true, color: null });
+    const api = mockApi({
+      "GET /public/bookings/manage/TOKEN": () => manage("pending"),
+      "POST /public/bookings/manage/TOKEN/cancel": (call) => call.body.nonce === "m-1" ? reply(409, { error: "This booking was changed meanwhile", code: "BOOKING_CHANGED" }) : manage("cancelled")
+    });
+    const view = await render(<BookingPublicPage path="/p/book/manage/TOKEN" search="" />);
+    await view.waitFor(() => view.container.textContent?.includes("Awaiting the host's confirmation"));
+    expect(view.container.textContent).not.toContain("Add to calendar");
+    await view.click(view.button("Cancel booking")!);
+    await view.click(view.container.querySelector("form button[type=submit]")!);
+    await view.waitFor(() => view.container.textContent?.includes("changed meanwhile"));
+    await view.waitFor(() => served === 2);
+    await view.click(view.container.querySelector("form button[type=submit]")!);
+    await view.waitFor(() => view.container.textContent?.includes("Cancelled"));
+    expect(api.calls.filter((call) => call.method === "POST").map((call) => call.body.nonce)).toEqual(["m-1", "m-2"]);
   });
 });

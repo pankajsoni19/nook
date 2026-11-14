@@ -22,10 +22,16 @@ const profileView = (row: ProfileRow): ProfileView => ({
 
 export const profileRow = (userId: string) => db.query("SELECT * FROM booking_profiles WHERE user_id = ?").get(userId) as ProfileRow | null;
 
-/** The person's zone: their mail zone (email_prefs.tz), else UTC. */
+/**
+ * The person's zone when the client did not send one (D1129): the first zone other modules stored for
+ * them that is not their UTC default (mail, then Time), else UTC.
+ */
 function userZone(userId: string) {
-  const tz = (db.query("SELECT tz FROM email_prefs WHERE user_id = ?").get(userId) as { tz: string } | null)?.tz;
-  return tz && isValidTimeZone(tz) ? tz : "UTC";
+  for (const sql of ["SELECT tz FROM email_prefs WHERE user_id = ?", "SELECT tz FROM time_user_settings WHERE user_id = ?"]) {
+    const tz = (db.query(sql).get(userId) as { tz: string } | null)?.tz;
+    if (tz && tz !== "UTC" && isValidTimeZone(tz)) return tz;
+  }
+  return "UTC";
 }
 
 function handleTaken(handle: string, userId: string, nowIso = now()) {
@@ -121,12 +127,14 @@ export function ensureDefaultSchedule(userId: string, tz?: string): ScheduleRow 
   const id = Bun.randomUUIDv7();
   const timestamp = now();
   db.query("INSERT INTO availability_schedules (id, user_id, name, tz, rules_json, is_default, created_at, updated_at) VALUES (?, ?, 'Working hours', ?, ?, 1, ?, ?)")
-    .run(id, userId, tz && isValidTimeZone(tz) ? tz : userZone(userId), JSON.stringify(DEFAULT_WEEKLY), timestamp, timestamp);
+    .run(id, userId, tz && isValidTimeZone(tz) ? tz : profileRow(userId)?.tz ?? userZone(userId), JSON.stringify(DEFAULT_WEEKLY), timestamp, timestamp);
   return db.query("SELECT * FROM availability_schedules WHERE id = ?").get(id) as ScheduleRow;
 }
 
-export function listSchedules(userId: string): ScheduleView[] {
-  ensureDefaultSchedule(userId);
+/** `tz` is the client's zone, used when this first call makes the profile and the default schedule (D1129). */
+export function listSchedules(userId: string, tz?: string): ScheduleView[] {
+  ensureProfile(userId, tz);
+  ensureDefaultSchedule(userId, tz);
   return (db.query("SELECT * FROM availability_schedules WHERE user_id = ? ORDER BY is_default DESC, name").all(userId) as ScheduleRow[]).map(scheduleView);
 }
 

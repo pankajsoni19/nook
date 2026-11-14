@@ -21,7 +21,8 @@
 .bk-slots-day.open { background: var(--bk-open); color: var(--bk-accent-text); font-weight: 700; cursor: pointer; }
 .bk-slots-day.open:hover { outline: 1px solid var(--bk-accent); }
 .bk-slots-day.selected { background: var(--bk-accent); color: var(--bk-on-accent); }
-.bk-slots-day.today:not(.selected) { box-shadow: inset 0 -2px 0 var(--bk-muted); }
+/* Today: a whole ring inside the circle (an inset bottom edge on a round cell read as half a ring). */
+.bk-slots-day.today:not(.selected) { box-shadow: inset 0 0 0 2px var(--bk-muted); }
 .bk-slots-day:disabled { cursor: default; }
 .bk-slots-zone { display: inline-flex; align-items: center; gap: 8px; color: var(--bk-muted); font-size: .84rem; }
 .bk-slots-zone svg { width: 16px; height: 16px; flex: none; }

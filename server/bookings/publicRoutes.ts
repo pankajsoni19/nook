@@ -12,7 +12,7 @@ import { formatWhen, LOCATION_LABELS, MAX_PUBLIC_SLOT_DAYS, slotsByDate, type Pu
 import { BookingError, bookingRow, durationsOf, parseJson, typeRow, userName, type ProfileRow, type TypeRow } from "./model";
 import { profileByHandle } from "./setup";
 import { availability, ownerActive } from "./availability";
-import { bookingIcs, cancelBooking, createBooking, managePath, rescheduleBooking } from "./service";
+import { bookingHasIcs, bookingIcs, cancelBooking, createBooking, managePath, rescheduleBooking } from "./service";
 import { bookerSchema, sendError, windowFrom } from "./routes";
 
 /**
@@ -226,7 +226,8 @@ export function registerBookingPublicRoutes(router: PublicRouter) {
   router.get("/api/public/bookings/manage/:token", (c) => { const target = manageTarget(c); return target ? c.json(manageView(target)) : publicNotFound(c); });
   router.get("/api/public/bookings/manage/:token/ics", (c) => {
     const target = manageTarget(c);
-    if (!target) return publicNotFound(c);
+    // A request awaiting approval (or declined, expired) has no calendar file (D1122).
+    if (!target || !bookingHasIcs(target.booking)) return publicNotFound(c);
     return new Response(bookingIcs(target.booking), { headers: { "Content-Type": "text/calendar; charset=utf-8", "Content-Disposition": "attachment; filename=\"booking.ics\"" } });
   });
   router.get("/api/public/bookings/manage/:token/slots", (c) => {
