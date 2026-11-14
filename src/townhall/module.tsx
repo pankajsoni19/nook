@@ -3,7 +3,7 @@ import { MessageCircleQuestion, Plus, Presentation } from "lucide-react";
 import { WORKSPACE_MODULE_LABELS } from "../../shared/workspaceModules";
 import type { WorkspaceClientModule } from "../workspaceModules/types";
 import type { Route } from "../router";
-import { insertEmbedAt, openEmbedPicker } from "../ui/embeds/openEmbedPicker";
+import { pickAndEmbed } from "../ui/embeds/openEmbedPicker";
 import type { EmbedCardProps } from "../editor/moduleEmbedRegistry";
 import { listSessions } from "./api";
 
@@ -63,10 +63,10 @@ export const module: WorkspaceClientModule = {
   embedRenderers: [{ kind: "townhall_session", match: isSessionPath, component: SessionEmbed }],
   slashItems: [{
     label: "Townhall", hint: "Embed a townhall session", keywords: "townhall all-hands ama questions session",
-    run: (editor, range) => openEmbedPicker({
+    run: (editor, range) => pickAndEmbed(editor, range, "townhall_session", {
       title: "Add a townhall", eyebrow: "Townhall", icon: Presentation, emptyTitle: "No sessions", emptyText: "Create a session in Townhall first.",
       load: () => listSessions("all").then((page) => page.items.map((item) => ({ id: item.id, title: item.title, meta: item.state === "live" ? "Live now" : item.state === "ended" ? "Ended" : "Upcoming", path: item.href })))
-    }, (item) => insertEmbedAt(editor, range, "townhall_session", item.path))
+    })
   }],
   notificationTopics: [
     { id: "townhall.live", label: "A townhall you asked in goes live" },

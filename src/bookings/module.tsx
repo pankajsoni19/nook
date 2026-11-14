@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from "react";
-import { insertEmbedAt, openEmbedPicker } from "../ui/embeds/openEmbedPicker";
+import { pickAndEmbed } from "../ui/embeds/openEmbedPicker";
 import type { ItemSlotProps } from "../ui/itemSlots";
 import { CalendarCheck2, CalendarClock, CalendarPlus, Link2 } from "lucide-react";
 import { WORKSPACE_MODULE_LABELS } from "../../shared/workspaceModules";
@@ -81,10 +81,10 @@ export const module: WorkspaceClientModule = {
   slashItems: [{
     label: "Booking link", hint: "Embed one of your booking types", keywords: "booking book meeting schedule calendly link",
     // A picker of your active public types (D1059; D1025 embedded the first one).
-    run: (editor, range) => openEmbedPicker({
+    run: (editor, range) => pickAndEmbed(editor, range, "booking_type", {
       title: "Add a booking link", eyebrow: "Bookings", icon: CalendarPlus, emptyTitle: "No public booking types", emptyText: "Make a booking type public and active in Bookings first.",
       load: loadBookableTypes
-    }, (item) => insertEmbedAt(editor, range, "booking_type", item.path))
+    })
   }],
   itemSections: [{ id: "bookings.record", kinds: ["contact", "company", "deal"], order: 30, component: RecordBookings }],
   searchRenderer: {

@@ -21,9 +21,14 @@ export function openEmbedPicker(props: Omit<DialogProps, "onClose" | "onPick">, 
   });
 }
 
-type EmbedChain = { focus: () => { deleteRange: (range: unknown) => { insertModuleEmbed: (attrs: { kind: string; path: string }) => { run: () => void } } } };
+type EmbedChain = { focus: () => { deleteRange: (range: unknown) => { run: () => void }; insertModuleEmbed: (attrs: { kind: string; path: string }) => { run: () => void } } };
 
-/** Replaces the slash range with a module embed (the editor's `insertModuleEmbed` command, D835). */
-export function insertEmbedAt(editor: { chain: () => unknown }, range: unknown, kind: string, path: string) {
-  (editor.chain() as EmbedChain).focus().deleteRange(range).insertModuleEmbed({ kind, path }).run();
+/**
+ * A `/` item that embeds one of your items: removes the typed `/word` at once (which closes the slash
+ * menu, the Forms pattern), opens the picker, and inserts the embed where the cursor was on pick
+ * (the editor's `insertModuleEmbed` command, D835). Closing the picker inserts nothing.
+ */
+export function pickAndEmbed(editor: { chain: () => unknown }, range: unknown, kind: string, picker: Omit<DialogProps, "onClose" | "onPick">) {
+  (editor.chain() as EmbedChain).focus().deleteRange(range).run();
+  openEmbedPicker(picker, (item) => (editor.chain() as EmbedChain).focus().insertModuleEmbed({ kind, path: item.path }).run());
 }

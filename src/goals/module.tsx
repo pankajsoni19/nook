@@ -6,7 +6,7 @@ import { GoalCardSection } from "./GoalCardSection";
 import { goalActivityRenderers } from "./activity";
 import type { WorkspaceClientModule, WorkspaceRoute } from "../workspaceModules/types";
 import type { Route } from "../router";
-import { insertEmbedAt, openEmbedPicker } from "../ui/embeds/openEmbedPicker";
+import { pickAndEmbed } from "../ui/embeds/openEmbedPicker";
 import type { EmbedCardProps } from "../editor/moduleEmbedRegistry";
 import { listGoals } from "./goalsApi";
 
@@ -63,10 +63,10 @@ export const module: WorkspaceClientModule = {
   embedRenderers: [{ kind: "goal", component: GoalEmbedCard }],
   slashItems: [{
     label: "Goal", hint: "Embed a goal and its progress", keywords: "goal okr objective key result progress",
-    run: (editor, range) => openEmbedPicker({
+    run: (editor, range) => pickAndEmbed(editor, range, "goal", {
       title: "Add a goal", eyebrow: "Goals", icon: Target, emptyTitle: "No goals found", emptyText: "Create a goal in Goals first.",
       load: () => listGoals({ view: "list" }).then((page) => page.goals.map((goal) => ({ id: goal.id, title: goal.title, meta: `${Math.round(goal.progress * 100)}%${goal.period ? ` · ${goal.period.name}` : ""}`, path: goal.href })))
-    }, (item) => insertEmbedAt(editor, range, "goal", item.path))
+    })
   }],
   activityRenderers: goalActivityRenderers,
   searchRenderer: {
