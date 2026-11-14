@@ -11,7 +11,9 @@ import { keyedHash, readSignedToken, signedToken } from "../public/secret";
  *
  * - The template must be registered with `resolveExternal` (server/mail/registry.ts).
  * - Caps per address: 10 an hour and 50 a day; per item: 30 a day (counted from the outbox, so a
- *   restart cannot reset them). Over a cap, nothing is queued (null).
+ *   restart cannot reset them). Over a cap, nothing is queued (null). A caller may count the item cap
+ *   under its own key and size (`cap`): verification codes do, so strangers asking for codes never use
+ *   up an item's other mail, and the code cap follows the item's own public limits (D822a, T508).
  * - Suppressed addresses (bounces, complaints) and addresses that stopped mail about the item are
  *   skipped. Every mail carries a "Stop emails about this …" link (`stopHref`).
  * - The payload is ids and plain values for the resolver; the template must never print an internal
@@ -28,6 +30,8 @@ export type ExternalMailInput = {
   payload: Record<string, unknown>;
   /** The item the mail is about (a booking, a time poll): caps and the stop link use it. */
   itemRef: { kind: string; id: string };
+  /** The per-item cap under another key and size (default: `itemRef`, 30 a day). */
+  cap?: { ref: { kind: string; id: string }; perDay: number };
   /** Earliest send (reminders). */
   notBeforeMs?: number;
   nowMs?: number;
@@ -39,7 +43,8 @@ export function enqueueExternalMail(input: ExternalMailInput): string | null {
   if (!template?.resolveExternal) throw new Error(`Mail template ${input.template} is not registered for outside addresses`);
   const to = normalizeEmail(input.to);
   if (!isEmail(to)) return null;
-  if (!/^[a-z_]{1,20}$/.test(input.itemRef.kind) || !/^[A-Za-z0-9-]{1,40}$/.test(input.itemRef.id)) throw new Error("Invalid item reference");
+  const capRef = input.cap?.ref ?? input.itemRef;
+  for (const ref of [input.itemRef, capRef]) if (!/^[a-z_]{1,20}$/.test(ref.kind) || !/^[A-Za-z0-9-]{1,40}$/.test(ref.id)) throw new Error("Invalid item reference");
   const nowMs = input.nowMs ?? Date.now();
   if (suppressionOf(to, nowMs)) return null;
   if (externalMailStopped(to, input.itemRef.kind, input.itemRef.id)) return null;
@@ -48,8 +53,8 @@ export function enqueueExternalMail(input: ExternalMailInput): string | null {
   const count = (sql: string, ...params: string[]) => (db.query(sql).get(...params) as { count: number }).count;
   if (count("SELECT COUNT(*) AS count FROM mail_outbox WHERE user_id IS NULL AND to_hash = ? AND created_at > ? AND coalesce_key LIKE 'x:%'", hash, since(3_600_000)) >= EXTERNAL_CAPS.addressHour) return null;
   if (count("SELECT COUNT(*) AS count FROM mail_outbox WHERE user_id IS NULL AND to_hash = ? AND created_at > ? AND coalesce_key LIKE 'x:%'", hash, since(86_400_000)) >= EXTERNAL_CAPS.addressDay) return null;
-  const itemKey = `x:${input.itemRef.kind}:${input.itemRef.id}:`;
-  if (count("SELECT COUNT(*) AS count FROM mail_outbox WHERE user_id IS NULL AND created_at > ? AND substr(coalesce_key, 1, ?) = ?", since(86_400_000), String(itemKey.length), itemKey) >= EXTERNAL_CAPS.itemDay) return null;
+  const itemKey = `x:${capRef.kind}:${capRef.id}:`;
+  if (count("SELECT COUNT(*) AS count FROM mail_outbox WHERE user_id IS NULL AND created_at > ? AND substr(coalesce_key, 1, ?) = ?", since(86_400_000), String(itemKey.length), itemKey) >= (input.cap?.perDay ?? EXTERNAL_CAPS.itemDay)) return null;
   const id = crypto.randomUUID();
   const createdAt = new Date(nowMs).toISOString();
   // A unique coalesce key (never merged) that keeps the item for the per-item cap after the payload is cleared.

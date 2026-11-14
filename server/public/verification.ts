@@ -9,6 +9,7 @@ import { isEmail, normalizeEmail } from "../../shared/questions";
 import { VERIFICATION_CODE_LENGTH, VERIFICATION_MAX_ATTEMPTS, VERIFICATION_TTL_MS } from "../../shared/publicPages";
 import { keyedHash } from "./secret";
 import { logSubmission } from "./limits";
+import { LINK_SUBMISSIONS_PER_HOUR } from "./links";
 
 /**
  * Email verification for public submissions (docs/plan/WORKSPACE_MODULES.md §B.8, T577, T508): a
@@ -49,6 +50,9 @@ registerMailTemplate("public.verification", {
   resolveExternal: (payload) => typeof payload.code === "string" && /^\d{6}$/.test(payload.code) ? { data: { code: payload.code, minutes: Math.round(VERIFICATION_TTL_MS / 60_000) } } : { skip: "empty" }
 });
 
+/** Verification codes an item may send a day: what its public links accept in a day (300 an hour, T508). */
+export const VERIFICATION_ITEM_DAY_CAP = LINK_SUBMISSIONS_PER_HOUR * 24;
+
 export type VerificationStart = { verificationId: string; mailQueued: boolean };
 
 /**
@@ -65,7 +69,11 @@ export function startEmailVerification(input: { kind: string; itemId: string; li
   const code = String(randomInt(0, 10 ** VERIFICATION_CODE_LENGTH)).padStart(VERIFICATION_CODE_LENGTH, "0");
   db.query(`INSERT INTO public_verifications (id, kind, item_id, link_id, email_hash, code_hash, payload_json, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .run(id, input.kind, input.itemId, input.linkId ?? null, keyedHash("email", email), keyedHash("verify-code", `${id}:${code}`), payload, new Date(nowMs + VERIFICATION_TTL_MS).toISOString(), new Date(nowMs).toISOString());
-  const queued = enqueueExternalMail({ to: email, template: "public.verification", payload: { code }, itemRef: { kind: input.kind, id: input.itemId }, nowMs });
+  // Codes count under their own key (`v_<kind>`), never the item's 30-a-day outside-mail cap that strangers
+  // could use up (D822a, T508): the per-address caps (10/hour, 50/day) stop mail bombing, and the item's
+  // cap is what its links can accept in a day (VERIFICATION_ITEM_DAY_CAP).
+  const queued = enqueueExternalMail({ to: email, template: "public.verification", payload: { code }, itemRef: { kind: input.kind, id: input.itemId },
+    cap: { ref: { kind: `v_${input.kind}`.slice(0, 20), id: input.itemId }, perDay: VERIFICATION_ITEM_DAY_CAP }, nowMs });
   logSubmission({ kind: input.kind, itemId: input.itemId, linkId: input.linkId, address: input.address, email, outcome: "verification_sent", nowMs });
   return { verificationId: id, mailQueued: queued !== null };
 }
