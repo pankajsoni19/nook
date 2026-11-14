@@ -1358,6 +1358,23 @@ Threats: **T600** no SQL on the workspace source (a non-JSON or unknown-field qu
 
 Deferred: editing an existing widget in the builder (Inspect → Edit SQL shows and saves the JSON, checked like any edit); cross-dataset queries and joins; Add filter's column picker for datasets; excluding multi-select values; per-reader result caching (each read runs ≤12 SQLite aggregates, ≤1,000 rows each); money shown in major units (datasets return minor units; formats are left to the author).
 
+### D.9 Audit 2 fixes
+
+Time and Goals (lane tg; migration 120):
+
+| # | Decision |
+|---|---|
+| D1140 | **The entry and timer sheets send the work item only when it changes** (TG1): a target the viewer cannot open shows as empty, and sending that empty value unlinked the entry from its card. |
+| D1141 | **The entry sheet sends the start only when the day or start changed** (TG8): the fields hold minutes, so every save dropped the entry's seconds. |
+| D1142 | **Budget alerts fire once per crossing** (TG2): `time_projects.budget_alerted` (migration 120) holds the last `<period>:<threshold>` sent; the dedupe key only folded unread repeats, so every write after the alert was read sent it (and a push) again. Changing the budget clears it. |
+| D1143 | **A project the viewer cannot open is "A project you can't open"** (TG4) wherever an entry shows (card Time sections, entry lists, summaries, which group all such projects in one row, CSV, the `time.entries` dataset, which also drops its id and client); its color reads slate and its client is empty. The dataset builds these columns per query (built at load, the access predicate read as "0"). |
+| D1144 | **`start_timer` refuses when the running timer is on a project the key cannot reach** (TG5), as `stop_timer` does, instead of stopping it. |
+| D1145 | **A carried-over goal counts once in its parent's roll-up** (TG3): the closed original drops out while its live copy (linked by `source`) has the same parent; the copy continues it (D905). |
+| D1146 | **Closing a goal or a period uses fresh numbers** (TG6): auto key results are recomputed (forced) before the snapshot and the 70% score. **Approvals list a week's total by each entry's local day** (TG7), the rule approving locks by, not UTC bounds. |
+| D1147 | **Today's total is bounded by tomorrow** (entries logged ahead are not today's); **`get_time_for_item` with a key over chosen projects totals those projects only** (entries, totals, per person). |
+| D1148 | **A new goal goes in the current period**: the New goal sheet opened from "All periods" (or with no period chosen) picks the open period containing today (the latest-starting when they overlap); "No period" stays a choice. MCP `create_goal` does the same when `periodId` is left out (`null` keeps none). |
+| D1149 | **Goal sheet fields top-align** (UI9): the Start field's hint made the row taller and the Due input stretched to fill it. |
+
 ---
 
 ## E. Design and UX guidelines

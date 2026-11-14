@@ -4,6 +4,16 @@ Release notes for Nook, newest first. Upgrade steps for each release are in [doc
 
 ## Unreleased
 
+**Time and Goals fixes** (audit 2)
+
+- Saving a time entry or the running timer no longer unlinks it from a card you can't open, or trims its start to the minute.
+- Budget alerts arrive once when a project crosses 80% and 100% of its budget, not again on every entry after you read them.
+- People who see a worklog on a card, but not its private project, see "A project you can't open" instead of the project's name, color, and client (card Time section, summaries, CSV, and the time dataset).
+- An MCP key limited to some projects can no longer stop a timer running on another project by starting one, and `get_time_for_item` totals only its projects.
+- Week approvals show the same total that approving locks (each entry's local day); time logged ahead for tomorrow no longer counts as today's.
+- A goal carried over to the next period counts once in its parent's progress; closing a goal or a period uses up-to-date automatic key results.
+- New goals start in the current period (also over MCP when no period is given); the New goal sheet's Start and Due fields line up.
+
 **Workspace modules working together** (Wave 3)
 
 - **Standups and Goals**: a goal update question shows your goals' key results; numbers you type become goal check-ins when you post. Closed rounds can be added to a note of your choice and published. Cards you logged time on show up in "What did you get done".
