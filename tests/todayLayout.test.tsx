@@ -115,6 +115,22 @@ test("storage usage is a card without a count", () => {
   expect(markup).toContain('<h3 id="today-storage">Storage</h3>');
 });
 
+test("a module section with its own renderer is a card without a count", () => {
+  const name = "probeRendered";
+  registerTodayRenderer(name, { title: "Probe", group: "today", empty: "none", app: "Test", render: () => <p className="probe-body">Total</p> });
+  try {
+    const data = response({ [name]: { items: [{ id: "today:2026-09-27", seconds: 60 }], more: false, href: "/time" } });
+    const markup = render([name], data);
+    expect(cardsIn(markup)).toEqual([name]);
+    expect(markup).toContain(`<h3 id="today-${name}">Probe</h3>`);
+    expect(markup).not.toContain("today-section-count");
+    expect(markup).toContain('<p class="probe-body">Total</p>');
+  } finally {
+    delete TODAY_SECTIONS[name];
+    DEFAULT_SECTION_ORDER.splice(DEFAULT_SECTION_ORDER.indexOf(name), 1);
+  }
+});
+
 test("groups are one column on phones, two from 761 px with Housekeeping below, three from 1100 px", async () => {
   const css = await Bun.file(new URL("../src/today/today.css", import.meta.url)).text();
   expect(css).toMatch(/\.today-groups \{ display: grid; grid-template-columns: minmax\(0, 1fr\);[^}]*align-items: start;/);

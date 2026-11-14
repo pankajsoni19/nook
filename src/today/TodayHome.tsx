@@ -61,7 +61,8 @@ export function isQuietSection(name: string, section: TodaySection | undefined, 
 function SectionView({ name, section, date, busy, retrying, onRetry, onOpenRoute }: SectionViewProps) {
   const def = TODAY_SECTIONS[name]!;
   const headingId = `today-${name}`;
-  const count = !busy && section && !section.error && name !== "storage" ? sectionCount(section.items, section.more) : null;
+  // Only a list of rows has a count: Storage and a module's own renderer (Time's total, D836) show one summary item.
+  const count = !busy && section && !section.error && name !== "storage" && !def.render ? sectionCount(section.items, section.more) : null;
   return <section className={`today-section today-section-${name}`} aria-labelledby={headingId} aria-busy={busy || retrying || undefined}>
     <header className="today-section-header">
       <h3 id={headingId}>{def.title}{count && <span className="today-section-count"> · {count}</span>}</h3>
