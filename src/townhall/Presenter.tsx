@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { ArrowBigUp, MessageCircleQuestion, UserRound } from "lucide-react";
 import QRCode from "qrcode";
 import { PresenterView } from "../ui/live/PresenterView";
-import type { TownhallLiveState } from "../../shared/townhall";
+import { authorLabel, type TownhallLiveState } from "../../shared/townhall";
 import { PollView } from "./PollView";
 
 /** A QR code (data URL) for a join link, black on white for any projector. */
@@ -44,7 +44,7 @@ export function Presenter({ state, joinUrl, onExit, onShow }: { state: TownhallL
           <p className="th-present-label"><MessageCircleQuestion aria-hidden="true" />Now answering</p>
           <p className="th-present-text">{pinned.text}</p>
           <p className="th-present-meta">
-            {pinned.author ? <span>{pinned.author}</span> : <span className="th-present-anon"><UserRound aria-hidden="true" />Anonymous</span>}
+            {pinned.author ? <span>{authorLabel(pinned)}</span> : <span className="th-present-anon"><UserRound aria-hidden="true" />Anonymous</span>}
             <span className="th-present-votes"><ArrowBigUp aria-hidden="true" /><span className="ui-tabular">{pinned.votes}</span></span>
           </p>
         </section>

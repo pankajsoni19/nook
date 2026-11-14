@@ -14,9 +14,9 @@ import { cardPath, notePath } from "../friendlyPaths";
 import { emptyQuestionSet, type Question, type QuestionSet } from "../../shared/questions";
 import { isShortId } from "../../shared/friendlyUrls";
 import {
-  TOWNHALL_LIMITS, townhallPath,
+  TOWNHALL_LIMITS, authorLabel, townhallPath,
   type TownhallLiveState, type TownhallModeration, type TownhallPollKind, type TownhallPollView, type TownhallQuestionStatus, type TownhallQuestionView,
-  type TownhallRecap, type TownhallSessionSummary, type TownhallSessionView, type TownhallState, type TownhallYou
+  type TownhallAuthorKind, type TownhallRecap, type TownhallSessionSummary, type TownhallSessionView, type TownhallState, type TownhallYou
 } from "../../shared/townhall";
 import { newTokenSeed, tokenFromSeed } from "./seal";
 import { sessionChanged } from "./live";
@@ -90,6 +90,9 @@ export function sessionRow(ref: string): SessionRow | null {
 
 export const sessionHref = (row: Pick<SessionRow, "title" | "short_id">) => townhallPath(row.title, row.short_id);
 
+/** Whose name is shown (D1104, T621): a member's display name, or a name a public participant typed. */
+const authorKindOf = (row: Pick<QuestionRow, "anonymous" | "author_id">): TownhallAuthorKind => row.anonymous ? null : row.author_id ? "member" : "guest";
+
 /** The person's level on a live session (`none` when missing, binned, or unreadable). */
 export function levelOn(row: SessionRow | null, userId: string): ItemLevel {
   if (!row || row.deleted_at !== null) return "none";
@@ -132,6 +135,18 @@ const voterKey = (viewer: Viewer) => viewer.kind === "user" ? `u:${viewer.userId
 export const voterHash = (sessionId: string, viewer: Viewer) => keyedHash("townhall-voter", `${sessionId}:${voterKey(viewer)}`);
 /** Who asked, for "my questions" on anonymous questions (no author id is stored for them). */
 export const askerHash = (sessionId: string, viewer: Viewer) => keyedHash("townhall-asker", `${sessionId}:${voterKey(viewer)}`);
+/**
+ * A named question's asker hash, salted with the question id (D1101, T620): it never equals the
+ * person's anonymous `askerHash`, so a named row (which stores the author id or typed name) cannot be
+ * matched to the same person's anonymous questions by comparing hashes.
+ */
+const namedAskerHash = (sessionId: string, questionId: string, viewer: Viewer) => keyedHash("townhall-asker-named", `${sessionId}:${questionId}:${voterKey(viewer)}`);
+/** Whether the viewer asked this question: anonymous by the session hash, named by author id (members) or the salted hash (public). */
+function askedBy(question: Pick<QuestionRow, "id" | "anonymous" | "author_id" | "asker_hash">, sessionId: string, viewer: Viewer, anonymousHash?: string): boolean {
+  if (question.anonymous) return question.asker_hash === (anonymousHash ?? askerHash(sessionId, viewer));
+  if (question.author_id) return viewer.kind === "user" && viewer.userId === question.author_id;
+  return viewer.kind === "public" && question.asker_hash === namedAskerHash(sessionId, question.id, viewer);
+}
 /** One poll answer per person (word clouds: a few), the engine's dedupe hash. */
 const pollHash = (pollId: string, viewer: Viewer) => keyedHash("townhall-poll", `${pollId}:${voterKey(viewer)}`);
 const attendeeHash = (sessionId: string, viewer: Viewer) => keyedHash("townhall-attendee", `${sessionId}:${voterKey(viewer)}`);
@@ -294,7 +309,7 @@ export function sessionView(row: SessionRow, userId: string | null): TownhallSes
   };
 }
 
-/** Sessions the person can open, newest first by start (keyset paged by `updated_at, id` within a filter). */
+/** Sessions the person can open: live ones first, then newest by start (keyset paged by rank, start, id). */
 export function listSessions(userId: string, options: { state?: TownhallState | "all"; q?: string; cursor?: string | null; limit?: number; ids?: readonly string[] | null } = {}): { items: TownhallSessionSummary[]; nextCursor: string | null } {
   const limit = Math.min(Math.max(1, options.limit ?? 50), 100);
   const terms = [readableContainerSql("townhall_session", "s")];
@@ -302,24 +317,31 @@ export function listSessions(userId: string, options: { state?: TownhallState | 
   if (options.state && options.state !== "all") { terms.push("s.state = $state"); params.state = options.state; }
   if (options.q?.trim()) { terms.push("instr(lower(s.title), lower($q)) > 0"); params.q = options.q.trim().slice(0, 200); }
   if (options.ids) { terms.push("s.id IN (SELECT value FROM json_each($ids))"); params.ids = JSON.stringify(options.ids); }
+  // Keyset over the whole order (live first, then newest), so paging never repeats or skips a session (D1106).
   const cursor = decodeCursor(options.cursor);
-  if (cursor) { terms.push("(COALESCE(s.starts_at, s.created_at), s.id) < ($cursorAt, $cursorId)"); params.cursorAt = cursor[0]; params.cursorId = cursor[1]; }
-  const rows = db.query(`SELECT s.*, COALESCE(s.starts_at, s.created_at) AS sort_at, u.display_name AS owner_name,
+  if (cursor) {
+    terms.push(`(${RANK_SQL} > $cursorRank OR (${RANK_SQL} = $cursorRank AND (COALESCE(s.starts_at, s.created_at), s.id) < ($cursorAt, $cursorId)))`);
+    params.cursorRank = cursor[0]; params.cursorAt = cursor[1]; params.cursorId = cursor[2];
+  }
+  const rows = db.query(`SELECT s.*, COALESCE(s.starts_at, s.created_at) AS sort_at, ${RANK_SQL} AS sort_rank, u.display_name AS owner_name,
       (SELECT COUNT(*) FROM townhall_questions q WHERE q.session_id = s.id AND q.merged_into IS NULL AND q.status IN ('approved','answered')) AS question_count
     FROM townhall_sessions s JOIN users u ON u.id = s.owner_id WHERE ${terms.join(" AND ")}
-    ORDER BY CASE s.state WHEN 'live' THEN 0 ELSE 1 END, sort_at DESC, s.id DESC LIMIT $limit`).all(params) as Array<SessionRow & { sort_at: string; owner_name: string; question_count: number }>;
+    ORDER BY sort_rank, sort_at DESC, s.id DESC LIMIT $limit`).all(params) as Array<SessionRow & { sort_at: string; sort_rank: number; owner_name: string; question_count: number }>;
   const page = rows.slice(0, limit);
   return {
     items: page.map((row) => ({ id: row.id, shortId: row.short_id, title: row.title, state: row.state, startsAt: row.starts_at, endsAt: row.ends_at, questionCount: row.question_count, ownerName: row.owner_name, href: sessionHref(row), updatedAt: row.updated_at })),
-    nextCursor: rows.length > limit ? Buffer.from(JSON.stringify([page.at(-1)!.sort_at, page.at(-1)!.id])).toString("base64url") : null
+    nextCursor: rows.length > limit ? Buffer.from(JSON.stringify([page.at(-1)!.sort_rank, page.at(-1)!.sort_at, page.at(-1)!.id])).toString("base64url") : null
   };
 }
 
-function decodeCursor(value: string | null | undefined): [string, string] | null {
+const RANK_SQL = "(CASE s.state WHEN 'live' THEN 0 ELSE 1 END)";
+
+/** A list cursor: [rank, sort_at, id]. An older two-part cursor reads as none (the list starts over). */
+function decodeCursor(value: string | null | undefined): [number, string, string] | null {
   if (!value || value.length > 200) return null;
   try {
     const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as unknown;
-    return Array.isArray(parsed) && typeof parsed[0] === "string" && typeof parsed[1] === "string" ? [parsed[0], parsed[1]] : null;
+    return Array.isArray(parsed) && parsed.length === 3 && (parsed[0] === 0 || parsed[0] === 1) && typeof parsed[1] === "string" && typeof parsed[2] === "string" ? [parsed[0], parsed[1], parsed[2]] : null;
   } catch {
     return null;
   }
@@ -373,7 +395,7 @@ export function readQuestion(questionId: string, userId: string) {
   if (!session || level === "none") throw notFound("Question");
   // A pending or hidden question is the moderators' and its asker's only.
   const moderator = isModerator(level, userId);
-  if (!moderator && (question.merged_into || question.status === "hidden" || (question.status === "pending" && question.asker_hash !== askerHash(session.id, { kind: "user", userId })))) throw notFound("Question");
+  if (!moderator && (question.merged_into || question.status === "hidden" || (question.status === "pending" && !askedBy(question, session.id, { kind: "user", userId })))) throw notFound("Question");
   return { question, session, level, moderator };
 }
 
@@ -409,12 +431,14 @@ export function askQuestion(sessionRef: string, viewer: Viewer, input: { text: s
     if (count >= TOWNHALL_LIMITS.questionsPerSession) throw new TownhallError(409, "LIMIT_REACHED", "This session has reached its question limit");
     db.query(`INSERT INTO townhall_questions (id, session_id, author_id, author_label, anonymous, asker_hash, body, status, via, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, row.id, viewer.kind === "user" && !anonymous ? viewer.userId : null,
-      viewer.kind === "public" && !anonymous ? input.name!.trim().slice(0, TOWNHALL_LIMITS.name) : null, anonymous ? 1 : 0, askerHash(row.id, viewer), text, status, via, timestamp, timestamp);
-    recordItemActivity({ itemKind: "townhall_session", itemId: row.id, actorId: viewer.kind === "user" && !anonymous ? viewer.userId : null, kind: "townhall_asked", via: viewer.kind === "public" ? "public" : undefined, payload: { item: { id, label: "Question" } } });
-    audit(viewer.kind === "user" ? viewer.userId : null, null, "townhall.question_asked", { sessionId: row.id, questionId: id, anonymous, status, via });
+      viewer.kind === "public" && !anonymous ? input.name!.trim().slice(0, TOWNHALL_LIMITS.name) : null, anonymous ? 1 : 0, anonymous ? askerHash(row.id, viewer) : namedAskerHash(row.id, id, viewer), text, status, via, timestamp, timestamp);
+    // An anonymous question names nobody anywhere: no actor on its activity, audit row (and so the server log), or notification (D1100, T620).
+    const actor = viewer.kind === "user" && !anonymous ? viewer.userId : null;
+    recordItemActivity({ itemKind: "townhall_session", itemId: row.id, actorId: actor, kind: "townhall_asked", via: viewer.kind === "public" ? "public" : undefined, payload: { item: { id, label: "Question" } } });
+    audit(actor, null, "townhall.question_asked", { sessionId: row.id, ...(anonymous ? {} : { questionId: id }), anonymous, status, via });
     if (status === "pending") {
       const pending = (db.query("SELECT COUNT(*) AS count FROM townhall_questions WHERE session_id = ? AND status = 'pending' AND merged_into IS NULL").get(row.id) as { count: number }).count;
-      notify({ userIds: [row.owner_id], module: "townhall", topic: "townhall.review", title: `${pending} ${pending === 1 ? "question" : "questions"} to review in ${row.title}`, href: `${sessionHref(row)}?filter=review`, item: { kind: "townhall_session", id: row.id }, actor: viewer.kind === "user" ? viewer.userId : null, dedupeKey: `townhall:review:${row.id}` });
+      notify({ userIds: [row.owner_id], module: "townhall", topic: "townhall.review", title: `${pending} ${pending === 1 ? "question" : "questions"} to review in ${row.title}`, href: `${sessionHref(row)}?filter=review`, item: { kind: "townhall_session", id: row.id }, actor, dedupeKey: `townhall:review:${row.id}` });
     }
     return questionView(db.query("SELECT * FROM townhall_questions WHERE id = ?").get(id) as QuestionRow, row, viewer, moderator);
   })();
@@ -428,12 +452,13 @@ export function withdrawQuestion(questionId: string, viewer: Viewer, publicSessi
   if (!question) throw notFound("Question");
   const session = viewer.kind === "user" ? sessionRow(question.session_id) : publicSession && publicSession.id === question.session_id ? publicSession : null;
   if (!session || (viewer.kind === "user" && levelOn(session, viewer.userId) === "none")) throw notFound("Question");
-  if (question.asker_hash !== askerHash(session.id, viewer)) throw notFound("Question");
+  if (!askedBy(question, session.id, viewer)) throw notFound("Question");
   if (question.status === "answered") throw new TownhallError(409, "ANSWERED", "An answered question stays in the session");
   db.transaction(() => {
     db.query("DELETE FROM townhall_questions WHERE id = ?").run(question.id);
     if (session.pinned_question_id === question.id) db.query("UPDATE townhall_sessions SET pinned_question_id = NULL WHERE id = ?").run(session.id);
-    audit(viewer.kind === "user" ? viewer.userId : null, null, "townhall.question_withdrawn", { sessionId: session.id, questionId: question.id });
+    const anonymous = question.anonymous === 1;
+    audit(viewer.kind === "user" && !anonymous ? viewer.userId : null, null, "townhall.question_withdrawn", { sessionId: session.id, ...(anonymous ? { anonymous } : { questionId: question.id }) });
   })();
   sessionChanged(session.id);
   return { withdrawn: true };
@@ -448,7 +473,7 @@ export function voteQuestion(questionId: string, viewer: Viewer, upvote: boolean
     session = readQuestion(questionId, viewer.userId).session;
   } else {
     session = publicSession && publicSession.id === question.session_id ? publicSession : null;
-    if (!session || (question.status !== "approved" && question.status !== "answered" && !(question.status === "pending" && question.asker_hash === askerHash(session.id, viewer)))) throw notFound("Question");
+    if (!session || (question.status !== "approved" && question.status !== "answered" && !(question.status === "pending" && askedBy(question, session.id, viewer)))) throw notFound("Question");
   }
   if (!session) throw notFound("Question");
   if (session.state === "ended") throw new TownhallError(409, "SESSION_ENDED", "This session has ended");
@@ -519,12 +544,12 @@ export function moderateQuestion(questionId: string, userId: string, action: Tow
   return result;
 }
 
-function questionView(row: QuestionRow, session: SessionRow, viewer: Viewer, moderator: boolean, extra?: { voted?: boolean; merged?: number; comments?: number; names?: Map<string, string> }): TownhallQuestionView {
+function questionView(row: QuestionRow, session: SessionRow, viewer: Viewer, moderator: boolean, extra?: { voted?: boolean; merged?: number; comments?: number; names?: Map<string, string>; mineHash?: string }): TownhallQuestionView {
   const name = row.anonymous ? null : row.author_id ? (extra?.names?.get(row.author_id) ?? ownerName(row.author_id)) : row.author_label ?? null;
   return {
-    id: row.id, text: row.body, author: name, votes: row.vote_count,
+    id: row.id, text: row.body, author: name, authorKind: authorKindOf(row), votes: row.vote_count,
     voted: extra?.voted ?? Boolean(db.query("SELECT 1 FROM townhall_votes WHERE question_id = ? AND voter_hash = ?").get(row.id, voterHash(session.id, viewer))),
-    status: row.status, pinned: session.pinned_question_id === row.id, starred: moderator && row.starred === 1, mine: row.asker_hash === askerHash(session.id, viewer),
+    status: row.status, pinned: session.pinned_question_id === row.id, starred: moderator && row.starred === 1, mine: askedBy(row, session.id, viewer, extra?.mineHash),
     createdAt: row.created_at, answeredAt: row.answered_at, mergedCount: extra?.merged ?? 0, commentCount: extra?.comments ?? 0,
     card: moderator ? cardRef(row.card_id) : null
   };
@@ -762,14 +787,14 @@ export function liveState(row: SessionRow, viewer: Viewer, level: ItemLevel | "p
   };
   const rows = db.query("SELECT * FROM townhall_questions WHERE session_id = ? AND merged_into IS NULL ORDER BY created_at, id LIMIT 2000").all(row.id) as QuestionRow[];
   const mineHash = askerHash(row.id, viewer);
-  const shown = rows.filter((question) => moderator || question.status === "approved" || question.status === "answered" || (question.status === "pending" && question.asker_hash === mineHash));
+  const shown = rows.filter((question) => moderator || question.status === "approved" || question.status === "answered" || (question.status === "pending" && askedBy(question, row.id, viewer, mineHash)));
   const voted = new Set((db.query("SELECT v.question_id AS id FROM townhall_votes v JOIN townhall_questions q ON q.id = v.question_id WHERE q.session_id = ? AND v.voter_hash = ?").all(row.id, voterHash(row.id, viewer)) as Array<{ id: string }>).map((entry) => entry.id));
   const merged = new Map((db.query("SELECT merged_into AS id, COUNT(*) AS count FROM townhall_questions WHERE session_id = ? AND merged_into IS NOT NULL GROUP BY merged_into").all(row.id) as Array<{ id: string; count: number }>).map((entry) => [entry.id, entry.count]));
   const comments = level === "public" ? new Map<string, number>() : new Map((db.query(`SELECT c.item_id AS id, COUNT(*) AS count FROM item_comments c JOIN townhall_questions q ON q.id = c.item_id
     WHERE c.item_kind = 'townhall_question' AND q.session_id = ? AND c.deleted_at IS NULL GROUP BY c.item_id`).all(row.id) as Array<{ id: string; count: number }>).map((entry) => [entry.id, entry.count]));
   const authorIds = [...new Set(shown.filter((question) => question.author_id && !question.anonymous).map((question) => question.author_id!))];
   const names = new Map(authorIds.length ? (db.query(`SELECT id, display_name FROM users WHERE id IN (SELECT value FROM json_each(?))`).all(JSON.stringify(authorIds)) as Array<{ id: string; display_name: string }>).map((entry) => [entry.id, entry.display_name]) : []);
-  const questions = shown.map((question) => questionView(question, row, viewer, moderator, { voted: voted.has(question.id), merged: merged.get(question.id) ?? 0, comments: comments.get(question.id) ?? 0, names }));
+  const questions = shown.map((question) => questionView(question, row, viewer, moderator, { voted: voted.has(question.id), merged: merged.get(question.id) ?? 0, comments: comments.get(question.id) ?? 0, names, mineHash }));
   const participants = (db.query("SELECT COUNT(*) AS count FROM townhall_attendance WHERE session_id = ?").get(row.id) as { count: number }).count;
   const state: TownhallLiveState = {
     session: sessionView(row, userId),
@@ -807,6 +832,7 @@ export function recap(ref: string, userId: string): TownhallRecap {
   const questions = db.query(`SELECT q.*, u.display_name AS author_name FROM townhall_questions q LEFT JOIN users u ON u.id = q.author_id
     WHERE q.session_id = ? AND q.merged_into IS NULL ORDER BY q.vote_count DESC, q.created_at LIMIT 2000`).all(row.id) as Array<QuestionRow & { author_name: string | null }>;
   const author = (question: QuestionRow & { author_name: string | null }) => question.anonymous ? null : question.author_name ?? question.author_label ?? null;
+  const shownToReader = (question: QuestionRow) => question.status !== "hidden" && (moderator || question.status !== "pending");
   const answered = questions.filter((question) => question.status === "answered");
   const open = questions.filter((question) => question.status === "approved" || (moderator && question.status === "pending"));
   const attendance = db.query("SELECT via, COUNT(*) AS count FROM townhall_attendance WHERE session_id = ? GROUP BY via").all(row.id) as Array<{ via: string; count: number }>;
@@ -818,11 +844,12 @@ export function recap(ref: string, userId: string): TownhallRecap {
     totals: {
       questions: questions.filter((question) => question.status !== "hidden" && question.status !== "pending").length, answered: answered.length, unanswered: open.length,
       hidden: moderator ? questions.filter((question) => question.status === "hidden").length : 0,
-      votes: questions.filter((question) => question.status !== "hidden").reduce((sum, question) => sum + question.vote_count, 0),
+      // Upvotes on questions this reader can see: a pending question is the hosts' only (D1109).
+      votes: questions.filter(shownToReader).reduce((sum, question) => sum + question.vote_count, 0),
       participants: members + publicCount, members, publicParticipants: publicCount, polls: polls.length
     },
-    answered: answered.map((question) => ({ id: question.id, text: question.body, votes: question.vote_count, author: author(question), answeredAt: question.answered_at })),
-    unanswered: open.map((question) => ({ id: question.id, text: question.body, votes: question.vote_count, author: author(question), card: moderator ? cardRef(question.card_id) : null })),
+    answered: answered.map((question) => ({ id: question.id, text: question.body, votes: question.vote_count, author: author(question), authorKind: authorKindOf(question), answeredAt: question.answered_at })),
+    unanswered: open.map((question) => ({ id: question.id, text: question.body, votes: question.vote_count, author: author(question), authorKind: authorKindOf(question), card: moderator ? cardRef(question.card_id) : null })),
     polls: polls.map((poll) => ({
       id: poll.id, kind: poll.kind, title: poll.title, total: poll.total, average: poll.average,
       results: poll.kind === "single" || poll.kind === "multi" ? poll.options.map((option) => ({ label: option.label, count: poll.counts?.[option.id] ?? 0 }))
@@ -842,10 +869,10 @@ export function recapMarkdown(data: TownhallRecap): string {
   lines.push(`- ${data.totals.participants} participants, ${data.totals.questions} questions, ${data.totals.votes} upvotes`, `- ${data.totals.answered} answered, ${data.totals.unanswered} still open`, `- ${data.totals.polls} polls`, "");
   lines.push("## Answered", "");
   if (!data.answered.length) lines.push("None.", "");
-  for (const question of data.answered) lines.push(`- ${mdEscape(question.text)} (${question.votes} ▲${question.author ? `, ${mdEscape(question.author)}` : ""})`);
+  for (const question of data.answered) lines.push(`- ${mdEscape(question.text)} (${question.votes} ▲${question.author ? `, ${mdEscape(authorLabel(question) ?? "")}` : ""})`);
   lines.push("", "## Still open", "");
   if (!data.unanswered.length) lines.push("None.", "");
-  for (const question of data.unanswered) lines.push(`- [ ] ${mdEscape(question.text)} (${question.votes} ▲${question.author ? `, ${mdEscape(question.author)}` : ""})`);
+  for (const question of data.unanswered) lines.push(`- [ ] ${mdEscape(question.text)} (${question.votes} ▲${question.author ? `, ${mdEscape(authorLabel(question) ?? "")}` : ""})`);
   if (data.polls.length) {
     lines.push("", "## Polls", "");
     for (const poll of data.polls) {
@@ -869,7 +896,7 @@ export function recapCsv(ref: string, userId: string): string {
     return /[",\n\r]/.test(text) || text.startsWith("'") ? `"${text.replace(/"/g, '""')}"` : text;
   };
   const lines = [["Question", "Status", "Upvotes", "Asked by", "Asked at", "Answered at"].map(cell).join(",")];
-  for (const question of rows) lines.push([question.body, question.status, question.vote_count, question.anonymous ? "Anonymous" : question.author_name ?? question.author_label ?? "", question.created_at, question.answered_at ?? ""].map(cell).join(","));
+  for (const question of rows) lines.push([question.body, question.status, question.vote_count, question.anonymous ? "Anonymous" : question.author_name ?? authorLabel({ author: question.author_label, authorKind: "guest" }) ?? "", question.created_at, question.answered_at ?? ""].map(cell).join(","));
   return `${lines.join("\r\n")}\r\n`;
 }
 
