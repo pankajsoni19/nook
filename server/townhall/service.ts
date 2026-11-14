@@ -929,5 +929,7 @@ export function runReminder(sessionId: string) {
   const members = (db.query("SELECT user_id FROM item_members WHERE item_kind = 'townhall_session' AND item_id = ?").all(row.id) as Array<{ user_id: string }>).map((entry) => entry.user_id);
   const recipients = [...new Set([row.owner_id, ...askers, ...members])].filter((id) => levelOn(row, id) !== "none");
   const minutes = row.reminder_minutes;
-  notify({ userIds: recipients, includeActor: true, module: "townhall", topic: "townhall.reminder", title: `${row.title} starts in ${minutes >= 60 ? `${Math.round(minutes / 60)} h` : `${minutes} min`}`, body: "Add your questions before it starts.", href: sessionHref(row), item: { kind: "townhall_session", id: row.id }, dedupeKey: `townhall:remind:${row.id}` });
+  notify({ userIds: recipients, includeActor: true, module: "townhall", topic: "townhall.reminder", title: `${row.title} starts in ${minutes >= 60 ? `${Math.round(minutes / 60)} h` : `${minutes} min`}`, body: "Add your questions before it starts.", href: sessionHref(row), item: { kind: "townhall_session", id: row.id }, dedupeKey: `townhall:remind:${row.id}`,
+    // And by email under the Townhall switch (D1055); the template re-reads the session at send time.
+    email: { template: "townhall.reminder", payload: { sessionId: row.id }, coalesceKey: `townhall-remind:${row.id}` } });
 }
