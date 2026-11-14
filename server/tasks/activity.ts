@@ -1,6 +1,7 @@
 import { auditVia, db, now } from "../db";
 import { readableBoard, readableCard } from "./access";
 import { boardStructure } from "./hierarchy";
+import { reportCardChange } from "./cardEvents";
 import { estimateBadge, type EstimateKind } from "../../shared/estimates";
 import {
   ACTIVITY_COALESCE_MS,
@@ -87,6 +88,7 @@ export function recordCardActivity(input: RecordActivityInput) {
       } else {
         db.query("UPDATE card_activity SET payload = ?, created_at = ? WHERE id = ?").run(JSON.stringify(merged), at, latest.id);
       }
+      reportCardChange({ activityId: latest.id, cardId: input.cardId, boardId: input.boardId, actorId: input.actorId, kind: input.kind, at });
       return latest.id;
     }
   }
@@ -97,6 +99,8 @@ export function recordCardActivity(input: RecordActivityInput) {
   const id = Bun.randomUUIDv7();
   db.query("INSERT INTO card_activity (id, card_id, board_id, actor_id, actor_label, via, kind, payload, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
     .run(id, input.cardId, input.boardId, input.actorId, clip(label), via, input.kind, JSON.stringify(payload), at);
+  // Other modules hear about it after the transaction (D1040); Tasks' own behaviour is unchanged.
+  reportCardChange({ activityId: id, cardId: input.cardId, boardId: input.boardId, actorId: input.actorId, kind: input.kind, at });
   return id;
 }
 
