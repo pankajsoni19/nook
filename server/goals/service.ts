@@ -1053,6 +1053,12 @@ function checkPeriodInput(input: { name?: string; startsOn?: string; endsOn?: st
   for (const value of [input.startsOn, input.endsOn]) if (value !== undefined && !DATE.test(value)) throw invalid("Dates are YYYY-MM-DD");
 }
 
+/** D1264: period names are unique (case aside), so a second "Add period" never makes a twin. */
+function requireUniquePeriodName(name: string, exceptId: string | null = null) {
+  const taken = db.query("SELECT 1 FROM goal_periods WHERE lower(name) = lower(?) AND id IS NOT ? LIMIT 1").get(name.trim(), exceptId);
+  if (taken) throw new GoalError(409, "DUPLICATE_PERIOD", `There is already a period named “${name.trim()}”. Choose another name.`);
+}
+
 function schedulePeriodEnd(period: PeriodRow) {
   const at = Date.parse(`${period.ends_on}T09:00:00Z`) - 7 * 86_400_000;
   if (period.archived_at || at <= Date.now()) { cancelSchedules({ kind: "goal_period", id: period.id }); return; }
@@ -1065,6 +1071,7 @@ export function createPeriod(userId: string, input: { name: string; startsOn: st
   if (input.endsOn <= input.startsOn) throw invalid("A period ends after it starts");
   const id = Bun.randomUUIDv7();
   db.transaction(() => {
+    requireUniquePeriodName(input.name);
     db.query("INSERT INTO goal_periods (id, name, starts_on, ends_on, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(id, input.name.trim(), input.startsOn, input.endsOn, userId, now(), now());
     schedulePeriodEnd(db.query("SELECT * FROM goal_periods WHERE id = ?").get(id) as PeriodRow);
     audit(userId, null, "goals.period_create", { periodId: id });
@@ -1087,6 +1094,7 @@ export function updatePeriod(userId: string, periodId: string, input: { name?: s
   const ends = input.endsOn ?? period.ends_on;
   if (ends <= starts) throw invalid("A period ends after it starts");
   db.transaction(() => {
+    if (input.name !== undefined) requireUniquePeriodName(input.name, period.id);
     db.query("UPDATE goal_periods SET name = ?, starts_on = ?, ends_on = ?, archived_at = ?, updated_at = ? WHERE id = ?")
       .run(input.name?.trim() ?? period.name, starts, ends, input.archived === undefined ? period.archived_at : input.archived ? period.archived_at ?? now() : null, now(), period.id);
     schedulePeriodEnd(db.query("SELECT * FROM goal_periods WHERE id = ?").get(period.id) as PeriodRow);

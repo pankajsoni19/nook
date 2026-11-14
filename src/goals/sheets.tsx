@@ -419,8 +419,7 @@ export function CloseSheet({ goal, onClose, onSaved }: { goal: GoalDetail; onClo
 // ------------------------------------------------------------------------------------------------
 // Periods.
 
-function nextQuarters(count: number) {
-  const now = new Date();
+function nextQuarters(count: number, now = new Date()) {
   const quarters: Array<{ name: string; startsOn: string; endsOn: string }> = [];
   let year = now.getUTCFullYear();
   let quarter = Math.floor(now.getUTCMonth() / 3);
@@ -434,23 +433,40 @@ function nextQuarters(count: number) {
   return quarters;
 }
 
+/**
+ * D1264: the quarter "Add period" suggests: the first from this one on whose name no period has yet
+ * (case aside), so adding twice in a row moves on instead of offering a twin. Null after two years.
+ */
+export function nextPeriodSuggestion(periods: ReadonlyArray<{ name: string }>, now = new Date()) {
+  const taken = new Set(periods.map((period) => period.name.trim().toLowerCase()));
+  return nextQuarters(8, now).find((quarter) => !taken.has(quarter.name.toLowerCase())) ?? null;
+}
+
 export function PeriodsSheet({ onClose, onChanged, canWrite }: { onClose: () => void; onChanged: (message: string) => void; canWrite: boolean }) {
   const [periods, setPeriods] = useState<Period[] | null>(null);
-  const suggestions = useMemo(() => nextQuarters(3), []);
-  const [name, setName] = useState(suggestions[0]!.name);
-  const [startsOn, setStartsOn] = useState(suggestions[0]!.startsOn);
-  const [endsOn, setEndsOn] = useState(suggestions[0]!.endsOn);
+  const first = useMemo(() => nextQuarters(1)[0]!, []);
+  const [name, setName] = useState(first.name);
+  const [startsOn, setStartsOn] = useState(first.startsOn);
+  const [endsOn, setEndsOn] = useState(first.endsOn);
   const [closing, setClosing] = useState<Period | null>(null);
   const [carryTo, setCarryTo] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const load = () => listPeriods(true).then((body) => setPeriods(body.periods), (reason) => setError(errorText(reason, "Could not load periods")));
   useEffect(() => { void load(); }, []);
+  // D1264: once the list is in (first load, or after an add), a name it already has moves on to the next free quarter.
+  useEffect(() => {
+    if (!periods || !periods.some((period) => period.name.trim().toLowerCase() === name.trim().toLowerCase())) return;
+    const next = nextPeriodSuggestion(periods);
+    if (next) { setName(next.name); setStartsOn(next.startsOn); setEndsOn(next.endsOn); }
+    // Only a new list re-suggests; typing a name never jumps.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [periods]);
   const run = async (operation: () => Promise<string>) => {
     setBusy(true); setError(null);
     try { onChanged(await operation()); await load(); } catch (reason) { setError(errorText(reason, "Could not save")); } finally { setBusy(false); }
   };
-  const add = () => run(async () => { await createPeriod({ name: name.trim(), startsOn, endsOn }); const next = suggestions.find((item) => !periods?.some((period) => period.name === item.name) && item.name !== name); if (next) { setName(next.name); setStartsOn(next.startsOn); setEndsOn(next.endsOn); } return `${name.trim()} added`; });
+  const add = () => run(async () => { await createPeriod({ name: name.trim(), startsOn, endsOn }); return `${name.trim()} added`; });
   return <Sheet title="Periods" onClose={onClose} busy={busy} onSubmit={canWrite ? add : onClose} submitLabel={canWrite ? "Add period" : "Done"} error={error}>
     {periods === null ? <p className="goals-note" role="status">Loading periods…</p> : periods.length === 0 ? <p className="goals-note">No periods yet. Quarters work well: add one below.</p> :
       <ul className="goals-periods">{periods.map((period) => <li key={period.id}>

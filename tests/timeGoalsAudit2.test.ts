@@ -252,4 +252,14 @@ describe("goals (TG3, TG6, D1145, D1146, D1148)", () => {
     expect((await mcpCall(key, "create_goal", { title: "No period goal", periodId: null })).isError).toBe(false);
     expect((db.query("SELECT period_id FROM goals WHERE title = 'No period goal'").get() as Json).period_id).toBeNull();
   });
+
+  test("a second period of the same name is refused, case aside, on create and rename (D1264)", async () => {
+    const twin = await goals(owner, "POST", "/goal-periods", { name: "audit q1", startsOn: "2026-01-01", endsOn: "2026-03-31" });
+    expect(twin.status).toBe(409);
+    expect(twin.body.error).toContain("There is already a period named");
+    expect((db.query("SELECT COUNT(*) AS n FROM goal_periods WHERE lower(name) = 'audit q1'").get() as Json).n).toBe(1);
+    expect((await goals(owner, "PATCH", `/goal-periods/${q2}`, { name: "Audit Q1" })).status).toBe(409);
+    // Renaming a period to its own name (or saving it unchanged) is fine.
+    expect((await goals(owner, "PATCH", `/goal-periods/${q2}`, { name: "Audit Q2" })).status).toBe(200);
+  });
 });
