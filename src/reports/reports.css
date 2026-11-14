@@ -382,3 +382,25 @@
 /* An empty report: the two ways to get charts, above its console. */
 .report-empty-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: -6px 0 18px; }
 @media (max-width: 760px) { .report-empty-actions > button { flex: 1 1 auto; } }
+
+/* W3-REPORTS (D1067): reports on This workspace: the live note, the empty state, and Add widget. */
+.report-facts .report-live-note { padding: 1px 8px; border-radius: 999px; border: 1px solid var(--report-border, #d9d9de); color: inherit; }
+.report-workspace-empty { display: grid; gap: 8px; padding: 18px; margin: 4px 0 18px; border: 1px dashed var(--report-border, #d9d9de); border-radius: 10px; }
+.report-workspace-empty h2 { margin: 0; font-size: 1.05rem; }
+.report-workspace-empty p { margin: 0; color: #6b6b73; max-width: 64ch; }
+.report-workspace-empty .report-empty-actions { margin: 6px 0 0; }
+.report-widget-sheet .report-widget-field { display: grid; gap: 6px; min-width: 0; }
+.report-widget-sheet .report-widget-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.report-widget-sheet .report-widget-group { display: grid; gap: 8px; margin: 0; padding: 10px 12px 12px; border: 1px solid var(--report-border, #d9d9de); border-radius: 8px; min-width: 0; }
+.report-widget-sheet .report-widget-group legend { padding: 0 4px; font-weight: 600; font-size: .9rem; }
+.report-widget-sheet .report-widget-row { display: flex; gap: 8px; align-items: center; min-width: 0; }
+.report-widget-sheet .report-widget-row > :first-child { flex: 1 1 auto; min-width: 0; }
+.report-widget-sheet .report-widget-filter { flex-wrap: wrap; }
+.report-widget-sheet .report-widget-filter > * { flex: 1 1 140px; min-width: 0; }
+.report-widget-sheet .report-widget-filter > .icon-button { flex: 0 0 44px; }
+.report-widget-sheet .report-widget-row .icon-button { min-width: 44px; min-height: 44px; }
+.report-widget-sheet .report-widget-add { justify-self: start; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; }
+.report-widget-sheet .report-widget-problem { color: #8a5a00; }
+.report-widget-sheet input { min-height: 44px; }
+.report-widget-sheet input { border: 1px solid #333338; border-radius: 10px; padding: 0 12px; background: #0b0b0d; color: #ededee; font-size: .92rem; outline: 0; }
+.report-widget-sheet input:focus { border-color: #6b582f; }

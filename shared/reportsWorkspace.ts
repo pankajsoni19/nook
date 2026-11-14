@@ -16,8 +16,11 @@
  * Pure: no server or client imports beyond shared/, so both sides and the tests share it.
  */
 
-import { DATASET_MEASURES, FILTER_OPS, TIME_BUCKETS, type DatasetColumnType, type DatasetFilter, type StructuredQuery, type TimeBucket } from "./datasets";
+import { DATASET_MEASURES, FILTER_OPS, TIME_BUCKETS, type DatasetColumnType, type DatasetFilter, type DatasetInfo, type StructuredQuery, type TimeBucket } from "./datasets";
 import { DATE_PRESETS, parseArrayLiteral, resolveDateRange, unescapeParamString, type BoundParam, type DatePreset } from "./reportParams";
+
+/** GET /api/reports/workspace/datasets (the widget editor). */
+export type WorkspaceCatalog = { datasets: DatasetInfo[] };
 
 /** The data source id a workspace report shows as (`datasourceId`), and its name. */
 export const WORKSPACE_SOURCE_ID = "workspace";

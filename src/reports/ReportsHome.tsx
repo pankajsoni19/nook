@@ -540,7 +540,7 @@ export function ReportsHome({ displayName, role, onHome, onSettings, onSignOut, 
           {plain && !view && noSources && (role === "admin"
             ? <><p>Reports query a ClickHouse data source. Add one first.</p><button className="primary-button" onClick={onOpenDatasources}><Database />Add a data source</button></>
             : <p>Reports query a ClickHouse data source, and none is set up yet. Ask an admin to add one.</p>)}
-          {plain && !view && !noSources && <p>Paste a doc that describes your metrics and let AI build the report, or write SQL against your team's warehouse yourself.</p>}
+          {plain && !view && !noSources && <p>Paste a doc that describes your metrics and let AI build the report, build one from this workspace's own data, or write SQL against your team's warehouse yourself.</p>}
           {plain && currentFolder && <p>Drag a report here, use Move to… in a report's ⋯ menu, or create one in this folder.</p>}
           {plain && view === "shared" && <p>Reports other people share with you appear here.</p>}
           {plain && currentList && !currentList.hidden && <p>{curating ? "Add reports with Add to list… in a report’s ⋯ menu or on its page, or drag a report onto the list." : "Its curators haven’t added reports yet."}</p>}

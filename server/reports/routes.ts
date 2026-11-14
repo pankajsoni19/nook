@@ -17,6 +17,7 @@ import { registerGenerateRoutes } from "./generateRoutes";
 import { registerReportViewRoutes } from "./viewRoutes";
 import { registerReportEditRoutes } from "./editRoutes";
 import { registerQueryEditRoutes } from "./queryEditRoutes";
+import { registerWorkspaceReportRoutes } from "./workspaceRoutes";
 import { registerReportFolderRoutes } from "./folderRoutes";
 import { registerReportListRoutes } from "./listRoutes";
 import { ownerReview } from "./ownerReview";
@@ -125,6 +126,8 @@ const adminOnly = (handler: Handler): Handler => (c) => {
 };
 
 export function registerReportRoutes(app: Hono<AppEnv>) {
+  // W3-REPORTS (D1067): before `/api/reports/:reportId`, so `workspace` is never read as a report id.
+  registerWorkspaceReportRoutes(app);
   // --- Admin: Settings → Report owners (D500): reports nobody can manage, or the admin cannot open; pages by cursor (D505) ---
   app.get("/api/reports/admin/owner-review", handle(adminOnly((c) => {
     const query = ownerReviewSchema.parse(c.req.query());

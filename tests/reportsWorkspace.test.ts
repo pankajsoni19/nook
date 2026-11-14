@@ -154,3 +154,43 @@ describe("workspace queries (shared/reportsWorkspace.ts)", () => {
     expect(missingDatasetScope(hoursByPerson, (scope) => scope === "time:read")).toBeNull();
   });
 });
+
+describe("generating a workspace report with the AI (scripted provider)", () => {
+  test("the prompt carries the dataset catalog, the schema tools are gone, and run_sql takes a structured query", async () => {
+    const { startScriptedProvider } = await import("../scripts/fakeReportProvider");
+    const { DEFAULT_COMPAT } = await import("../shared/agents");
+    const { generateDeps, liveGenerations } = await import("../server/reports/generate");
+    const provider = startScriptedProvider(0, (context) => {
+      if (context.step === 1) return { toolCalls: [{ name: "run_sql", arguments: { sql: hoursByPerson, purpose: "Hours by person", key: "hours" } }] };
+      return { toolCalls: [{ name: "submit_report", arguments: { title: "Hours by person this month", sections: [], parameters: [], queries: [{ key: "hours", sql: hoursByPerson, purpose: "Hours by person" }],
+        blocks: [{ id: "hours", type: "table", intent: "detail", title: "Hours by person", queryKey: "hours" }] } }] };
+    });
+    const original = generateDeps.connection;
+    generateDeps.connection = () => ({ id: "scripted", baseUrl: provider.baseUrl, apiKey: null, model: "scripted-report-model", compat: DEFAULT_COMPAT });
+    try {
+      const noteId = (await send(owner, "POST", "/notes", { folderId: null })).body.note.id as string;
+      expect((await send(owner, "PUT", `/notes/${noteId}/draft`, { markdown: "# Hours\n\nHours by person this month.", revision: 1 })).status).toBe(200);
+      expect((await send(owner, "POST", `/notes/${noteId}/publish`)).status).toBe(200);
+      const started = await send(owner, "POST", "/reports/generate", { docRef: noteId, serverId: "nook", datasourceId: "workspace" });
+      expect(started.status).toBe(202);
+      const until = Date.now() + 20_000;
+      while (liveGenerations().length && Date.now() < until) await Bun.sleep(20);
+      const run = db.query("SELECT status, error FROM report_runs WHERE id = ?").get(started.body.run.id) as { status: string; error: string | null };
+      expect(run).toMatchObject({ status: "succeeded" });
+      const first = provider.calls[0]!;
+      const system = String(first.messages?.[0]?.content ?? "");
+      expect(system).toContain("## Datasets you can query");
+      expect(system).toContain("### time.entries");
+      expect(system).not.toContain("ClickHouse dialect");
+      const tools = (first.tools ?? []).map((tool) => tool.function.name);
+      expect(tools).toContain("run_sql");
+      expect(tools).not.toContain("search_schema");
+      const reportId = started.body.report.id as string;
+      expect((db.query("SELECT source FROM reports WHERE id = ?").get(reportId) as { source: string }).source).toBe("workspace");
+      expect((await send(owner, "GET", `/reports/${reportId}/results`)).body.results[0].result.rows).toEqual([["Workspace report owner", 4]]);
+    } finally {
+      generateDeps.connection = original;
+      provider.stop();
+    }
+  });
+});
