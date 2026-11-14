@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PublicNotFound, PublicPageShell } from "../public/PublicPageShell";
 import { QaList, type QaQuestion } from "../ui/live/QaList";
 import { appName } from "../appName";
-import type { TownhallLiveState } from "../../shared/townhall";
+import { authorLabel, type TownhallLiveState } from "../../shared/townhall";
 import { TOWNHALL_LIMITS } from "../../shared/townhall";
 import { PollView } from "./PollView";
 import { useLiveState } from "./useLiveState";
@@ -25,7 +25,7 @@ const writeStored = (token: string, value: string) => { try { window.localStorag
 async function call<T>(path: string, body?: unknown): Promise<T> {
   const response = await fetch(`/api/public/townhall/${path}`, body === undefined ? { headers: { Accept: "application/json" } } : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
-  if (!response.ok) throw Object.assign(new Error(typeof payload.error === "string" ? payload.error : "Something went wrong"), { status: response.status, payload });
+  if (!response.ok) throw Object.assign(new Error(typeof payload.error === "string" ? payload.error : "Something went wrong"), { status: response.status, payload, retryAfter: Number(response.headers.get("Retry-After")) || undefined });
   return payload as T;
 }
 
@@ -35,6 +35,7 @@ export default function PublicTownhall({ path }: { path: string }) {
   const [nonce, setNonce] = useState<string | null>(null);
   const [name, setName] = useState(() => { try { return window.localStorage.getItem("townhall:name") ?? ""; } catch { return ""; } });
   const [sort, setSort] = useState<"top" | "recent">("top");
+  const honeypot = useRef<HTMLInputElement>(null);
   const load = useCallback(async () => {
     const stored = readStored(token);
     const state = await call<PublicState>(`${encodeURIComponent(token)}${stored ? `?p=${encodeURIComponent(stored)}` : ""}`);
@@ -45,12 +46,15 @@ export default function PublicTownhall({ path }: { path: string }) {
   const streamUrl = participant ? `/api/public/townhall/${encodeURIComponent(token)}/live?p=${encodeURIComponent(participant)}` : null;
   const live = useLiveState<PublicState>({ load, streamUrl });
   const state = live.state;
+  // With the stream open, the change arrives on it; refetching after every vote would cost the room its
+  // shared request budget (D1103). Polling (no stream) still refreshes at once.
+  const afterAction = () => live.mode === "live" ? Promise.resolve() : live.refresh();
   // The stream sends the plain state; the meta and nonce come from the first load.
   const [meta, setMeta] = useState<PublicState["meta"] | null>(null);
   useEffect(() => { if (state?.meta) setMeta(state.meta); }, [state?.meta]);
   useEffect(() => { try { window.localStorage.setItem("townhall:name", name); } catch { /* ignore */ } }, [name]);
   const questions = useMemo<QaQuestion[]>(() => (state?.questions ?? []).map((question) => ({
-    id: question.id, text: question.text, author: question.author, votes: question.votes, voted: question.voted, status: question.status, pinned: question.pinned, createdAt: question.createdAt, mine: question.mine, mergedCount: question.mergedCount
+    id: question.id, text: question.text, author: authorLabel(question), votes: question.votes, voted: question.voted, status: question.status, pinned: question.pinned, createdAt: question.createdAt, mine: question.mine, mergedCount: question.mergedCount
   })), [state]);
 
   if (live.gone) return <PublicNotFound appName={appName()} />;
@@ -66,29 +70,29 @@ export default function PublicTownhall({ path }: { path: string }) {
       <p className="th-public-state">{ended ? "This session has ended." : session.state === "live" ? <><span className="ui-live-dot" aria-hidden="true" /> Live now</> : session.startsAt ? `Starts ${new Date(session.startsAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}` : "Ask your questions before it starts."}</p>
       {session.description && <p className="ui-public-text">{session.description}</p>}
       {pinned && <section className="th-public-pinned" aria-label="Now answering"><strong>Now answering</strong><p>{pinned.text}</p></section>}
-      {poll && <PollView poll={poll} onVote={async (answer) => { await call(`${encodeURIComponent(token)}/polls/${poll.id}/vote`, { participant, ...answer }); await live.refresh(); }} />}
+      {poll && <PollView poll={poll} onVote={async (answer) => { await call(`${encodeURIComponent(token)}/polls/${poll.id}/vote`, { participant, ...answer }); await afterAction(); }} />}
       {state.you.canAsk && <label className="th-public-name">
         <span>Your name {session.allowAnonymous ? <small>(optional)</small> : null}</span>
         <input type="text" value={name} maxLength={TOWNHALL_LIMITS.name} autoComplete="name" placeholder={session.allowAnonymous ? "Anonymous" : "Your name"} onChange={(event) => setName(event.target.value)} />
       </label>}
       <QaList questions={questions} sort={sort} onSort={setSort} closed={ended} maxLength={TOWNHALL_LIMITS.question} anonymousAllowed={false}
-        onUpvote={ended ? undefined : (id, voted) => { void call(`${encodeURIComponent(token)}/questions/${id}/vote`, { participant, upvote: voted }).then(() => live.refresh(), () => undefined); }}
+        onUpvote={ended ? undefined : (id, voted) => { void call(`${encodeURIComponent(token)}/questions/${id}/vote`, { participant, upvote: voted }).then(afterAction, () => undefined); }}
         onAsk={state.you.canAsk ? async (text) => {
           if (!session.allowAnonymous && !name.trim()) throw new Error("Add your name to ask");
           try {
-            const result = await call<{ renderNonce: string }>(`${encodeURIComponent(token)}/questions`, { participant, text, name: name.trim() || null, nonce, website: "" });
+            const result = await call<{ renderNonce: string }>(`${encodeURIComponent(token)}/questions`, { participant, text, name: name.trim() || null, nonce, website: honeypot.current?.value ?? "" });
             setNonce(result.renderNonce);
-            await live.refresh();
+            await afterAction();
           } catch (reason) {
             const fresh = (reason as { payload?: { renderNonce?: string } }).payload?.renderNonce;
             if (fresh) setNonce(fresh);
             throw reason;
           }
         } : undefined}
-        onWithdraw={(id) => { void call(`${encodeURIComponent(token)}/questions/${id}/withdraw`, { participant }).then(() => live.refresh(), () => undefined); }}
+        onWithdraw={(id) => { void call(`${encodeURIComponent(token)}/questions/${id}/withdraw`, { participant }).then(afterAction, () => undefined); }}
         askNote={session.moderation === "review" ? "A host reviews questions before everyone sees them." : undefined} />
       {/* The honeypot: people never see it; bots fill it. */}
-      <input className="th-hp" type="text" name="website" tabIndex={-1} autoComplete="off" aria-hidden="true" />
+      <input ref={honeypot} className="th-hp" type="text" name="website" tabIndex={-1} autoComplete="off" aria-hidden="true" defaultValue="" />
     </div>
   </PublicPageShell>;
 }

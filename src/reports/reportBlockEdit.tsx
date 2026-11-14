@@ -27,6 +27,8 @@ export type ReportEditing = {
   removeFilter?: (paramId: string) => void;
   /** D536 (the owner): sets or clears what clicking a chart or table filters by (the block menu). */
   setClickFilter?: (blockId: string) => void;
+  /** D1220 (the owner, a This workspace report): opens Edit widget on a block (its header, its ⋯ menu). */
+  editWidget?: (blockId: string) => void;
 };
 
 export const ReportEditContext = createContext<ReportEditing | null>(null);

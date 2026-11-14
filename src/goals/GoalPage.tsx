@@ -179,7 +179,7 @@ export default function GoalPage({ segment, navigate, onOpenPath, userId, displa
     </div>
     {sheet?.kind === "checkin" && <CheckInSheet goal={goal} onClose={() => setSheet(null)} onSaved={(next) => { setSheet(null); setGoal(next); reload(); flash("Checked in"); }} />}
     {sheet?.kind === "edit" && <GoalEditor goal={goal} me={{ id: userId, name: displayName }} onClose={() => setSheet(null)} onSaved={(next) => { setSheet(null); setGoal(next); reload(); flash("Goal saved"); }} />}
-    {sheet?.kind === "child" && <GoalEditor me={{ id: userId, name: displayName }} defaults={{ parentId: goal.id, periodId: goal.period?.id ?? null }} onClose={() => setSheet(null)} onSaved={(next) => { setSheet(null); flash(`${next.title} created`); onOpenPath(next.href); }} />}
+    {sheet?.kind === "child" && <GoalEditor me={{ id: userId, name: displayName }} defaults={{ parentId: goal.id, periodId: goal.period?.id }} onClose={() => setSheet(null)} onSaved={(next) => { setSheet(null); flash(`${next.title} created`); onOpenPath(next.href); }} />}
     {sheet?.kind === "kr" && <KrEditor goal={goal} kr={sheet.kr} onClose={() => setSheet(null)} onSaved={(message) => { setSheet(null); reload(); flash(message); }} />}
     {sheet?.kind === "close" && <CloseSheet goal={goal} onClose={() => setSheet(null)} onSaved={(message, next) => { setSheet(null); setGoal(next); reload(); flash(message); }} />}
     {sheet?.kind === "access" && <Suspense fallback={null}><AccessSheet kind="goal" id={goal.id} title={goal.title} guardHistory note="Contributors can always open the goal and check in on it." onClose={() => setSheet(null)}

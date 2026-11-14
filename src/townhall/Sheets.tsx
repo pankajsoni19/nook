@@ -5,7 +5,7 @@ import { Select } from "../ui/Select";
 import { ItemTimeline } from "../ui/activity/ItemTimeline";
 import { useHistoryDialogGuard } from "../ui/useHistoryDialogGuard";
 import { errorText, notify } from "../ui/notify";
-import { POLL_KIND_LABELS, POLL_KINDS, TOWNHALL_LIMITS, type TownhallPollKind, type TownhallQuestionView, type TownhallSessionView } from "../../shared/townhall";
+import { authorLabel, POLL_KIND_LABELS, POLL_KINDS, TOWNHALL_LIMITS, type TownhallPollKind, type TownhallQuestionView, type TownhallSessionView } from "../../shared/townhall";
 import * as townhall from "./api";
 import { useQrCode } from "./Presenter";
 
@@ -166,7 +166,7 @@ export function PollSheet({ sessionId, live, onClose }: { sessionId: string; liv
 export function CommentsSheet({ question, canComment, onClose }: { question: TownhallQuestionView; canComment: boolean; onClose: () => void }) {
   return <Sheet title="Replies" onClose={onClose} className="th-comments">
     <div className="th-sheet-body">
-      <blockquote className="th-quote">{question.text}<footer>{question.author ?? "Anonymous"}</footer></blockquote>
+      <blockquote className="th-quote">{question.text}<footer>{authorLabel(question) ?? "Anonymous"}</footer></blockquote>
       <ItemTimeline kind="townhall_question" id={question.id} canComment={canComment} title="Replies" />
     </div>
   </Sheet>;
@@ -186,7 +186,7 @@ export function MergeSheet({ source, questions, onPick, onClose }: { source: Tow
         : <ul className="nook-picker-list" aria-label="Questions">{candidates.map((question) => <li key={question.id}><button type="button" disabled={busy} onClick={async () => {
           setBusy(true);
           try { await onPick(question.id); onClose(); } catch (reason) { notify.error(errorText(reason, "Could not merge")); } finally { setBusy(false); }
-        }}><span><strong>{question.text}</strong><small>{question.votes} upvotes{question.author ? ` · ${question.author}` : ""}</small></span></button></li>)}</ul>}
+        }}><span><strong>{question.text}</strong><small>{question.votes} upvotes{question.author ? ` · ${authorLabel(question)}` : ""}</small></span></button></li>)}</ul>}
     </div>
   </Sheet>;
 }
@@ -245,8 +245,10 @@ export function ShareSheet({ session, memberUrl, publicUrl, publicAllowed, canMa
   onPublic: (enabled: boolean) => Promise<void>; onAccess: () => void; onClose: () => void;
 }) {
   const [busy, setBusy] = useState(false);
+  // The QR code is of the link shown beside it (D1112): the audience link once there is one, else the team link.
   const shown = publicUrl ?? memberUrl;
   const qr = useQrCode(shown);
+  const qrFigure = qr ? <figure className="th-share-qr"><img src={qr} alt={`QR code for ${shown}`} width={180} height={180} /><figcaption>{publicUrl ? "Scan to join as audience" : "Scan to open (team link)"}</figcaption></figure> : null;
   const copy = async (url: string) => {
     try { await navigator.clipboard.writeText(url); notify.success("Link copied"); } catch { notify.error("Could not copy the link"); }
   };
@@ -257,6 +259,7 @@ export function ShareSheet({ session, memberUrl, publicUrl, publicAllowed, canMa
         <p className="th-hint">{session.visibility === "all_users" ? "Everyone signed in can open it." : session.visibility === "selected" ? "The people and groups you chose can open it." : "Only you can open it now."}</p>
         <div className="th-copy-row"><input readOnly value={memberUrl} aria-label="Link for your team" onFocus={(event) => event.target.select()} /><button type="button" className="secondary-button" onClick={() => { void copy(memberUrl); }}><Copy aria-hidden="true" />Copy</button></div>
         {canManage && <button type="button" className="ui-text-button" onClick={onAccess}>Change who has access</button>}
+        {!publicUrl && qrFigure}
       </section>
       <section>
         <h3><Globe aria-hidden="true" />Audience link</h3>
@@ -267,13 +270,13 @@ export function ShareSheet({ session, memberUrl, publicUrl, publicAllowed, canMa
               <p className="th-hint">Anyone with this link can ask, upvote, and vote, without an account. Turn it off to stop it at once.</p>
               <div className="th-copy-row"><input readOnly value={publicUrl} aria-label="Audience link" onFocus={(event) => event.target.select()} /><button type="button" className="secondary-button" onClick={() => { void copy(publicUrl); }}><Copy aria-hidden="true" />Copy</button></div>
               <button type="button" className="ui-text-button th-danger-text" disabled={busy} onClick={async () => { setBusy(true); try { await onPublic(false); } finally { setBusy(false); } }}>Turn off the audience link</button>
+              {qrFigure}
             </>
             : <>
               <p className="th-hint">For people outside the workspace: they can ask, upvote, and vote, nothing else.</p>
               <button type="button" className="secondary-button" disabled={busy} onClick={async () => { setBusy(true); try { await onPublic(true); } finally { setBusy(false); } }}><Globe aria-hidden="true" />Create an audience link</button>
             </>}
       </section>
-      {qr && <figure className="th-share-qr"><img src={qr} alt={`QR code for ${shown}`} width={180} height={180} /><figcaption>Scan to join</figcaption></figure>}
     </div>
   </Sheet>;
 }

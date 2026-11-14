@@ -7,6 +7,7 @@ import { egressFetch, EgressError, readEgressText, checkEgressUrl } from "../age
 import { workspaceKey } from "../public/secret";
 import { cancelSchedules, upsertSchedule } from "../schedules/service";
 import { icsBusy, ICS_MAX_BYTES, type BusyInterval } from "./icsParse";
+import { zonedToUtc } from "../../shared/calendarRecurrence";
 
 const slog = logger("bookings");
 
@@ -126,7 +127,7 @@ export function refreshFeed(feedId: string, nowMs = Date.now()): Promise<void> {
       slog.warn(`Busy feed refresh failed: feed=${row.id.slice(0, 8)} code=${caught instanceof EgressError ? caught.code : "other"}`);
     }
     const timestamp = new Date(nowMs).toISOString();
-    if (busy) db.query("UPDATE booking_feeds SET busy_json = ?, last_fetched_at = ?, last_status = 'ok', last_error = NULL WHERE id = ?").run(JSON.stringify(busy.map((item) => [item.start, item.end, item.allDay ? 1 : 0])), timestamp, row.id);
+    if (busy) db.query("UPDATE booking_feeds SET busy_json = ?, last_fetched_at = ?, last_status = 'ok', last_error = NULL WHERE id = ?").run(JSON.stringify(busy.map((item) => item.allDay && item.dates ? [item.start, item.end, 1, item.dates[0], item.dates[1]] : [item.start, item.end, item.allDay ? 1 : 0])), timestamp, row.id);
     else db.query("UPDATE booking_feeds SET last_fetched_at = ?, last_status = ?, last_error = ? WHERE id = ?").run(timestamp, status, error!.slice(0, 200), row.id);
   })().finally(() => inFlight.delete(feedId));
   inFlight.set(feedId, job);
@@ -143,14 +144,23 @@ export async function refreshStaleFeeds(userIds: readonly string[], nowMs = Date
   await Promise.race([all, new Promise((resolve) => setTimeout(resolve, waitMs))]);
 }
 
-/** Cached outside busy time of a user overlapping [fromMs, toMs); all-day blocks only when asked. */
-export function feedBusy(userId: string, fromMs: number, toMs: number, includeAllDay: boolean): BusyInterval[] {
+/**
+ * Cached outside busy time of a user overlapping [fromMs, toMs); all-day blocks only when asked. An
+ * all-day block covers its dates in `tz` (the schedule's zone, as the host's Nook calendars' all-day
+ * events do, audit 2 D1128); a block cached before dates were kept stays as it was stored.
+ */
+export function feedBusy(userId: string, fromMs: number, toMs: number, includeAllDay: boolean, tz?: string): BusyInterval[] {
   const out: BusyInterval[] = [];
   for (const row of db.query("SELECT busy_json FROM booking_feeds WHERE user_id = ?").all(userId) as Array<{ busy_json: string }>) {
-    for (const [start, end, allDay] of JSON.parse(row.busy_json) as Array<[number, number, number]>) {
-      if (end <= fromMs || start >= toMs) continue;
+    for (const entry of JSON.parse(row.busy_json) as Array<[number, number, number, string?, string?]>) {
+      let [start, end] = entry;
+      const allDay = entry[2] === 1;
       if (allDay && !includeAllDay) continue;
-      out.push({ start, end, allDay: allDay === 1 });
+      if (allDay && tz && entry[3] && entry[4]) {
+        try { [start, end] = [zonedToUtc(`${entry[3]}T00:00`, tz), zonedToUtc(`${entry[4]}T00:00`, tz)]; } catch { /* the stored instants stay */ }
+      }
+      if (end <= fromMs || start >= toMs) continue;
+      out.push({ start, end, allDay });
     }
   }
   return out;

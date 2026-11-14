@@ -31,6 +31,7 @@ export const module: WorkspaceClientModule = {
   notificationTopics: [
     { id: "checkins.open", label: "Rounds opening", description: "When a standup you take part in opens for you" },
     { id: "checkins.remind", label: "Reminders", description: "Before your answer is due" },
+    { id: "checkins.nudge", label: "Nudges", description: "Someone running the standup is waiting on your answer" },
     { id: "checkins.summary", label: "Round summaries", description: "When a round closes" },
     { id: "checkins.blocked", label: "Blockers on your cards", description: "When a standup names a card you're assigned to as a blocker" }
   ],

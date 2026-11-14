@@ -101,7 +101,11 @@
   .today-intro h1 { margin-bottom: 18px; font-size: 2.1rem; }
   .today-launcher-label { margin: 0 0 8px; color: #85858c; font-size: .72rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
 .today-launcher ul { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 8px; }
-  .today-app { width: 100%; min-height: 52px; padding-right: 10px; }
+  /* D1266: a third of a 390 px screen has no room for an icon and "Whiteboards" side by side (the label
+     ran out of its cell): on phones the icon sits above the label, which never leaves the tile. */
+  .today-app { width: 100%; min-width: 0; min-height: 72px; flex-direction: column; justify-content: center; gap: 4px; padding: 8px 6px; font-size: .84rem; }
+  .today-app > span:last-child { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .today-app-icon { width: 30px; height: 30px; }
   .today-toolbar { flex-wrap: wrap; margin: 24px 0 16px; }
   .today-toolbar-title { flex-basis: 100%; }
   .today-refresh, .today-retry, .today-customize, .today-load-error .primary-button { min-height: 44px; }

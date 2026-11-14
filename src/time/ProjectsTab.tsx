@@ -183,11 +183,11 @@ function Toggle({ label, value, onChange }: { label: string; value: boolean; onC
 
 type Access = { etag?: string; audience: "private" | "selected" | "all_users"; audienceLevel: string; people: Array<{ id: string; displayName: string; level: string }>; yourLevel: string };
 
-export function ProjectPage({ projectId, onBack, onOpen, flashMissing }: { projectId: string; onBack: () => void; onOpen: (href: string) => void; flashMissing: () => void }) {
+export function ProjectPage({ projectId, initialTab, onBack, onOpen, flashMissing }: { projectId: string; initialTab?: string | null; onBack: () => void; onOpen: (href: string) => void; flashMissing: () => void }) {
   const prefs = useUnitPreferences();
   const [project, setProject] = useState<TimeProject | null>(null);
   const [entries, setEntries] = useState<TimeEntry[]>([]);
-  const [tab, setTab] = useState<"entries" | "team" | "approvals">("entries");
+  const [tab, setTab] = useState<"entries" | "team" | "approvals">(initialTab === "team" || initialTab === "approvals" ? initialTab : "entries");
   const [editing, setEditing] = useState(false);
   const [entry, setEntry] = useState<TimeEntry | null>(null);
   const load = useCallback(() => {
@@ -226,11 +226,11 @@ export function ProjectPage({ projectId, onBack, onOpen, flashMissing }: { proje
       {budget && <div className="ui-kpi time-budget-kpi"><ProgressBar value={budget.value} label="Budget" valueText={budget.text ?? `${Math.round(budget.value * 100)}%`} meter tone={budget.value > 1 ? "danger" : budget.value >= 0.8 ? "warning" : "accent"} /></div>}
     </KpiRow>
     <div className="ui-segmented time-project-tabs" role="group" aria-label="Project views">
-      <button type="button" aria-pressed={tab === "entries"} onClick={() => setTab("entries")}>Entries</button>
+      <button type="button" aria-pressed={tab === "entries" || (tab === "approvals" && !manager)} onClick={() => setTab("entries")}>Entries</button>
       <button type="button" aria-pressed={tab === "team"} onClick={() => setTab("team")}>Team{manager ? " and rates" : ""}</button>
       {manager && <button type="button" aria-pressed={tab === "approvals"} onClick={() => setTab("approvals")}>Approvals</button>}
     </div>
-    {tab === "entries" && (entries.length === 0
+    {(tab === "entries" || (tab === "approvals" && !manager)) && (entries.length === 0
       ? <EmptyState icon={FolderClock} title="No time on this project yet." compact />
       : <ul className="time-entries flat">
         {entries.map((item) => <li key={item.id} className="time-entry">

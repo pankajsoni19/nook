@@ -28,6 +28,8 @@ export const bookingsDataset: DatasetDef = {
     { name: "duration_min", sql: "b.duration_min", type: "number", label: "Duration (minutes)", dimension: true, measures: ["sum", "avg", "min", "max"] },
     { name: "lead_time_hours", sql: "ROUND((julianday(b.start_utc) - julianday(b.created_at)) * 24, 1)", type: "number", label: "Lead time (hours)", measures: ["avg", "min", "max"] },
     { name: "rescheduled", sql: "(b.rescheduled_from_id IS NOT NULL)", type: "bool", label: "Rescheduled", dimension: true },
+    // The old row of a reschedule (cancelled, with a successor): one meeting, which Insights counts once (D1125).
+    { name: "moved", sql: "(b.id IN (SELECT rescheduled_from_id FROM bookings WHERE rescheduled_from_id IS NOT NULL))", type: "bool", label: "Moved to a new time", dimension: true },
     { name: "created_at", sql: "b.created_at", type: "datetime", label: "Booked at", dimension: true, measures: ["min", "max"] }
   ]
 };
@@ -39,7 +41,8 @@ export function bookingsInsights(userId: string, options: { days: number; tz: st
   const from = new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
   const to = new Date(Date.now() + 60 * 86_400_000).toISOString().slice(0, 10);
   const viewer = { userId, role };
-  const base = { dataset: "bookings.bookings", timeRange: { from, to }, tz };
+  // A rescheduled booking's old row is left out: a move is neither a second booking nor a cancellation (D1125).
+  const base = { dataset: "bookings.bookings", timeRange: { from, to }, tz, filters: [{ column: "moved", op: "eq" as const, value: false }] };
   const byStatus = runDatasetQuery({ ...base, measures: [{ fn: "count" }], dimensions: ["status"] }, viewer);
   const byWeek = runDatasetQuery({ ...base, measures: [{ fn: "count" }], timeBucket: "week", sort: [{ column: "bucket", dir: "asc" }] }, viewer);
   const byType = runDatasetQuery({ ...base, measures: [{ fn: "count" }, { fn: "sum", column: "duration_min", as: "minutes" }], dimensions: ["type"], sort: [{ column: "count", dir: "desc" }], limit: 12 }, viewer);

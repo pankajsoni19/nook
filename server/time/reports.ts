@@ -11,7 +11,7 @@ import {
   localDate, PROJECT_COLOR_HEX, PROJECT_COLORS, weekDays, weekStartOf,
   type ProjectColor, type Summary, type SummaryGroup, type SummaryRow, type TargetTime, type Timesheet, type TimesheetRow
 } from "../../shared/time";
-import { PROJECT_JOIN, projectRow, projectSettings, visibleEntrySql } from "./access";
+import { HIDDEN_PROJECT_LABEL, hiddenProjectSql, PROJECT_JOIN, projectRow, projectSettings, visibleEntrySql } from "./access";
 import {
   createEntry, deleteEntry, entrySeconds, entrySelect, entryWhere, resolveTarget, TimeError, toEntries, updateEntry, defaultProjectFor,
   type Actor, type EntryFilters, type TargetInput, type EntryRow
@@ -27,7 +27,7 @@ import { captureUndo } from "../undo";
 const zoneOr = (tz: string | undefined) => tz && isValidTimeZone(tz) ? tz : "UTC";
 const colorOf = (value: string | null): ProjectColor => (PROJECT_COLORS as readonly string[]).includes(value ?? "") ? value as ProjectColor : "amber";
 
-type ViewRow = EntryRow & { user_name: string | null; project_name: string | null; project_color: string | null; client_name: string | null; money_ok: number; manager: number; project_deleted: string | null };
+type ViewRow = EntryRow & { user_name: string | null; project_name: string | null; project_color: string | null; client_name: string | null; money_ok: number; manager: number; project_deleted: string | null; project_hidden: number };
 
 // ---------------------------------------------------------------------------
 // The week timesheet
@@ -66,7 +66,8 @@ export function timesheet(userId: string, week: string | undefined, tz: string |
   }
   if (options.carry) {
     const previousFrom = new Date(zonedToUtc(`${addDays(start, -7)}T00:00`, zone)).toISOString();
-    const previous = db.query(`SELECT e.project_id, p.name AS project_name, p.color AS project_color, p.deleted_at AS project_deleted, e.target_kind, e.target_id
+    const previous = db.query(`SELECT e.project_id, CASE WHEN ${hiddenProjectSql()} THEN '${HIDDEN_PROJECT_LABEL.replace("'", "''")}' ELSE p.name END AS project_name,
+        CASE WHEN ${hiddenProjectSql()} THEN 'slate' ELSE p.color END AS project_color, p.deleted_at AS project_deleted, e.target_kind, e.target_id
       FROM ${PROJECT_JOIN} WHERE e.user_id = $userId AND e.started_at >= $from AND e.started_at < $to GROUP BY e.project_id, e.target_kind, e.target_id`)
       .all({ userId, from: previousFrom, to: fromIso }) as Array<Pick<ViewRow, "project_id" | "project_name" | "project_color" | "project_deleted" | "target_kind" | "target_id">>;
     for (const row of previous) add(row);
@@ -155,7 +156,8 @@ export function summarize(viewerId: string, input: SummaryInput): Summary {
   const weekStart = readUnitPreferences(viewerId).weekStart;
   const keysOf = (row: ViewRow, group: SummaryGroup): Keyed[] => {
     switch (group) {
-      case "project": return [row.project_id && row.project_name && !row.project_deleted ? { key: row.project_id, label: row.project_name, color: PROJECT_COLOR_HEX[colorOf(row.project_color)] } : { key: "", label: "No project" }];
+      // Projects the viewer cannot open share one row, so neither their names nor their number shows (D1143).
+      case "project": return [row.project_hidden === 1 ? { key: "hidden", label: row.project_name ?? "" } : row.project_id && row.project_name && !row.project_deleted ? { key: row.project_id, label: row.project_name, color: PROJECT_COLOR_HEX[colorOf(row.project_color)] } : { key: "", label: "No project" }];
       case "client": return [row.client_name ? { key: `c:${row.client_name.toLowerCase()}`, label: row.client_name } : { key: "", label: "No client" }];
       case "user": return [{ key: row.user_id, label: row.user_name ?? "Former member" }];
       case "target": {
@@ -238,16 +240,21 @@ export function exportCsv(viewerId: string, input: SummaryInput): string {
 // ---------------------------------------------------------------------------
 // Time on one work item (the card's Time section, get_time_for_item)
 
-export function timeForTarget(viewerId: string, input: TargetInput): TargetTime {
+/**
+ * `inReach` narrows everything to entries whose project passes it (a key limited to chosen projects,
+ * D1147): the entries, the totals, and the per-person split alike.
+ */
+export function timeForTarget(viewerId: string, input: TargetInput, inReach?: (projectId: string | null) => boolean): TargetTime {
   const ref = resolveTarget(input, viewerId)!;
   const summary = resolveRefs([ref], { userId: viewerId }).get(workRefKey(ref));
   if (!summary) throw new TimeError(404, "NOT_FOUND", "Work item not found");
   // Totals count every entry on the item (card readers see totals even of private projects, D872).
-  const all = db.query("SELECT user_id, started_at, duration_s FROM time_entries WHERE target_kind = ? AND target_id = ?").all(ref.kind, ref.id) as Array<{ user_id: string; started_at: string; duration_s: number | null }>;
+  const all = (db.query("SELECT user_id, project_id, started_at, duration_s FROM time_entries WHERE target_kind = ? AND target_id = ?").all(ref.kind, ref.id) as Array<{ user_id: string; project_id: string | null; started_at: string; duration_s: number | null }>)
+    .filter((row) => !inReach || inReach(row.project_id));
   const total = all.reduce((sum, row) => sum + entrySeconds(row), 0);
   const mine = all.filter((row) => row.user_id === viewerId).reduce((sum, row) => sum + entrySeconds(row), 0);
   const rows = db.query(`${entrySelect()} WHERE e.target_kind = $kind AND e.target_id = $id AND ${visibleEntrySql()} ORDER BY e.started_at DESC LIMIT 200`).all({ kind: ref.kind, id: ref.id, userId: viewerId }) as ViewRow[];
-  const entries = toEntries(rows, viewerId);
+  const entries = toEntries(rows.filter((row) => !inReach || inReach(row.project_id)), viewerId);
   const people = new Map<string, { id: string; name: string; seconds: number }>();
   for (const entry of entries) {
     const person = people.get(entry.user.id) ?? { id: entry.user.id, name: entry.user.name, seconds: 0 };
@@ -327,7 +334,9 @@ export function todayTotals(userId: string, tz: string | undefined) {
   const zone = zoneOr(tz);
   const today = localDate(Date.now(), zone);
   const from = new Date(zonedToUtc(`${today}T00:00`, zone)).toISOString();
-  const rows = db.query("SELECT started_at, duration_s FROM time_entries WHERE user_id = ? AND started_at >= ?").all(userId, from) as Array<{ started_at: string; duration_s: number | null }>;
+  // Bounded above too: an entry logged ahead for tomorrow is not today's time (D1147).
+  const to = new Date(zonedToUtc(`${addDays(today, 1)}T00:00`, zone)).toISOString();
+  const rows = db.query("SELECT started_at, duration_s FROM time_entries WHERE user_id = ? AND started_at >= ? AND started_at < ?").all(userId, from, to) as Array<{ started_at: string; duration_s: number | null }>;
   return { date: today, seconds: rows.reduce((sum, row) => sum + entrySeconds(row), 0), entries: rows.length };
 }
 

@@ -6,6 +6,7 @@ import type { TodaySectionDef } from "../today/todaySections";
 import type { EmbedKindDef, SlashItemDef } from "../editor/moduleEmbedRegistry";
 import type { BoardHeaderItemDef, CardFaceBadgeDef, CardHeaderActionDef, CardSectionDef, TimelineDecorationDef } from "../ui/cardSlots";
 import type { ItemSectionDef } from "../ui/itemSlots";
+import type { MemberActionDef } from "../ui/memberSlots";
 import type { WorkspaceModuleId } from "../../shared/workspaceModules";
 import type { ItemActivityEntry } from "../../shared/itemActivity";
 
@@ -124,6 +125,8 @@ export type WorkspaceClientModule = {
   boardHeaderItems?: readonly BoardHeaderItemDef[];
   /** Panels on other modules' item pages (goal, contact, deal, booking…), D1056. */
   itemSections?: readonly ItemSectionDef[];
+  /** Buttons on the Team page's member rows and profiles ("Book time with …"), D1253. */
+  memberActions?: readonly MemberActionDef[];
   shortcuts?: readonly ShortcutDef[];
   /** Its public pages by path prefix (`/p/f/`, `/p/book/`, `/p/t/`). */
   publicPages?: readonly PublicPageDef[];

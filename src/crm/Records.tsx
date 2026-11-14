@@ -9,6 +9,7 @@ import type { CrmBook, CrmCompany, CrmContact, CrmEntity, CrmFilter, CrmList, Cr
 import { binCompany, binContact, changeListMembers, createView, deleteView, errorMessage, listCompanies, listContacts, listLists, listViews, updateContact } from "./crmApi";
 import { FilterSheet, filterLabel } from "./Sheets";
 import { fieldText, relative } from "./format";
+import { useRelationNames } from "./relationNames";
 import { Avatar } from "../ui/Avatar";
 import { usePhone } from "./usePhone";
 
@@ -44,6 +45,7 @@ export function RecordsView({ entity, book, books, q, userId, canWrite, listRef,
   const { ask, confirmElement } = useConfirm();
   const [naming, setNaming] = useState<string | null>(null);
   const custom = book?.fields[entity] ?? [];
+  const relationNames = useRelationNames(custom, rows ?? []);
 
   const load = useCallback(async (next: string | null = null) => {
     const id = ++request.current;
@@ -135,7 +137,7 @@ export function RecordsView({ entity, book, books, q, userId, canWrite, listRef,
       }
     }
     const field = custom.find((item) => item.id === column);
-    return field ? fieldText(field, row.custom[field.id]) : "";
+    return field ? fieldText(field, row.custom[field.id], relationNames) : "";
   };
   const Icon = entity === "contact" ? Contact : Building2;
   const plural = entity === "contact" ? "contacts" : "companies";

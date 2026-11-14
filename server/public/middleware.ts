@@ -4,7 +4,7 @@ import type { AppEnv } from "../auth";
 import { clientIp } from "../clientAddress";
 import { config } from "../config";
 import { distRoot, serveStaticFile } from "../staticFiles";
-import { publicLimit } from "./limits";
+import { isRoomPath, publicLimit, roomLimit } from "./limits";
 import { PUBLIC_BODY_MAX_BYTES, PUBLIC_NOT_FOUND } from "../../shared/publicPages";
 
 /**
@@ -18,7 +18,8 @@ import { PUBLIC_BODY_MAX_BYTES, PUBLIC_NOT_FOUND } from "../../shared/publicPage
  *   session cookie (any Set-Cookie is stripped). CSRF protection for submissions is the signed,
  *   single-use render nonce (server/public/limits.ts), not the session's token.
  * - One uniform 404 (PUBLIC_NOT_FOUND) for unknown, revoked, expired, policy-off, binned, closed.
- * - Pages: 120 requests a minute per address; submissions: their own limits (checkSubmission).
+ * - Pages: 120 requests a minute per address; room reads (a live session, `room: true`) their own
+ *   per-participant and per-address buckets (D1103); submissions their own limits (checkSubmission).
  * - Bodies over 64 KiB are refused before they are parsed (readPublicJson).
  */
 
@@ -42,7 +43,8 @@ export async function publicPageHeaders(c: Context<AppEnv>, next: Next) {
   if (c.req.path.startsWith("/api/public/chat-shares/")) return next();
   const page = isPage(c.req.path);
   if (c.req.method === "GET" || c.req.method === "HEAD") {
-    const wait = publicLimit("page", clientIp(c));
+    const participant = c.req.query("p");
+    const wait = isRoomPath(c.req.path) ? roomLimit(clientIp(c), typeof participant === "string" && participant ? participant : null) : publicLimit("page", clientIp(c));
     if (wait > 0) {
       const response = page
         ? new Response("Too many requests", { status: 429, headers: { "Content-Type": "text/plain; charset=utf-8", "Retry-After": String(wait) } })

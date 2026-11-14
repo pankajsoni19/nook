@@ -1,7 +1,7 @@
 import { readableNotePredicate } from "../access";
 import { listUpcoming } from "../calendar/service";
 import { listRecentRows } from "../collections/service";
-import { BIN_LIST_LIMIT, listBinPurgingSoon } from "../bin";
+import { BIN_LIST_LIMIT, listBin, listBinPurgingSoon } from "../bin";
 import { db } from "../db";
 import { recentListableDocuments } from "../documentAccess";
 import { storageUsage } from "../documents";
@@ -249,5 +249,7 @@ registerTodayProvider("upcoming", {
 
 registerTodayProvider("storage", {
   href: "/files",
-  load: ({ userId }) => ({ items: [storageUsage(userId)], more: false })
+  // D1265: the Bin's item count too: notes, cards, and boards take no bytes, so bytes alone said "Nothing in the Bin".
+  // An MCP key counts only the types it may see, as binSoon lists them.
+  load: ({ userId, scopes }) => ({ items: [{ ...storageUsage(userId), binnedItems: listBin(userId, null).filter((item) => binItemVisible(item.type, scopes)).length }], more: false })
 });

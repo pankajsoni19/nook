@@ -32,7 +32,11 @@ export function EntrySheet({ entry, draft, onClose, onOpen }: { entry: TimeEntry
   const start = entry?.startedAt ?? draft?.startedAt ?? new Date(Date.now() - (draft?.durationS ?? 3600) * 1000).toISOString();
   const [description, setDescription] = useState(entry?.description ?? draft?.description ?? "");
   const [projectId, setProjectId] = useState<string | null>(entry?.project?.id ?? draft?.project?.id ?? null);
-  const [target, setTarget] = useState<PickedTarget>(entry ? targetOf(entry) : draft?.target ?? null);
+  const [target, setTargetState] = useState<PickedTarget>(entry ? targetOf(entry) : draft?.target ?? null);
+  // An existing entry sends its work item only once the person changes it: a target they cannot open
+  // shows as empty here, and sending that empty value would unlink the entry from it (TG1, D1140).
+  const [targetTouched, setTargetTouched] = useState(entry === null);
+  const setTarget = (next: PickedTarget) => { setTargetState(next); setTargetTouched(true); };
   const [billable, setBillable] = useState(entry?.billable ?? draft?.billable ?? false);
   const [billableTouched, setBillableTouched] = useState(entry !== null || draft?.billable !== undefined);
   const [tags, setTags] = useState<string[]>(entry?.tags ?? draft?.tags ?? []);
@@ -67,17 +71,22 @@ export function EntrySheet({ entry, draft, onClose, onOpen }: { entry: TimeEntry
     setBusy(true);
     setError(null);
     try {
+      // The start goes only when the day or start changed: the fields hold minutes, so resending them
+      // would drop an entry's seconds on every save (TG8, D1141).
+      const startChanged = !entry || day !== localDay(entry.startedAt) || startText !== clock(entry.startedAt);
       const body = {
-        description, projectId, target: target ? { kind: target.kind, id: target.id } : null, tags,
+        description, projectId, tags,
+        ...(targetTouched ? { target: target ? { kind: target.kind, id: target.id } : null } : {}),
         ...(billableTouched ? { billable } : {}),
-        startedAt: new Date(startMs).toISOString(), ...(running ? {} : { duration: duration! })
+        ...(startChanged ? { startedAt: new Date(startMs).toISOString() } : {}),
+        ...(running ? {} : { duration: duration! })
       };
       if (entry) {
         const result = await timeApi.update(entry.id, { ...body, expectedRevision: entry.revision } as never);
         if (result.entry.running) setRunning(result.entry);
         notify.success("Entry saved");
       } else {
-        await timeApi.create({ ...body, duration: duration!, source: "manual" });
+        await timeApi.create({ ...body, startedAt: new Date(startMs).toISOString(), duration: duration!, source: "manual" });
         notify.success("Time logged");
       }
       timeChanged();

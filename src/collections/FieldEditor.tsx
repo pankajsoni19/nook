@@ -65,6 +65,8 @@ export function FieldEditor({ collection, onSaved, onReload, onClose }: FieldEdi
           </div>
           <div className="field-editor-details">
             {draft.type !== "file" && <label className="field-editor-check"><input type="checkbox" checked={draft.required} onChange={(event) => update(draft.key, { required: event.target.checked })} disabled={busy} />Required</label>}
+            {draft.type === "person" && <span className="field-editor-hint">One team member per row</span>}
+            {draft.type === "contact" && <span className="field-editor-hint">One contact per row; people who can't read its contact book see “A contact”</span>}
             {draft.type === "number" && <>
               <label>Decimals <input type="number" min={0} max={6} value={draft.decimals} onChange={(event) => update(draft.key, { decimals: Number(event.target.value) || 0 })} disabled={busy} /></label>
               <label>Unit <input value={draft.unit} maxLength={8} placeholder="kg, €, min" onChange={(event) => update(draft.key, { unit: event.target.value })} disabled={busy} /></label>

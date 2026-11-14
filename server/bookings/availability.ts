@@ -80,11 +80,13 @@ export type SlotQuery = { fromMs: number; toMs: number; durationMin: number; now
 
 /** Bookable starts → the hosts free at each (round robin: any; collective: all; single: the owner). Synchronous: feeds come from their cache. */
 export function slotHosts(type: TypeRow, query: SlotQuery): SlotMap {
-  if (!durationsOf(type).includes(query.durationMin)) throw invalid("Choose one of the type's durations", { field: "duration" });
+  // A reschedule keeps the booking's own length even when the host has since changed the type's durations (D1124).
+  const rescheduling = Boolean(query.excludeBookingId) && Number.isInteger(query.durationMin) && query.durationMin > 0 && query.durationMin <= 1440;
+  if (!rescheduling && !durationsOf(type).includes(query.durationMin)) throw invalid("Choose one of the type's durations", { field: "duration" });
   const plans = hostPlans(type);
   const perHost = plans.map((plan) => {
     const busy = [...calendarBusy(type, plan.userId, query.fromMs - 86_400_000, query.toMs + 86_400_000, plan.schedule.tz),
-      ...feedBusy(plan.userId, query.fromMs - 86_400_000, query.toMs + 86_400_000, type.include_all_day_busy === 1)];
+      ...feedBusy(plan.userId, query.fromMs - 86_400_000, query.toMs + 86_400_000, type.include_all_day_busy === 1, plan.schedule.tz)];
     const slots = computeSlots(plan.schedule, {
       durationMin: query.durationMin, intervalMin: type.slot_interval_min, bufferBeforeMin: type.buffer_before_min, bufferAfterMin: type.buffer_after_min,
       minNoticeMin: type.min_notice_min, maxDaysAhead: type.max_days_ahead, dateFrom: type.date_from, dateTo: type.date_to, dailyLimit: type.daily_limit,
@@ -112,14 +114,15 @@ export async function availability(type: TypeRow, query: SlotQuery): Promise<Slo
 
 /**
  * Round robin (D1005): among the free hosts, the one with the fewest bookings of this type in the
- * last 30 days; ties by priority (higher first), then the least recently booked.
+ * last 30 days; ties by priority (higher first), then the least recently booked. Only bookings that
+ * stand count: a cancelled one (a reschedule cancels the old row) is no load (D1125).
  */
 export function pickRoundRobin(type: TypeRow, free: readonly string[], nowMs: number): string {
   if (free.length === 1) return free[0]!;
   const since = new Date(nowMs - 30 * 86_400_000).toISOString();
   const priority = new Map(hostsOf(type.id).map((host) => [host.user_id, host.priority]));
   const stats = free.map((userId) => {
-    const row = db.query("SELECT COUNT(*) AS count, MAX(created_at) AS last FROM bookings WHERE type_id = ? AND host_id = ? AND created_at > ? AND status NOT IN ('declined','expired')").get(type.id, userId, since) as { count: number; last: string | null };
+    const row = db.query("SELECT COUNT(*) AS count, MAX(created_at) AS last FROM bookings WHERE type_id = ? AND host_id = ? AND created_at > ? AND status NOT IN ('declined','expired','cancelled')").get(type.id, userId, since) as { count: number; last: string | null };
     return { userId, count: row.count, last: row.last ?? "", priority: priority.get(userId) ?? 0 };
   });
   stats.sort((a, b) => a.count - b.count || b.priority - a.priority || a.last.localeCompare(b.last) || a.userId.localeCompare(b.userId));

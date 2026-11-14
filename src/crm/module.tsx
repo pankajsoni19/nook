@@ -39,7 +39,8 @@ export const module: WorkspaceClientModule = {
   notificationTopics: [
     { id: "crm.followup_due", label: "Follow-ups due", description: "A reminder you set on a contact, company, or deal." },
     { id: "crm.deal_assigned", label: "Deals you own", description: "Someone made you a deal's owner." },
-    { id: "crm.deal_won", label: "Deals won or lost", description: "A deal you own was won or lost." },
+    { id: "crm.deal_won", label: "Deals won", description: "A deal you own was won." },
+    { id: "crm.deal_lost", label: "Deals lost", description: "A deal you own was lost." },
     { id: "crm.deal_rotting", label: "Quiet deals", description: "A deal you own has had no activity for its stage's rotting days." }
   ],
   workKindRenderers: {

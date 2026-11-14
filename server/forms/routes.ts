@@ -156,7 +156,7 @@ export function registerFormsRoutes(router: ModuleRouter) {
   router.get("/api/forms/:id/export.csv", handle((c) => {
     const { row } = requireForm(idOf(c), user(c), "view");
     const filter = parseFilter({ question: c.req.query("question"), option: c.req.query("option") });
-    const csv = exportCsv({ kind: "form", id: row.id }, filter, { identity: row.anonymous === 0 });
+    const csv = exportCsv({ kind: "form", id: row.id }, filter, { identity: row.anonymous === 0, dayOnly: row.anonymous === 1 });
     audit(user(c), null, "forms.export", { formId: row.id, bytes: csv.length });
     const name = `${row.title.replace(/[^A-Za-z0-9 _-]+/g, "").trim().slice(0, 60) || "responses"}.csv`;
     return new Response(`﻿${csv}`, { headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="${name}"`, "Cache-Control": "no-store" } });

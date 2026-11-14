@@ -1,12 +1,13 @@
-import { addDays, dateToDay, expandSeries, isValidTimeZone, normalizeRule, rangeFor, utcToZoned, weekdayIndex, WEEKDAYS, zonedToUtc, type RecurrenceRule, type Weekday } from "../../shared/calendarRecurrence";
+import { addDays, dateToDay, isValidTimeZone, utcToZoned, weekdayIndex, WEEKDAYS, zonedToUtc, type Weekday } from "../../shared/calendarRecurrence";
 
 /**
  * Busy time from an outside calendar's ICS "secret address" (§G.1 Q1, D1008–D1010): a small,
  * tolerant RFC 5545 reader for what Google Calendar and Outlook publish. Only what busy time needs
  * is read (no titles are kept, T575): VEVENT DTSTART / DTEND / DURATION (UTC, TZID, floating, and
- * VALUE=DATE), RRULE (FREQ, INTERVAL, COUNT, UNTIL, BYDAY; monthly BYDAY with an ordinal such as 2TU
- * or -1FR), EXDATE, RECURRENCE-ID overrides, STATUS:CANCELLED and TRANSP:TRANSPARENT (both free).
- * Recurrences are expanded with the calendar module's DST-correct expansion in the event's zone.
+ * VALUE=DATE), RRULE (FREQ, INTERVAL, COUNT, UNTIL, BYDAY with or without an ordinal such as 2TU or
+ * -1FR, BYMONTHDAY, BYMONTH), EXDATE, RECURRENCE-ID overrides, STATUS:CANCELLED and
+ * TRANSP:TRANSPARENT (both free). Recurrences are expanded in the event's zone on wall-clock time,
+ * so instances keep their local time across DST (D1120).
  *
  * Bounded: 2 MiB of text, 5000 VEVENTs, 5000 busy intervals in the window.
  */
@@ -15,7 +16,8 @@ export const ICS_MAX_BYTES = 2 * 1024 * 1024;
 export const ICS_MAX_EVENTS = 5000;
 export const ICS_MAX_INTERVALS = 5000;
 
-export type BusyInterval = { start: number; end: number; allDay?: boolean };
+/** An all-day block also carries its dates (first, day after the last), so a reader can place it in another zone. */
+export type BusyInterval = { start: number; end: number; allDay?: boolean; dates?: [string, string] };
 
 type Prop = { name: string; params: Record<string, string>; value: string };
 type RawEvent = Prop[];
@@ -102,50 +104,116 @@ export function durationMinutes(value: string): number | null {
   return Number(weeks ?? 0) * 10080 + Number(days ?? 0) * 1440 + Number(hours ?? 0) * 60 + Number(minutes ?? 0) + Math.ceil(Number(seconds ?? 0) / 60);
 }
 
-type ParsedRule = { rule: RecurrenceRule | null; monthlyNth: Array<{ n: number; day: Weekday }> | null; unsupported: boolean };
+type Freq = "daily" | "weekly" | "monthly" | "yearly";
+type ByDay = { n: number | null; day: Weekday };
+/** An RRULE as read. UNTIL is an instant when written as a time (UTC or local), a date when written as a date (D1120). */
+type ParsedRule = {
+  freq: Freq; interval: number; count?: number; untilMs?: number; untilDate?: string;
+  byDay: ByDay[]; byMonthDay: number[]; byMonth: number[]; unsupported: boolean;
+};
 
-function readRule(value: string, start: Instant): ParsedRule {
-  const parts = Object.fromEntries(value.split(";").map((part) => part.split("=")).filter((pair) => pair.length === 2).map(([key, val]) => [key!.toUpperCase(), val!]));
-  const freq = ({ DAILY: "daily", WEEKLY: "weekly", MONTHLY: "monthly", YEARLY: "yearly" } as Record<string, RecurrenceRule["freq"]>)[parts.FREQ ?? ""];
-  if (!freq) return { rule: null, monthlyNth: null, unsupported: true };
-  const rule: RecurrenceRule = { freq, interval: Math.min(99, Math.max(1, Number(parts.INTERVAL ?? 1) || 1)) };
+function readRule(value: string, start: Instant): ParsedRule | null {
+  const parts = Object.fromEntries(value.split(";").map((part) => part.split("=")).filter((pair) => pair.length === 2).map(([key, val]) => [key!.toUpperCase(), val!.trim()]));
+  const freq = ({ DAILY: "daily", WEEKLY: "weekly", MONTHLY: "monthly", YEARLY: "yearly" } as Record<string, Freq>)[(parts.FREQ ?? "").toUpperCase()];
+  if (!freq) return null;
+  const rule: ParsedRule = { freq, interval: Math.min(99, Math.max(1, Number(parts.INTERVAL ?? 1) || 1)), byDay: [], byMonthDay: [], byMonth: [], unsupported: false };
   if (parts.COUNT) rule.count = Math.min(730, Math.max(1, Number(parts.COUNT) || 1));
   else if (parts.UNTIL) {
-    const until = /^(\d{4})(\d{2})(\d{2})/.exec(parts.UNTIL);
-    if (until) rule.until = `${until[1]}-${until[2]}-${until[3]}`;
+    const until = /^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})(Z?))?$/.exec(parts.UNTIL);
+    if (until) {
+      const day = `${until[1]}-${until[2]}-${until[3]}`;
+      if (until[4] === undefined) rule.untilDate = day;
+      // A UTC UNTIL is an instant: instants are compared, not its UTC date with local dates (BK3).
+      else if (until[7] === "Z") rule.untilMs = Date.UTC(Number(until[1]), Number(until[2]) - 1, Number(until[3]), Number(until[4]), Number(until[5]), Number(until[6]));
+      else {
+        try { rule.untilMs = zonedToUtc(`${day}T${until[4]}:${until[5]}`, start.tz) + Number(until[6]) * 1000; } catch { rule.untilDate = day; }
+      }
+    }
   }
-  let monthlyNth: ParsedRule["monthlyNth"] = null;
-  let unsupported = Boolean(parts.BYMONTHDAY && freq !== "monthly") || Boolean(parts.BYSETPOS) || Boolean(parts.BYHOUR) || Boolean(parts.BYMONTH && freq !== "yearly");
+  // Parts that pick times of day or weeks of the year are not read: the rest is expanded and the feed is flagged.
+  rule.unsupported = ["BYSETPOS", "BYHOUR", "BYMINUTE", "BYSECOND", "BYWEEKNO", "BYYEARDAY"].some((key) => parts[key] !== undefined);
+  if (parts.BYMONTH) {
+    rule.byMonth = parts.BYMONTH.split(",").map(Number).filter((month) => Number.isInteger(month) && month >= 1 && month <= 12);
+    if (!rule.byMonth.length) rule.unsupported = true;
+  }
+  if (parts.BYMONTHDAY) {
+    rule.byMonthDay = freq === "weekly" ? [] : parts.BYMONTHDAY.split(",").map(Number).filter((day) => Number.isInteger(day) && day !== 0 && day >= -31 && day <= 31);
+    if (!rule.byMonthDay.length) rule.unsupported = true;
+  }
   if (parts.BYDAY) {
-    const days = parts.BYDAY.split(",").map((entry) => /^([+-]?\d{1,2})?(MO|TU|WE|TH|FR|SA|SU)$/.exec(entry.trim())).filter((match): match is RegExpExecArray => match !== null);
-    if (freq === "weekly") {
-      const set = new Set(days.map((match) => match[2] as Weekday));
-      set.add(WEEKDAYS[weekdayIndex(dateToDay(start.date))]!);
-      rule.byDay = WEEKDAYS.filter((day) => set.has(day));
-    } else if (freq === "monthly" && days.length && days.every((match) => match[1])) {
-      monthlyNth = days.map((match) => ({ n: Number(match[1]), day: match[2] as Weekday }));
-    } else if (freq === "daily") {
-      // FREQ=DAILY;BYDAY=MO,TU…: the same as weekly on those days.
-      rule.freq = "weekly";
-      const set = new Set(days.map((match) => match[2] as Weekday));
-      set.add(WEEKDAYS[weekdayIndex(dateToDay(start.date))]!);
-      rule.byDay = WEEKDAYS.filter((day) => set.has(day));
-    } else unsupported = true;
+    const days = parts.BYDAY.split(",").map((entry) => /^([+-]?\d{1,2})?(MO|TU|WE|TH|FR|SA|SU)$/i.exec(entry.trim())).filter((match): match is RegExpExecArray => match !== null);
+    rule.byDay = days.map((match) => ({ n: match[1] ? Number(match[1]) || null : null, day: match[2]!.toUpperCase() as Weekday }));
+    if (!rule.byDay.length) rule.unsupported = true;
+    if (freq === "yearly" && !rule.byMonth.length) {
+      // Weekdays of a whole year (BYDAY=20MO) are not read.
+      rule.unsupported = true;
+      rule.byDay = [];
+    } else if (freq === "daily" || freq === "weekly") {
+      if (rule.byDay.some((entry) => entry.n !== null)) rule.unsupported = true;
+      rule.byDay = rule.byDay.map((entry) => ({ ...entry, n: null }));
+    }
   }
-  return { rule, monthlyNth, unsupported };
+  return rule;
 }
 
-/** The nth (1-based, negative from the end) weekday of a month as a date, or null. */
-function nthWeekday(year: number, month: number, n: number, day: Weekday): string | null {
-  const first = `${year}-${String(month).padStart(2, "0")}-01`;
-  const days = new Date(Date.UTC(year, month, 0)).getUTCDate();
-  const target = WEEKDAYS.indexOf(day);
-  const matches: string[] = [];
-  for (let index = 0; index < days; index += 1) {
-    const date = addDays(first, index);
-    if (weekdayIndex(dateToDay(date)) === target) matches.push(date);
+const monthLength = (year: number, month: number) => new Date(Date.UTC(year, month, 0)).getUTCDate();
+
+/** The dates of one month that a monthly (or yearly, in its months) rule picks, sorted. `startDay` is DTSTART's day of the month. */
+function monthDates(year: number, month: number, rule: ParsedRule, startDay: number): string[] {
+  const length = monthLength(year, month);
+  const prefix = `${year}-${String(month).padStart(2, "0")}-`;
+  const all = Array.from({ length }, (_, index) => `${prefix}${String(index + 1).padStart(2, "0")}`);
+  let days: string[];
+  if (rule.byMonthDay.length) {
+    const picked = new Set(rule.byMonthDay.map((day) => (day > 0 ? day : length + day + 1)));
+    days = all.filter((_, index) => picked.has(index + 1));
+  } else if (rule.byDay.length) days = all;
+  else days = startDay <= length ? [all[startDay - 1]!] : []; // the 31st skips shorter months (RFC 5545)
+  if (rule.byDay.length) {
+    const keep = new Set<string>();
+    for (const entry of rule.byDay) {
+      const matches = all.filter((date) => WEEKDAYS[weekdayIndex(dateToDay(date))] === entry.day);
+      if (entry.n === null) for (const date of matches) keep.add(date);
+      else {
+        const date = entry.n > 0 ? matches[entry.n - 1] : matches[matches.length + entry.n];
+        if (date) keep.add(date);
+      }
+    }
+    days = days.filter((date) => keep.has(date));
   }
-  return (n > 0 ? matches[n - 1] : matches[matches.length + n]) ?? null;
+  return days;
+}
+
+/** The rule's nth period (a day, a week starting Monday, a month, a year): its first date and the candidate dates in it, sorted. */
+function period(rule: ParsedRule, startDate: string, index: number): { first: string; dates: string[] } {
+  const [year0, month0, day0] = [Number(startDate.slice(0, 4)), Number(startDate.slice(5, 7)), Number(startDate.slice(8, 10))];
+  const inMonths = (date: string) => !rule.byMonth.length || rule.byMonth.includes(Number(date.slice(5, 7)));
+  const weekday = (date: string) => WEEKDAYS[weekdayIndex(dateToDay(date))]!;
+  if (rule.freq === "daily") {
+    const date = addDays(startDate, index * rule.interval);
+    const length = monthLength(Number(date.slice(0, 4)), Number(date.slice(5, 7)));
+    const dayOfMonth = Number(date.slice(8, 10));
+    const ok = inMonths(date)
+      && (!rule.byDay.length || rule.byDay.some((entry) => entry.day === weekday(date)))
+      && (!rule.byMonthDay.length || rule.byMonthDay.some((day) => (day > 0 ? day : length + day + 1) === dayOfMonth));
+    return { first: date, dates: ok ? [date] : [] };
+  }
+  if (rule.freq === "weekly") {
+    const monday = addDays(startDate, -weekdayIndex(dateToDay(startDate)) + index * rule.interval * 7);
+    const days = rule.byDay.length ? WEEKDAYS.filter((day) => rule.byDay.some((entry) => entry.day === day)) : [weekday(startDate)];
+    return { first: monday, dates: days.map((day) => addDays(monday, WEEKDAYS.indexOf(day))).filter(inMonths) };
+  }
+  if (rule.freq === "monthly") {
+    const months = month0 - 1 + index * rule.interval;
+    const year = year0 + Math.floor(months / 12);
+    const month = (months % 12) + 1;
+    const first = `${year}-${String(month).padStart(2, "0")}-01`;
+    return { first, dates: rule.byMonth.length && !rule.byMonth.includes(month) ? [] : monthDates(year, month, rule, day0) };
+  }
+  const year = year0 + index * rule.interval;
+  const months = rule.byMonth.length ? [...rule.byMonth].sort((a, b) => a - b) : [month0];
+  // Without BYMONTHDAY or BYDAY a yearly rule keeps DTSTART's day (29 February skips other years).
+  return { first: `${year}-01-01`, dates: months.flatMap((month) => monthDates(year, month, rule, day0)) };
 }
 
 /**
@@ -208,7 +276,7 @@ export function icsBusy(text: string, fromMs: number, toMs: number, hostTz: stri
     minutes = Math.min(minutes, 10_080);
     const allDayInterval = (date: string) => {
       const days = Math.max(1, Math.round(minutes! / 1440));
-      return { start: zonedToUtc(`${date}T00:00`, hostTz), end: zonedToUtc(`${addDays(date, days)}T00:00`, hostTz), allDay: true };
+      return { start: zonedToUtc(`${date}T00:00`, hostTz), end: zonedToUtc(`${addDays(date, days)}T00:00`, hostTz), allDay: true, dates: [date, addDays(date, days)] as [string, string] };
     };
     const rruleProp = get(event, "RRULE");
     if (!rruleProp || get(event, "RECURRENCE-ID")) {
@@ -226,7 +294,7 @@ export function icsBusy(text: string, fromMs: number, toMs: number, hostTz: stri
       }
     }
     const parsed = readRule(rruleProp.value, start);
-    if (parsed.unsupported || !parsed.rule) unsupported += 1;
+    if (!parsed || parsed.unsupported) unsupported += 1;
     const occurrences = expandRule(start, minutes, parsed, fromMs, toMs);
     for (const occurrence of occurrences) {
       if (skip.has(occurrence)) continue;
@@ -238,49 +306,42 @@ export function icsBusy(text: string, fromMs: number, toMs: number, hostTz: stri
   return { intervals, truncated, unsupported };
 }
 
-/** Occurrence starts (UTC ms) of one series within the window; an unreadable rule keeps the first instance only. */
-function expandRule(start: Instant, minutes: number, parsed: ParsedRule, fromMs: number, toMs: number): number[] {
+/**
+ * Occurrence starts (UTC ms) of one series within the window (D1120). DTSTART is always the first
+ * instance; later ones are the rule's dates after DTSTART's date, at DTSTART's wall-clock time in its
+ * zone. COUNT counts from DTSTART, so a series with COUNT is walked from its start; one without
+ * jumps ahead to just before the window. An unreadable rule keeps the first instance only.
+ */
+function expandRule(start: Instant, minutes: number, rule: ParsedRule | null, fromMs: number, toMs: number): number[] {
   const tz = start.tz;
-  const local = start.local ?? `${start.date}T00:00`;
-  if (!parsed.rule) return [start.ms];
-  if (parsed.monthlyNth) {
-    const out: number[] = [];
-    const rule = parsed.rule;
-    const [year0, month0] = [Number(start.date.slice(0, 4)), Number(start.date.slice(5, 7))];
-    let count = 0;
-    for (let step = 0; step < 1200; step += rule.interval) {
-      const monthIndex = month0 - 1 + step;
-      const year = year0 + Math.floor(monthIndex / 12);
-      const month = (monthIndex % 12) + 1;
-      const dates = parsed.monthlyNth.map((entry) => nthWeekday(year, month, entry.n, entry.day)).filter((date): date is string => date !== null && date >= start.date).sort();
-      for (const date of dates) {
-        if (rule.until && date > rule.until) return out;
-        count += 1;
-        if (rule.count && count > rule.count) return out;
-        const ms = zonedToUtc(`${date}${local.slice(10)}`, tz);
-        if (ms >= toMs) return out;
-        if (ms + minutes * 60_000 > fromMs) out.push(ms);
-      }
-    }
-    return out;
-  }
-  let rule: RecurrenceRule;
-  const timing = { allDay: false as const, startLocal: local, tz, durationMinutes: Math.max(1, minutes) };
-  try {
-    rule = normalizeRule(parsed.rule, timing);
-  } catch {
-    return [start.ms];
-  }
+  const time = (start.local ?? `${start.date}T00:00`).slice(10);
   const out: number[] = [];
-  // rangeFor allows 100 days at a time: walk the window in chunks.
-  let cursor = utcToZoned(Math.max(fromMs - minutes * 60_000, start.ms) - 86_400_000, tz).slice(0, 10);
+  const fits = (ms: number) => ms < toMs && ms + minutes * 60_000 > fromMs;
+  if (fits(start.ms)) out.push(start.ms);
+  if (!rule) return out;
   const lastDate = utcToZoned(toMs + 86_400_000, tz).slice(0, 10);
-  const seen = new Set<number>();
-  for (let guard = 0; cursor < lastDate && guard < 10; guard += 1) {
-    const next = addDays(cursor, 90) < lastDate ? addDays(cursor, 90) : lastDate;
-    const { occurrences } = expandSeries({ ...timing, rule }, rangeFor(cursor, next, tz), 2000);
-    for (const occurrence of occurrences) if (!occurrence.allDay && !seen.has(occurrence.startMs)) { seen.add(occurrence.startMs); out.push(occurrence.startMs); }
-    cursor = next;
+  let index = 0;
+  if (rule.count === undefined) {
+    const days = dateToDay(utcToZoned(fromMs - minutes * 60_000, tz).slice(0, 10)) - dateToDay(start.date);
+    // The longest period (31-day months, 366-day years) so the jump never lands past the window.
+    const span = { daily: 1, weekly: 7, monthly: 31, yearly: 366 }[rule.freq] * rule.interval;
+    if (days > span) index = Math.floor(days / span) - 1;
+  }
+  let count = 1;
+  for (let guard = 0; guard < 40_000; guard += 1, index += 1) {
+    const { first, dates } = period(rule, start.date, index);
+    if (first > lastDate || (rule.untilDate !== undefined && first > rule.untilDate) || first > "2100-12-31") return out;
+    for (const date of dates) {
+      if (date <= start.date) continue;
+      let ms: number;
+      try { ms = zonedToUtc(`${date}${time}`, tz); } catch { continue; }
+      if ((rule.untilDate !== undefined && date > rule.untilDate) || (rule.untilMs !== undefined && ms > rule.untilMs)) return out;
+      count += 1;
+      if (rule.count !== undefined && count > rule.count) return out;
+      if (ms >= toMs) return out;
+      if (fits(ms)) out.push(ms);
+      if (out.length >= ICS_MAX_INTERVALS) return out;
+    }
   }
   return out;
 }

@@ -48,11 +48,22 @@ export type TownhallSessionSummary = {
   updatedAt: string;
 };
 
+/**
+ * Whose name a question shows (D1104, T621): `member`, a workspace member's display name; `guest`, a
+ * name a public participant typed (anyone can type any name); null when anonymous.
+ */
+export type TownhallAuthorKind = "member" | "guest" | null;
+
+/** The name to show for a question's asker: a guest's typed name says so ("Ada · guest"), so it cannot pass for a member. */
+export const authorLabel = (question: { author: string | null; authorKind?: TownhallAuthorKind }) =>
+  question.author === null ? null : question.authorKind === "guest" ? `${question.author} · guest` : question.author;
+
 export type TownhallQuestionView = {
   id: string;
   text: string;
-  /** Null: anonymous (or hidden from this reader). */
+  /** Null: anonymous (or hidden from this reader). Show it with `authorLabel`. */
   author: string | null;
+  authorKind: TownhallAuthorKind;
   votes: number;
   voted: boolean;
   status: TownhallQuestionStatus;
@@ -140,8 +151,8 @@ export type TownhallLiveState = {
 export type TownhallRecap = {
   session: { id: string; title: string; state: TownhallState; startsAt: string | null; wentLiveAt: string | null; endedAt: string | null; href: string };
   totals: { questions: number; answered: number; unanswered: number; hidden: number; votes: number; participants: number; members: number; publicParticipants: number; polls: number };
-  answered: Array<{ id: string; text: string; votes: number; author: string | null; answeredAt: string | null }>;
-  unanswered: Array<{ id: string; text: string; votes: number; author: string | null; card: { id: string; href: string } | null }>;
+  answered: Array<{ id: string; text: string; votes: number; author: string | null; authorKind: TownhallAuthorKind; answeredAt: string | null }>;
+  unanswered: Array<{ id: string; text: string; votes: number; author: string | null; authorKind: TownhallAuthorKind; card: { id: string; href: string } | null }>;
   polls: Array<{ id: string; kind: TownhallPollKind; title: string; total: number; results: Array<{ label: string; count: number }>; average: number | null }>;
 };
 

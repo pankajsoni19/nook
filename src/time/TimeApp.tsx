@@ -47,7 +47,7 @@ export default function TimeApp({ route, navigate, onOpenPath, displayName, onHo
     {tab === "timesheet" && <TimesheetTab week={params.get("week")} onWeek={(week) => go(["timesheet"], week ? `?week=${week}` : "")} onOpen={onOpenPath} readOnly={!writer} />}
     {tab === "reports" && <ReportsTab onOpen={onOpenPath} userId={userId} />}
     {tab === "projects" && !projectRef && <ProjectsTab canCreate={canCreateProject} onNew={() => setNewProject(true)} onProject={(project) => go(["projects", `${slug(project.name)}-${project.shortId}`])} />}
-    {tab === "projects" && projectRef && <ProjectPage projectId={projectRef} onBack={() => go(["projects"])} onOpen={onOpenPath} flashMissing={() => { flash("That project is not available"); go(["projects"], "", true); }} />}
+    {tab === "projects" && projectRef && <ProjectPage key={`${projectRef}:${params.get("tab") ?? ""}`} projectId={projectRef} initialTab={params.get("tab")} onBack={() => go(["projects"])} onOpen={onOpenPath} flashMissing={() => { flash("That project is not available"); go(["projects"], "", true); }} />}
     {newProject && <ProjectSheet project={null} onClose={() => setNewProject(false)} onSaved={(project) => { setNewProject(false); go(["projects", `${slug(project.name)}-${project.shortId}`]); }} />}
     {logging && <EntrySheet entry={null} onOpen={onOpenPath} onClose={() => setLogging(false)} />}
     {reminders && <RemindersSheet onClose={() => setReminders(false)} />}

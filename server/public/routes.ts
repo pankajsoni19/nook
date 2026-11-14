@@ -3,7 +3,7 @@ import type { AppEnv } from "../auth";
 import { DynamicRoutes } from "../dynamicRoutes";
 import { applyExternalStop, mailStopPagePath } from "../notify/external";
 import { publicShell } from "./middleware";
-import { publicLimit } from "./limits";
+import { markRoomPath, publicLimit } from "./limits";
 import { clientIp } from "../clientAddress";
 
 /**
@@ -14,10 +14,13 @@ import { clientIp } from "../clientAddress";
  * read a session, and nothing it adds elsewhere can skip the session guards.
  */
 
+/** `room`: a live room read (many people behind one address at once), rate-limited apart from pages (D1103). */
+export type PublicRouteOptions = { room?: boolean };
+
 export type PublicRouter = {
   /** A page: the app shell with 200 when `opens` says the item opens now, else the same shell with 404. */
-  page: (path: `/p/${string}`, opens: (c: Context<AppEnv>) => boolean | Promise<boolean>) => void;
-  get: (path: `/api/public/${string}`, handler: Handler<AppEnv>) => void;
+  page: (path: `/p/${string}`, opens: (c: Context<AppEnv>) => boolean | Promise<boolean>, options?: PublicRouteOptions) => void;
+  get: (path: `/api/public/${string}`, handler: Handler<AppEnv>, options?: PublicRouteOptions) => void;
   post: (path: `/api/public/${string}`, handler: Handler<AppEnv>) => void;
 };
 
@@ -32,13 +35,15 @@ function routerFor(owner: string): PublicRouter {
     if (!path.startsWith(prefix) || path.includes("..") || RESERVED.some((reserved) => path.startsWith(reserved))) throw new Error(`Public route ${path} of ${owner} must be under ${prefix}`);
   };
   return {
-    page: (path, opens) => {
+    page: (path, opens, options) => {
       check(path, "/p/");
+      if (options?.room) markRoomPath(path);
       publicRoutePaths.push({ owner, method: "GET", path });
       publicRoutes.add("GET", path, async (c) => publicShell(c, await opens(c)));
     },
-    get: (path, handler) => {
+    get: (path, handler, options) => {
       check(path, "/api/public/");
+      if (options?.room) markRoomPath(path);
       publicRoutePaths.push({ owner, method: "GET", path });
       publicRoutes.add("GET", path, handler);
     },

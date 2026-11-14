@@ -28,6 +28,7 @@ import { canManageTeam, canSeeTeam, ROLE_DESCRIPTIONS, ROLE_LABELS, roleOptions 
 import "./team.css";
 import { notify } from "../ui/notify";
 import { FormError } from "../ui/FormError";
+import { MemberActions, useMemberActionData, type MemberActionData } from "../ui/MemberActionsOutlet";
 
 /** The history-free navigation the Settings hub hands Team: it moves the hub's route and the URL together. */
 type TeamNavigate = (route: Route, options?: { replace?: boolean }) => void;
@@ -278,6 +279,9 @@ export function TeamSection({ route, role, totpEnabled = false, navigate, flash,
 
   const all = members ?? [];
   const visible = useMemo(() => filterTeam(all, filter, query), [all, filter, query]);
+  // Module buttons on rows and profiles ("Book time with …", D1253): one batched read for the whole list.
+  const actionIds = useMemo(() => members ? members.filter((member) => !member.isYou && member.status !== "blocked").map((member) => member.id) : null, [members]);
+  const actionData = useMemberActionData(actionIds, role);
   const chips = useMemo(() => teamFilters(all, admin), [all, admin]);
 
   const dialogs = dialog && detail && <TeamDialog
@@ -355,7 +359,7 @@ export function TeamSection({ route, role, totpEnabled = false, navigate, flash,
         <h2>{query.trim() ? "Nobody matches that search." : "Nobody here yet."}</h2>
       </div>}
       {!loadError && visible.length > 0 && <ul className="team-list" aria-label="Team members">
-        {visible.map((member) => <li key={member.id}>
+        {visible.map((member) => <li key={member.id} className="team-row-item">
           <button type="button" className={`team-row${member.id === routeUserId ? " selected" : ""}${member.status === "blocked" ? " blocked" : ""}`} aria-current={member.id === routeUserId ? "page" : undefined} onClick={() => { if (member.id !== routeUserId) guardLeave(() => go(member.id)); }}>
             <Avatar className="team-avatar" name={member.displayName} url={member.avatarUrl} />
             <span className="team-row-copy">
@@ -375,13 +379,14 @@ export function TeamSection({ route, role, totpEnabled = false, navigate, flash,
               {admin && member.emailAllowed === false && <span className="team-status-chip warn">Not on allowlist</span>}
             </span>
           </button>
+          <MemberActions className="team-row-actions" variant="row" data={actionData} member={{ id: member.id, displayName: member.displayName, isYou: member.isYou, blocked: member.status === "blocked" }} />
         </li>)}
       </ul>}
     </section>
 
     <section ref={detailPaneRef} className="team-detail-pane split-pane" aria-label="Team member">
       {routeUserId && detail?.id === routeUserId
-        ? <MemberDetail member={detail} members={all} admin={admin} onBack={back} onAction={setDialog} onRoleChosen={(to) => setDialog({ kind: "role", to })} onOpenAccess={() => openAccess(detail.id)} onRemovePicture={() => void removePicture(detail)} />
+        ? <MemberDetail member={detail} members={all} admin={admin} actionData={actionData} onBack={back} onAction={setDialog} onRoleChosen={(to) => setDialog({ kind: "role", to })} onOpenAccess={() => openAccess(detail.id)} onRemovePicture={() => void removePicture(detail)} />
         : routeUserId
           ? <p className="team-loading" role="status">Loading…</p>
           : <div className="team-placeholder"><Users aria-hidden="true" /><p>Choose someone to see their team role{admin ? ", account details, and activity" : ""}.</p></div>}
@@ -391,10 +396,11 @@ export function TeamSection({ route, role, totpEnabled = false, navigate, flash,
   </div>;
 }
 
-function MemberDetail({ member, members, admin, onBack, onAction, onRoleChosen, onOpenAccess, onRemovePicture }: {
+function MemberDetail({ member, members, admin, actionData, onBack, onAction, onRoleChosen, onOpenAccess, onRemovePicture }: {
   member: TeamMemberDetail;
   members: readonly TeamMember[];
   admin: boolean;
+  actionData?: MemberActionData;
   onBack: () => void;
   onAction: (dialog: Dialog) => void;
   onRoleChosen: (role: Role) => void;
@@ -419,6 +425,7 @@ function MemberDetail({ member, members, admin, onBack, onAction, onRoleChosen, 
         </p>
       </div>
     </header>
+    {actionData && <MemberActions className="team-detail-actions" variant="detail" data={actionData} member={{ id: member.id, displayName: member.displayName, isYou: member.isYou, blocked: member.status === "blocked" }} />}
 
     <section className="team-card" aria-labelledby="team-role-heading">
       <h3 id="team-role-heading">Team role</h3>

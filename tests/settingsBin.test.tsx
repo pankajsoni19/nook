@@ -44,7 +44,8 @@ describe("routes", () => {
 
   test("Open Bin links (the binned whiteboard card) go to /settings/bin", () => {
     expect(read("editor/whiteboardEmbed.tsx")).toContain('openPath("/settings/bin")');
-    expect(read("App.tsx")).toContain('if (!(route.app === "whiteboards" && route.boardId) && route.app !== "bin") return;');
+    // D1260: the open-path listener opens any checked in-app path (the Bin included; tests/openPath.test.ts).
+    expect(read("App.tsx")).toContain("const path = inAppOpenPath(href);");
   });
 });
 

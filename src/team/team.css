@@ -207,3 +207,14 @@
    detail pane's own flow (no padding of its own and no scroller of its own: the pane scrolls). */
 .team-integration-page .keys-settings { overflow: visible; padding: 0; margin: 8px 0 4px; }
 .team-integration-page h2 .integration-badge { font-size: .62rem; }
+
+/* Member actions from modules ("Book time with …", D1253): inside the row's card, after its chips. */
+.team-row-item { position: relative; }
+.team-row-item:has(.ui-menu) { z-index: 5; }
+.team-row-item:has(> .team-row-actions) > .team-row { padding-right: 152px; }
+.team-row-actions { position: absolute; top: 50%; right: 12px; display: flex; gap: 6px; transform: translateY(-50%); }
+.team-detail-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+@media (max-width: 420px) {
+  .team-row-item:has(> .team-row-actions) > .team-row { padding-right: 66px; }
+  .team-row-actions { right: 10px; }
+}

@@ -1,8 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Plus, X } from "lucide-react";
 import { ModalDialog } from "../files/Dialog";
 import { Select } from "../ui/Select";
 import type { FieldDefinition, FilterSpec, SortSpec } from "./collectionsApi";
+import { PersonPicker } from "../ui/people/People";
+import { resolvePeople } from "../ui/workspaceApi";
+import type { PersonSummary } from "../../shared/people";
 import { defaultFilterValue, filterReady, OPERATOR_LABELS, OPERATORS, SORTABLE_TYPES, valuelessOperator } from "./values";
 
 export type SortFilter = { sort: SortSpec[]; filters: FilterSpec[]; hiddenFieldIds: string[] };
@@ -102,7 +105,23 @@ function NumberValue({ value, onChange, label }: { value: FilterSpec["value"]; o
   }} />;
 }
 
+/** One team member or contact to match (D1202); a saved value is shown by name once resolved. */
+function RelationValue({ field, value, onChange, label }: { field: FieldDefinition; value: FilterSpec["value"]; onChange: (value: FilterSpec["value"]) => void; label: string }) {
+  const id = typeof value === "string" && value ? value : null;
+  const [chosen, setChosen] = useState<PersonSummary[]>([]);
+  const known = chosen[0] && "id" in chosen[0] ? chosen[0].id : null;
+  useEffect(() => {
+    if (!id || id === known) return;
+    let active = true;
+    resolvePeople(field.type === "person" ? { users: [id] } : { contacts: [id] }).then((result) => { if (active) setChosen(result.people.slice(0, 1)); }).catch(() => undefined);
+    return () => { active = false; };
+  }, [field.type, id, known]);
+  return <PersonPicker label={label} value={id ? chosen : []} allow={[field.type === "contact" ? "contact" : "user"]} multiple={false}
+    onChange={(people) => { setChosen(people); const next = people[0]; onChange(next && "id" in next ? next.id : ""); }} />;
+}
+
 function FilterValue({ field, filter, onChange, label }: { field: FieldDefinition; filter: FilterSpec; onChange: (value: FilterSpec["value"]) => void; label: string }) {
+  if (field.type === "person" || field.type === "contact") return <RelationValue field={field} value={filter.value} onChange={onChange} label={label} />;
   if (field.type === "checkbox") {
     return <Select label={label} value={filter.value === false ? "false" : "true"} onChange={(next) => onChange(next === "true")}
       options={[{ value: "true", label: "Checked" }, { value: "false", label: "Not checked" }]} />;

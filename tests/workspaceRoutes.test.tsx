@@ -110,10 +110,11 @@ describe("the stubs (D800, D832)", () => {
     expect(renderToStaticMarkup(<TopBarItems />)).toBe("");
   });
 
-  test("guests never get Time, Contacts, or Bookings in Settings, once they ship", () => {
+  test("guests never get Contacts or Bookings in Settings, and Time only when the server offers it (D1192)", () => {
     // Read through the same filter Settings uses: the rule names them even while they are planned.
     const shown = settingsModulesFor("guest").map((module) => module.id);
-    for (const id of ["time", "crm", "bookings", "team", "inbox"]) expect(shown).not.toContain(id);
+    for (const id of ["crm", "bookings", "team", "inbox"]) expect(shown).not.toContain(id);
+    expect(settingsModulesFor("guest", ["time"]).map((module) => module.id)).not.toContain("time");
   });
 
   test("Back and Forward remember a module section like any app", () => {

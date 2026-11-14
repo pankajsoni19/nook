@@ -533,7 +533,7 @@ export function resultsVisibleTo(row: FormRow, userId: string | null, options: {
 }
 
 /** Poll and time-poll results (aggregates; voters only on named polls; never text answers, T517). */
-export function pollResults(row: FormRow, viewerId: string | null, options: { withVoters: boolean }): PollResults | null {
+export function pollResults(row: FormRow, viewerId: string | null, options: { withVoters: boolean; publicView?: boolean }): PollResults | null {
   const current = currentSet(host(row.id));
   if (!current) return null;
   const question = current.set.questions.find((item) => item.type !== "statement");
@@ -549,7 +549,9 @@ export function pollResults(row: FormRow, viewerId: string | null, options: { wi
         WHERE r.host_kind = 'form' AND r.host_id = ? AND r.status = 'submitted' ORDER BY r.submitted_at LIMIT 20000`).all(question.id, row.id) as Array<{ id: string; user_id: string | null; name: string; option_id: string; value_text: string }>;
       const byResponse = new Map<string, PollResults["participants"][number]>();
       for (const item of rows) {
-        const entry = byResponse.get(item.id) ?? { key: item.id, name: item.name, you: viewerId !== null && item.user_id === viewerId, votes: {} };
+        // The public grid (D1108): a member shows by first name only, and rows are keyed by position, never a response id.
+        const name = options.publicView && item.user_id ? item.name.trim().split(/\s+/)[0] || "Member" : item.name;
+        const entry = byResponse.get(item.id) ?? { key: options.publicView ? `p${byResponse.size + 1}` : item.id, name, you: viewerId !== null && item.user_id === viewerId, votes: {} };
         entry.votes[item.option_id] = item.value_text as "yes" | "maybe" | "no";
         byResponse.set(item.id, entry);
       }
@@ -652,7 +654,9 @@ export function submitMemberResponse(userId: string, ref: string, input: { answe
     recordVisit(row.id, "submits");
     recount(row.id, at);
     if (!row.anonymous) recordItemActivity({ itemKind: "response", itemId: response.id, container: { kind: "form", id: row.id }, actorId: userId, kind: "submitted" });
-    audit(userId, null, "forms.response_submit", { formId: row.id, responseId: response.id, via });
+    // An anonymous response names nobody: no actor or response id in the audit row or server log (D1100, T620).
+    if (row.anonymous) audit(null, null, "forms.response_submit", { formId: row.id, anonymous: true, via });
+    else audit(userId, null, "forms.response_submit", { formId: row.id, responseId: response.id, via });
     return { response, ending: meta.ending ?? null, created: true, form: formRowById(row.id)! };
   })();
   responseCommitted(outcome, { actorId: userId, via });
@@ -699,9 +703,22 @@ export function parseFilter(input: { question?: string | null; option?: string |
   return filter;
 }
 
+/**
+ * On an anonymous form, `since`/`until` move to whole UTC days (since: the day's start; until: the next
+ * day's start unless already on one), so narrowing the window cannot time a single response (D1102, T623).
+ */
+export function dayFilter(row: FormRow, filter: ResponseFilter): ResponseFilter {
+  if (!row.anonymous) return filter;
+  const dayStart = (iso: string) => `${iso.slice(0, 10)}T00:00:00.000Z`;
+  const next = { ...filter };
+  if (next.since) next.since = dayStart(next.since);
+  if (next.until) next.until = next.until === dayStart(next.until) ? next.until : new Date(Date.parse(dayStart(next.until)) + 86_400_000).toISOString();
+  return next;
+}
+
 export function listResponses(userId: string, ref: string, filter: ResponseFilter, cursor?: string | null, limit = 50) {
   const { row } = requireForm(ref, userId, "view");
-  const page = responsesPage(host(row.id), filter, cursor, limit);
+  const page = responsesPage(host(row.id), dayFilter(row, filter), cursor, limit, { dayOnly: row.anonymous === 1 });
   return { items: withNames(row, page.items), nextCursor: page.nextCursor, total: row.response_count };
 }
 
@@ -728,7 +745,7 @@ export function deleteFormResponse(userId: string, ref: string, responseId: stri
 
 export function formSummary(userId: string, ref: string, filter: ResponseFilter = {}): FormSummaryView {
   const { row } = requireForm(ref, userId, "view");
-  const summary = summarize(host(row.id), filter);
+  const summary = summarize(host(row.id), dayFilter(row, filter));
   const textHidden = row.anonymous === 1 && summary.responses < 3;
   const questions = textHidden ? summary.questions.map((item) => item.kind === "text" ? { ...item, latest: [], topWords: [] } : item) : summary.questions;
   const funnel = db.query("SELECT COALESCE(SUM(views), 0) AS views, COALESCE(SUM(starts), 0) AS starts, COALESCE(SUM(submits), 0) AS submits FROM form_visits WHERE form_id = ?").get(row.id) as FormSummaryView["funnel"];

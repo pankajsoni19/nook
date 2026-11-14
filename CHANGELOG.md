@@ -4,7 +4,80 @@ Release notes for Nook, newest first. Upgrade steps for each release are in [doc
 
 ## Unreleased
 
+**Fixes: final QA of the modules**
+
+- **Open** on a goal, form, or townhall card in a note, and **Open in Bookings** after booking a colleague, open the page in the app again (they did nothing). Leaving a note saves it first; a module that is off shows its hint on Home.
+- Team → **Book time**: the booking sheet opens whole over the page instead of clipped inside the member's row.
+- Collections: choosing a team member or contact for a row lists the matches inside the sheet, above its buttons, and a click picks one (the list was cut off and clicks missed it).
+- Insights charts in every module shrink when the window gets narrower instead of running off their cards.
+- Goals → Periods: **Add period** twice in a row adds the next quarter instead of a copy, and a period name already in use is refused with a message saying so.
+- Today → Storage says how many items are in the Bin instead of "Nothing in the Bin" when the Bin holds notes, cards, or boards.
+- Home on a phone: app tiles show the icon above the name, so **Whiteboards** fits its tile.
+- Report charts of counts step 0, 1, 2 instead of 0, 0.5, 1.
+
+**Fixes: gaps between the modules plan, the docs, and the app**
+
+- Today's Follow-ups **View all** opens the Contacts Follow-ups tab instead of People, and a submitted week's notification opens the project's Approvals tab.
+- Standup Settings → Who can read it has a **Private answers** switch (owner and managers), saying who sees whose answers; editors who are not managers can no longer change it through the API.
+- Settings → Notifications names every module notification: deals lost (Contacts), nudges (Standups), and responses a form's Notify people action sends you (Forms).
+- Guests see Time once they are on a time project (tile, Today, and its Settings → Modules switch), and no longer see Contacts or Bookings, whose pages and API refuse guests.
+- Calendar events as standup answer suggestions are listed as not built yet.
+
+**Fixes: Standups and Contacts**
+
+- A standup whose round run failed or was interrupted by a restart picks up again within 15 minutes instead of stopping for good.
+- Blocked people are no longer asked, counted as missed, or a reason a standup's participant list can't be saved.
+- Undoing a contact import removes only the companies that import created, not companies from other imports.
+- Removing a pipeline stage that has deals moves them like a stage change: won/lost dates, lost reasons, stage history, and the deal's timeline.
+- Merging contacts or companies moves the time logged on them.
+- Restoring a company from the Bin whose domain another company now uses explains the clash instead of failing.
+- Goal key results that add up deal value count one currency (the pipeline's or book's, or one you choose) instead of mixing currencies.
+- Dragging a deal on a board filtered by Mine or search lands it where you dropped it.
+- Contacts sheets (new contact, company, deal, import) fill the screen on phones.
+- A note without a title reads "Note · Ada", not "Note · Note".
+- A standup with no rounds yet shows when its first round opens.
+
+**Time and Goals fixes** (audit 2)
+
+- Saving a time entry or the running timer no longer unlinks it from a card you can't open, or trims its start to the minute.
+- Budget alerts arrive once when a project crosses 80% and 100% of its budget, not again on every entry after you read them.
+- People who see a worklog on a card, but not its private project, see "A project you can't open" instead of the project's name, color, and client (card Time section, summaries, CSV, and the time dataset).
+- An MCP key limited to some projects can no longer stop a timer running on another project by starting one, and `get_time_for_item` totals only its projects.
+- Week approvals show the same total that approving locks (each entry's local day); time logged ahead for tomorrow no longer counts as today's.
+- A goal carried over to the next period counts once in its parent's progress; closing a goal or a period uses up-to-date automatic key results.
+- Project managers see amounts and currency for everyone's entries on their projects in the time dataset (reports), not only their own.
+- New goals start in the current period (also over MCP when no period is given); the New goal sheet's Start and Due fields line up.
+
+**Book time with a colleague**
+
+- The Team page shows **Book time** beside each colleague who has a booking type you can book (shared with you, or on their public booking page), and **Book time with <name>** on their profile. With one type it opens the booking sheet right away; with several, pick one first. Choose a length and a time, answer the type's questions, and it's booked as you, without leaving Nook.
+- Agents and MCP clients can ask which colleagues they can book time with (`list_bookable_types`).
+
+**Bookings fixes**
+
+- Outside calendars: repeating events are read correctly when they repeat on other weekdays than the first one, on days of the month (the 1st and 15th, the last day), on every Monday of a month, or yearly on the 4th Thursday of November, and a series ending on a given day no longer adds one more day west of UTC.
+- A booking that was refused (the time was just taken, an answer to fix) can be tried again right away, on the booking page and the manage page.
+- A request waiting for the host's approval no longer offers "Add to calendar"; the calendar file comes once it is confirmed, and its event id no longer reveals Nook's internal id.
+- Rescheduling works after the host changed the type's lengths; a moved booking counts once in round robin and in Insights (no longer as a cancellation); a booker can cancel only before the start; agents can't book a hidden type they don't own.
+- A new Bookings profile and its working hours start in your browser's time zone instead of UTC; all-day events from outside calendars block the days in your schedule's zone; today's mark on the booking calendar is a whole ring.
+
+**Audit fixes: Forms, Townhall, public pages**
+
+- **Anonymous stays anonymous**: anonymous townhall questions and anonymous form responses no longer record who sent them in the audit log or server log, and a named question can no longer be matched to the same person's anonymous ones. Anonymous form exports, response lists, and date filters work by the day only.
+- **Townhall audience page**: a whole room behind one network can load and follow a live session; a busy moment retries instead of leaving the page on "Loading…"; names typed by outside participants show as "Name · guest".
+- **Public forms**: a refused submission (a missing answer, already responded) can be sent again without reloading; a response limit reached from a public link closes the form like any other close; the public time-poll grid shows members by first name only.
+- **Fixes**: the townhall list no longer repeats or skips sessions when paging past live ones; recap upvote totals leave out questions still waiting for review.
+- **Polish**: tapping a public poll right after it opens counts the vote (no more silent "too fast"); Forms sheets fill the screen on phones; the form editor's question count no longer wraps; opening a form's results you were only asked to answer explains that and links to the form; the Townhall Invite QR code is of the link shown beside it.
+
+**Collections**
+
+- **Team member and contact fields**: collections can have a Team member or a Contact field; pick someone in the cell or row panel, filter by them, sort by member name, and import or export them by name or email. Someone who can't read a contact's book sees "A contact", never the name. Contacts' custom fields of these types now show names in tables and on records, and a contact field searches the whole book. MCP tools take an id, email, or name and return names.
+
+- **Fixed**: starting a standup round, removing a key result, deleting a time entry, moving a form or contact to the Bin, and other one-click actions no longer fail with "Content-Type must be application/json" (D1180).
+- **Fixed**: Insights charts use the app's theme for labels and axes, show goal health in its own colours, count in whole numbers, and show every rating from 1 to the top of the scale (D1181, D1182).
+
 **Workspace modules working together** (Wave 3)
+
 
 - **Standups and Goals**: a goal update question shows your goals' key results; numbers you type become goal check-ins when you post. Closed rounds can be added to a note of your choice and published. Cards you logged time on show up in "What did you get done".
 - **Tasks, Contacts, and Goals**: finishing a card made from a contact or deal logs "Task done" on it; key results that count a board's cards update within seconds of a move; a board shows the goal it contributes to in its header.
@@ -14,6 +87,9 @@ Release notes for Nook, newest first. Upgrade steps for each release are in [doc
 - **Sharing**: Goals, Standups, Forms (who sees results), Contacts books, Time projects, Bookings types, and Townhall sessions all use the same Access sheet as notes and boards; booking types can now be shared.
 - **Mail and reminders**: booking confirmations and new times attach a calendar file that updates in place; a finalized time poll emails outside voters the chosen time as a calendar file; Townhall reminders also arrive by email; goal check-in reminders arrive Monday 09:00 in each owner's time zone.
 - **Embeds**: notes and card descriptions can embed a goal or a townhall session; `/` Goal, Townhall, and Booking link let you pick which one. Today's empty-section lines no longer split into narrow columns.
+- **Docs**: the docs site and docs/USING.md have "Using Nook" sections for Forms, Time, Goals, Standups, Contacts, Bookings, and Townhall, with screenshots, plus how the modules connect, the public pages and their admin switches in Settings → Workspace, and the modules' MCP tools.
+
+- **Reports on This workspace**: **Edit widget** (the pencil on a block, or its ⋯ menu) opens the widget builder on what the block shows; change the measures, grouping, time range, filters, or chart type, preview it, and save it in place as a new version with Undo. Widgets the builder cannot show open in the JSON editor instead.
 
 **Goals**
 

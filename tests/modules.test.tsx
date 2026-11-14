@@ -104,7 +104,7 @@ describe("Settings → Modules", () => {
     expect(guest).not.toContain("module-label-agents");
     // Nor Reports (Wave 45).
     expect(guest).not.toContain("module-label-reports");
-    expect([...guest.matchAll(/role="switch"/g)]).toHaveLength(SETTINGS_MODULES.filter((module) => builtIn(module.id)).length - 5 + SETTINGS_MODULES.filter((module) => !builtIn(module.id) && !["time", "crm", "bookings"].includes(module.id)).length);
+    expect([...guest.matchAll(/role="switch"/g)]).toHaveLength(SETTINGS_MODULES.filter((module) => builtIn(module.id)).length - 5 + SETTINGS_MODULES.filter((module) => !builtIn(module.id) && !["crm", "bookings"].includes(module.id)).length);
     expect(render(["team"], null, "admin")).toContain("You are an admin: Team stays available from Settings.");
   });
 

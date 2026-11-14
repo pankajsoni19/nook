@@ -22,7 +22,18 @@ export type Booking = {
   cancelReason: string | null; cancelledBy: string | null; source: BookingSource; createdAt: string; revision: number;
   response?: { setVersion: number; answers: Record<string, unknown> }; questions?: QuestionSet | null;
 };
-export type SlotDays = { tz: string; duration: number; days: Record<string, string[]> };
+/** A type a member can book with a colleague (GET /api/bookings/bookable, D1250). */
+export type BookableType = {
+  id: string; shortId: string; title: string; description: string; durations: number[]; color: string; locationKind: LocationKind;
+  confirm: "auto" | "manual"; assignment: Assignment; href: string;
+};
+/** The in-app booking sheet's type (GET /api/bookings/types/:id/form). */
+export type BookingForm = {
+  type: BookableType & { locationLabel: string; location: string; needsLocation: boolean };
+  hosts: Array<{ id: string; name: string }>;
+  questions: QuestionSet | null;
+};
+export type SlotDays ={ tz: string; duration: number; days: Record<string, string[]> };
 export type Insights = {
   days: number; tz: string; total: number; statusCounts: Record<string, number>; cancelRate: number | null; noShowRate: number | null; avgLeadHours: number | null;
   weeks: Array<{ week: string; count: number }>; types: Array<{ type: string; count: number; minutes: number }>; hosts: Array<{ host: string; count: number }>;
@@ -32,12 +43,13 @@ const send = (method: string, body?: unknown): RequestInit => ({ method, ...(bod
 const enc = encodeURIComponent;
 
 export const bookingsApi = {
-  profile: () => api<{ profile: Profile; feeds: Feed[] }>("/bookings/profile"),
+  // The browser's zone goes along: the first call makes the profile and working hours in it (D1129).
+  profile: () => api<{ profile: Profile; feeds: Feed[] }>(`/bookings/profile?tz=${enc(viewerZone())}`),
   saveProfile: (input: Partial<Profile>) => api<{ profile: Profile }>("/bookings/profile", send("PUT", input)),
   addFeed: (input: { label: string; url: string }) => api<{ feed: Feed }>("/bookings/feeds", send("POST", input)),
   refreshFeed: (id: string) => api<{ feed: Feed }>(`/bookings/feeds/${enc(id)}/refresh`, send("POST", {})),
   removeFeed: (id: string) => api<void>(`/bookings/feeds/${enc(id)}`, send("DELETE")),
-  schedules: () => api<{ schedules: Schedule[] }>("/bookings/schedules"),
+  schedules: () => api<{ schedules: Schedule[] }>(`/bookings/schedules?tz=${enc(viewerZone())}`),
   createSchedule: (input: { name: string; tz: string; weekly?: WeeklyRules }) => api<{ schedule: Schedule }>("/bookings/schedules", send("POST", input)),
   saveSchedule: (id: string, input: { name?: string; tz?: string; weekly?: WeeklyRules; isDefault?: boolean }) => api<{ schedule: Schedule }>(`/bookings/schedules/${enc(id)}`, send("PUT", input)),
   deleteSchedule: (id: string) => api<void>(`/bookings/schedules/${enc(id)}`, send("DELETE")),
@@ -61,6 +73,9 @@ export const bookingsApi = {
   bookingSlots: (ref: string, query: { from: string; to: string; tz: string }) => api<SlotDays>(`/bookings/b/${enc(ref)}/slots?${new URLSearchParams(query)}`),
   insights: (days: number, tz: string) => api<Insights>(`/bookings/insights?${new URLSearchParams({ days: String(days), tz })}`),
   calendars: () => api<{ calendars: Array<{ id: string; name: string; role: string; color: string }> }>("/calendars"),
+  form: (ref: string) => api<BookingForm>(`/bookings/types/${enc(ref)}/form`),
+  book: (input: { type: string; start: string; duration: number; tz: string; location?: string | null; guests?: string[]; answers?: Record<string, unknown> }) =>
+    api<{ booking: Booking; mailQueued: boolean }>("/bookings", send("POST", input)),
   embed: (ref: string) => api<{ title: string; publicPath: string | null; durations: number[]; ownerName: string }>(`/bookings/types/${enc(ref)}/embed`)
 };
 

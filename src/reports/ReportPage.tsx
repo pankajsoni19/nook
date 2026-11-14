@@ -36,6 +36,8 @@ import { placeholderInput, placeholdersIn, placeholderValue } from "../../shared
 import type { ReportParamsSearch } from "../router";
 import { isWorkspaceSource } from "../../shared/reportsWorkspace";
 import { WorkspaceWidgetSheet } from "./WorkspaceWidgetSheet";
+import { QueryEditSheet } from "./QueryEditSheet";
+import { blockMapping } from "./InspectSheet";
 
 type PageProps = {
   reportId: string;
@@ -128,8 +130,13 @@ export function ReportPage({ reportId, displayName, flash, onBack, onSettings, o
   useLayerOpener("reports.metrics", () => setMetricsOpen(true));
   // D534: Add filter (the owner), a sheet with its own layer.
   const [addFilterOpen, setAddFilterOpen] = useState(false);
-  // W3-REPORTS (D1067): Add widget, the structured-query builder of a report on This workspace.
-  const [widgetOpen, setWidgetOpen] = useState(false);
+  // W3-REPORTS (D1067): Add widget, the structured-query builder of a report on This workspace;
+  // D1220: Edit widget is the same sheet on a block (`blockId`); D1222: its JSON fallback is Edit SQL.
+  const [widget, setWidget] = useState<{ blockId: string | null } | null>(null);
+  const lastWidget = useRef<{ blockId: string | null }>({ blockId: null });
+  const openWidget = useCallback((blockId: string | null) => { lastWidget.current = { blockId }; setWidget({ blockId }); }, []);
+  const [jsonEdit, setJsonEdit] = useState<string | null>(null);
+  useLayerOpener("reports.widget-edit", (blockId) => { if (blockId) openWidget(blockId); });
   useLayerOpener("reports.add-filter", () => setAddFilterOpen(true));
   useLayerOpener("reports.duplicate", () => setDuplicating(true));
   // The header's actions that live in the viewer and the generation part (reportCommands.tsx).
@@ -173,8 +180,8 @@ export function ReportPage({ reportId, displayName, flash, onBack, onSettings, o
   const hasBlocks = Boolean(report?.spec.blocks.length);
   const editing = useMemo<ReportEditing>(() => ({
     canEdit: ownerWrite, canSuggest: canWrite && !report?.isOwner && Boolean(rights?.canComment) && rights?.level === "comment", onChanged: reloadReport, openChanges,
-    ...(ownerWrite && hasBlocks ? { ...(isWorkspaceSource(report?.datasourceId) ? {} : { addFilter: () => setAddFilterOpen(true) }), removeFilter: (paramId: string) => { void removeFilter(paramId); } } : {})
-  }), [canWrite, hasBlocks, openChanges, ownerWrite, reloadReport, removeFilter, report?.datasourceId, report?.isOwner, rights?.canComment, rights?.level]);
+    ...(ownerWrite && hasBlocks ? { ...(isWorkspaceSource(report?.datasourceId) ? { editWidget: (blockId: string) => openWidget(blockId) } : { addFilter: () => setAddFilterOpen(true) }), removeFilter: (paramId: string) => { void removeFilter(paramId); } } : {})
+  }), [canWrite, hasBlocks, openChanges, openWidget, ownerWrite, reloadReport, removeFilter, report?.datasourceId, report?.isOwner, rights?.canComment, rights?.level]);
   useEffect(() => { if (report) document.title = `${report.title} · Reports · ${appName()}`; }, [report]);
   useEffect(() => { saveDraft(reportId, sql); }, [reportId, sql]);
 
@@ -321,7 +328,7 @@ export function ReportPage({ reportId, displayName, flash, onBack, onSettings, o
           {ownerWrite && commands.refreshAll && <button type="button" className="primary-button" onClick={commands.refreshAll.run} disabled={commands.refreshAll.disabled} aria-busy={commands.refreshAll.busy || undefined}>
             {commands.refreshAll.busy ? <LoaderCircle className="spin" aria-hidden="true" /> : <RefreshCw aria-hidden="true" />}Refresh all
           </button>}
-          {ownerWrite && isWorkspaceSource(report.datasourceId) && report.spec.blocks.length > 0 && <button type="button" className="secondary-button" onClick={() => setWidgetOpen(true)}><Plus aria-hidden="true" />Add widget</button>}
+          {ownerWrite && isWorkspaceSource(report.datasourceId) && report.spec.blocks.length > 0 && <button type="button" className="secondary-button" onClick={() => openWidget(null)}><Plus aria-hidden="true" />Add widget</button>}
           <button type="button" className="secondary-button" onClick={() => openChanges(null)}><MessageSquare aria-hidden="true" />Changes</button>
           {report.isOwner && <button type="button" className="secondary-button report-wide-only" onClick={() => openRuns(null)}><History aria-hidden="true" />Runs</button>}
           <button type="button" className="secondary-button report-wide-only" onClick={() => setVersionsOpen(true)}><GitCommitVertical aria-hidden="true" />Versions</button>
@@ -352,7 +359,7 @@ export function ReportPage({ reportId, displayName, flash, onBack, onSettings, o
         <h2 id={`${consoleId}-workspace`}>Build from this workspace's data</h2>
         <p>Forms, Time, Goals, Standups, Contacts, Bookings, Townhall, and Tasks: pick a dataset, what to measure, and how to group it. Everyone who opens the report sees the numbers their own access allows.</p>
         {ownerWrite && <div className="report-empty-actions">
-          <button type="button" className="primary-button" onClick={() => setWidgetOpen(true)}><Plus aria-hidden="true" />Add widget</button>
+          <button type="button" className="primary-button" onClick={() => openWidget(null)}><Plus aria-hidden="true" />Add widget</button>
           <button type="button" className="secondary-button" onClick={generateFromDoc}><FileText aria-hidden="true" />Generate from a doc</button>
           <button type="button" className="secondary-button" onClick={() => { composerFocus.current = true; openChanges(null); }}><MessageSquarePlus aria-hidden="true" />Ask for a chart</button>
         </div>}
@@ -375,7 +382,9 @@ export function ReportPage({ reportId, displayName, flash, onBack, onSettings, o
       {versionsOpen && report && <VersionsSheet report={report} canRestore={ownerWrite} onClose={() => setVersionsOpen(false)} reopen={() => setVersionsOpen(true)} layerKey="reports.versions" memory={versionsMemory.current}
         onRestored={() => { setVersionsOpen(false); reloadReport(); }} />}
     </ReportRunsContext.Provider>
-    {widgetOpen && report && <ReportParamsContext.Provider value={paramsContext}><WorkspaceWidgetSheet report={report} onClose={() => setWidgetOpen(false)} reopen={() => setWidgetOpen(true)} onChanged={reloadReport} /></ReportParamsContext.Provider>}
+    {widget && report && <ReportParamsContext.Provider value={paramsContext}><WorkspaceWidgetSheet key={widget.blockId ?? ""} report={report} onClose={() => setWidget(null)} reopen={() => setWidget(lastWidget.current)} onChanged={reloadReport}
+      {...(widget.blockId ? { editBlockId: widget.blockId, layerKey: `reports.widget-edit:${widget.blockId}`, onEditJson: (blockId: string) => { setWidget(null); setJsonEdit(blockId); } } : {})} /></ReportParamsContext.Provider>}
+    {jsonEdit && report && <JsonEditSheet report={report} blockId={jsonEdit} paramsContext={paramsContext} onClose={() => setJsonEdit(null)} reopen={() => setJsonEdit(jsonEdit)} onChanged={reloadReport} openChanges={openChanges} />}
     {addFilterOpen && report && <AddFilterSheet reportId={report.id} onClose={() => setAddFilterOpen(false)} reopen={() => setAddFilterOpen(true)} onRequested={() => { setAddFilterOpen(false); openChanges(null); }} />}
     {metricsOpen && report && <MetricsSheet reportId={report.id} title={report.title} canEdit={ownerWrite} onClose={() => setMetricsOpen(false)} reopen={() => setMetricsOpen(true)} />}
     {runsAt && report && <RunsSheet key={runsAt.runId ?? ""} reportId={report.id} title={report.title} focusRunId={runsAt.runId} onClose={() => setRunsAt(null)} reopen={() => setRunsAt(lastRuns.current)} />}
@@ -505,4 +514,19 @@ function ConsoleSheet({ title, onClose, reopen, blocked, children }: { title: st
   return <ModalDialog title="SQL console" eyebrow={title} onClose={onClose} variant="sheet" className="reports-dialog report-console-sheet">
     <div className="report-console-sheet-body">{children}</div>
   </ModalDialog>;
+}
+
+/**
+ * D1222: Edit widget's fallback for a block the builder cannot show: Inspect's own editor (Edit SQL),
+ * on the block's structured query as JSON, checked and saved the same way (a version, with Undo).
+ */
+function JsonEditSheet({ report, blockId, paramsContext, onClose, reopen, onChanged, openChanges }: { report: ReportDetail; blockId: string; paramsContext: { search: ReportParamsSearch | undefined; onChange: (params: ReportParamsSearch | undefined, options?: { replace?: boolean }) => void }; onClose: () => void; reopen: () => void; onChanged: () => void; openChanges: (blockId: string | null) => void }) {
+  const block = report.spec.blocks.find((item) => item.id === blockId);
+  const query = block && block.type !== "markdown" ? report.spec.queries.find((item) => item.key === block.queryKey) : undefined;
+  useEffect(() => { if (!query) onClose(); }, [onClose, query]);
+  if (!block || block.type === "markdown" || !query) return null;
+  return <ReportParamsContext.Provider value={paramsContext}>
+    <QueryEditSheet report={report} blockId={block.id} blockTitle={block.title ?? query.key} query={query} mode="save" highlight={blockMapping(block)}
+      onClose={onClose} reopen={reopen} layerKey={`reports.widget-json:${block.id}`} onChanged={onChanged} openChanges={openChanges} />
+  </ReportParamsContext.Provider>;
 }

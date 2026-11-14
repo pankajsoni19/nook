@@ -66,8 +66,15 @@ function checkTimes(deadline: number, reminder: number | null) {
 }
 
 /** Validates people and groups: live team members (guests only when sharing with guests is on). */
-function checkParticipants(input: ParticipantsInput) {
-  const people = [...new Set(input.people.map((id) => id.toLowerCase()))];
+function checkParticipants(input: ParticipantsInput, checkinId?: string) {
+  let people = [...new Set(input.people.map((id) => id.toLowerCase()))];
+  // A blocked person already on the list is dropped, not an error (D1161): they are hidden from the
+  // list the editor saves back, and a stale copy of it must not block the save.
+  if (checkinId && people.length) {
+    const blocked = new Set((db.query(`SELECT p.user_id FROM checkin_participants p JOIN users u ON u.id = p.user_id
+      WHERE p.checkin_id = ? AND u.disabled_at IS NOT NULL`).all(checkinId) as Array<{ user_id: string }>).map((row) => row.user_id));
+    if (blocked.size) people = people.filter((id) => !blocked.has(id));
+  }
   const groups = [...new Set(input.groups.map((id) => id.toLowerCase()))];
   if (people.length > CHECKIN_MAX_PARTICIPANTS) throw new CheckinError(400, "INVALID", `At most ${CHECKIN_MAX_PARTICIPANTS} people`);
   if (groups.length > CHECKIN_MAX_GROUPS) throw new CheckinError(400, "INVALID", `At most ${CHECKIN_MAX_GROUPS} groups`);
@@ -132,7 +139,12 @@ export function createCheckin(userId: string, input: CheckinInput, nowMs = Date.
 
 export function updateCheckin(userId: string, ref: string, patch: CheckinPatch, nowMs = Date.now()): CheckinRow {
   return db.transaction(() => {
-    const { row } = requireLevel(checkinRow(ref), userId, "edit");
+    const { row, level } = requireLevel(checkinRow(ref), userId, "edit");
+    // D1191 (T550): an editor who is not a manager reads only their own answers under private answers,
+    // so turning it off (or on) is a manager's change, like who can read the standup.
+    if (patch.privateAnswers !== undefined && (patch.privateAnswers ? 1 : 0) !== row.private_answers && LEVEL_RANK[level] < LEVEL_RANK.manage) {
+      throw new CheckinError(403, "READ_ONLY", "Only the owner or a manager changes who sees the answers");
+    }
     if (patch.expectedRevision !== undefined && patch.expectedRevision !== row.revision) throw new CheckinError(409, "CHECKIN_CHANGED", "This standup changed since you opened it", { revision: row.revision });
     const name = patch.name !== undefined ? checkName(patch.name) : row.name;
     const description = patch.description !== undefined ? patch.description.trim() : row.description_md;
@@ -178,7 +190,7 @@ export function deleteCheckin(userId: string, ref: string, nowMs = Date.now()) {
 export function setParticipants(userId: string, ref: string, input: ParticipantsInput, nowMs = Date.now()) {
   return db.transaction(() => {
     const { row } = requireLevel(checkinRow(ref), userId, "edit", "change who takes part");
-    const checked = checkParticipants(input);
+    const checked = checkParticipants(input, row.id);
     const timestamp = new Date(nowMs).toISOString();
     const changed = writeParticipants(row.id, checked, timestamp);
     joinOpenRounds(row, changed.added, nowMs);

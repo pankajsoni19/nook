@@ -56,3 +56,13 @@ describe("Goals client module", () => {
     expect(quiet).toContain("achieved");
   });
 });
+
+describe("Periods: Add period suggestions (D1264)", () => {
+  test("suggests the first quarter no period is named yet, so a second add moves on", async () => {
+    const { nextPeriodSuggestion } = await import("../src/goals/sheets");
+    const now = new Date(Date.UTC(2026, 10, 14));
+    expect(nextPeriodSuggestion([], now)).toEqual({ name: "Q4 2026", startsOn: "2026-10-01", endsOn: "2026-12-31" });
+    expect(nextPeriodSuggestion([{ name: "q4 2026" }], now)?.name).toBe("Q1 2027");
+    expect(nextPeriodSuggestion([{ name: "Q4 2026" }, { name: "Q1 2027" }], now)).toEqual({ name: "Q2 2027", startsOn: "2027-04-01", endsOn: "2027-06-30" });
+  });
+});

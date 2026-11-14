@@ -83,6 +83,6 @@ export function registerGoalRoutes(router: ModuleRouter) {
   router.delete("/api/goal-periods/:id", handle((c, userId) => { deletePeriod(userId, param(c, "id")); return { deleted: true }; }));
   router.post("/api/goal-periods/:id/close", handle(async (c, userId) => {
     const body = await parseJson(c.req.raw, z.object({ carryOverTo: z.string().uuid().nullish() }).strict());
-    return { closed: closePeriod(userId, param(c, "id"), body) };
+    return { closed: await closePeriod(userId, param(c, "id"), body) };
   }));
 }

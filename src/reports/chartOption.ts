@@ -416,8 +416,12 @@ export function buildChartOption(block: ChartBlock, data: ChartData, theme: Char
   // When every bar carries its own value label the axis labels go; otherwise fewer ticks (one per ~110 px) and overlaps hidden.
   const narrowAcross = horizontal && size.width !== undefined && size.width < 560;
   const everyBarLabelled = bars && series.length === 1 && !stacked && categories.length <= TIP_LABELS;
+  // D1267: counts step in whole numbers (a chart of 1s and 2s drew 0.5 ticks): an integer measure,
+  // or a plain number whose every plotted value is whole.
+  const wholeSteps = !percent && (format === "integer" || ((format === undefined || format === "number") && raw.every((values) => values.every((value) => value === null || Number.isInteger(value)))));
   const valueAxis = {
     type: "value",
+    ...(wholeSteps ? { minInterval: 1 } : {}),
     ...(narrowAcross ? { splitNumber: Math.max(2, Math.floor((size.width! - 120) / 110)) } : {}),
     axisLabel: { show: !(narrowAcross && everyBarLabelled), hideOverlap: true, color: ink.muted, fontSize: TYPE.axis.size, formatter: named(`axis:${format ?? "number"}`, (value: number) => compactValue(value, format)) },
     // Gridlines are horizontal only: a horizontal bar chart's value axis runs across, so it has none.

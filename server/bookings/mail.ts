@@ -83,7 +83,8 @@ function resolveBooker(kind: BookerMail["kind"]): RegisteredMailTemplate<BookerM
       kind, typeTitle: booking.type_title, when: formatWhen(booking.start_utc, booking.end_utc, tz),
       previous: typeof payload.previousStart === "string" ? formatWhen(payload.previousStart, new Date(Date.parse(payload.previousStart) + booking.duration_min * 60_000).toISOString(), tz) : null,
       location: booking.location_resolved, locationKind: booking.location_kind, hostName: userName(booking.host_id),
-      manageHref: manage ? appLink(manage) : null, icsHref: manage ? appLink(`/api/public/bookings/manage/${manage.slice("/p/book/manage/".length)}/ics`) : null,
+      // No "Add to calendar" for a request awaiting approval: the file would say CONFIRMED (D1122).
+      manageHref: manage ? appLink(manage) : null, icsHref: manage && booking.status === "confirmed" ? appLink(`/api/public/bookings/manage/${manage.slice("/p/book/manage/".length)}/ics`) : null,
       reason: typeof payload.reason === "string" && payload.reason ? payload.reason.slice(0, 500) : null, by: typeof payload.by === "string" ? payload.by : null,
       ics: ICS_ATTACHED_KINDS.has(kind) && booking.status === "confirmed" ? bookingIcs(booking) : null
     } };

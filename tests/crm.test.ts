@@ -63,8 +63,8 @@ describe("books, fields, contacts, companies", () => {
     const good = await api(owner, "POST", "/crm/contacts", { bookId, name: "Gold Person", custom: { Tier: tier!.options[0].id, [manager!.id]: owner.userId } });
     expect(good.status).toBe(201);
     expect(good.body.contact.custom[tier!.id]).toBe(tier!.options[0].id);
-    // Collections itself does not offer the relation types yet (D961).
-    expect(() => buildSchema([{ name: "Title", type: "text" }, { name: "Who", type: "person" }])).toThrow(/not available here/);
+    // Collections offers the relation types too since D1200.
+    expect(buildSchema([{ name: "Title", type: "text" }, { name: "Who", type: "person" }]).fields[1]!.type).toBe("person");
   });
 
   test("contacts dedupe by email, link companies by domain, and keep hand edits from upserts (D806)", async () => {

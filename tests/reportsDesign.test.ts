@@ -277,3 +277,15 @@ describe("KPI compareLabel", () => {
     expect(kpiValue({ id: "k", type: "kpi", queryKey: "q", column: "v", compareColumn: "revenue_prev" }, result).change!.against).toBe("vs previous period");
   });
 });
+
+describe("count charts step in whole numbers (D1267)", () => {
+  const rows = (values: number[]) => ({ columns: [{ name: "country", type: "String" }, { name: "orders", type: "Float64" }], rows: values.map((value, index) => [`C${index}`, String(value)]) });
+  const yAxis = (data: ReturnType<typeof rows>, overrides: Record<string, unknown> = {}) => buildChartOption({ ...chart(overrides), id: "c" } as never, data, chartTheme("dark")).option!.yAxis as { minInterval?: number };
+  test("whole values or an integer format get minInterval 1; fractions, percent, and money do not", () => {
+    expect(yAxis(rows([1, 2, 1])).minInterval).toBe(1);
+    expect(yAxis(rows([1, 2]), { format: "integer" }).minInterval).toBe(1);
+    expect(yAxis(rows([0.4, 1.5])).minInterval).toBeUndefined();
+    expect(yAxis(rows([1, 2]), { format: "percent" }).minInterval).toBeUndefined();
+    expect(yAxis(rows([1, 2]), { format: "currency:USD" }).minInterval).toBeUndefined();
+  });
+});

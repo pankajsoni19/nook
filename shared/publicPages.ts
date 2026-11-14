@@ -21,11 +21,11 @@ export const PUBLIC_HANDLE_PATTERN = /^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$/;
  * What a public page sends back with a submission (every field required):
  * - `nonce`: the signed, single-use render nonce from the page's JSON (`renderNonce`).
  * - `website`: the honeypot; must be empty (a bot fills it).
- * The minimum fill time is read from the nonce's signed render time (3 s forms, 5 s bookings).
+ * The minimum fill time is read from the nonce's signed render time (3 s forms, 1 s one-tap polls, 5 s bookings).
  */
 export const HONEYPOT_FIELD = "website";
 export const NONCE_FIELD = "nonce";
-export const MIN_FILL_MS = { form: 3000, booking: 5000 } as const;
+export const MIN_FILL_MS = { form: 3000, poll: 1000, booking: 5000 } as const;
 
 /** Body cap of a public submission. */
 export const PUBLIC_BODY_MAX_BYTES = 65_536;

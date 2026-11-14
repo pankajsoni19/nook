@@ -33,13 +33,22 @@ export const visibleEntrySql = () => `(e.user_id = $userId
   OR (p.id IS NOT NULL AND ${readableContainerSql("time_project", "p", { minLevel: "edit" })})
   OR (e.target_kind = 'card' AND NOT ${privateProject} AND ${readableCardTargetSql}))`;
 
+/**
+ * The entry's live project is one `$userId` cannot open (TG4, D1143): a card reader, or an author who
+ * lost access, sees the entry's time but not the project's name, color, or client.
+ */
+export const hiddenProjectSql = () => `(p.id IS NOT NULL AND p.deleted_at IS NULL AND NOT ${readableContainerSql("time_project", "p")})`;
+
+/** What a project the viewer cannot open is called, wherever an entry shows its project. */
+export const HIDDEN_PROJECT_LABEL = "A project you can't open";
+
 /** Entries whose money `$userId` may see (D873). */
 export const moneyVisibleSql = () => `(e.user_id = $userId OR (p.id IS NOT NULL AND ${readableContainerSql("time_project", "p", { minLevel: "manage" })}))`;
 
 export type ProjectRow = {
   id: string; short_id: string; owner_id: string; name: string; code: string | null; color: string; company_id: string | null; board_id: string | null;
   billable_default: number; rate_minor: number | null; currency: string; budget_kind: "none" | "hours" | "money"; budget_value: number | null;
-  budget_period: "total" | "monthly"; settings_json: string; archived_at: string | null; visibility: "private" | "selected" | "all_users"; share_role: string;
+  budget_period: "total" | "monthly"; budget_alerted?: string | null; settings_json: string; archived_at: string | null; visibility: "private" | "selected" | "all_users"; share_role: string;
   revision: number; created_at: string; updated_at: string; deleted_at: string | null; deleted_by: string | null; purge_after: string | null; purge_started_at: string | null;
 };
 
@@ -74,3 +83,7 @@ export function projectSettings(row: Pick<ProjectRow, "settings_json">): { priva
     return { privateEntries: false, requireDescription: false };
   }
 }
+
+/** Whether `userId` holds any level on a live time project: a guest sees Time only then (§G.1 Q8, D1192). */
+export const belongsToTimeProject = (userId: string): boolean =>
+  db.query(`SELECT 1 FROM time_projects p WHERE ${readableContainerSql("time_project", "p")} LIMIT 1`).get({ userId }) !== null;

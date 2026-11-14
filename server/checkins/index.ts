@@ -1,7 +1,7 @@
 import { registerWorkspaceModule } from "../workspaceModules";
 import { checkinRoutes, CHECKIN_READ_ONLY_WRITES } from "./routes";
 import { checkinTools, CHECKIN_READ_TOOLS, CHECKIN_WRITE_TOOLS, roundResource } from "./mcp";
-import { DRIVE_PURPOSE, driveCheckin } from "./rounds";
+import { DRIVE_PURPOSE, WATCHDOG_PURPOSE, driveCheckin, driveStranded } from "./rounds";
 import { binProvider, datasets, digestSection, itemKinds, mailTemplates, progressSources, proposalKind, searchScope, todayProvider, workKinds } from "./registrations";
 import "../../shared/checkins";
 
@@ -29,7 +29,11 @@ registerWorkspaceModule({
   searchScopes: [searchScope],
   datasets,
   // The dispatcher passes the occurrence; events up to it run, then the schedule re-arms (D939).
-  scheduleHandlers: { [DRIVE_PURPOSE]: { run: (schedule, fireAt) => { driveCheckin(schedule.owner.id, Math.max(Date.parse(fireAt), Date.now())); } } },
+  // The watchdog re-drives standups whose drive schedule was lost to a failed or interrupted run (D1160).
+  scheduleHandlers: {
+    [DRIVE_PURPOSE]: { run: (schedule, fireAt) => { driveCheckin(schedule.owner.id, Math.max(Date.parse(fireAt), Date.now())); } },
+    [WATCHDOG_PURPOSE]: { run: (_schedule, fireAt) => { driveStranded(Math.max(Date.parse(fireAt), Date.now())); } }
+  },
   progressSources,
   mailTemplates: mailTemplates as never,
   proposalKinds: [{ kind: "checkin_answer", def: proposalKind }],

@@ -7,11 +7,12 @@ import { restoreItem } from "../bin";
 import { readableContact } from "../people/contacts";
 import { QuestionError } from "../questions/service";
 import { ASSIGNMENTS, LOCATION_KINDS, MAX_SLOT_WINDOW_DAYS, slotsByDate } from "../../shared/bookings";
-import { BookingError, requireBooking, requireType, typeRow } from "./model";
+import { BookingError, requireBooking, requireType, typeRow, userName } from "./model";
 import { availability } from "./availability";
 import { approveBooking, bookingView, cancelBooking, createBooking, declineBooking, markNoShow, rescheduleBooking } from "./service";
 import { createType, deleteType, listTypes, typeView, updateType, type TypeInput } from "./types";
 import { listBookings, windowFrom } from "./routes";
+import { bookableByHost, requireTypeForBooking } from "./bookable";
 import { profileRow } from "./setup";
 
 /**
@@ -94,6 +95,20 @@ export const bookingTools: McpToolSpec[] = [
     handler: ({ typeId }, key) => run(key, () => typeView(requireType(typeId, key.userId).type, key.userId))
   }),
   defineTool({
+    name: "list_bookable_types",
+    title: "List types to book with colleagues",
+    description: "Booking types the user can book with colleagues (\"Book time with …\"), grouped by the member who hosts them: active types the user can read or that are on a public booking page, single-host or collective (never round robin), not the user's own. Pass hostIds to ask about some members. Then get_availability and create_booking.",
+    scopes: ["bookings:read"],
+    access: { mode: "list", lists: ["booking_type"], related: ["hostIds"] },
+    write: false,
+    inputSchema: z.object({ hostIds: z.array(z.string().uuid()).min(1).max(100).optional().describe("Member ids (default: everyone)") }),
+    handler: ({ hostIds }, key) => run(key, () => {
+      // A key limited to chosen types sees only those, in SQL (T203).
+      const hosts = bookableByHost(key.userId, { hostIds: hostIds ?? null, typeIds: keyContainerIds(key, "bookings:read", "booking_type") });
+      return { hosts: Object.entries(hosts).map(([userId, types]) => ({ userId, name: userName(userId), types: types.map((type) => ({ ...type, url: absolute(type.href) })) })) };
+    })
+  }),
+  defineTool({
     name: "create_booking_type",
     title: "Create a booking type",
     description: "Create a booking type (an event type people book). It is public on the owner's booking page unless public is false. Defaults: 30 minutes, video link, 4 hours notice, 60 days ahead, weekdays 09–17 in the owner's zone.",
@@ -154,7 +169,8 @@ export const bookingTools: McpToolSpec[] = [
       tz: z.string().max(64).optional().describe("IANA zone the dates are in (default UTC)"), duration: z.number().int().optional()
     }),
     handler: ({ typeId, from, to, tz, duration }, key) => run(key, async () => {
-      const { type } = requireType(typeId, key.userId);
+      // As GET /api/bookings/types/:id/slots: readers, or anyone for a public, open type (D1251).
+      const type = requireTypeForBooking(typeId, key.userId, { preview: true });
       const window = windowFrom({ from, to, tz }, MAX_SLOT_WINDOW_DAYS);
       const minutes = duration ?? (JSON.parse(type.durations_json) as number[])[0]!;
       const map = await availability(type, { fromMs: window.fromMs, toMs: window.toMs, durationMin: minutes, nowMs: Date.now() });
@@ -202,7 +218,8 @@ export const bookingTools: McpToolSpec[] = [
       answers: z.record(z.string(), z.unknown()).optional()
     }),
     handler: (args, key) => run(key, async () => {
-      const { type } = requireType(args.typeId, key.userId);
+      // As POST /api/bookings: a hidden type books only for its owner (D1127); a public, open type for anyone (D1251).
+      const type = requireTypeForBooking(args.typeId, key.userId);
       const duration = args.duration ?? (JSON.parse(type.durations_json) as number[])[0]!;
       let booker = args.booker ? { name: args.booker.name, email: args.booker.email, tz: args.booker.tz ?? "UTC" } : null;
       let contactId: string | null = null;
@@ -293,6 +310,6 @@ export const bookingTools: McpToolSpec[] = [
 ];
 
 export const BOOKING_AGENT_TOOLS = {
-  allowed: ["list_booking_types", "get_booking_type", "get_availability", "list_bookings", "get_booking", "get_booking_link", "create_booking"],
+  allowed: ["list_booking_types", "get_booking_type", "list_bookable_types", "get_availability", "list_bookings", "get_booking", "get_booking_link", "create_booking"],
   never: ["create_booking_type", "update_booking_type", "bin_booking_type", "restore_booking_type", "reschedule_booking", "cancel_booking", "confirm_booking_request", "decline_booking", "mark_no_show"]
 };
