@@ -140,7 +140,12 @@ function Done({ booking, mailQueued, tz, onClose }: { booking: Booking; mailQueu
     {booking.location && <p className="bk-book-muted">{booking.location}</p>}
     <p className="bk-book-muted">{pending ? `${booking.hostName} confirms it; you'll hear when they do.` : mailQueued ? "A confirmation is on its way to your inbox." : "It is in Bookings under Upcoming."}</p>
     <footer className="file-dialog-actions">
-      <a className="secondary-button" href={booking.href}>Open in Bookings</a>
+      <a className="secondary-button" href={booking.href} onClick={(event) => {
+        if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        onClose();
+        window.dispatchEvent(new CustomEvent("nook:open-path", { detail: { path: booking.href } }));
+      }}>Open in Bookings</a>
       <button type="button" className="primary-button" onClick={onClose} autoFocus>Done</button>
     </footer>
   </div>;
