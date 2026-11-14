@@ -837,7 +837,11 @@ function checkinViews(rows: readonly CheckinRow[]): CheckinView[] {
   }));
 }
 
-export type CheckinInput = { health: GoalHealth; confidence?: number | null; note?: string | null; values?: Record<string, number | boolean>; milestonesDone?: Record<string, string[]> };
+export type CheckinInput = {
+  health: GoalHealth; confidence?: number | null; note?: string | null; values?: Record<string, number | boolean>; milestonesDone?: Record<string, string[]>;
+  /** What wrote it (a standup answer's response id, D1059b): a second check-in with the same ref updates the first. */
+  sourceRef?: string;
+};
 
 /** A check-in (§D.3, T542: edit level, which contributors hold): new values for manual KRs, health, confidence, note. */
 export function checkIn(userId: string, ref: string, input: CheckinInput, nowMs = Date.now()): { checkin: CheckinView; goal: GoalDetail } {
@@ -875,9 +879,21 @@ export function checkIn(userId: string, ref: string, input: CheckinInput, nowMs 
     }
     recomputeGoal(goal.id);
     const fresh = goalRow(goal.id)!;
+    // D1059b: the same source (an edited or retried standup answer) updates its check-in in place:
+    // no second row, no second activity entry or notification (a real health change still says so).
+    const earlier = input.sourceRef ? db.query("SELECT id FROM goal_checkins WHERE goal_id = ? AND source_ref = ?").get(goal.id, input.sourceRef) as { id: string } | null : null;
+    if (earlier) {
+      db.query("UPDATE goal_checkins SET health = ?, confidence = ?, note_md = ?, values_json = ?, progress = ? WHERE id = ?")
+        .run(input.health, input.confidence ?? null, (input.note ?? "").trim(), JSON.stringify(typed), fresh.progress, earlier.id);
+      if (input.health !== goal.health) healthChanged(goal, input.health, userId);
+      db.query("UPDATE goals SET health = ?, updated_at = ?, revision = revision + 1 WHERE id = ?").run(input.health, timestamp, goal.id);
+      audit(userId, null, "goals.checkin_update", { goalId: goal.id, checkinId: earlier.id, krs: Object.keys(typed).length });
+      const row = db.query("SELECT * FROM goal_checkins WHERE id = ?").get(earlier.id) as CheckinRow;
+      return { checkin: checkinViews([row])[0]!, goal: goalDetail(goalRow(goal.id)!, goalLevel(goal.id, userId), userId) };
+    }
     const id = Bun.randomUUIDv7();
-    db.query("INSERT INTO goal_checkins (id, goal_id, author_id, health, confidence, note_md, values_json, progress, via, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-      .run(id, goal.id, userId, input.health, input.confidence ?? null, (input.note ?? "").trim(), JSON.stringify(typed), fresh.progress, viaNow(), timestamp);
+    db.query("INSERT INTO goal_checkins (id, goal_id, author_id, health, confidence, note_md, values_json, progress, via, created_at, source_ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .run(id, goal.id, userId, input.health, input.confidence ?? null, (input.note ?? "").trim(), JSON.stringify(typed), fresh.progress, viaNow(), timestamp, input.sourceRef ?? null);
     if (input.health !== goal.health) healthChanged(goal, input.health, userId);
     db.query("UPDATE goals SET health = ?, last_checkin_at = ?, updated_at = ?, revision = revision + 1 WHERE id = ?").run(input.health, timestamp, timestamp, goal.id);
     recordItemActivity({ itemKind: "goal", itemId: goal.id, actorId: userId, kind: "checked_in", payload: { extra: { health: input.health, confidence: input.confidence ?? null, progress: Math.round(fresh.progress * 100) } } });

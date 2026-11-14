@@ -28,7 +28,8 @@ export const standupGoalUpdaterUnregister = registerStandupGoalUpdater((context)
     if (seen.has(goal.id)) throw new CheckinError(400, "INVALID", "Each goal once per answer");
     seen.add(goal.id);
     try {
-      checkIn(context.userId, goal.id, { health: (update.health ?? goal.health) as GoalHealth, confidence: update.confidence ?? null, note, values: update.values ?? {} });
+      // Keyed by the answer (D1059b): editing or retrying it updates this check-in, never adds one.
+      checkIn(context.userId, goal.id, { health: (update.health ?? goal.health) as GoalHealth, confidence: update.confidence ?? null, note, values: update.values ?? {}, sourceRef: context.responseId });
     } catch (error) {
       if (error instanceof GoalError) throw new CheckinError(error.status, error.code, error.message);
       throw error;

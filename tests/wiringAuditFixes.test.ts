@@ -5,7 +5,8 @@ const { krsForBoards, refreshGoalsForBoards } = await import("../server/wiring/t
 
 /**
  * W3-WIRE audit fixes (§D.8): card changes recompute only the view and filter KRs that can count the
- * changed board, without forcing them (D1059a).
+ * changed board, without forcing them (D1059a); an edited or retried standup answer updates its goal
+ * check-in instead of adding one (D1059b).
  */
 
 type Json = Record<string, any>;
@@ -53,5 +54,31 @@ describe("card changes and spanning KRs (D1059a)", () => {
     const at = (id: string) => (db.query("SELECT auto_updated_at FROM key_results WHERE id = ?").get(id) as { auto_updated_at: string }).auto_updated_at;
     expect(at(mineKr)).toBe(stamp);
     expect(at(boardKr)).not.toBe(stamp);
+  });
+});
+
+describe("standup goal updates are keyed by the answer (D1059b)", () => {
+  test("editing the answer updates its check-in: one row, one activity entry, the new value", async () => {
+    const created = await api(owner, "POST", "/checkins", { template: "standup", name: "Keyed standup", participants: { people: [owner.userId], groups: [] } });
+    const checkinId = created.body.checkin.id as string;
+    const set = { version: 1, sections: [], logic: [], endings: [], questions: [{ id: "goals", type: "long_text", title: "Goal updates", role: "goal_update" }] };
+    expect((await api(owner, "PUT", `/checkins/${checkinId}/questions`, { set })).status).toBe(200);
+    expect((await api(owner, "POST", `/checkins/${checkinId}/questions/publish`)).status).toBe(200);
+    await api(owner, "POST", `/checkins/${checkinId}/rounds`);
+    const roundId = (db.query("SELECT id FROM checkin_rounds WHERE checkin_id = ?").get(checkinId) as { id: string }).id;
+    const goal = await api(owner, "POST", "/goals", { title: "Keyed goal", keyResults: [{ title: "Calls", targetValue: 10, currentValue: 0 }] });
+    const goalId = goal.body.goal.id as string;
+    const krId = goal.body.goal.keyResults[0].id as string;
+    const answer = (value: number, text: string) => api(owner, "POST", `/checkin-rounds/${roundId}/answer`, { answers: { goals: text }, goalUpdates: [{ goalId, values: { [krId]: value } }] });
+    expect((await answer(3, "Three calls")).status).toBe(201);
+    const edited = await answer(5, "Five calls");
+    expect(edited.status).toBeLessThan(300);
+    expect((await answer(5, "Five calls")).status).toBeLessThan(300);
+    const rows = db.query("SELECT note_md, values_json, source_ref FROM goal_checkins WHERE goal_id = ?").all(goalId) as Json[];
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.note_md).toContain("Five calls");
+    expect(JSON.parse(rows[0]!.values_json)).toEqual({ [krId]: 5 });
+    expect((db.query("SELECT current_value FROM key_results WHERE id = ?").get(krId) as Json).current_value).toBe(5);
+    expect((db.query("SELECT COUNT(*) AS n FROM item_activity WHERE item_kind = 'goal' AND item_id = ? AND kind = 'checked_in'").get(goalId) as Json).n).toBe(1);
   });
 });
