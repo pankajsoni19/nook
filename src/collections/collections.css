@@ -329,5 +329,8 @@ label.row-field-label { cursor: pointer; }
 .cell-relation .ui-person-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .field-editor-hint { color: #8d8d94; }
 .relation-picker .ui-person-picker { position: relative; }
+/* D1262: the results sit in the sheet's flow, not over it: an absolute list was clipped by the
+   dialog and lay under its footer, which took the clicks. The sheet grows (and scrolls) instead. */
+.relation-picker .ui-person-options { position: static; max-height: min(300px, 40vh); box-shadow: none; }
 .sort-filter-row .ui-person-picker { flex: 1 1 180px; min-width: 0; margin: 0; }
 .sort-filter-row .ui-person-picker > label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }

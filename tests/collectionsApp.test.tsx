@@ -250,3 +250,8 @@ test("the sort and filter sheet and the field editor use custom dropdowns (D91)"
   expect(editor).not.toMatch(/aria-label="Field 1 type" disabled=""/);
   expect(editor).toMatch(/class="ui-select ui-select-compact" role="combobox"[^>]*aria-label="Color of Book"/);
 });
+
+test("the relation picker's results sit in the sheet's flow, not under its footer (D1262)", async () => {
+  const css = await Bun.file(new URL("../src/collections/collections.css", import.meta.url)).text();
+  expect(css).toMatch(/\.relation-picker \.ui-person-options \{ position: static;/);
+});
