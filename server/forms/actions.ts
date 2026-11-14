@@ -236,7 +236,7 @@ async function runOne(action: ActionRow, context: RunContext): Promise<string | 
       WHERE i.source = 'form' AND substr(i.source_ref, 1, 36) = ? AND s.subject_kind = ? AND s.subject_id = ?`).get(response.id, subject.kind, subject.id));
     if (!subjects.length) return;
     try {
-      logInteraction(actor, { kind: "form", title: "Form response", body: "Sent a form response (in Linked work).", occurredAt: response.submittedAt, source: "form", sourceRef: `${response.id}:${action.id}`, subjects });
+      logInteraction(actor, { kind: "form", title: "Form response", body: "A form response came in (see Linked work).", occurredAt: response.submittedAt, source: "form", sourceRef: `${response.id}:${action.id}`, subjects });
     } catch (error) { slog.warn("A form interaction could not be logged", { formId: context.form.id, error: error instanceof Error ? error.message : String(error) }); }
   };
   if (action.kind === "save_contact") {
