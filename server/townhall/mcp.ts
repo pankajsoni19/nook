@@ -165,6 +165,7 @@ export const townhallMcpTools: McpToolSpec[] = [
 ];
 
 export const TOWNHALL_AGENT_TOOLS = {
-  allowed: ["list_townhall_sessions", "get_townhall_session", "export_townhall_recap"],
-  never: ["create_townhall_session", "ask_townhall_question", "upvote_townhall_question", "moderate_townhall_question", "launch_townhall_poll", "close_townhall_poll"]
+  // ask_townhall_question is offered as the townhall_question proposal kind (Wave 3, D1047).
+  allowed: ["list_townhall_sessions", "get_townhall_session", "export_townhall_recap", "ask_townhall_question"],
+  never: ["create_townhall_session", "upvote_townhall_question", "moderate_townhall_question", "launch_townhall_poll", "close_townhall_poll"]
 } as const;

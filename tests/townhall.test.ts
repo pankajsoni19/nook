@@ -331,8 +331,9 @@ describe("MCP", () => {
     const hidden = await invokeMcpToolForTests("get_townhall_session", { sessionId: other.id }, chosen.id) as Json;
     expect(hidden.isError).toBe(true);
     expect(hidden.content[0].text).toContain("NOT_FOUND");
-    // Agents: reads offered, writes never.
-    for (const name of ["ask_townhall_question", "moderate_townhall_question", "launch_townhall_poll"]) expect(NOOK_NEVER_TOOLS.has(name)).toBe(true);
+    // Agents: reads offered, and asking (as the townhall_question proposal, D1047); other writes never.
+    for (const name of ["moderate_townhall_question", "launch_townhall_poll"]) expect(NOOK_NEVER_TOOLS.has(name)).toBe(true);
+    expect(NOOK_NEVER_TOOLS.has("ask_townhall_question")).toBe(false);
     for (const spec of mcpToolSpecs.filter((entry) => entry.name.includes("townhall"))) expect(spec.scopes.every((scope) => scope.startsWith("townhall:"))).toBe(true);
   });
 });
