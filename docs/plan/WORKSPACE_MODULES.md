@@ -1360,6 +1360,23 @@ Deferred: editing an existing widget in the builder (Inspect → Edit SQL shows 
 
 ---
 
+### D.9 Audit 2 fixes
+
+#### Bookings (branch `fix/audit2-bookings`, decisions D1120–D1129)
+
+| ID | Decision |
+|---|---|
+| D1120 | **Outside-feed RRULEs are expanded by their own reader** (`server/bookings/icsParse.ts`), not the calendar module's (which requires DTSTART's weekday in BYDAY). DTSTART is always the first instance and later ones are the rule's dates after it, so `WEEKLY;BYDAY=TU,TH;COUNT=4` from a Monday no longer invents a Monday or spends COUNT on it (BK1). Monthly BYMONTHDAY (incl. negative), monthly BYDAY with or without an ordinal, yearly BYMONTH with BYMONTHDAY or an ordinal BYDAY (Thanksgiving) are read (BK2). A UTC `UNTIL` is an instant compared with instants, a local one is zoned, a date one is compared with dates (BK3). Series without COUNT jump to just before the window; BYSETPOS/BYHOUR/BYWEEKNO/BYYEARDAY still flag the feed as partly read. |
+| D1121 | **A refused public booking or manage change fetches a fresh render nonce** (the page JSON again) for the next try, as Forms' public page does; only a "too fast" refusal keeps the unspent, older nonce. Client only: `/api/public` is unchanged (BK4). |
+| D1122 | **No calendar file for a request awaiting approval**: `/api/public/bookings/manage/:token/ics` is the one 404 for pending, declined, and expired bookings (`bookingHasIcs`), the booker's mail shows "Add it to your calendar" only for a confirmed booking, and the confirmation and manage pages show the button only once confirmed (BK5). |
+| D1123 | **A booking's ICS UID is a keyed hash** (`keyedHash("booking-ics", first booking id)`, 32 hex) `@nook`, kept across reschedules with SEQUENCE raised; the internal id never leaves (T598, BK6). |
+| D1124 | **A reschedule keeps the booking's own length**: `slotHosts` skips the "one of the type's durations" check when `excludeBookingId` is set (1–1440 minutes), so the manage page's slots and the move work after the host changed the type's durations; new bookings still need a listed duration (BK7). |
+| D1125 | **A reschedule counts once**: round robin's 30-day load skips cancelled bookings (a move cancels the old row), and Insights leaves out a moved booking's old row (new dataset column `moved`, filtered off), so a move is neither a second booking nor a cancellation (BK8). |
+| D1126 | **The booker cancels before the start** (`cancelBooking` by `booker`, the manage page and the member booker alike); the host may still cancel a booking under way until it ends. |
+| D1127 | **MCP `create_booking` refuses a hidden type** to anyone but its owner, like `POST /api/bookings`. |
+| D1128 | **Outside-feed all-day blocks follow the schedule's zone**: the feed cache keeps an all-day block's dates, and `feedBusy(…, tz)` places them in the host's schedule zone as Nook calendar all-day events are; blocks cached before keep their stored instants until the next refresh. |
+| D1129 | **A new profile and working hours use the browser's zone** (UI3): `GET /api/bookings/profile` and `/schedules` take `?tz=` and the Bookings app asks for the profile on open; without it, the first non-UTC zone another module stored (mail, then Time), else UTC. An existing profile never moves. The slot calendar's today mark is a whole inset ring (was an inset bottom edge, half a ring on a round cell). |
+
 ## E. Design and UX guidelines
 
 Nook is dark-only with a warm amber accent (`--yellow #f6c453`, focus `--field-focus`), panels `#111113`/`#18181b`, borders `#29292d`, muted `#929299`, 8–10 px radii, `.84rem` controls, sheets on phones, and lucide icons. New modules must be indistinguishable in craft from Tasks and Reports.

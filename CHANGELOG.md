@@ -4,6 +4,14 @@ Release notes for Nook, newest first. Upgrade steps for each release are in [doc
 
 ## Unreleased
 
+**Bookings fixes**
+
+- Outside calendars: repeating events are read correctly when they repeat on other weekdays than the first one, on days of the month (the 1st and 15th, the last day), on every Monday of a month, or yearly on the 4th Thursday of November, and a series ending on a given day no longer adds one more day west of UTC.
+- A booking that was refused (the time was just taken, an answer to fix) can be tried again right away, on the booking page and the manage page.
+- A request waiting for the host's approval no longer offers "Add to calendar"; the calendar file comes once it is confirmed, and its event id no longer reveals Nook's internal id.
+- Rescheduling works after the host changed the type's lengths; a moved booking counts once in round robin and in Insights (no longer as a cancellation); a booker can cancel only before the start; agents can't book a hidden type they don't own.
+- A new Bookings profile and its working hours start in your browser's time zone instead of UTC; all-day events from outside calendars block the days in your schedule's zone; today's mark on the booking calendar is a whole ring.
+
 **Workspace modules working together** (Wave 3)
 
 - **Standups and Goals**: a goal update question shows your goals' key results; numbers you type become goal check-ins when you post. Closed rounds can be added to a note of your choice and published. Cards you logged time on show up in "What did you get done".
