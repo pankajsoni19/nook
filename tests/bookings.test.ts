@@ -267,10 +267,10 @@ describe("approval, teams", () => {
     await api("/bookings/schedules", colleague);
     const schedules = await api("/bookings/schedules", colleague);
     await api(`/bookings/schedules/${schedules.body.schedules[0].id}`, colleague, "PUT", { weekly: allDay, tz: "UTC" });
-    const rr = await api("/bookings/types", host, "POST", { title: "Support", assignment: "round_robin", minNotice: 0, hosts: [{ userId: host.userId }, { userId: colleague.userId }] });
+    const rr = await api("/bookings/types", host, "POST", { title: "Support", assignment: "round_robin", minNotice: 0, public: false, hosts: [{ userId: host.userId }, { userId: colleague.userId }] });
     expect(rr.body.type.hosts.map((item: any) => item.userId).sort()).toEqual([host.userId, colleague.userId].sort());
     const first = await api("/bookings", outsider, "POST", { type: rr.body.type.id, start: startAt(9, 2) });
-    expect(first.status).toBe(404); // not shared with the outsider
+    expect(first.status).toBe(404); // not shared with the outsider, and not on a public page (D1251)
     const hostsOf = [];
     for (const hour of [2, 3, 4]) hostsOf.push((await api("/bookings", host, "POST", { type: rr.body.type.id, start: startAt(9, hour), booker: { name: "C", email: `c${hour}@example.org`, tz: "UTC" } })).body.booking.hostId);
     expect(new Set(hostsOf).size).toBe(2);

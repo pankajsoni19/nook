@@ -8,13 +8,15 @@ import { parseRoute } from "../router";
 import { EmbedCard } from "../ui/embeds/EmbedCard";
 import { api } from "../api";
 import type { EmbedCardProps } from "../editor/moduleEmbedRegistry";
+import { bookTimeMemberAction } from "./TeamBookTime";
 
 /**
  * Bookings (lane BOOK, docs/plan/WORKSPACE_MODULES.md §D.6): the client module. The app is its own
  * lazy chunk; the public pages (`/p/book/…`) another, loaded without the session code (D831).
  * Registers: routes (`/bookings`, `/bookings/b/<id>`, `/bookings/types/<slug-id>`), the launcher,
  * Today's "Bookings" section, a "Copy booking link" quick action, notification topics, the
- * booking-link embed and its `/` item, search rows, and the module's shortcuts.
+ * booking-link embed and its `/` item, search rows, the Team page's "Book time with …" (D1253), and
+ * the module's shortcuts.
  */
 
 const BookingsApp = lazy(() => import("./BookingsApp"));
@@ -86,6 +88,8 @@ export const module: WorkspaceClientModule = {
       load: loadBookableTypes
     })
   }],
+  // "Book time with …" on the Team page (D1253).
+  memberActions: [bookTimeMemberAction],
   itemSections: [{ id: "bookings.record", kinds: ["contact", "company", "deal"], order: 30, component: RecordBookings }],
   searchRenderer: {
     scope: "bookings", label: "Bookings", icon: CalendarCheck2,

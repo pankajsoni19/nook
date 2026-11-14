@@ -37,6 +37,11 @@ Release notes for Nook, newest first. Upgrade steps for each release are in [doc
 - Project managers see amounts and currency for everyone's entries on their projects in the time dataset (reports), not only their own.
 - New goals start in the current period (also over MCP when no period is given); the New goal sheet's Start and Due fields line up.
 
+**Book time with a colleague**
+
+- The Team page shows **Book time** beside each colleague who has a booking type you can book (shared with you, or on their public booking page), and **Book time with <name>** on their profile. With one type it opens the booking sheet right away; with several, pick one first. Choose a length and a time, answer the type's questions, and it's booked as you, without leaving Nook.
+- Agents and MCP clients can ask which colleagues they can book time with (`list_bookable_types`).
+
 **Bookings fixes**
 
 - Outside calendars: repeating events are read correctly when they repeat on other weekdays than the first one, on days of the month (the 1st and 15th, the last day), on every Monday of a month, or yearly on the 4th Thursday of November, and a series ending on a given day no longer adds one more day west of UTC.

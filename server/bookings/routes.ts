@@ -14,6 +14,7 @@ import { availability } from "./availability";
 import { approveBooking, bookingView, cancelBooking, createBooking, declineBooking, markNoShow, rescheduleBooking } from "./service";
 import { addFeed, FeedError, listFeeds, refreshFeed, removeFeed } from "./feeds";
 import { bookingsInsights } from "./insights";
+import { bookableByHost, bookingForm, MAX_BOOKABLE_HOSTS, requireTypeForBooking } from "./bookable";
 import { workKindAdapter } from "../links/adapters";
 
 /**
@@ -227,8 +228,11 @@ export function registerBookingRoutes(router: ModuleRouter) {
     const input = await body(c, z.object({ set: z.unknown(), publish: z.boolean().optional() }).strict());
     return c.json(saveTypeQuestions(userId, c.req.param("id") ?? "", input.set, input.publish === true));
   }));
+  // "Book time with …" (D1250): the in-app booking sheet's type, place, and published questions.
+  router.get("/api/bookings/types/:id/form", handle((c, userId) => c.json(bookingForm(userId, c.req.param("id") ?? ""))));
   router.get("/api/bookings/types/:id/slots", handle(async (c, userId) => {
-    const { type } = requireType(c.req.param("id") ?? "", userId);
+    // Readers see any status (the type editor's preview); a public, open type is bookable by any member (D1251).
+    const type = requireTypeForBooking(c.req.param("id") ?? "", userId, { preview: true });
     const window = windowFrom(c.req.query(), MAX_SLOT_WINDOW_DAYS);
     const duration = Number(c.req.query("duration") ?? JSON.parse(type.durations_json)[0]);
     const slots = await availability(type, { fromMs: window.fromMs, toMs: window.toMs, durationMin: duration, nowMs: Date.now() });
@@ -241,6 +245,14 @@ export function registerBookingRoutes(router: ModuleRouter) {
   }));
   router.delete("/api/bookings/types/:id/secret-links/:linkId", handle((c, userId) => { revokeSecretLink(userId, c.req.param("id") ?? "", c.req.param("linkId") ?? ""); return c.body(null, 204); }));
 
+  // Who offers bookable types, for the Team list (D1250): one batched read, `?users=a,b,…` (at most 500) or everyone.
+  router.get("/api/bookings/bookable", handle((c, userId) => {
+    const raw = c.req.query("users");
+    const hostIds = raw === undefined ? null : [...new Set(raw.split(",").map((id) => id.trim().toLowerCase()).filter((id) => /^[0-9a-f-]{6,64}$/.test(id)))];
+    if (hostIds && hostIds.length > MAX_BOOKABLE_HOSTS) throw new BookingError(400, "INVALID", `Ask for at most ${MAX_BOOKABLE_HOSTS} members at a time`);
+    return c.json({ hosts: bookableByHost(userId, { hostIds }) });
+  }));
+
   // Bookings
   router.get("/api/bookings", handle((c, userId) => {
     const query = c.req.query();
@@ -248,9 +260,13 @@ export function registerBookingRoutes(router: ModuleRouter) {
   }));
   router.get("/api/bookings/insights", handle((c, userId) => c.json(bookingsInsights(userId, { days: Number(c.req.query("days") ?? 90), tz: c.req.query("tz") ?? "UTC" }))));
   router.post("/api/bookings", handle(async (c, userId) => {
-    const input = await body(c, z.object({ type: z.string().max(64), start: z.string().max(40), duration: z.number().int().optional(), booker: bookerSchema.optional(), contactId: uuid.optional() }).strict());
-    const { type } = requireType(input.type, userId);
-    if (type.status !== "active" && type.owner_id !== userId) throw new BookingError(404, "NOT_FOUND", "Booking type not found");
+    // Booking as yourself takes your zone, the place (when the type asks), guests, and intake answers alongside (D1252).
+    const input = await body(c, z.object({
+      type: z.string().max(64), start: z.string().max(40), duration: z.number().int().optional(), booker: bookerSchema.optional(), contactId: uuid.optional(),
+      tz: z.string().max(64).optional(), location: z.string().max(500).nullable().optional(), guests: z.array(z.string().max(254)).max(10).optional(), answers: z.record(z.string(), z.unknown()).optional()
+    }).strict());
+    // A hidden type books only for its owner; a colleague's public, open type books for any member (D1251).
+    const type = requireTypeForBooking(input.type, userId);
     let booker = input.booker;
     let contactId: string | null = null;
     if (input.contactId) {
@@ -262,7 +278,7 @@ export function registerBookingRoutes(router: ModuleRouter) {
     }
     if (!booker) {
       const me = db.query("SELECT display_name, email FROM users WHERE id = ?").get(userId) as { display_name: string; email: string };
-      booker = { name: me.display_name, email: me.email, tz: "UTC" };
+      booker = { name: me.display_name, email: me.email, tz: input.tz && isValidTimeZone(input.tz) ? input.tz : "UTC", location: input.location ?? null, guests: input.guests, answers: input.answers };
     }
     await availability(type, { fromMs: Date.parse(input.start) - 86_400_000, toMs: Date.parse(input.start) + 86_400_000, durationMin: input.duration ?? JSON.parse(type.durations_json)[0], nowMs: Date.now() }).catch(() => null);
     const created = createBooking({ type, start: input.start, durationMin: input.duration ?? JSON.parse(type.durations_json)[0], booker, source: "internal", actorId: userId, contactId });
