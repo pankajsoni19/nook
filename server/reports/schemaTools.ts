@@ -5,6 +5,7 @@ import { ReportError } from "./errors";
 import { adHocQueryId, limited, runGuarded } from "./runner";
 import { describeTables, listTables, parseTableName, searchSchema, type TableListItem } from "./schemaCatalog";
 import { classify, GuardError, sqlIdentifier } from "./sqlGuard";
+import { isWorkspaceRow, notOnWorkspace } from "./workspaceSource";
 
 /**
  * The schema tools (plan wave 45, "Agent tools for schema", D417), as plain server functions; wave 46
@@ -26,20 +27,24 @@ export const SAMPLE_READ_ROWS = 100_000;
 export const SCHEMA_QUERY_ROWS = 200;
 
 export function searchSchemaTool(row: DatasourceRow, input: { query: string; limit?: number }): { results: SchemaSearchHit[] } {
+  if (isWorkspaceRow(row)) throw notOnWorkspace("search_schema");
   return { results: searchSchema(row, input.query.slice(0, 200), Math.min(input.limit ?? REPORT_LIMITS.searchResults, REPORT_LIMITS.searchResults)) };
 }
 
 export function listTablesTool(row: DatasourceRow, input: { db?: string; like?: string; page?: number }): { tables: TableListItem[]; page: number; hasMore: boolean; databases: string[] } {
+  if (isWorkspaceRow(row)) throw notOnWorkspace("list_tables");
   return listTables(row, input);
 }
 
 /** A lazy miss reads ClickHouse, so describing counts against the person's query limit (review L2). */
 export async function describeTablesTool(row: DatasourceRow, userId: string, input: { tables: string[] }): Promise<{ tables: CatalogTable[]; missing: string[] }> {
+  if (isWorkspaceRow(row)) throw notOnWorkspace("describe_tables");
   if (input.tables.length > REPORT_LIMITS.describeBatch) throw new ReportError(400, "INVALID", `Describe at most ${REPORT_LIMITS.describeBatch} tables at a time`);
   return limited(userId, () => describeTables(row, input.tables));
 }
 
 export async function sampleRowsTool(row: DatasourceRow, userId: string, input: { table: string; n?: number }): Promise<QueryOutcome> {
+  if (isWorkspaceRow(row)) throw notOnWorkspace("sample_rows");
   const parsed = parseTableName(input.table, row.database);
   if (!parsed || !tableAllowed(allowlistOf(row), parsed.db, parsed.name)) throw new GuardError("NOT_ALLOWED_TABLE", `${input.table.slice(0, 200)} is not on this data source's allowlist`);
   const n = Math.min(Math.max(1, Math.floor(input.n ?? REPORT_LIMITS.sampleRows)), REPORT_LIMITS.sampleRows);
@@ -49,6 +54,7 @@ export async function sampleRowsTool(row: DatasourceRow, userId: string, input: 
 }
 
 export async function runSchemaQueryTool(row: DatasourceRow, userId: string, input: { sql: string }): Promise<QueryOutcome> {
+  if (isWorkspaceRow(row)) throw notOnWorkspace("run_schema_query");
   return runGuarded(row, input.sql, { classes: ["metadata"], maxRows: SCHEMA_QUERY_ROWS, queryId: adHocQueryId("meta"), userId });
 }
 
@@ -56,6 +62,7 @@ export type Estimate = { rows: number; parts: number; marks: number; tables: Arr
 
 /** EXPLAIN ESTIMATE of a select: what it would read, per table and in all. */
 export async function estimateTool(row: DatasourceRow, userId: string, input: { sql: string }): Promise<Estimate> {
+  if (isWorkspaceRow(row)) throw notOnWorkspace("estimate");
   const classified = classify(input.sql);
   if (classified.class !== "select") throw new GuardError("NOT_SELECT", "estimate takes a SELECT");
   const result = await runGuarded(row, `EXPLAIN ESTIMATE ${classified.sql}`, { classes: ["metadata"], maxRows: 1000, queryId: adHocQueryId("estimate"), userId });

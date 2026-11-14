@@ -10,6 +10,7 @@ import { mayChoose, reportModelOverride, setReportModel } from "./model";
 import { combinedHash, ensureDocRows, mirrorFirstDoc, newestSnapshot, ownerMayRead } from "./reportDocs";
 import { parseSpec, reportDetail, REPORTS_PER_USER } from "./service";
 import { maxProvenanceVersion } from "./versionNumbers";
+import { WORKSPACE_SOURCE_ID } from "../../shared/reportsWorkspace";
 
 const slog = logger("reports");
 
@@ -75,9 +76,11 @@ export function duplicateReport(actor: { id: string; role: string }, sourceId: s
   const at = now();
   let results = 0;
   db.transaction(() => {
-    db.query(`INSERT INTO reports (id, owner_id, title, title_source, datasource_id, spec_json, status, last_run_at, last_error, created_at, updated_at, folder_id)
-      VALUES (?, ?, ?, 'user', ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(id, actor.id, title, source.datasource_id, specJson, copied.blocks.length ? source.status : "draft", source.last_run_at, source.last_error, at, at, input.folderId ?? null);
+    // W3-REPORTS (D1060): a copy of a workspace report is one too (113's triggers keep its copied results row-free).
+    const workspace = source.datasource_id === WORKSPACE_SOURCE_ID;
+    db.query(`INSERT INTO reports (id, owner_id, title, title_source, datasource_id, source, spec_json, status, last_run_at, last_error, created_at, updated_at, folder_id)
+      VALUES (?, ?, ?, 'user', ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, actor.id, title, workspace ? null : source.datasource_id, workspace ? "workspace" : "clickhouse", specJson, copied.blocks.length ? source.status : "draft", source.last_run_at, source.last_error, at, at, input.folderId ?? null);
     // The queries, with the columns their last results had.
     const columnsOf = new Map((db.query("SELECT key, columns_json FROM report_queries WHERE report_id = ?").all(source.id) as Array<{ key: string; columns_json: string }>).map((row) => [row.key, row.columns_json]));
     const insertQuery = db.query("INSERT INTO report_queries (id, report_id, key, sql, purpose, columns_json, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");

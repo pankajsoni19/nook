@@ -15,6 +15,8 @@ import { INSTRUCTION_LIMITS } from "../../shared/reportsEdit";
 import { renameNote } from "../../shared/reportVersions";
 import { backfillVersion } from "./versionBackfill";
 import { nextVersion } from "./versionNumbers";
+import { WORKSPACE_SOURCE_ID, WORKSPACE_SOURCE_NAME } from "../../shared/reportsWorkspace";
+import { workspaceAvailable } from "./workspaceSource";
 
 const slog = logger("reports");
 
@@ -39,7 +41,7 @@ export function parseSpec(json: string): ReportSpec {
 
 function summaryOf(row: SummaryRow, userId: string): ReportSummary {
   return {
-    id: row.id, ...(row.short_id ? { shortId: row.short_id } : {}), title: row.title, datasourceId: row.datasource_id, datasourceName: row.datasource_name, status: row.status, isOwner: row.is_owner === 1,
+    id: row.id, ...(row.short_id ? { shortId: row.short_id } : {}), title: row.title, datasourceId: row.source === "workspace" ? WORKSPACE_SOURCE_ID : row.datasource_id, datasourceName: row.source === "workspace" ? WORKSPACE_SOURCE_NAME : row.datasource_name, status: row.status, isOwner: row.is_owner === 1,
     ownerName: row.owner_name, blockCount: parseSpec(row.spec_json).blocks.length, lastRunAt: row.last_run_at, createdAt: row.created_at, updatedAt: row.updated_at, revision: row.revision,
     // Phase 2 (D483): folders are the workspace's, so every reader sees where a report is filed.
     folderId: row.folder_id ?? null, scheduleCadence: row.schedule_cadence ?? null,
@@ -131,7 +133,8 @@ export function reportListSql(options: ReportListOptions, sizes: ReportListSizes
     params.ownerId = options.ownerId;
   }
   if (options.statuses?.length) { where.push("r.status IN (SELECT value FROM json_each($statuses))"); params.statuses = JSON.stringify(options.statuses); }
-  if (options.datasourceId) { where.push("r.datasource_id = $datasourceId"); params.datasourceId = options.datasourceId; }
+  if (options.datasourceId === WORKSPACE_SOURCE_ID) where.push("r.source = 'workspace'");
+  else if (options.datasourceId) { where.push("r.datasource_id = $datasourceId"); params.datasourceId = options.datasourceId; }
   if (options.scheduled !== undefined) where.push(`${SCHEDULED_SQL} IS ${options.scheduled ? "NOT NULL" : "NULL"}`);
   if (options.favorites) where.push(big(sizes.favorites) ? FAVORITE_SQL : "r.id IN (SELECT f_f.report_id FROM report_favorites f_f WHERE f_f.user_id = $userId)");
   if (options.shared) where.push(`NOT ${ownsReportSql("r")}`);
@@ -218,14 +221,17 @@ export function reportDetail(id: string, userId: string): ReportDetail {
 /** A new draft; `titleSource` says where the title came from (typed by default; generation passes doc or default). */
 export function createReport(userId: string, input: { title: string; datasourceId: string; titleSource?: "default" | "doc" | "ai" | "user"; folderId?: string | null }, via: { keyId?: string } = {}): ReportDetail {
   usableDatasource(input.datasourceId);
+  const workspace = input.datasourceId === WORKSPACE_SOURCE_ID;
+  if (workspace && !workspaceAvailable(userId)) throw new ReportError(403, "FORBIDDEN", "No workspace data is available to you for reports");
   // Lane I: "New report" in a folder files it there (phase 2: any live folder of the shared tree, else 404).
   if (input.folderId) liveFolder(input.folderId);
   const live = (db.query("SELECT COUNT(*) AS count FROM reports WHERE owner_id = ? AND deleted_at IS NULL").get(userId) as { count: number }).count;
   if (live >= REPORTS_PER_USER) throw new ReportError(409, "LIMIT_REACHED", `You can have up to ${REPORTS_PER_USER} reports`);
   const id = crypto.randomUUID();
   const at = now();
-  db.query("INSERT INTO reports (id, owner_id, title, title_source, datasource_id, spec_json, created_at, updated_at, folder_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
-    .run(id, userId, input.title, input.titleSource ?? "user", input.datasourceId, JSON.stringify(EMPTY_SPEC), at, at, input.folderId ?? null);
+  // W3-REPORTS (D1060): a report on This workspace keeps no data source row (`source` says it).
+  db.query("INSERT INTO reports (id, owner_id, title, title_source, datasource_id, source, spec_json, created_at, updated_at, folder_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    .run(id, userId, input.title, input.titleSource ?? "user", workspace ? null : input.datasourceId, workspace ? "workspace" : "clickhouse", JSON.stringify(EMPTY_SPEC), at, at, input.folderId ?? null);
   audit(userId, null, "reports.report.create", { id, ...(input.folderId ? { folderId: input.folderId } : {}), ...(via.keyId ? { via: "mcp", keyId: via.keyId } : {}) });
   return reportDetail(id, userId);
 }
@@ -239,12 +245,19 @@ export function updateReport(userId: string, id: string, patch: { title?: string
     const holder = db.query("SELECT id FROM report_runs WHERE report_id = ? AND status = 'running' AND (lease_until IS NULL OR lease_until > ?)").get(id, now()) as { id: string } | null;
     if (holder) throw new ReportError(409, "RUN_IN_PROGRESS", "This report is running; wait for it to finish", { runId: holder.id });
     usableDatasource(patch.datasourceId);
+    // W3-REPORTS (D1063): structured queries and SQL do not translate; a report changes between This
+    // workspace and a ClickHouse source only while it has no queries.
+    if ((patch.datasourceId === WORKSPACE_SOURCE_ID || row.datasource_id === WORKSPACE_SOURCE_ID) && parseSpec(row.spec_json).queries.length) {
+      throw new ReportError(409, "INVALID", "A report with queries cannot move between This workspace and a SQL data source; duplicate it or start a new one");
+    }
+    if (patch.datasourceId === WORKSPACE_SOURCE_ID && !workspaceAvailable(userId)) throw new ReportError(403, "FORBIDDEN", "No workspace data is available to you for reports");
   }
   // A title the person typed (a rename) is theirs: generation never replaces it (title_source 'user').
   const renamed = patch.title !== undefined && patch.title !== row.title;
   db.transaction(() => {
-    db.query(`UPDATE reports SET title = ?, datasource_id = ?, revision = revision + 1, updated_at = ?${renamed ? ", title_source = 'user'" : ""} WHERE id = ? AND revision = ?`)
-      .run(patch.title ?? row.title, patch.datasourceId ?? row.datasource_id, now(), id, row.revision);
+    const next = patch.datasourceId ?? row.datasource_id;
+    db.query(`UPDATE reports SET title = ?, datasource_id = ?, source = ?, revision = revision + 1, updated_at = ?${renamed ? ", title_source = 'user'" : ""} WHERE id = ? AND revision = ?`)
+      .run(patch.title ?? row.title, next === WORKSPACE_SOURCE_ID ? null : next, next === WORKSPACE_SOURCE_ID ? "workspace" : "clickhouse", now(), id, row.revision);
     if (renamed) recordRename(id, userId, row, patch.title!);
   })();
   audit(userId, null, "reports.report.update", { id, fields: Object.keys(patch).filter((field) => field !== "expectedRevision") });

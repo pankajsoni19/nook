@@ -14,6 +14,7 @@ import { queryIdFor } from "./clickhouse";
 import type { DatasourceRow } from "./datasources";
 import { asReportError, ReportError } from "./errors";
 import { runGuarded } from "./runner";
+import { isWorkspaceRow } from "./workspaceSource";
 import { sanityChecks, type SanityContext, type SanityResult } from "./sanity";
 import { parseSpec } from "./service";
 import { backfillVersion } from "./versionBackfill";
@@ -793,7 +794,8 @@ export async function validateSpec(row: DatasourceRow, raw: unknown, context: { 
     for (const block of design.spec.blocks) if (blocks.has(block.id)) for (const key of blockKeys(block)) queries.add(key);
     scope = { blocks, queries };
   }
-  const sanity = context.sanity ? await sanityChecks(row, design.spec, results, { userId: context.userId, runId: context.runId, signal: context.signal, metricOf: context.sanity.metricOf, scope }) : undefined;
+  // W3-REPORTS: the sanity checks read ClickHouse (fan-out, FINAL); a workspace report has none.
+  const sanity = context.sanity && !isWorkspaceRow(row) ? await sanityChecks(row, design.spec, results, { userId: context.userId, runId: context.runId, signal: context.signal, metricOf: context.sanity.metricOf, scope }) : undefined;
   return { ok: true, spec: design.spec, results, ...(sanity ? { sanity } : {}) };
 }
 

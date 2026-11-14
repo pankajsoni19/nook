@@ -2,6 +2,7 @@ import type { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../auth";
 import { parseJson, uuid } from "../validation";
+import { WORKSPACE_SOURCE_ID } from "../../shared/reportsWorkspace";
 import { REPORT_LIMITS } from "../../shared/reports";
 import type { GenerationRun } from "../../shared/reportsGenerate";
 import { TOOL_NAME } from "../agents/toolServers";
@@ -33,9 +34,9 @@ const sourceId = z.union([uuid, z.literal("nook")]);
 // D515: 1–8 docs in order (each a link and its source), or the one doc of docRef and serverId.
 const docInput = z.object({ docRef, serverId: sourceId, tool: toolName, arg: argName }).strict();
 const docList = z.array(docInput).min(1).max(REPORT_DOC_LIMITS.docs);
-const generateCreate = z.object({ docRef: docRef.optional(), serverId: sourceId.optional(), docs: docList.optional(), tool: toolName, arg: argName, datasourceId: uuid, title: oneLine(REPORT_LIMITS.title).nullish(), browseTools: browseTools.nullish(), folderId: uuid.nullish() }).strict()
+const generateCreate = z.object({ docRef: docRef.optional(), serverId: sourceId.optional(), docs: docList.optional(), tool: toolName, arg: argName, datasourceId: z.union([uuid, z.literal(WORKSPACE_SOURCE_ID)]), title: oneLine(REPORT_LIMITS.title).nullish(), browseTools: browseTools.nullish(), folderId: uuid.nullish() }).strict()
   .refine((body) => Boolean(body.docs?.length) !== Boolean(body.docRef && body.serverId), "Give docs, or docRef and serverId");
-const generateAgain = z.object({ docRef: docRef.optional(), serverId: sourceId.optional(), docs: docList.optional(), tool: toolName, arg: argName, datasourceId: uuid.optional(), browseTools: browseTools.nullish() }).strict()
+const generateAgain = z.object({ docRef: docRef.optional(), serverId: sourceId.optional(), docs: docList.optional(), tool: toolName, arg: argName, datasourceId: z.union([uuid, z.literal(WORKSPACE_SOURCE_ID)]).optional(), browseTools: browseTools.nullish() }).strict()
   .refine((body) => !(body.docs?.length && (body.docRef || body.serverId)), "Give docs, or docRef and serverId, not both");
 const docOrder = z.object({ ids: z.array(uuid).min(1).max(REPORT_DOC_LIMITS.docs) }).strict();
 const browseInput = z.object({ tools: browseTools }).strict();

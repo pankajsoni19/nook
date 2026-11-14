@@ -3,7 +3,7 @@ import { audit, db, now } from "../db";
 import { logger } from "../log";
 import { REPORT_LIMITS, type QueryOutcome, type ReportQuery, type ReportResult, type ReportSpec, type ResultColumn, type RunTrigger } from "../../shared/reports";
 import {
-  bindValues, boundRecord, canonicalValues, declaredPlaceholders, defaultValues, escapeParamString, excludableIds, isDefaultSet, isExcluded, LINKED_OPTIONS, multiPicks, optionParentsOf, PARAM_LIMITS, placeholdersIn, placeholdersOf, quotedElement, readsOf, resolveValues, todayUtc, valueLabel,
+  bindValues, boundRecord, canonicalValues, declaredPlaceholders, defaultValues, escapeParamString, excludableIds, isDefaultSet, isExcluded, LINKED_OPTIONS, multiPicks, optionParentsOf, PARAM_LIMITS, placeholdersIn, placeholdersOf, quotedElement, reachOf, readsOf, resolveValues, todayUtc, valueLabel,
   type BoundParam, type ParamOptions, type ParamSetInfo, type ParamValues, type ReportParameter
 } from "../../shared/reportParams";
 import type { QueryResultView, ReportResultsView } from "../../shared/reportsView";
@@ -12,12 +12,14 @@ import { queryIdFor } from "./clickhouse";
 import { usableDatasource, type DatasourceRow } from "./datasources";
 import { asReportError, ReportError } from "./errors";
 import {
-  BUSY_WAIT_MS, capRows, paramsJson, parseParams, pool, REFRESH_CONCURRENCY, reportResults, runQueryId
+  abandonExpiredReportRuns, BUSY_WAIT_MS, capRows, paramsJson, parseParams, pool, REFRESH_CONCURRENCY, reportResults, runningRun, runQueryId, runView
 } from "./refresh";
 import { runGuarded } from "./runner";
 import { parseSpec } from "./service";
 import { classify, GuardError } from "./sqlGuard";
-import { reportToday } from "./paramZone";
+import { reportTimeZone, reportToday } from "./paramZone";
+import { isWorkspaceReport, liveResults } from "./workspaceSource";
+import { looksLikeDatasetQuery } from "../../shared/reportsWorkspace";
 
 /**
  * Interactive report parameters (spec v3, D489, docs/plan/REPORT_THEME.md § Parameters).
@@ -83,7 +85,8 @@ export function parameterErrors(params: readonly ReportParameter[], queries: Rea
   for (const query of queries) {
     let placeholders: Array<{ name: string; type: string }>;
     try {
-      placeholders = classify(query.sql, { params: true }).placeholders;
+      // W3-REPORTS: a structured query (JSON) holds its placeholders as whole values; no SQL to classify.
+      placeholders = looksLikeDatasetQuery(query.sql) ? placeholdersIn(query.sql) : classify(query.sql, { params: true }).placeholders;
     } catch (error) {
       if (!(error instanceof GuardError)) throw error;
       // The guard says so when the query runs; only placeholder problems are reported here.
@@ -102,7 +105,7 @@ export function parameterErrors(params: readonly ReportParameter[], queries: Rea
     if (param.type !== "select" && param.type !== "multi_select") return;
     let placeholders: Array<{ name: string; type: string }>;
     try {
-      placeholders = classify(param.optionsQuery, { params: true }).placeholders;
+      placeholders = looksLikeDatasetQuery(param.optionsQuery) ? placeholdersIn(param.optionsQuery) : classify(param.optionsQuery, { params: true }).placeholders;
     } catch (error) {
       if (!(error instanceof GuardError)) throw error;
       if (/query parameter/i.test(error.message)) errors.push(`parameter ${param.id}: its optionsQuery: ${error.message}`);
@@ -154,9 +157,9 @@ export function paramSetsToCheck(params: readonly ReportParameter[], options: Re
  * values. D560: a linked options query reads earlier parameters; `params` binds them (only the
  * placeholders it holds are sent, and every one it holds must be bound).
  */
-export async function runOptionsQuery(row: DatasourceRow, sql: string, context: { userId: string; queryId: string; signal?: AbortSignal; params?: readonly BoundParam[] }): Promise<{ options: string[]; truncated: boolean }> {
+export async function runOptionsQuery(row: DatasourceRow, sql: string, context: { userId: string; queryId: string; signal?: AbortSignal; params?: readonly BoundParam[]; timeZone?: string }): Promise<{ options: string[]; truncated: boolean }> {
   const linked = placeholdersIn(sql).length > 0;
-  const outcome = await runGuarded(row, sql, { classes: ["select"], maxRows: PARAM_LIMITS.options, queryId: context.queryId, userId: context.userId, signal: context.signal, ...(linked ? { params: context.params ?? [] } : {}) });
+  const outcome = await runGuarded(row, sql, { classes: ["select"], maxRows: PARAM_LIMITS.options, queryId: context.queryId, userId: context.userId, signal: context.signal, ...(linked ? { params: context.params ?? [] } : {}), ...(context.timeZone ? { timeZone: context.timeZone } : {}) });
   if (!outcome.columns.length) throw new ReportError(400, "INVALID", "An options query must select at least one column");
   rememberOptionColumn(sql, outcome.columns[0]!.name);
   const options = optionTexts(outcome.rows);
@@ -294,6 +297,14 @@ export async function searchParamOptions(reportId: string, userId: string, param
   const spec = parseSpec(report.spec_json);
   const param = selectParam(spec, paramId);
   const parents = parentBinding(reportId, spec, param, given);
+  // W3-REPORTS (D1064): a workspace select's choices are the reader's own (their access), searched here.
+  if (isWorkspaceReport(report)) {
+    searchRateLimit(userId);
+    const read = await readOptionsList(report, param, userId, parents?.bound);
+    if (read.error) throw new ReportError(400, "INVALID", read.error);
+    const needle = term.toLowerCase();
+    return { paramId, options: read.values.filter((value) => value.toLowerCase().includes(needle)), truncated: read.truncated, error: null, at: now(), query: term, ...(parents ? { parents: parents.values } : {}) };
+  }
   const datasource = usableDatasource(report.datasource_id);
   searchRateLimit(userId);
   const queryId = queryIdFor("opts", reportId.replace(/-/g, "").slice(0, 12), paramId, crypto.randomUUID().slice(0, 8));
@@ -332,7 +343,7 @@ const optionsView = (paramId: string, row: OptionsRow | null, parents?: ParamVal
 async function readOptionsList(report: ReportRow, param: SelectParam, userId: string, bound?: readonly BoundParam[]): Promise<{ values: string[]; truncated: boolean; error: string | null }> {
   const datasource = usableDatasource(report.datasource_id);
   try {
-    const read = await runOptionsQuery(datasource, param.optionsQuery, { userId, queryId: queryIdFor("opt", report.id.replace(/-/g, "").slice(0, 12), param.id), ...(bound ? { params: bound } : {}) });
+    const read = await runOptionsQuery(datasource, param.optionsQuery, { userId, queryId: queryIdFor("opt", report.id.replace(/-/g, "").slice(0, 12), param.id), ...(bound ? { params: bound } : {}), timeZone: reportTimeZone(report.id) });
     return { values: read.options, truncated: read.truncated, error: null };
   } catch (failure) {
     // A busy person keeps the last list rather than caching the refusal.
@@ -358,6 +369,12 @@ export async function reportParamOptions(reportId: string, userId: string, param
   const spec = parseSpec(report.spec_json);
   const param = selectParam(spec, paramId);
   const parents = parentBinding(reportId, spec, param, given);
+  // W3-REPORTS (D1064, T602): a workspace select lists what this reader can see; never cached (a list
+  // read with one person's access is never another's).
+  if (isWorkspaceReport(report)) {
+    const read = await readOptionsList(report, param, userId, parents?.bound);
+    return optionsView(paramId, { sql: param.optionsQuery, values_json: JSON.stringify(read.values), truncated: read.truncated ? 1 : 0, error: read.error, created_at: now() }, parents?.values);
+  }
   if (parents) return linkedOptions(report, param, parents, userId);
   const cached = db.query("SELECT sql, values_json, truncated, error, created_at FROM report_param_options WHERE report_id = ? AND param_id = ?").get(reportId, paramId) as OptionsRow | null;
   if (freshList(report, cached, param.optionsQuery)) return optionsView(paramId, cached);
@@ -529,8 +546,16 @@ export function paramResults(reportId: string, userId: string, given: Record<str
   const report = readableReport(reportId, userId);
   const spec = parseSpec(report.spec_json);
   const set = resolveSet(spec, given, reportToday(reportId));
-  const base = reportResults(reportId, userId);
   const info = (missing: string[]): ParamSetInfo => ({ isDefault: set.isDefault, values: set.values, bound: boundRecord(set.bound), missing });
+  // W3-REPORTS (D1061): a workspace report runs every set live for this reader; nothing is cached or missing.
+  if (isWorkspaceReport(report)) {
+    if (set.isDefault) return { ...reportResults(reportId, userId), set: info([]) };
+    const zone = reportTimeZone(reportId);
+    abandonExpiredReportRuns(Date.now(), reportId);
+    const running = runningRun(reportId);
+    return { results: liveResults(spec, userId, set.bound, zone), running: running ? runView(running) : null, live: true, timeZone: zone, reach: reachOf(spec.parameters, spec.queries), set: info([]) };
+  }
+  const base = reportResults(reportId, userId);
   if (set.isDefault) return { ...base, set: info([]) };
   const cached = setResults(report, spec, set, base.results);
   touchSets(reportId, cached.usedSets);
@@ -631,6 +656,12 @@ export async function runParamSet(userId: string, reportId: string, given: Recor
   const set = resolveSet(spec, given, reportToday(reportId));
   if (set.isDefault) return paramResults(reportId, userId, given);
   await assertOptionValues(report, spec, set.values, userId);
+  // W3-REPORTS (D1061): nothing to run ahead; the set's results are computed live when read.
+  if (isWorkspaceReport(report)) {
+    rateLimit(userId);
+    audit(userId, null, "reports.params.run", { reportId, setHash: set.hash.slice(0, 16), trigger: options.trigger, queries: spec.queries.length, failed: 0, live: true });
+    return paramResults(reportId, userId, given);
+  }
   const cached = setResults(report, spec, set, reportResults(reportId, userId).results);
   // D532: `force` re-runs the used queries this set reads non-default values in (the rest answer with the default results).
   const keys = options.force ? setQueries(spec).filter((query) => !readsOnlyDefaults(spec, query.sql, set.values)).map((query) => query.key) : cached.missing;

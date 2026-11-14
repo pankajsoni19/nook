@@ -2,6 +2,7 @@ import { db } from "../db";
 import { AUDIENCE_ALL_USERS, type Role } from "../team/roles";
 import type { ReportLevel, ShareLevel } from "../../shared/reportsEdit";
 import { ReportError, reportNotFound } from "./errors";
+import { withSource } from "./workspaceSource";
 
 /**
  * Who reaches a report (plan wave 45, D418; wave 48 sharing, D455; phase 2: several owners in
@@ -22,6 +23,7 @@ export type ReportRow = {
   deleted_by: string | null; purge_after: string | null; purge_started_at: string | null; auto_apply?: number;
   /** B3 (056): the ticked doc tools, a JSON array; B4: `server` or `nook`. */ doc_browse_tools?: string; doc_source?: string;
   /** Lane I (059): the owner's folder; null is Unfiled. */ folder_id?: string | null;
+  /** W3-REPORTS (113, D1060): `workspace` for a report on This workspace (its `datasource_id` then reads `workspace`). */ source?: "clickhouse" | "workspace";
 };
 
 /** SQL: `$userId` is one of the owners of the report `alias` (phase 2, migration 062, D482). */
@@ -37,7 +39,7 @@ export const readableReportSql = (alias = "r") => `(${alias}.deleted_at IS NULL 
 export function readableReport(id: string, userId: string): ReportRow {
   const row = db.query(`SELECT * FROM reports r WHERE r.id = $id AND ${readableReportSql("r")}`).get({ id, userId }) as ReportRow | null;
   if (!row) throw reportNotFound();
-  return row;
+  return withSource(row);
 }
 
 /**
@@ -47,7 +49,7 @@ export function readableReport(id: string, userId: string): ReportRow {
 export function ownedReport(id: string, userId: string): ReportRow {
   const row = db.query(`SELECT * FROM reports r WHERE r.id = $id AND r.deleted_at IS NULL AND ${ownsReportSql("r")}`).get({ id, userId }) as ReportRow | null;
   if (!row) throw reportNotFound();
-  return row;
+  return withSource(row);
 }
 
 /** Whether the person is one of the report's owners (live or binned). */

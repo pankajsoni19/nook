@@ -4,6 +4,7 @@ import { databaseAllowed, tableAllowed } from "./allowlist";
 import { chQuery, ChError, queryIdFor, type ChResult } from "./clickhouse";
 import { allowlistOf, datasourceTarget, type DatasourceRow } from "./datasources";
 import { ReportError } from "./errors";
+import { isWorkspaceRow, runWorkspaceQuery } from "./workspaceSource";
 import { repairHint } from "./repairHints";
 import { tablesWithColumn } from "./schemaCatalog";
 import type { BoundParam } from "../../shared/reportParams";
@@ -40,6 +41,8 @@ export type RunOptions = {
    * sent (`param_<name>`), with the tree check and with the run.
    */
   params?: readonly BoundParam[];
+  /** W3-REPORTS: the zone a workspace query's relative ranges and buckets resolve in (the report's). */
+  timeZone?: string;
 };
 
 const PER_USER = 2;
@@ -139,6 +142,12 @@ const queryLog = logger("reports");
  * debug (it is the person's or the agent's SQL), and result rows never are.
  */
 export async function runGuarded(row: DatasourceRow, sql: string, options: RunOptions): Promise<QueryOutcome> {
+  // W3-REPORTS (D1060, T600): "This workspace" runs structured dataset queries with the caller's
+  // access through the dataset registry; nothing on it is ClickHouse and no SQL is accepted.
+  if (isWorkspaceRow(row)) {
+    if (!options.classes.includes("select")) throw new ReportError(400, "INVALID", "This workspace has no metadata statements; its datasets are listed in the widget editor");
+    return limited(options.userId, async () => runWorkspaceQuery(sql, { userId: options.userId, maxRows: options.maxRows, params: options.params, timeZone: options.timeZone }));
+  }
   const started = performance.now();
   if (queryLog.enabled("debug")) queryLog.debug("Query SQL", { query: options.queryId, sql: sql.slice(0, 4000) });
   try {
@@ -230,6 +239,7 @@ export const adHocQueryId = (kind: string) => queryIdFor(kind, crypto.randomUUID
  * statement with quoted ids; failures are ignored (the aborted request already stops a readonly query).
  */
 export async function killQuery(row: DatasourceRow, queryId: string) {
+  if (isWorkspaceRow(row)) return false;
   try {
     await chQuery(datasourceTarget(row), `KILL QUERY WHERE query_id IN (${sqlString(queryId)}, ${sqlString(`${queryId}-tree`.slice(0, 120))}) ASYNC`, { queryId: queryIdFor("kill", crypto.randomUUID().slice(0, 8)), profileSettings: true });
     return true;

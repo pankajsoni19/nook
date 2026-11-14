@@ -17,6 +17,7 @@ export type QueryResultView = { queryKey: string; result: ReportResult | null; f
 export type ReportResultsView = {
   results: QueryResultView[]; running: ReportRun | null; /** D489: a report with parameters: the IANA zone its date presets resolve in. */ timeZone?: string;
   /** D533: a report with parameters: the queries each one reaches (`{ paramId: queryKey[] }`). */ reach?: Record<string, string[]>;
+  /** W3-REPORTS (D1061): a report on This workspace: the results were computed just now with the reader's own access (nothing stored is shown). */ live?: boolean;
 };
 
 /** A doc snapshot as the inspect panel's Provenance tab shows it (never its markdown). */
