@@ -1374,6 +1374,7 @@ Time and Goals (lane tg; migration 120):
 | D1147 | **Today's total is bounded by tomorrow** (entries logged ahead are not today's); **`get_time_for_item` with a key over chosen projects totals those projects only** (entries, totals, per person). |
 | D1148 | **A new goal goes in the current period**: the New goal sheet opened from "All periods" (or with no period chosen) picks the open period containing today (the latest-starting when they overlap); "No period" stays a choice. MCP `create_goal` does the same when `periodId` is left out (`null` keeps none). |
 | D1149 | **Goal sheet fields top-align** (UI9): the Start field's hint made the row taller and the Due input stretched to fill it. |
+| D1150 | **The `time.entries` dataset's money columns are built per query** (like D1143's project columns): built at load, the access predicate read as "0", so a project's managers saw amounts and currency of their own entries only, against D873. |
 
 ---
 

@@ -110,6 +110,20 @@ describe("a project the viewer cannot open (TG4, D1143)", () => {
   });
 });
 
+describe("money in the time.entries dataset (D1150)", () => {
+  test("a project's manager sees amounts of a member's entries; the member sees only their own", async () => {
+    const manager = await createUser("Audit2 money manager");
+    const member = await createUser("Audit2 money member");
+    const other = await createUser("Audit2 money other");
+    const project = (await time(manager, "POST", "/projects", { name: "Billed project", rateMinor: 12000, currency: "EUR", memberIds: [member.userId, other.userId] })).body.project.id as string;
+    expect((await time(member, "POST", "/entries", { startedAt: hoursAgo(50), duration: 1800, projectId: project, billable: true })).status).toBe(201);
+    expect((await time(other, "POST", "/entries", { startedAt: hoursAgo(51), duration: 3600, projectId: project, billable: true })).status).toBe(201);
+    const query = (viewer: Session) => runDatasetQuery({ dataset: "time.entries", measures: [{ fn: "sum", column: "amount_minor" }], dimensions: ["person", "currency"], filters: [{ column: "project_id", op: "eq", value: project }], sort: [{ column: "person", dir: "asc" }] }, { userId: viewer.userId, role: "member" }).rows;
+    expect(query(manager)).toEqual([["Audit2 money member", "EUR", 6000], ["Audit2 money other", "EUR", 12000]]);
+    expect(query(member)).toEqual([["Audit2 money member", "EUR", 6000], ["Audit2 money other", null, null]]);
+  });
+});
+
 describe("MCP with a key over one project (TG5, D1144, D1147)", () => {
   test("start_timer refuses to stop a timer running on a project the key cannot reach", async () => {
     resetMcpLimits();

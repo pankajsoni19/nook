@@ -12,6 +12,7 @@ Release notes for Nook, newest first. Upgrade steps for each release are in [doc
 - An MCP key limited to some projects can no longer stop a timer running on another project by starting one, and `get_time_for_item` totals only its projects.
 - Week approvals show the same total that approving locks (each entry's local day); time logged ahead for tomorrow no longer counts as today's.
 - A goal carried over to the next period counts once in its parent's progress; closing a goal or a period uses up-to-date automatic key results.
+- Project managers see amounts and currency for everyone's entries on their projects in the time dataset (reports), not only their own.
 - New goals start in the current period (also over MCP when no period is given); the New goal sheet's Start and Due fields line up.
 
 **Workspace modules working together** (Wave 3)

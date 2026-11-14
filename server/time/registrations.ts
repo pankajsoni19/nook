@@ -203,8 +203,9 @@ export const timeDataset: DatasetDef = {
     { name: "seconds", sql: "e.duration_s", type: "duration", label: "Time", measures: ["sum", "avg", "min", "max"] },
     { name: "hours", sql: "(e.duration_s / 3600.0)", type: "number", label: "Hours", measures: ["sum", "avg"] },
     { name: "billable_seconds", sql: "(CASE WHEN e.billable = 1 THEN e.duration_s ELSE 0 END)", type: "duration", label: "Billable time", measures: ["sum"] },
-    { name: "amount_minor", sql: `(CASE WHEN e.billable = 1 AND e.rate_minor IS NOT NULL AND ${moneyVisibleSql()} THEN CAST(ROUND(e.rate_minor * e.duration_s / 3600.0) AS INTEGER) END)`, type: "money", label: "Amount (minor units)", measures: ["sum", "avg"] },
-    { name: "currency", sql: `(CASE WHEN ${moneyVisibleSql()} THEN e.currency END)`, type: "string", label: "Currency", dimension: true }
+    // Per query too: built at load, the managers' half of the money predicate read as "0" (D1150).
+    queryTimeColumn({ name: "amount_minor", type: "money", label: "Amount (minor units)", measures: ["sum", "avg"] }, () => `(CASE WHEN e.billable = 1 AND e.rate_minor IS NOT NULL AND ${moneyVisibleSql()} THEN CAST(ROUND(e.rate_minor * e.duration_s / 3600.0) AS INTEGER) END)`),
+    queryTimeColumn({ name: "currency", type: "string", label: "Currency", dimension: true }, () => `(CASE WHEN ${moneyVisibleSql()} THEN e.currency END)`)
   ]
 };
 
