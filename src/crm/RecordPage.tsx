@@ -228,13 +228,13 @@ export function RecordPage({ kind, refId, books, canWriteRole, onOpen, onBack, o
   </div>;
 }
 
-function InteractionRow({ interaction, onDelete, self }: { interaction: CrmInteraction; onDelete: () => void; self: CrmEntity }) {
+export function InteractionRow({ interaction, onDelete, self }: { interaction: CrmInteraction; onDelete: () => void; self: CrmEntity }) {
   const Icon = interaction.kind === "call" ? PhoneCall : interaction.kind === "email" ? Mail : interaction.kind === "meeting" ? Users : interaction.kind === "note" ? StickyNote : MessageSquareText;
   const others = interaction.subjects.filter((subject) => subject.kind !== self && subject.title);
   return <article className="crm-interaction">
     <span className="crm-interaction-icon" aria-hidden="true"><Icon /></span>
     <div>
-      <header><strong>{interaction.title || INTERACTION_LABELS[interaction.kind]}</strong><span className="crm-muted"> · {INTERACTION_LABELS[interaction.kind]}{interaction.durationS ? ` · ${Math.round(interaction.durationS / 60)} min` : ""} · {interaction.author?.name ?? "Nook"} · <time dateTime={interaction.occurredAt}>{dateTime(interaction.occurredAt)}</time></span></header>
+      <header><strong>{interaction.title || INTERACTION_LABELS[interaction.kind]}</strong><span className="crm-muted">{interaction.title ? ` · ${INTERACTION_LABELS[interaction.kind]}` : ""}{interaction.durationS ? ` · ${Math.round(interaction.durationS / 60)} min` : ""}{" · "}{interaction.author?.name ?? "Nook"} · <time dateTime={interaction.occurredAt}>{dateTime(interaction.occurredAt)}</time></span></header>
       {interaction.body && interaction.body !== interaction.title && <p className="crm-interaction-body">{interaction.body}</p>}
       {others.length > 0 && <p className="crm-muted">Also on {others.map((subject) => subject.title).join(", ")}</p>}
     </div>

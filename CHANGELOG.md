@@ -14,6 +14,9 @@ Release notes for Nook, newest first. Upgrade steps for each release are in [doc
 - Restoring a company from the Bin whose domain another company now uses explains the clash instead of failing.
 - Goal key results that add up deal value count one currency (the pipeline's or book's, or one you choose) instead of mixing currencies.
 - Dragging a deal on a board filtered by Mine or search lands it where you dropped it.
+- Contacts sheets (new contact, company, deal, import) fill the screen on phones.
+- A note without a title reads "Note · Ada", not "Note · Note".
+- A standup with no rounds yet shows when its first round opens.
 
 **Workspace modules working together** (Wave 3)
 

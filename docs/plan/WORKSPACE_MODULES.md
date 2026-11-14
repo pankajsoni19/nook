@@ -1372,6 +1372,9 @@ Deferred: editing an existing widget in the builder (Inspect → Edit SQL shows 
 | D1165 | **Restoring a binned company** whose domain a live company of the book now has answers `409 NAME_TAKEN` naming that company (it was a 500 from the unique index). |
 | D1166 | **Value progress sources** (`crm_won_value`, `crm_pipeline_value`) add up one currency, as the board does (D972): the config's `currency`, else the pipeline's (else its book's), else the book's, else the workspace default; the detail names it. |
 | D1167 | **Board drops** name their neighbours: the client sends `afterId` (the card above) and `beforeId` (the card below) from the cards it shows, and the server places the deal among all the stage's deals, so a drop on a board filtered by Mine or search lands where it was dropped. `position` (an index among all deals) stays for MCP and older clients. |
+| D1168 | **Contacts sheets on phones**: `.crm-sheet` and `.crm-import` set their width only from 761 px up (as collections.css does), so phones keep the full-screen sheet. |
+| D1169 | **Untitled interactions** read "Note · Ada · 14 Nov" (the kind once, as the heading), not "Note · Note". |
+| D1170 | **A standup with no round yet** shows "First round Mon 16 Nov, 09:30" (the viewer's next open, `nextOpensAt`) in the list instead of "No rounds yet". Participants were already listed before the first round (`readableCheckinSql`); the audit's "No standups yet" came from a setup where the member had not been added. |
 
 ---
 
