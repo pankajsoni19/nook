@@ -4,9 +4,12 @@ import type { QuestionSet } from "../shared/questions";
 
 const { issueRenderNonce, resetPublicLimits } = await import("../server/public/limits");
 const mail = await import("../server/mail");
+const { pendingActionRuns } = await import("../server/forms/actions");
+const settle = async () => { await Promise.all([...pendingActionRuns]); };
 
 /**
- * Forms audit fixes (§D.1): email verification with mail off (D863).
+ * Forms audit fixes (§D.1): email verification with mail off (D863); hidden fields never give a
+ * public respondent their identity (D864, T523).
  */
 
 let owner: Session;
@@ -64,5 +67,53 @@ describe("confirm email with mail off (D863)", () => {
     const held = await submit(formId, token, { answers: { name: "Ada", email: "ada@outside.test" } });
     expect(held.status).toBe(202);
     mail.setMailTransportForTests(null);
+  });
+});
+
+describe("hidden fields are not identity on public submissions (D864, T523)", () => {
+  const HIDDEN_SET: QuestionSet = {
+    version: 1, sections: [], endings: [], logic: [],
+    questions: [
+      { id: "name", type: "short_text", title: "Your name", required: true, role: "contact_name" },
+      { id: "email", type: "email", title: "Email", role: "contact_email" },
+      { id: "ref", type: "hidden", title: "Referrer email", hiddenKey: "ref" }
+    ]
+  };
+  async function hiddenForm(title: string, verifyEmail: boolean) {
+    const book = await api(owner, "POST", "/forms/contact-books", { name: `${title} book` });
+    const created = await api(owner, "POST", "/forms", { kind: "form", title, questions: HIDDEN_SET, publish: true });
+    const formId = created.body.form.id as string;
+    const link = await api(owner, "POST", `/forms/${formId}/public-link`);
+    if (verifyEmail) await api(owner, "PATCH", `/forms/${formId}`, { verifyEmail: true });
+    expect((await api(owner, "POST", `/forms/${formId}/actions`, { kind: "save_contact", config: { bookId: book.body.book.id, emailQuestionId: "ref" } })).status).toBe(201);
+    return { formId, token: link.body.token as string, bookId: book.body.book.id as string };
+  }
+  const emailsIn = (bookId: string) => (db.query("SELECT ch.value_norm AS email FROM contacts c JOIN contact_channels ch ON ch.contact_id = c.id WHERE c.book_id = ? AND ch.kind = 'email' ORDER BY 1").all(bookId) as Array<{ email: string }>).map((row) => row.email);
+
+  test("a verified public response saves the address that confirmed the code, not the URL's hidden value", async () => {
+    mail.setMailTransportForTests(async () => ({ id: "msg" }));
+    resetPublicLimits();
+    const { formId, token, bookId } = await hiddenForm("Verified hidden", true);
+    const held = await submit(formId, token, { answers: { name: "Mallory", email: "mallory@outside.test" }, hidden: { ref: "victim@outside.test" } });
+    expect(held.status).toBe(202);
+    const outbox = db.query("SELECT payload FROM mail_outbox WHERE template = 'public.verification' AND to_address = 'mallory@outside.test' ORDER BY created_at DESC LIMIT 1").get() as { payload: string };
+    const code = JSON.parse(outbox.payload).code as string;
+    const verified = await api(null, "POST", `/public/forms/${token}/verify`, { id: held.body.verificationId, code });
+    expect(verified.status).toBe(201);
+    await settle();
+    expect(emailsIn(bookId)).toEqual(["mallory@outside.test"]);
+    mail.setMailTransportForTests(null);
+  });
+
+  test("an unverified public response ignores the hidden email; a member's own response may use it", async () => {
+    resetPublicLimits();
+    const { formId, token, bookId } = await hiddenForm("Unverified hidden", false);
+    expect((await submit(formId, token, { answers: { name: "Mallory", email: "mallory2@outside.test" }, hidden: { ref: "victim2@outside.test" } })).status).toBe(201);
+    await settle();
+    expect(emailsIn(bookId)).not.toContain("victim2@outside.test");
+    const own = await api(owner, "POST", `/forms/${formId}/responses`, { answers: { name: "Owner" }, hidden: { ref: "lead@inside.test" } });
+    expect(own.status).toBe(201);
+    await settle();
+    expect(emailsIn(bookId)).toContain("lead@inside.test");
   });
 });

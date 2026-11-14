@@ -46,8 +46,10 @@ function publicSet(set: QuestionSet): QuestionSet {
   return { ...set, questions: set.questions.filter((question) => QUESTION_TYPES[question.type].public).map((question): Question => ({ ...question, role: undefined })) };
 }
 
-const emailQuestion = (set: QuestionSet) => set.questions.find((question) => question.role === "contact_email") ?? set.questions.find((question) => question.type === "email");
-const nameQuestion = (set: QuestionSet) => set.questions.find((question) => question.role === "contact_name");
+// A hidden question (filled from the URL) never names the respondent of a public submission (T523, D864).
+const visible = (set: QuestionSet) => set.questions.filter((question) => question.type !== "hidden");
+const emailQuestion = (set: QuestionSet) => visible(set).find((question) => question.role === "contact_email") ?? visible(set).find((question) => question.type === "email");
+const nameQuestion = (set: QuestionSet) => visible(set).find((question) => question.role === "contact_name");
 
 function publicResults(row: FormRow, browser: string | null) {
   if (row.kind === "form") return null;

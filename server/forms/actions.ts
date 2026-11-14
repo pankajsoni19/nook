@@ -185,7 +185,7 @@ export function renderTemplate(template: string, set: QuestionSet, answers: Reco
 
 // ---------------------------------------------------------------- running
 
-type RunContext = { form: FormRow; responseId: string; publicSubmission: boolean };
+type RunContext = { form: FormRow; responseId: string; publicSubmission: boolean; verified: boolean };
 
 const questionFor = (set: QuestionSet, id: string | null | undefined, role: Question["role"], type?: Question["type"]) =>
   (id ? set.questions.find((question) => question.id === id) : undefined) ?? set.questions.find((question) => question.role === role) ?? (type ? set.questions.find((question) => question.type === type) : undefined);
@@ -198,7 +198,11 @@ async function runOne(action: ActionRow, context: RunContext): Promise<string | 
   const actor = action.created_by ?? context.form.owner_id;
   const config = JSON.parse(action.config_json) as Record<string, unknown>;
   const answers = response.answers;
-  const usable = (question: Question | undefined) => question && (question.type !== "hidden" || (context.form.verify_email === 1 && !context.publicSubmission) || context.form.verify_email === 1) ? question : undefined;
+  // Hidden fields come from the link's URL, so a public submission never uses them for identity, verified
+  // or not (T523, D864); members' own submissions may. A verified public response's identity is the
+  // address that confirmed the code (the response's respondent email), never a typed answer.
+  const usable = (question: Question | undefined) => question && (question.type !== "hidden" || !context.publicSubmission) ? question : undefined;
+  const verifiedEmail = context.publicSubmission && context.verified ? response.respondent.email : null;
   if (action.kind === "create_card") {
     const value = createCardConfig.parse(config);
     const title = renderTemplate(value.title, set, answers, { markdown: false }).slice(0, 500).trim() || `Response to ${context.form.title}`.slice(0, 500);
@@ -218,7 +222,7 @@ async function runOne(action: ActionRow, context: RunContext): Promise<string | 
     const emailQuestion = usable(questionFor(set, ids.emailQuestionId, "contact_email", "email"));
     const contactQuestion = set.questions.find((question) => question.type === "contact");
     const contactAnswer = contactQuestion ? answers[contactQuestion.id] as { name?: string; email?: string; phone?: string; company?: string } | undefined : undefined;
-    const email = (emailQuestion ? answers[emailQuestion.id] : undefined) ?? contactAnswer?.email;
+    const email = verifiedEmail ?? (emailQuestion ? answers[emailQuestion.id] : undefined) ?? contactAnswer?.email;
     if (typeof email !== "string" || !email) return null;
     const pick = (question: Question | undefined) => { const found = usable(question); const answer = found ? answers[found.id] : undefined; return found && answer !== undefined ? plainAnswer(found, answer) : null; };
     const result = db.transaction(() => upsertContactByEmail(bookId, {
@@ -286,9 +290,10 @@ async function execute(runId: string) {
   const form = formRowById(run.form_id);
   if (!form || form.deleted_at !== null) return;
   const response = db.query("SELECT meta_json FROM responses WHERE id = ?").get(run.response_id) as { meta_json: string } | null;
-  const publicSubmission = response ? (JSON.parse(response.meta_json) as { via?: string }).via === "public" : false;
+  const meta = response ? JSON.parse(response.meta_json) as { via?: string; verified?: boolean } : {};
+  const publicSubmission = meta.via === "public";
   try {
-    const ref = await runOne(run, { form, responseId: run.response_id, publicSubmission });
+    const ref = await runOne(run, { form, responseId: run.response_id, publicSubmission, verified: meta.verified === true });
     db.query("UPDATE form_action_runs SET status = 'done', result_ref = ?, error = NULL, attempts = attempts + 1, updated_at = ? WHERE id = ?").run(ref, now(), runId);
     audit(run.created_by, null, "forms.action_run", { formId: form.id, actionId: run.id, responseId: run.response_id, outcome: "done" });
   } catch (error) {
