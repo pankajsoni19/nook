@@ -8,7 +8,7 @@ import { registerGoalRoutes } from "./routes";
 import { goalAgentTools, goalTools } from "./mcp";
 import { tasksProgressSource } from "./sources";
 import { goalLevel, readableGoalSql, type GoalRow } from "./access";
-import { goalHref, goalsInBin, keyResultRestored, purgeGoal, restoreGoal, summarize, sweepAutoKrs } from "./service";
+import { goalHref, goalsInBin, keyResultRestored, ownerTimeZone, purgeGoal, restoreGoal, summarize, sweepAutoKrs, syncReminder } from "./service";
 import { checkinDue } from "../../shared/goals";
 import { HEALTH_LABEL } from "../../shared/tones";
 import { WORK_KIND_ICONS, type WorkSummary } from "../../shared/workRefs";
@@ -201,6 +201,9 @@ registerWorkspaceModule({
       run: (schedule, fireAt) => {
         const goal = goalById(schedule.owner.id);
         if (!goal || goal.deleted_at !== null || goal.state !== "active") return;
+        // The owner's zone moved since the schedule was armed (or it predates per-owner zones): re-arm it
+        // there; this occurrence still runs (the dispatcher's advance reads the re-armed rule, D1055).
+        if (schedule.tz !== ownerTimeZone(goal.owner_id)) syncReminder(goal);
         // A day's grace: a goal checked in on Saturday is not reminded on Monday of a weekly cadence.
         if (!checkinDue(goal.checkin_cadence, goal.last_checkin_at, goal.created_at, Date.parse(fireAt) + 86_400_000)) return;
         const contributors = (db.query("SELECT user_id FROM goal_contributors WHERE goal_id = ?").all(goal.id) as Array<{ user_id: string }>).map((row) => row.user_id);

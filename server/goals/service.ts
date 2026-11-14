@@ -10,6 +10,7 @@ import { createLink } from "../links/service";
 import { setItemMember } from "../access/workspaceItems";
 import { atLeast, goalLevel, goalRow, readableGoalIds, readableGoalSql, type GoalRow } from "./access";
 import { slugSegment } from "../../shared/friendlyUrls";
+import { isValidTimeZone } from "../../shared/calendarRecurrence";
 import {
   checkinDue, CLOSED_STATES, elapsedFraction, GOAL_LIMITS, krProgress, suggestedHealth, weightedProgress,
   type CheckinCadence, type GoalHealth, type GoalKind, type GoalState, type KrDirection, type KrMetric, type ProgressMode
@@ -454,11 +455,30 @@ function syncFts(goalId: string) {
   db.query("INSERT INTO goals_fts (goal_id, title, body) VALUES (?, ?, ?)").run(goalId, goal.title, `${krs}\n${goal.description_md}`.slice(0, 40_000));
 }
 
-/** The check-in reminder schedule (D909): Mondays 09:00 UTC, every 1, 2, or 4 weeks; none when off or closed. */
+/**
+ * A person's time zone for their goal reminders (D1053 is mail; this is D1055's sibling, see §D.8): the
+ * first real zone among the one they chose for email (Settings → Notifications), the one their browser
+ * reports to Standups (D946), and Time's reminder zone; UTC when none is set. A stored "UTC" counts as
+ * unset, since every one of those columns defaults to it.
+ */
+export function ownerTimeZone(userId: string): string {
+  const candidates: Array<string | null | undefined> = [];
+  const read = (sql: string) => { try { return (db.query(sql).get(userId) as { tz: string | null } | null)?.tz; } catch { return null; } };
+  candidates.push(read("SELECT tz FROM email_prefs WHERE user_id = ?"));
+  candidates.push(read("SELECT tz FROM checkin_participants WHERE user_id = ? AND tz IS NOT NULL AND tz <> 'UTC' LIMIT 1"));
+  candidates.push(read("SELECT tz FROM time_user_settings WHERE user_id = ?"));
+  return candidates.find((tz): tz is string => typeof tz === "string" && tz !== "UTC" && isValidTimeZone(tz)) ?? "UTC";
+}
+
+/**
+ * The check-in reminder schedule (D909 as changed in Wave 3): Mondays 09:00 in the owner's zone
+ * (`ownerTimeZone`), every 1, 2, or 4 weeks; none when off or closed. Re-armed on every goal write and,
+ * when the owner's zone has changed since, by the reminder itself (no boot hook needed).
+ */
 export function syncReminder(goal: Pick<GoalRow, "id" | "owner_id" | "checkin_cadence" | "state">) {
   if (goal.checkin_cadence === "none" || isClosed(goal.state) || goal.state === "draft") { cancelSchedules({ kind: "goal", id: goal.id }, "goals.checkin_reminder"); return; }
   const weeks = goal.checkin_cadence === "weekly" ? 1 : goal.checkin_cadence === "biweekly" ? 2 : 4;
-  upsertSchedule({ kind: "goal", id: goal.id }, "goals.checkin_reminder", { cadence: { weekdays: [1], at: "09:00", ...(weeks > 1 ? { everyNWeeks: weeks } : {}) } }, {}, { userId: goal.owner_id });
+  upsertSchedule({ kind: "goal", id: goal.id }, "goals.checkin_reminder", { cadence: { weekdays: [1], at: "09:00", ...(weeks > 1 ? { everyNWeeks: weeks } : {}) } }, {}, { userId: goal.owner_id, tz: ownerTimeZone(goal.owner_id) });
 }
 
 let sweepEnsured = false;

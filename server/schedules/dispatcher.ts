@@ -39,8 +39,10 @@ export function releaseStaleScheduleClaims(nowMs = Date.now()) {
 }
 
 function advance(row: ScheduleRow, fireAt: string, nowMs: number, fired: boolean) {
-  const rule = JSON.parse(row.rule_json) as ScheduleRule;
-  const next = nextFireIso(rule, row.tz, Math.max(Date.parse(fireAt), nowMs));
+  // The rule and zone as stored now: a handler may have re-armed its own schedule (a new zone, D1055).
+  const current = db.query("SELECT rule_json, tz FROM schedules WHERE id = ?").get(row.id) as { rule_json: string; tz: string } | null;
+  const rule = JSON.parse(current?.rule_json ?? row.rule_json) as ScheduleRule;
+  const next = nextFireIso(rule, current?.tz ?? row.tz, Math.max(Date.parse(fireAt), nowMs));
   db.query("UPDATE schedules SET next_fire_at = ?, claimed_at = NULL, last_fired_at = CASE WHEN ? THEN ? ELSE last_fired_at END, updated_at = ? WHERE id = ?")
     .run(next, fired ? 1 : 0, fireAt, iso(nowMs), row.id);
 }
