@@ -89,6 +89,7 @@ function useChoices(): Choices | null {
 }
 
 export function GoalEditor({ goal, defaults, me, onClose, onSaved }: {
+  /** `periodId` left out: the current period once the periods load (D1148); null: no period. */
   goal?: GoalDetail; defaults?: { periodId?: string | null; parentId?: string | null }; me: { id: string; name: string };
   onClose: () => void; onSaved: (goal: GoalDetail) => void;
 }) {
@@ -96,7 +97,15 @@ export function GoalEditor({ goal, defaults, me, onClose, onSaved }: {
   const [title, setTitle] = useState(goal?.title ?? "");
   const [description, setDescription] = useState(goal?.description ?? "");
   const [kind, setKind] = useState<GoalKind>(goal?.kind ?? "objective");
-  const [periodId, setPeriodId] = useState(goal?.period?.id ?? defaults?.periodId ?? "");
+  const [periodId, setPeriodIdState] = useState(goal?.period?.id ?? defaults?.periodId ?? "");
+  const [periodTouched, setPeriodTouched] = useState(false);
+  const setPeriodId = (next: string) => { setPeriodIdState(next); setPeriodTouched(true); };
+  const wantsCurrent = !goal && defaults?.periodId === undefined;
+  useEffect(() => {
+    if (!wantsCurrent || periodTouched || !choices) return;
+    const current = choices.periods.find((period) => period.current);
+    if (current) setPeriodIdState((value) => value || current.id);
+  }, [wantsCurrent, periodTouched, choices]);
   const [parentId, setParentId] = useState(goal?.parentId ?? defaults?.parentId ?? "");
   const [teamId, setTeamId] = useState(goal?.team?.id ?? "");
   const [ownerId, setOwnerId] = useState(goal?.owner.id ?? me.id);

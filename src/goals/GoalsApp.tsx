@@ -116,7 +116,7 @@ function GoalsHome({ route, navigate, onOpenPath, userId, displayName, role, fla
             ? <GoalsTimeline goals={goals} period={periods.find((item) => item.id === period) ?? null} onOpen={open} />
             : <GoalRows goals={goals} tree={!listView} onOpen={open} onAddChild={canWrite ? (parentId) => setCreating({ parentId }) : undefined} />}
     {listView && cursor && <div className="goals-more"><button type="button" className="secondary-button" onClick={() => { void more(); }}>Load more</button></div>}
-    {creating && <GoalEditor me={{ id: userId, name: displayName }} defaults={{ periodId: period && period !== "all" && period !== "none" ? period : null, parentId: creating.parentId ?? null }} onClose={() => setCreating(null)} onSaved={created} />}
+    {creating && <GoalEditor me={{ id: userId, name: displayName }} defaults={{ periodId: period === "none" ? null : period && period !== "all" ? period : undefined, parentId: creating.parentId ?? null }} onClose={() => setCreating(null)} onSaved={created} />}
     {periodsOpen && <PeriodsSheet canWrite={canWrite} onClose={() => { setPeriodsOpen(false); void loadPeriods(); setReload((value) => value + 1); }} onChanged={flash} />}
   </ModuleHome>;
 }
