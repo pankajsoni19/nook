@@ -1,7 +1,7 @@
 import * as z from "zod/v4";
 import { BIN_BUCKETS, BIN_DESCRIPTION, defineTool, McpToolError, restoreResult, type McpKeyContext } from "../mcpToolKit";
 import { binProvider } from "./bin";
-import { keyContainerIds } from "../keyResources";
+import { keyContainerIds, keyReach } from "../keyResources";
 import { CHECKIN_TEMPLATES } from "../../shared/checkins";
 import { CheckinError, checkinLevel, checkinRow, roundRow } from "./store";
 import { createCheckin, deleteCheckin, setParticipants, updateCheckin } from "./service";
@@ -59,13 +59,15 @@ export const answerTool = defineTool({
   title: "Answer a standup",
   description: "Answer (or edit your answer to) a standup round you take part in, as the key's owner. Answers after your deadline count as late; a round takes answers until a day after it closes. Card keys like KAN-12 in a blockers answer link the card and flag it Blocked when you can edit it.",
   scopes: ["checkins:write"],
-  access: { mode: "items", items: [{ arg: "roundId", kind: "checkin_round", ifAbsent: "allow" }, { arg: "checkinId", kind: "checkin", ifAbsent: "allow" }] },
+  // goalUpdates name goals: the handler needs the key to reach Goals' writes on its whole module (T596), and Goals checks each goal as the person.
+  access: { mode: "items", items: [{ arg: "roundId", kind: "checkin_round", ifAbsent: "allow" }, { arg: "checkinId", kind: "checkin", ifAbsent: "allow" }], related: ["goalUpdates"] },
   write: true,
   annotations: { idempotentHint: true },
   inputSchema: z.object({ ...roundArgs, answers, goalUpdates: goalUpdatesSchema.optional().describe("For a goal_update question: check-ins on your goals, [{ goalId, values: { <keyResultId>: number }, health?, confidence? }] (list_goals mine, get_goal)") }).strict(),
   outputSchema: z.object({ status: z.string(), edited: z.boolean(), blockers: z.number(), roundId: z.string() }),
   handler: (args, key) => run(() => {
     const roundId = roundOf(args, key.userId);
+    if (args.goalUpdates?.length && keyReach(key, "goals:write") !== "all") throw new McpToolError("SCOPE_REQUIRED", "Goal updates need a key with goals:write on every goal");
     const result = answerRound(key.userId, roundId, { answers: args.answers, goalUpdates: args.goalUpdates });
     return { status: result.status, edited: result.edited, blockers: result.blockers, roundId };
   })
