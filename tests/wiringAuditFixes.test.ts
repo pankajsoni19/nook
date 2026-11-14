@@ -2,11 +2,14 @@ import { beforeAll, describe, expect, test } from "bun:test";
 import { createUser, db, request, type Session } from "./support/harness";
 
 const { krsForBoards, refreshGoalsForBoards } = await import("../server/wiring/tasksGoals");
+const { flushCardChangesForTests, onCardChange } = await import("../server/tasks/cardEvents");
+const { recordCardActivity } = await import("../server/tasks/activity");
 
 /**
  * W3-WIRE audit fixes (§D.8): card changes recompute only the view and filter KRs that can count the
  * changed board, without forcing them (D1059a); an edited or retried standup answer updates its goal
- * check-in instead of adding one (D1059b).
+ * check-in instead of adding one (D1059b); a rolled-back change folded into an earlier activity entry
+ * is never reported (D1059c).
  */
 
 type Json = Record<string, any>;
@@ -80,5 +83,29 @@ describe("standup goal updates are keyed by the answer (D1059b)", () => {
     expect(JSON.parse(rows[0]!.values_json)).toEqual({ [krId]: 5 });
     expect((db.query("SELECT current_value FROM key_results WHERE id = ?").get(krId) as Json).current_value).toBe(5);
     expect((db.query("SELECT COUNT(*) AS n FROM item_activity WHERE item_kind = 'goal' AND item_id = ? AND kind = 'checked_in'").get(goalId) as Json).n).toBe(1);
+  });
+});
+
+describe("folded card activity is reported only when it commits (D1059c)", () => {
+  test("a rolled-back fold reports nothing; a committed one does", async () => {
+    const target = await board(owner, "Fold board");
+    const cardId = (await api(owner, "POST", `/tasks/boards/${target.id}/cards`, { columnId: target.todo, title: "Fold me" })).body.card.id as string;
+    const write = (to: string) => recordCardActivity({ cardId, boardId: target.id, actorId: owner.userId, kind: "description", payload: { to: { label: to } } });
+    const first = db.transaction(() => write("first"))();
+    await flushCardChangesForTests();
+    const heard: string[] = [];
+    const stop = onCardChange((changes) => { for (const change of changes) heard.push(`${change.kind}:${change.activityId}`); });
+    try {
+      expect(() => db.transaction(() => { write("rolled back"); throw new Error("refused"); })()).toThrow("refused");
+      await flushCardChangesForTests();
+      expect(heard).toEqual([]);
+      // The earlier entry is untouched by the rollback.
+      expect(db.query("SELECT json_extract(payload, '$.to.label') AS label FROM card_activity WHERE id = ?").get(first)).toEqual({ label: "first" });
+      const kept = db.transaction(() => write("kept"))();
+      await flushCardChangesForTests();
+      expect(heard).toEqual([`description:${kept}`]);
+      // Still one folded entry on the card for the two committed writes.
+      expect(db.query("SELECT COUNT(*) AS n FROM card_activity WHERE card_id = ? AND kind = 'description'").get(cardId)).toEqual({ n: 1 });
+    } finally { stop(); }
   });
 });

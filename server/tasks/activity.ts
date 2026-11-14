@@ -85,11 +85,17 @@ export function recordCardActivity(input: RecordActivityInput) {
       const merged: CardActivityPayload = spec.shape === "change" ? { ...payload, from: previous.from ?? null } : payload;
       if (spec.shape === "change" && sameActivityValue(merged.from, merged.to)) {
         db.query("DELETE FROM card_activity WHERE id = ?").run(latest.id);
-      } else {
-        db.query("UPDATE card_activity SET payload = ?, created_at = ? WHERE id = ?").run(JSON.stringify(merged), at, latest.id);
+        // A change that undid itself: the earlier entry was reported when it was written.
+        return latest.id;
       }
-      reportCardChange({ activityId: latest.id, cardId: input.cardId, boardId: input.boardId, actorId: input.actorId, kind: input.kind, at });
-      return latest.id;
+      // The folded entry takes a fresh id (D1059c), so the change reports a token only this
+      // transaction can create: a rolled-back fold leaves no row with it, and listeners hear nothing.
+      const folded = Bun.randomUUIDv7();
+      db.query(`INSERT INTO card_activity (id, card_id, board_id, actor_id, actor_label, via, kind, payload, created_at)
+        SELECT ?, card_id, board_id, actor_id, actor_label, via, kind, ?, ? FROM card_activity WHERE id = ?`).run(folded, JSON.stringify(merged), at, latest.id);
+      db.query("DELETE FROM card_activity WHERE id = ?").run(latest.id);
+      reportCardChange({ activityId: folded, cardId: input.cardId, boardId: input.boardId, actorId: input.actorId, kind: input.kind, at });
+      return folded;
     }
   }
   const label = input.actorId
