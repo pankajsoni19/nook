@@ -5,6 +5,7 @@ import { fieldsOf, shown, toolProposalKind } from "../inbox/toolProposals";
 import { crmMcpTools } from "../crm/mcpTools";
 import { readRecord } from "../crm/interactions";
 import { requireBook } from "../crm/core";
+import { getContact } from "../crm/records";
 import { goalTools } from "../goals/mcp";
 import { goalHref, requireGoal } from "../goals/service";
 import { goalRow } from "../goals/access";
@@ -68,9 +69,19 @@ const contactUpdate = toolProposalKind({
   fields: (viewerId, payload) => {
     const record = recordOf("contact", viewerId, payload.contactId);
     if (!record) return null;
-    const row = db.query("SELECT display_name, job_title, location, lifecycle FROM contacts WHERE id = ?").get(record.id) as { display_name: string; job_title: string | null; location: string | null; lifecycle: string | null } | null;
-    const before: Record<string, string | null> = { name: row?.display_name ?? null, jobTitle: row?.job_title ?? null, location: row?.location ?? null, lifecycle: row?.lifecycle ?? null };
-    return fieldsOf(payload, CONTACT_FIELDS).map((field) => { const key = CONTACT_FIELDS.find(([, label]) => label === field.name)?.[0] ?? ""; return { ...field, before: before[key] ?? null }; });
+    // Every field the tool can change shows what it is now (D1059d), read as the viewer.
+    const contact = safely(() => getContact(record.id, viewerId));
+    if (!contact) return null;
+    const channels = (kind: "email" | "phone", primary: string | null) => {
+      const values = contact.channels.filter((channel) => channel.kind === kind).sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary)).map((channel) => channel.value);
+      const all = primary && !values.includes(primary) ? [primary, ...values] : values;
+      return all.length ? all.join(", ") : null;
+    };
+    const before: Record<string, unknown> = {
+      name: contact.displayName, firstName: contact.firstName, lastName: contact.lastName, email: channels("email", contact.email), phone: channels("phone", contact.phone),
+      jobTitle: contact.jobTitle, companyName: contact.companyName, lifecycle: contact.lifecycle, location: contact.location, tags: contact.tags.length ? contact.tags : null
+    };
+    return fieldsOf(payload, CONTACT_FIELDS).map((field) => { const key = CONTACT_FIELDS.find(([, label]) => label === field.name)?.[0] ?? ""; return { ...field, before: shown(before[key]) }; });
   },
   targetLabel: (viewerId, payload) => recordOf("contact", viewerId, payload.contactId)?.title ?? null,
   digest: (payload) => `Update ${CONTACT_FIELDS.filter(([key]) => payload[key] !== undefined).map(([, label]) => label).join(", ") || "a contact"}`,
