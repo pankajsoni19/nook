@@ -37,7 +37,7 @@ const responsesTemplate = defineTemplate<ResponsesMail>({
   fixture: () => ({ title: "Onboarding survey", count: 5, href: "https://nook.example/forms/onboarding-survey-0a1b2c3d4e/results" })
 });
 
-/** `ics`: the chosen time as a calendar file, built at send time from the payload's UTC times (D1055). */
+/** `ics`: the chosen time as a calendar file, built at send time from the payload's UTC times (D1054). */
 type FinalMail = { title: string; when: string; stopHref?: string; ics?: string | null };
 const finalTemplate = defineTemplate<FinalMail>({
   name: "forms.time_final",

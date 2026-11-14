@@ -456,7 +456,7 @@ function syncFts(goalId: string) {
 }
 
 /**
- * A person's time zone for their goal reminders (D1053 is mail; this is D1055's sibling, see §D.8): the
+ * A person's time zone for their goal reminders (D1055): the
  * first real zone among the one they chose for email (Settings → Notifications), the one their browser
  * reports to Standups (D946), and Time's reminder zone; UTC when none is set. A stored "UTC" counts as
  * unset, since every one of those columns defaults to it.

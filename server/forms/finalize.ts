@@ -14,7 +14,7 @@ import { FormError, formRowById, host, requireForm, syncSchedules, type FormRow 
  * the poll) picks one proposed time; it becomes an event in a calendar they can write, the poll
  * closes, the event and the poll are linked (event `source` ← form), the workspace participants
  * (named voters and the people chosen) are notified, and outside voters who left an email get one
- * email with the time and a calendar file of it (§B.7 caps, a stop link; never more than once per address; D1055).
+ * email with the time and a calendar file of it (§B.7 caps, a stop link; never more than once per address; D1054).
  */
 
 /** "Tue 18 Nov 2026, 14:00–15:00 (Europe/Paris)" in a zone. */
@@ -53,7 +53,7 @@ export async function finalizeTimePoll(userId: string, ref: string, input: { slo
   const when = slotWords(slot.start, slot.end, tz);
   const guests = input.emailGuests === false ? [] : db.query(`SELECT DISTINCT lower(respondent_email) AS email FROM responses WHERE host_kind = 'form' AND host_id = ? AND status = 'submitted' AND respondent_email IS NOT NULL LIMIT 100`).all(row.id) as Array<{ email: string }>;
   let emailed = 0;
-  // The calendar file's UID (D1055): a keyed hash of the poll, so outside mail never carries its id.
+  // The calendar file's UID (D1054): a keyed hash of the poll, so outside mail never carries its id.
   const icsUid = keyedHash("forms-time-final", row.id).slice(0, 32);
   const finalized = db.transaction((): FormRow => {
     const timestamp = now();
