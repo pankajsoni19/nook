@@ -91,6 +91,8 @@ export type FormDetail = FormListItem & {
   opensAt: string | null;
   maxResponses: number | null;
   verifyEmail: boolean;
+  /** Whether this server sends email: with mail off, "confirm email" is skipped (D863). */
+  mailEnabled: boolean;
   theme: FormTheme;
   ending: FormEnding;
   settings: FormSettings;

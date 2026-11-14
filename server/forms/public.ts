@@ -4,6 +4,7 @@ import type { AppEnv } from "../auth";
 import { audit, db } from "../db";
 import { appName } from "../config";
 import { clientIp } from "../clientAddress";
+import { mailEnabled } from "../mail";
 import {
   checkSubmission, confirmEmailVerification, consumePublicLink, issueRenderNonce, publicLimit, publicNotFound, readPublicJson, readPublicLink, startEmailVerification,
   type PublicLink, type PublicRouter
@@ -27,13 +28,17 @@ import { recordItemActivity } from "../activity/service";
  * nonce, honeypot, three-second minimum fill time; §B.8), then the per-link hourly limit, then the
  * question engine's validation with the public audience (members-only types refused, T516). Hidden
  * fields are stored as typed and never trusted for identity (T523). With email verification on, the
- * response is held until the six-digit code is entered (T577).
+ * response is held until the six-digit code is entered (T577); with mail off nothing can be confirmed,
+ * so verification is skipped and the response counts unverified (D863, as bookings do).
  */
 
 const opensFor = (link: PublicLink) => {
   const row = formRowById(link.itemId);
   return row !== null && row.deleted_at === null && row.audience === "public" && row.status !== "draft";
 };
+/** Email verification applies only when this server can send the code (D863). */
+const verifying = (row: FormRow) => row.verify_email === 1 && mailEnabled();
+
 const linkOf = (c: Context<AppEnv>) => readPublicLink("form", c.req.param("token") ?? "", { opens: opensFor });
 
 /** The definition a visitor may see: question and option ids, titles, and settings; never people, ids of other items, or answers. */
@@ -75,11 +80,11 @@ function identity(row: FormRow, set: QuestionSet, body: SubmitBody) {
   return { name: (typedName || answerName || contactAnswer?.name || "Guest").slice(0, 120), email };
 }
 
-function save(row: FormRow, link: PublicLink, body: SubmitBody, address: string | null): SubmitOutcome {
+function save(row: FormRow, link: PublicLink, body: SubmitBody, address: string | null, verified = false): SubmitOutcome {
   const set = currentSet(host(row.id))!.set;
   const who = identity(row, set, body);
   const respondent = row.anonymous ? { kind: "anonymous" as const, dedupeHash: body.browser ? browserHash(row.id, body.browser) : null } : { kind: "guest" as const, name: who.name, email: who.email };
-  const response = submitResponse({ host: host(row.id), respondent, answers: body.answers, hidden: body.hidden, audience: "public", meta: { via: "public", link: link.id, ...(row.verify_email ? { verified: true } : {}) } });
+  const response = submitResponse({ host: host(row.id), respondent, answers: body.answers, hidden: body.hidden, audience: "public", meta: { via: "public", link: link.id, ...(verified ? { verified: true } : {}) } });
   if (!row.anonymous && body.browser) db.query("UPDATE responses SET dedupe_hash = ? WHERE id = ?").run(browserHash(row.id, body.browser), response.id);
   const meta = JSON.parse((db.query("SELECT meta_json FROM responses WHERE id = ?").get(response.id) as { meta_json: string }).meta_json) as { ending?: string };
   recordVisit(row.id, "submits");
@@ -111,7 +116,7 @@ export function registerFormsPublicRoutes(router: PublicRouter) {
     return c.json({
       form: {
         kind: row.kind, title: row.title, description: row.description_md, display: row.display, theme: themeOf(row), ending: endingOf(row), showProgress: settingsOf(row).showProgress,
-        anonymous: row.anonymous === 1, verifyEmail: row.verify_email === 1, limitPer: row.limit_per, resultsVisibility: row.results_visibility, closesAt: row.closes_at,
+        anonymous: row.anonymous === 1, verifyEmail: verifying(row), limitPer: row.limit_per, resultsVisibility: row.results_visibility, closesAt: row.closes_at,
         accepting: reason === null, closedReason: reason, finalizedSlotId: row.finalized_slot_id, responseCount: row.kind === "form" ? null : row.response_count
       },
       set: publicSet(current.set),
@@ -156,7 +161,7 @@ export function registerFormsPublicRoutes(router: PublicRouter) {
       if (seen) return c.json({ error: row.kind === "form" ? "You already responded from this browser" : "You already voted from this browser", code: "ALREADY_RESPONDED" }, 409);
     }
     try {
-      if (row.verify_email) {
+      if (verifying(row)) {
         const email = identity(row, set, body).email;
         if (!email) return c.json({ error: "Enter your email address to get a code", code: "INVALID_ANSWERS", errors: { [emailQuestion(set)?.id ?? "_email"]: "Enter your email address" } }, 400);
         // Validate now, so the code is only sent for a response that will be accepted.
@@ -188,7 +193,7 @@ export function registerFormsPublicRoutes(router: PublicRouter) {
     if (!accepting(row)) return c.json({ error: "This form is not accepting responses", code: "FORM_CLOSED" }, 409);
     try {
       const held = submitSchema.parse(result.payload);
-      const outcome = db.transaction(() => consumePublicLink(link) ? save(row, link, held, clientIp(c)) : null)();
+      const outcome = db.transaction(() => consumePublicLink(link) ? save(row, link, held, clientIp(c), true) : null)();
       if (!outcome) return c.json({ error: "This form is getting too many responses. Try again later.", code: "RATE_LIMITED" }, 429);
       responseCommitted(outcome, { actorId: null, via: "public" });
       return c.json({ ok: true, ending: outcome.ending, results: publicResults(outcome.form, held.browser ?? null) }, 201);

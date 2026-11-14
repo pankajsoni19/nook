@@ -180,7 +180,7 @@ function SettingsPanel({ form, onSave }: { form: FormDetail; onSave: (body: Reco
       <Toggle label="Anonymous responses" checked={form.anonymous} disabled={form.responseCount > 0} onChange={(anonymous) => { void onSave({ anonymous }); }} hint={form.responseCount > 0 ? "Can't change once there are responses." : "No name, email, or exact time is kept with the answers."} />
       {form.kind === "form" && <Toggle label="People can edit their response" checked={form.allowEdit} disabled={form.anonymous} onChange={(allowEdit) => { void onSave({ allowEdit }); }} />}
       {form.kind === "form" && <Toggle label="Offer “Submit another response”" checked={form.settings.allowAnother} onChange={(allowAnother) => { void onSave({ settings: { allowAnother } }); }} hint="When responses per person is unlimited." />}
-      <Toggle label="Confirm email before a public response counts" checked={form.verifyEmail} onChange={(verifyEmail) => { void onSave({ verifyEmail }); }} hint="Public link only: a 6-digit code goes to the email in the form." />
+      <Toggle label="Confirm email before a public response counts" checked={form.verifyEmail} onChange={(verifyEmail) => { void onSave({ verifyEmail }); }} hint={form.mailEnabled ? "Public link only: a 6-digit code goes to the email in the form." : "Email is not set up on this server, so no code can be sent: public responses count without confirming their email."} />
     </section>
     <section className="forms-panel" aria-labelledby="forms-s-dates">
       <header className="ui-panel-header"><h3 id="forms-s-dates">Opening and closing</h3></header>

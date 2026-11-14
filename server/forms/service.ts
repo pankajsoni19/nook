@@ -1,4 +1,5 @@
 import { audit, db, now } from "../db";
+import { mailEnabled } from "../mail";
 import { purgeAfterFrom } from "../bin";
 import { itemLevel, readableContainerSql } from "../access/workspaceItems";
 import { LEVEL_RANK, type ItemLevel } from "../access/levels";
@@ -181,7 +182,7 @@ export function formDetail(row: FormRow, userId: string): FormDetail {
     ...listItem(row, userId, level),
     description: row.description_md, audience: row.audience, audienceUsers: users, audienceGroups: groups, anonymous: row.anonymous === 1, limitPer: row.limit_per,
     allowEdit: row.allow_edit === 1, resultsVisibility: row.results_visibility, display: row.display, opensAt: row.opens_at, maxResponses: row.max_responses,
-    verifyEmail: row.verify_email === 1, theme: themeOf(row), ending: endingOf(row), settings: settingsOf(row), calendarId: atLeast(level, "edit") ? row.calendar_id : null,
+    verifyEmail: row.verify_email === 1, mailEnabled: mailEnabled(), theme: themeOf(row), ending: endingOf(row), settings: settingsOf(row), calendarId: atLeast(level, "edit") ? row.calendar_id : null,
     finalizedSlotId: row.finalized_slot_id, finalizedEventId: row.finalized_event_id, revision: row.revision, version: publishedVersion(row.id),
     hasDraft: draftSet(host(row.id)) !== null, publicLink: link ? { id: link.id, prefix: link.tokenPrefix, createdAt: link.createdAt, useCount: link.useCount, lastUsedAt: link.lastUsedAt } : null,
     publicAllowed: publicPolicyAllows("form"), createdAt: row.created_at
