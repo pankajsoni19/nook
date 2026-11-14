@@ -1,4 +1,5 @@
 import type { Context } from "hono";
+import { listPipelines } from "../crm/deals";
 import { z } from "zod";
 import type { AppEnv } from "../auth";
 import { db } from "../db";
@@ -82,7 +83,9 @@ export function registerFormsRoutes(router: ModuleRouter) {
     const boards = (listBoards(userId) as Array<{ id: string; name: string; level?: string; role?: string }>).filter((board) => board.level === undefined || ["owner", "manage", "edit"].includes(String(board.level)))
       .slice(0, 200).map((board) => ({ id: board.id, name: board.name, columns: listColumns(board.id).map((column) => ({ id: column.id, name: column.name })) }));
     const bookIds = readableIds("contact_book", userId, "edit");
-    const books = bookIds.length ? db.query(`SELECT id, name FROM contact_books WHERE system_kind IS NULL AND id IN (${bookIds.map(() => "?").join(",")}) ORDER BY name COLLATE NOCASE`).all(...bookIds) as Array<{ id: string; name: string }> : [];
+    const books = (bookIds.length ? db.query(`SELECT id, name FROM contact_books WHERE system_kind IS NULL AND deleted_at IS NULL AND id IN (${bookIds.map(() => "?").join(",")}) ORDER BY name COLLATE NOCASE`).all(...bookIds) as Array<{ id: string; name: string }> : [])
+      // Pipelines and stages for "Create a deal" (C3, D1045).
+      .map((book) => ({ ...book, pipelines: listPipelines(book.id, userId).map((pipeline) => ({ id: pipeline.id, name: pipeline.name, stages: pipeline.stages.filter((stage) => stage.kind === "open").map((stage) => ({ id: stage.id, name: stage.name })) })) }));
     const calendars = listCalendars(userId).calendars.filter((calendar) => calendar.role === "owner" || calendar.role === "editor" || String(calendar.role) === "edit").map((calendar) => ({ id: calendar.id, name: calendar.name }));
     return c.json({ boards, books, calendars });
   }));
