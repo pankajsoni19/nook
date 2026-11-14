@@ -128,3 +128,18 @@
   .goals-kr-values { white-space: normal; }
   .goals-field { grid-template-columns: 96px minmax(0, 1fr); }
 }
+
+/* The board header's goal chip (C22, D1048). */
+.goals-board-chip { min-height: 32px; max-width: 260px; display: inline-flex; flex: 0 1 auto; align-items: center; gap: 6px; overflow: hidden; border: 1px solid #3a3a40; border-radius: 999px; padding: 0 10px; background: #151518; color: #d6d6d9; font-size: .8rem; text-decoration: none; white-space: nowrap; }
+.goals-board-chip:hover { border-color: #6d5a2c; color: #ffe19a; }
+.goals-board-chip:focus-visible { outline: 2px solid #b8860b; outline-offset: 2px; }
+.goals-board-chip svg { flex: none; width: 15px; height: 15px; }
+.goals-board-chip-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.goals-board-chip-progress, .goals-board-chip-more { flex: none; color: #a1a1a8; font-variant-numeric: tabular-nums; }
+.goals-board-chip.health-on_track svg { color: #4ade80; }
+.goals-board-chip.health-at_risk svg { color: #fbbf24; }
+.goals-board-chip.health-off_track svg { color: #f87171; }
+@media (max-width: 760px) {
+  .goals-board-chip { min-height: 44px; max-width: none; padding: 0 12px; }
+  .goals-board-chip-title, .goals-board-chip-more { display: none; }
+}

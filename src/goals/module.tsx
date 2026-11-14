@@ -3,6 +3,7 @@ import { Target, TrendingUp } from "lucide-react";
 import { WORKSPACE_MODULE_LABELS } from "../../shared/workspaceModules";
 import { shortIdOfSegment } from "../../shared/friendlyUrls";
 import { GoalCardSection } from "./GoalCardSection";
+import { BoardGoalChip } from "./BoardGoalChip";
 import { goalActivityRenderers } from "./activity";
 import type { WorkspaceClientModule, WorkspaceRoute } from "../workspaceModules/types";
 import type { Route } from "../router";
@@ -60,6 +61,7 @@ export const module: WorkspaceClientModule = {
   },
   quickActions: [{ id: "goals.checkin", label: "Check in on a goal", icon: TrendingUp, href: "/goals?view=mine", hiddenFor: ["viewer", "guest"] }],
   cardSections: [{ id: "goals.card", area: "side", order: 20, component: GoalCardSection }],
+  boardHeaderItems: [{ id: "goals.board", order: 10, component: BoardGoalChip }],
   embedRenderers: [{ kind: "goal", component: GoalEmbedCard }],
   slashItems: [{
     label: "Goal", hint: "Embed a goal and its progress", keywords: "goal okr objective key result progress",

@@ -40,7 +40,11 @@ export type CardHeaderActionDef = { id: string; order?: number; component: Compo
 /** A decoration inside a Timeline bar (C14: logged-vs-estimate fill), absolutely positioned in the bar. */
 export type TimelineDecorationDef = { id: string; order?: number; component: ComponentType<{ card: CardSlotCard }>; module?: string };
 
+/** An item in a board's header after its card count (C22: the goal the board contributes to). Renders nothing when it has nothing to say. */
+export type BoardHeaderItemDef = { id: string; order?: number; component: ComponentType<{ board: { id: string; name: string } }>; module?: string };
+
 const sections: CardSectionDef[] = [];
+const boardHeaderItems: BoardHeaderItemDef[] = [];
 const badges: CardFaceBadgeDef[] = [];
 const actions: CardHeaderActionDef[] = [];
 const decorations: TimelineDecorationDef[] = [];
@@ -57,6 +61,7 @@ export const registerCardSection = (def: CardSectionDef) => put(sections, def);
 export const registerCardFaceBadge = (def: CardFaceBadgeDef) => put(badges, def);
 export const registerCardHeaderAction = (def: CardHeaderActionDef) => put(actions, def);
 export const registerTimelineDecoration = (def: TimelineDecorationDef) => put(decorations, def);
+export const registerBoardHeaderItem = (def: BoardHeaderItemDef) => put(boardHeaderItems, def);
 
 const shown = <T extends { module?: string }>(list: readonly T[], disabled: readonly string[]) => list.filter((item) => !item.module || !disabled.includes(item.module));
 
@@ -65,6 +70,7 @@ export const cardSections = (area: "side" | "main", disabled: readonly string[] 
 export const cardFaceBadges = (disabled: readonly string[] = []) => shown(badges, disabled);
 export const cardHeaderActions = (disabled: readonly string[] = []) => shown(actions, disabled);
 export const timelineDecorations = (disabled: readonly string[] = []) => shown(decorations, disabled);
+export const boardHeaderItemsFor = (disabled: readonly string[] = []) => shown(boardHeaderItems, disabled);
 
 /** Tests: drop every registration. */
 export function clearCardSlotsForTests() {
@@ -72,4 +78,5 @@ export function clearCardSlotsForTests() {
   badges.length = 0;
   actions.length = 0;
   decorations.length = 0;
+  boardHeaderItems.length = 0;
 }

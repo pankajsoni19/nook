@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, ChevronLeft, ChevronsLeftRight, ChevronsRightLeft, CircleCheck, Gauge, Pencil, Plus, RotateCcw, Rows3, Settings2, Trash2, TriangleAlert } from "lucide-react";
 import { BoardSettingsSheet } from "./BoardSettingsSheet";
+import { BoardHeaderItemsOutlet } from "../ui/CardSlotOutlets";
 import { keyedSendQueue } from "./keyedSendQueue";
 import { useBoardHierarchy } from "./useBoardHierarchy";
 import { useBoardSprints } from "./useBoardSprints";
@@ -929,6 +930,7 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
         <h1 id="task-board-title" title={board?.name}>{board?.name ?? "Loading…"}</h1>
       </div>
       {board && <span className="task-board-count">{cardCountLabel(showArchived ? board.card_count : board.card_count - (board.archived_count ?? 0))}</span>}
+      {board && <BoardHeaderItemsOutlet board={{ id: board.id, name: board.name }} />}
       {detail && !readOnly && <button className="primary-button task-new-card" onClick={() => setComposer({ columnId: null })} aria-haspopup="dialog" aria-label="New card" title="New card"><Plus /><span>New card</span></button>}
       {detail && !phone && viewSwitch}
       {detail && !phone && swimSelect}

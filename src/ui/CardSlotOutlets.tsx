@@ -1,6 +1,6 @@
 import { Component, type ReactNode } from "react";
 import { useDisabledModules } from "../modules";
-import { cardFaceBadges, cardHeaderActions, cardSections, timelineDecorations, type CardSlotCard, type CardSlotProps } from "./cardSlots";
+import { boardHeaderItemsFor, cardFaceBadges, cardHeaderActions, cardSections, timelineDecorations, type CardSlotCard, type CardSlotProps } from "./cardSlots";
 
 /**
  * Where the card dialog, the card face, and the Timeline render the slots other modules registered
@@ -45,4 +45,11 @@ export function TimelineDecorationsOutlet({ card }: { card: CardSlotCard }) {
   const list = timelineDecorations(useDisabledModules());
   if (list.length === 0) return null;
   return <>{list.map(({ id, component: Decoration }) => <SlotBoundary key={id} id={id}><Decoration card={card} /></SlotBoundary>)}</>;
+}
+
+/** A board header's module items, after the card count (C22, D1048). */
+export function BoardHeaderItemsOutlet({ board }: { board: { id: string; name: string } }) {
+  const list = boardHeaderItemsFor(useDisabledModules());
+  if (list.length === 0) return null;
+  return <>{list.map(({ id, component: Item }) => <SlotBoundary key={id} id={id}><Item board={board} /></SlotBoundary>)}</>;
 }
