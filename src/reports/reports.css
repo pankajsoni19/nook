@@ -404,3 +404,11 @@
 .report-widget-sheet input { min-height: 44px; }
 .report-widget-sheet input { border: 1px solid #333338; border-radius: 10px; padding: 0 12px; background: #0b0b0d; color: #ededee; font-size: .92rem; outline: 0; }
 .report-widget-sheet input:focus { border-color: #6b582f; }
+/* D1220–D1222: Edit widget: a saved filter or order kept as is, the shared-query note, and the JSON fallback. */
+.report-widget-sheet .report-widget-locked { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 8px; min-height: 44px; padding: 4px 4px 4px 12px; border: 1px dashed #333338; border-radius: 10px; }
+.report-widget-sheet .report-widget-locked p { margin: 0; padding: 4px 0; font-size: .86rem; line-height: 1.4; overflow-wrap: anywhere; }
+.report-widget-sheet .report-widget-locked small { display: block; color: #929299; font-size: .76rem; }
+.report-widget-sheet .report-widget-locked .secondary-button { flex: none; min-height: 36px; }
+.report-widget-sheet .report-widget-note { margin: 0; padding: 8px 12px; border-left: 3px solid #6b582f; }
+.report-widget-sheet .report-widget-unbuildable { display: grid; gap: 6px; padding: 12px 14px; border: 1px solid #6b582f; border-radius: 10px; background: rgba(246, 196, 83, .06); }
+.report-widget-sheet .report-widget-unbuildable p { margin: 0; overflow-wrap: anywhere; }

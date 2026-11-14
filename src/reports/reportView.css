@@ -111,6 +111,8 @@ ul.report-block-problem { display: block; padding-left: 18px; }
   .report-block-kpi .report-block-title { order: 1; flex-basis: 100%; }
   /* D525: three buttons crowd a narrow tile; Remove stays in its ⋯ menu. */
   .report-block-kpi .report-block-remove { display: none; }
+  /* D1220: so is Edit widget (in ⋯ as well). */
+  .report-block-kpi .report-block-edit { display: none; }
 }
 @container report-kpi (max-width: 240px) { .report-kpi-vs { flex-basis: 100%; } }
 .report-kpi { display: grid; gap: 4px; padding: 2px 0; }
