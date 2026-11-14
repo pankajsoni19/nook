@@ -688,7 +688,7 @@ Details and decisions in [WORKSPACE_MODULES.md §D.7 Townhall](WORKSPACE_MODULES
 | ID | Threat | Mitigation | Status |
 | --- | --- | --- | --- |
 | T610 | **Deanonymizing anonymous askers or voters** | No author id for anonymous questions; upvotes, poll answers, attendance as keyed hashes; exports and MCP say "Anonymous"; audit rows carry ids only. | Required (built) |
-| T611 | **Public spam and vote stuffing** (incl. a room behind one NAT) | Ask: nonce, honeypot, fill time, per-address and per-link limits; votes: per-participant (60/min) and per-address (1200/min) buckets; review mode, hide, link off. Clearing storage mints a new participant (bounded by the address bucket): accepted. | Required (built) |
+| T611 | **Public spam and vote stuffing** (incl. a room behind one NAT) | Ask: nonce, honeypot, fill time, per-address and per-link limits; votes: per-participant (60/min) and per-address (1200/min) buckets; review mode, hide, link off. Clearing storage mints a new participant only up to 60 per address and session in 10 minutes, then the address gets its last token again; attendance counts only participants who act or stay 30 s, never a bare page load (D1088, `tests/townhallAuditFixes.test.ts`). | Required (built) |
 | T612 | **Audience link leakage or reuse** | Hashed 43-character token, uniform 404, policy gate; the token is re-derived from a seed that revoking deletes; hosts only. | Required (built) |
 | T613 | **Reading pending, hidden, draft, or results-hidden content** | Per-viewer state; NOT_FOUND for unreadable sessions and questions; chosen-session keys. | Required (built) |
 | T614 | **Live streams as DoS** | Stream caps per person (8), address (300), session (3000); coalesced pushes; access re-check every 15 s. | Required (built) |

@@ -68,7 +68,8 @@ export const TOWNHALL_READ_ONLY_WRITES = [
 ];
 
 /** A server-sent event stream of the session's state for one viewer (D1075). */
-export function liveStream(c: Context<AppEnv>, input: { sessionId: string; viewer: Viewer; slots: Array<{ key: string; limit: number }>; state: () => unknown | null }) {
+export function liveStream(c: Context<AppEnv>, input: { sessionId: string; viewer: Viewer; slots: Array<{ key: string; limit: number }>; state: () => unknown | null;
+  /** Called once when the stream has stayed open `stayMs` (public attendance, D1088). */ onStayed?: { afterMs: number; run: () => void } }) {
   const release = takeStream([...input.slots, { key: `session:${input.sessionId}`, limit: STREAM_CAPS.perSession }]);
   if (!release) return c.json({ error: "Too many open streams; close another tab with this session", code: "TOO_MANY_STREAMS" }, 429);
   c.header("X-Accel-Buffering", "no");
@@ -79,6 +80,7 @@ export function liveStream(c: Context<AppEnv>, input: { sessionId: string; viewe
     const unsubscribe = subscribeSession(input.sessionId, () => { dirty = true; wake?.(); });
     const tick = setInterval(() => { wake?.(); }, Math.min(LIVE_TIMING.pingMs, LIVE_TIMING.accessCheckMs));
     stream.onAbort(() => { wake?.(); });
+    const stayed = input.onStayed ? setTimeout(() => { if (!stream.aborted) { try { input.onStayed!.run(); } catch { /* attendance is best effort */ } } }, input.onStayed.afterMs) : null;
     let lastPing = Date.now();
     let lastCheck = Date.now();
     try {
@@ -102,6 +104,7 @@ export function liveStream(c: Context<AppEnv>, input: { sessionId: string; viewe
       }
     } finally {
       clearInterval(tick);
+      if (stayed) clearTimeout(stayed);
       unsubscribe();
       release();
     }

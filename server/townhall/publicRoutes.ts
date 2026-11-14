@@ -19,6 +19,13 @@ import { liveStream, respondError } from "./routes";
  * submission checks (nonce, honeypot, fill time, per-address and per-link limits); upvotes and poll
  * votes have their own per-participant and per-address buckets, since a room behind one address votes
  * at once (T611). Every miss is the one uniform 404 (T507).
+ *
+ * Participants and attendance (D1088, T611): an address gets at most `PARTICIPANT_MINTS.perAddress`
+ * new participant tokens per session in `PARTICIPANT_MINTS.windowMs`; past that, a page load without a
+ * token gets the address's most recent one again, so scripted reloads cannot mint voters. Attendance
+ * counts a participant only once they act (ask, vote, withdraw) or stay: the live stream open
+ * `ATTENDANCE_STAY_MS`, or a page load with a token at least that old. Loading the page alone counts
+ * nobody.
  */
 
 const opens = (itemId: string) => {
@@ -31,15 +38,36 @@ function session(c: Context<AppEnv>): SessionRow | null {
   return link ? sessionRow(link.itemId) : null;
 }
 
-/** A participant token bound to this session, or null. */
-function participantOf(sessionId: string, token: unknown): string | null {
+/** A participant token bound to this session (its id and when it was issued, 0 for older tokens), or null. */
+function readParticipant(sessionId: string, token: unknown): { id: string; issuedMs: number } | null {
   if (typeof token !== "string" || token.length > 200) return null;
   const payload = readSignedToken("townhall-participant", token);
   if (!payload) return null;
-  const [forSession, id] = payload.split(":");
-  return forSession === sessionId && id && /^[A-Za-z0-9_-]{16,40}$/.test(id) ? id : null;
+  const [forSession, id, issued] = payload.split(":");
+  return forSession === sessionId && id && /^[A-Za-z0-9_-]{16,40}$/.test(id) ? { id, issuedMs: Number(issued) || 0 } : null;
 }
-const newParticipant = (sessionId: string) => signedToken("townhall-participant", `${sessionId}:${randomToken(18)}`);
+const participantOf = (sessionId: string, token: unknown) => readParticipant(sessionId, token)?.id ?? null;
+const newParticipant = (sessionId: string, nowMs: number) => signedToken("townhall-participant", `${sessionId}:${randomToken(18)}:${nowMs}`);
+
+export const PARTICIPANT_MINTS = { perAddress: 60, windowMs: 10 * 60_000 } as const;
+export const ATTENDANCE_STAY_MS = 30_000;
+/** Tokens minted per session and address (in memory, one replica, like the vote buckets). */
+const mints = new Map<string, Array<{ at: number; token: string }>>();
+function participantFor(sessionId: string, address: string | null, nowMs = Date.now()): string {
+  const key = `${sessionId}|${address ?? "unknown"}`;
+  const recent = (mints.get(key) ?? []).filter((mint) => mint.at > nowMs - PARTICIPANT_MINTS.windowMs);
+  if (recent.length >= PARTICIPANT_MINTS.perAddress) {
+    mints.set(key, recent);
+    return recent[recent.length - 1]!.token;
+  }
+  const token = newParticipant(sessionId, nowMs);
+  recent.push({ at: nowMs, token });
+  if (mints.size > 20_000) mints.clear();
+  mints.set(key, recent);
+  return token;
+}
+export const resetTownhallParticipantMints = () => mints.clear();
+const attend = (row: SessionRow, participant: string) => touchAttendance(row, { kind: "public", participant, name: null });
 
 /** Votes: per participant (60 a minute) and per address (1200 a minute, a room behind one NAT). In memory, one replica. */
 const buckets = new Map<string, number[]>();
@@ -76,10 +104,11 @@ export function registerTownhallPublicRoutes(router: PublicRouter) {
     const row = session(c);
     if (!row) return publicNotFound(c);
     const given = c.req.query("p");
-    const existing = participantOf(row.id, given);
-    const token = existing ? given! : newParticipant(row.id);
-    const viewer: Viewer = { kind: "public", participant: existing ?? participantOf(row.id, token)!, name: null };
-    touchAttendance(row, viewer);
+    const existing = readParticipant(row.id, given);
+    const token = existing ? given! : participantFor(row.id, clientIp(c));
+    const viewer: Viewer = { kind: "public", participant: existing?.id ?? participantOf(row.id, token)!, name: null };
+    // A returning participant whose token is old enough has stayed; a first load counts nobody (D1088).
+    if (existing && Date.now() - existing.issuedMs >= ATTENDANCE_STAY_MS) touchAttendance(row, viewer);
     return c.json({ ...liveState(row, viewer, "public"), participant: token, renderNonce: issueRenderNonce("townhall_session", row.id), meta: meta() });
   });
 
@@ -90,6 +119,7 @@ export function registerTownhallPublicRoutes(router: PublicRouter) {
     const token = c.req.param("token") ?? "";
     return liveStream(c, {
       sessionId: row.id, viewer: { kind: "public", participant, name: null },
+      onStayed: { afterMs: ATTENDANCE_STAY_MS, run: () => { const fresh = sessionRow(row.id); if (fresh && fresh.deleted_at === null) attend(fresh, participant); } },
       slots: [{ key: `addr:${clientIp(c) ?? "unknown"}`, limit: STREAM_CAPS.perAddress }, { key: `participant:${participant}`, limit: 4 }],
       state: () => {
         const link = readPublicLink("townhall_session", token, { opens: (found) => opens(found.itemId) });
@@ -114,6 +144,7 @@ export function registerTownhallPublicRoutes(router: PublicRouter) {
     if (!consumePublicLink(link)) return c.json({ error: "This session is taking too many questions right now", code: "RATE_LIMITED" }, 429);
     try {
       const question = askQuestion(row.id, viewerOf(row, participant, body.name)!, { text: body.text, name: body.name ?? null }, row);
+      attend(row, participant);
       return c.json({ question, renderNonce: issueRenderNonce("townhall_session", row.id) }, 201);
     } catch (error) {
       return respondError(c, error);
@@ -128,7 +159,9 @@ export function registerTownhallPublicRoutes(router: PublicRouter) {
     if (!body || !participant) return c.json({ error: "Invalid request", code: "INVALID" }, 400);
     if (!allowVote(participant, clientIp(c))) return c.json({ error: "Slow down a little", code: "RATE_LIMITED" }, 429);
     try {
-      return c.json(voteQuestion(c.req.param("qid") ?? "", viewerOf(row, participant)!, body.upvote, row));
+      const voted = voteQuestion(c.req.param("qid") ?? "", viewerOf(row, participant)!, body.upvote, row);
+      attend(row, participant);
+      return c.json(voted);
     } catch (error) {
       return respondError(c, error);
     }
@@ -141,7 +174,9 @@ export function registerTownhallPublicRoutes(router: PublicRouter) {
     const participant = body ? participantOf(row.id, body.participant) : null;
     if (!body || !participant) return c.json({ error: "Invalid request", code: "INVALID" }, 400);
     try {
-      return c.json(withdrawQuestion(c.req.param("qid") ?? "", viewerOf(row, participant)!, row));
+      const withdrawn = withdrawQuestion(c.req.param("qid") ?? "", viewerOf(row, participant)!, row);
+      attend(row, participant);
+      return c.json(withdrawn);
     } catch (error) {
       return respondError(c, error);
     }
@@ -156,7 +191,9 @@ export function registerTownhallPublicRoutes(router: PublicRouter) {
     if (!allowVote(participant, clientIp(c))) return c.json({ error: "Slow down a little", code: "RATE_LIMITED" }, 429);
     const { participant: _participant, ...vote } = body;
     try {
-      return c.json(votePoll(row.id, c.req.param("pollId") ?? "", viewerOf(row, participant)!, vote, row));
+      const voted = votePoll(row.id, c.req.param("pollId") ?? "", viewerOf(row, participant)!, vote, row);
+      attend(row, participant);
+      return c.json(voted);
     } catch (error) {
       return respondError(c, error);
     }
