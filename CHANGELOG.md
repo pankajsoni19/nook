@@ -4,6 +4,9 @@ Release notes for Nook, newest first. Upgrade steps for each release are in [doc
 
 ## Unreleased
 
+- **Fixed**: starting a standup round, removing a key result, deleting a time entry, moving a form or contact to the Bin, and other one-click actions no longer fail with "Content-Type must be application/json" (D1180).
+- **Fixed**: Insights charts use the app's theme for labels and axes, show goal health in its own colours, count in whole numbers, and show every rating from 1 to the top of the scale (D1181, D1182).
+
 **Workspace modules working together** (Wave 3)
 
 - **Standups and Goals**: a goal update question shows your goals' key results; numbers you type become goal check-ins when you post. Closed rounds can be added to a note of your choice and published. Cards you logged time on show up in "What did you get done".
