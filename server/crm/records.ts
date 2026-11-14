@@ -307,10 +307,11 @@ function moveReferences(kind: "contact" | "company", fromId: string, toId: strin
   db.query("UPDATE item_comments SET item_id = ? WHERE item_kind = ? AND item_id = ?").run(toId, kind, fromId);
   const columns = (table: string) => (db.query(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map((column) => column.name);
   const tables = new Set((db.query("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>).map((row) => row.name));
-  const refs: Array<[string, string]> = kind === "contact"
-    ? [["responses", "respondent_contact_id"], ["bookings", "contact_id"], ["time_entries", "contact_id"]]
-    : [["time_projects", "company_id"], ["bookings", "company_id"], ["time_entries", "company_id"]];
+  // The real columns (D1164): bookings link a contact only; time entries name a contact or company as
+  // their work item (`target_kind`, `target_id`), time projects a company.
+  const refs: Array<[string, string]> = kind === "contact" ? [["responses", "respondent_contact_id"], ["bookings", "contact_id"]] : [["time_projects", "company_id"]];
   for (const [table, column] of refs) if (tables.has(table) && columns(table).includes(column)) db.query(`UPDATE ${table} SET ${column} = ? WHERE ${column} = ?`).run(toId, fromId);
+  if (tables.has("time_entries")) db.query("UPDATE time_entries SET target_id = ? WHERE target_kind = ? AND target_id = ?").run(toId, kind, fromId);
 }
 
 /**

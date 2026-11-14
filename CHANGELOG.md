@@ -4,6 +4,17 @@ Release notes for Nook, newest first. Upgrade steps for each release are in [doc
 
 ## Unreleased
 
+**Fixes: Standups and Contacts**
+
+- A standup whose round run failed or was interrupted by a restart picks up again within 15 minutes instead of stopping for good.
+- Blocked people are no longer asked, counted as missed, or a reason a standup's participant list can't be saved.
+- Undoing a contact import removes only the companies that import created, not companies from other imports.
+- Removing a pipeline stage that has deals moves them like a stage change: won/lost dates, lost reasons, stage history, and the deal's timeline.
+- Merging contacts or companies moves the time logged on them.
+- Restoring a company from the Bin whose domain another company now uses explains the clash instead of failing.
+- Goal key results that add up deal value count one currency (the pipeline's or book's, or one you choose) instead of mixing currencies.
+- Dragging a deal on a board filtered by Mine or search lands it where you dropped it.
+
 **Workspace modules working together** (Wave 3)
 
 - **Standups and Goals**: a goal update question shows your goals' key results; numbers you type become goal check-ins when you post. Closed rounds can be added to a note of your choice and published. Cards you logged time on show up in "What did you get done".

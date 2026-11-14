@@ -161,10 +161,15 @@ export function commitImport(jobId: string, userId: string, input: { duplicates?
   const started = now();
   const created: string[] = [];
   const updated: Snapshot[] = [];
+  // Companies this job made for its contacts (a company column, or linking by email domain): undo
+  // deletes these if still unused, never another job's or anyone's own (D1162).
+  const companies: string[] = [];
   let skipped = 0, invalidRows = 0;
   const table = job.entity === "contact" ? "contacts" : "companies";
   for (let start = 0; start < rows.length; start += IMPORT_LIMITS.chunk) {
     db.transaction(() => {
+      // Nothing else writes inside this transaction, so companies past the mark in this book are this chunk's.
+      const mark = job.entity === "contact" ? (db.query("SELECT COALESCE(MAX(rowid), 0) AS mark FROM companies").get() as { mark: number }).mark : 0;
       for (const row of rows.slice(start, start + IMPORT_LIMITS.chunk)) {
         const values = valuesOf(row, mapping);
         if (rowProblem(job.entity, values)) { invalidRows += 1; continue; }
@@ -211,12 +216,15 @@ export function commitImport(jobId: string, userId: string, input: { duplicates?
           throw error;
         }
       }
+      if (job.entity === "contact") {
+        for (const company of db.query("SELECT id FROM companies WHERE rowid > ? AND book_id = ?").all(mark, job.book_id) as Array<{ id: string }>) companies.push(company.id);
+      }
     })();
   }
   const undoUntil = new Date(Date.now() + IMPORT_LIMITS.undoHours * 3_600_000).toISOString();
   const stats = { created: created.length, updated: updated.length, skipped, invalid: invalidRows };
   db.query("UPDATE crm_import_jobs SET status = 'committed', stats_json = ?, csv_text = NULL, changes_json = ?, finished_at = ?, undo_until = ?, mapping_json = ? WHERE id = ?")
-    .run(JSON.stringify(stats), JSON.stringify({ created, updated, started }), now(), undoUntil, JSON.stringify(mapping), job.id);
+    .run(JSON.stringify(stats), JSON.stringify({ created, updated, companies, started }), now(), undoUntil, JSON.stringify(mapping), job.id);
   audit(userId, null, "crm.import_commit", { bookId: job.book_id, jobId: job.id, entity: job.entity, ...stats });
   return { jobId: job.id, ...stats, undoUntil };
 }
@@ -225,7 +233,7 @@ export function commitImport(jobId: string, userId: string, input: { duplicates?
 export function undoImport(jobId: string, userId: string) {
   const job = readJob(jobId, userId);
   if (job.status !== "committed" || !job.undo_until || job.undo_until < now()) throw new CrmError(409, "UNDO_EXPIRED", "This import can no longer be undone");
-  const changes = JSON.parse(job.changes_json ?? "{}") as { created: string[]; updated: Snapshot[]; started: string };
+  const changes = JSON.parse(job.changes_json ?? "{}") as { created: string[]; updated: Snapshot[]; companies?: string[]; started: string };
   const table = job.entity === "contact" ? "contacts" : "companies";
   return db.transaction(() => {
     for (const id of changes.created) db.query(`DELETE FROM ${table} WHERE id = ?`).run(id);
@@ -240,9 +248,10 @@ export function undoImport(jobId: string, userId: string) {
         }
       }
     }
-    if (job.entity === "contact") {
-      db.query(`DELETE FROM companies WHERE book_id = ? AND source = 'import' AND created_by = ? AND created_at >= ? AND created_at <= ?
-        AND NOT EXISTS (SELECT 1 FROM contacts c WHERE c.company_id = companies.id) AND NOT EXISTS (SELECT 1 FROM deals d WHERE d.company_id = companies.id)`).run(job.book_id, userId, changes.started, job.undo_until);
+    // Only the companies this job recorded (jobs from before D1162 recorded none: their companies stay).
+    if (job.entity === "contact" && changes.companies?.length) {
+      db.query(`DELETE FROM companies WHERE book_id = ? AND id IN (SELECT value FROM json_each(?))
+        AND NOT EXISTS (SELECT 1 FROM contacts c WHERE c.company_id = companies.id) AND NOT EXISTS (SELECT 1 FROM deals d WHERE d.company_id = companies.id)`).run(job.book_id, JSON.stringify(changes.companies));
     }
     db.query("UPDATE crm_import_jobs SET status = 'undone', changes_json = NULL WHERE id = ?").run(job.id);
     audit(userId, null, "crm.import_undo", { bookId: job.book_id, jobId: job.id, created: changes.created.length, updated: changes.updated.length });

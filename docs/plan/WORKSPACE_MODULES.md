@@ -1358,6 +1358,21 @@ Threats: **T600** no SQL on the workspace source (a non-JSON or unknown-field qu
 
 Deferred: editing an existing widget in the builder (Inspect → Edit SQL shows and saves the JSON, checked like any edit); cross-dataset queries and joins; Add filter's column picker for datasets; excluding multi-select values; per-reader result caching (each read runs ≤12 SQLite aggregates, ≤1,000 rows each); money shown in major units (datasets return minor units; formats are left to the author).
 
+### D.9 Audit 2 fixes
+
+#### Standups and Contacts (branch `fix/audit2-checkins-crm`)
+
+| # | Decision |
+|---|---|
+| D1160 | **Standup watchdog** (amends D939): one module schedule `checkins.watchdog` (`everyMinutes: 15`, owner `checkins_module/watchdog`, created on first re-arm like `goals.sweep`) drives every standup that is active with participants, or has an open round, but has no armed `checkins.drive` schedule. A drive handler that throws (its re-arm rolls back with it) or a crash after the fire row was recorded (the occurrence never runs again, T504) used to leave the `{ once }` rule with no next fire and the standup silent forever; now it resumes within 15 minutes. Each standup is driven in its own savepoint, so one failing never stops the others. |
+| D1161 | **Blocked participants** take no part: `participantsOf` leaves out disabled people (no round rows, not counted as missed, not listed); saving the participant list drops a blocked person already on it instead of refusing (a newly added blocked person is still refused). |
+| D1162 | **Import undo's companies**: a contact import records the companies it created (a Company column or email-domain linking) in its changes; undo deletes only those, if no contact or deal uses them. Jobs from before this record none, so undo leaves their companies. |
+| D1163 | **Removing a stage with deals** (`moveDealsTo`) moves each deal as a stage change does (D972): status, `closed_at` (cleared for open; kept when a closed deal stays closed the same way, stamped otherwise), lost reason only on lost, a `deal_stage_changes` row, and a `crm_stage` timeline entry (binned deals move without history). |
+| D1164 | **Merge** (amends D970) moves time entries by their work item (`time_entries.target_kind`/`target_id` = contact or company); `bookings.company_id` and `time_entries.contact_id`/`company_id` never existed. |
+| D1165 | **Restoring a binned company** whose domain a live company of the book now has answers `409 NAME_TAKEN` naming that company (it was a 500 from the unique index). |
+| D1166 | **Value progress sources** (`crm_won_value`, `crm_pipeline_value`) add up one currency, as the board does (D972): the config's `currency`, else the pipeline's (else its book's), else the book's, else the workspace default; the detail names it. |
+| D1167 | **Board drops** name their neighbours: the client sends `afterId` (the card above) and `beforeId` (the card below) from the cards it shows, and the server places the deal among all the stage's deals, so a drop on a board filtered by Mine or search lands where it was dropped. `position` (an index among all deals) stays for MCP and older clients. |
+
 ---
 
 ## E. Design and UX guidelines
