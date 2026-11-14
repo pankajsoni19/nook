@@ -6,6 +6,8 @@ Release notes for Nook, newest first. Upgrade steps for each release are in [doc
 
 **Workspace modules working together** (Wave 3)
 
+- **Team member and contact fields**: collections can have a Team member or a Contact field; pick someone in the cell or row panel, filter by them, sort by member name, and import or export them by name or email. Someone who can't read a contact's book sees "A contact", never the name. Contacts' custom fields of these types now show names in tables and on records, and a contact field searches the whole book. MCP tools take an id, email, or name and return names.
+
 - **Standups and Goals**: a goal update question shows your goals' key results; numbers you type become goal check-ins when you post. Closed rounds can be added to a note of your choice and published. Cards you logged time on show up in "What did you get done".
 - **Tasks, Contacts, and Goals**: finishing a card made from a contact or deal logs "Task done" on it; key results that count a board's cards update within seconds of a move; a board shows the goal it contributes to in its header.
 - **Forms and Contacts**: a new "Create a deal" response action (pipeline, stage, value from a number answer, the respondent as its contact); form responses appear on the contact's and deal's timeline.

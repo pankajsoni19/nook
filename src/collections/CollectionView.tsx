@@ -36,6 +36,8 @@ import { FieldEditor } from "./FieldEditor";
 import { ImportDialog } from "./ImportDialog";
 import { CollectionIcon } from "./icons";
 import { OptionPicker } from "./OptionPicker";
+import { RelationPicker } from "./RelationPicker";
+import { relationChip } from "./cells";
 import { RowActionSheet } from "./RowActionSheet";
 import { RowPanel } from "./RowPanel";
 import { SortFilterSheet, type SortFilter } from "./SortFilterSheet";
@@ -401,7 +403,9 @@ export function CollectionView({ collectionId, viewId, rowId, go, onBack, onMiss
       }} />}
     {dialog?.kind === "deleteView" && view && <ConfirmDialog title="Delete view" message={`Delete the view “${view.name}”? Rows are not affected.`} confirmLabel="Delete view" danger onCancel={closeDialog} onConfirm={() => { void removeCurrentView(); }} />}
     {dialog?.kind === "deleteCollection" && <ConfirmDialog title="Move to Bin" message={collectionBinMessage(collection)} confirmLabel="Move to Bin" danger onCancel={closeDialog} onConfirm={() => { void removeCollection(); }} />}
-    {dialog?.kind === "picker" && dialogRow && pickerField && <OptionPicker field={pickerField} selected={Array.isArray(dialogRow.values[pickerField.id]) ? dialogRow.values[pickerField.id] as string[] : []}
+    {dialog?.kind === "picker" && dialogRow && pickerField && (pickerField.type === "person" || pickerField.type === "contact") && <RelationPicker field={pickerField} selected={relationChip(pickerField, dialogRow)}
+      onClose={closeDialog} onSave={async (id) => (await rows.save(dialogRow.id, { [pickerField.id]: id })) !== null} />}
+    {dialog?.kind === "picker" && dialogRow && pickerField && pickerField.type !== "person" && pickerField.type !== "contact" && <OptionPicker field={pickerField} selected={Array.isArray(dialogRow.values[pickerField.id]) ? dialogRow.values[pickerField.id] as string[] : []}
       onClose={closeDialog} onSave={async (ids) => (await rows.save(dialogRow.id, { [pickerField.id]: ids.length ? ids : null })) !== null} />}
     {dialog?.kind === "actions" && dialogRow && <RowActionSheet row={dialogRow} editable={editable} onClose={closeDialog}
       onUndo={() => { void undo(dialogRow); }} onDelete={() => { void remove(dialogRow); }} onCopyLink={() => { void copyLink(dialogRow); }} />}

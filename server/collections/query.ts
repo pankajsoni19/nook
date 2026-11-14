@@ -21,14 +21,17 @@ export const OPERATORS = {
   multi_select: ["has_any", "has_all"],
   note: ["empty", "not_empty"],
   file: ["empty", "not_empty"],
-  // Contacts lane (D961): relation fields filter by presence until Wave 3 adds pickers here.
-  person: ["empty", "not_empty"],
-  contact: ["empty", "not_empty"]
+  // Relation fields (D1202): one chosen member or contact, or presence.
+  person: ["is", "is_not", "empty", "not_empty"],
+  contact: ["is", "is_not", "empty", "not_empty"]
 } as const satisfies Record<FieldType, readonly string[]>;
 export type Operator = typeof OPERATORS[FieldType][number];
 
 const ALL_OPERATORS = [...new Set(Object.values(OPERATORS).flat())] as [Operator, ...Operator[]];
-const SORTABLE = new Set<FieldType>(["text", "url", "number", "date", "checkbox", "select"]);
+// Person fields sort by the member's name; contact fields do not sort, since the order would hint at
+// the names of contacts a reader cannot read (D1202, T640).
+const SORTABLE = new Set<FieldType>(["text", "url", "number", "date", "checkbox", "select", "person"]);
+const uuidValue = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export const QUERY_LIMITS = { sort: 3, filters: 10, q: 200, value: 200, inList: 20, pageSize: 100, defaultPageSize: 50 } as const;
 
@@ -108,6 +111,12 @@ function compileFilter(field: FieldDefinition, filter: FilterSpec): { sql: strin
       if (op === "has_any") return { sql: `EXISTS (SELECT 1 FROM json_each(r.values_json, ?) je WHERE je.value IN (${list}))`, params: [p, ...ids] };
       return { sql: `(SELECT COUNT(DISTINCT je.value) FROM json_each(r.values_json, ?) je WHERE je.value IN (${list})) = ?`, params: [p, ...ids, ids.length] };
     }
+    case "person":
+    case "contact": {
+      if (typeof value !== "string" || !uuidValue.test(value)) throw new QueryError(field.type === "person" ? `Choose a team member for “${field.name}”` : `Choose a contact for “${field.name}”`);
+      const id = value.toLowerCase();
+      return op === "is" ? { sql: `${extract} = ?`, params: [p, id] } : { sql: `COALESCE(${extract}, '') <> ?`, params: [p, id] };
+    }
     default:
       throw new QueryError(`“${op}” does not apply to ${field.type} fields`);
   }
@@ -125,6 +134,7 @@ function compileSort(field: FieldDefinition, sort: SortSpec): { sql: string; par
     expression = `CASE WHEN json_type(r.values_json, ?) ${field.type === "number" ? "IN ('integer','real')" : "= 'text'"} THEN ${extract} END`;
     params = [path(field), path(field)];
   }
+  if (field.type === "person") expression = `(SELECT lower(u.display_name) FROM users u WHERE u.id = ${extract})`;
   if (field.type === "select") {
     const options = field.options ?? [];
     if (!options.length) return { sql: "", params: [] };

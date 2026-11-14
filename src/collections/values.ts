@@ -3,6 +3,7 @@
 // feedback.
 import type { ItemLevel } from "../access/accessLevels";
 import type { CollectionRow, FieldDefinition, FieldType, FieldValue, OptionColor } from "./collectionsApi";
+import type { PersonSummary } from "../../shared/people";
 
 export const FIELD_TYPE_LABELS: Record<FieldType, string> = {
   text: "Text",
@@ -13,7 +14,9 @@ export const FIELD_TYPE_LABELS: Record<FieldType, string> = {
   multi_select: "Multi-select",
   url: "Link",
   note: "Note",
-  file: "Files"
+  file: "Files",
+  person: "Team member",
+  contact: "Contact"
 };
 
 export const OPTION_COLORS: OptionColor[] = ["gray", "red", "orange", "yellow", "green", "teal", "blue", "purple", "pink"];
@@ -105,7 +108,14 @@ export function formatDate(value: string, locale?: string) {
 export const optionById = (field: FieldDefinition, id: string) => field.options?.find((option) => option.id === id) ?? null;
 
 /** One line of display text for a cell or card (the table and the mobile card list). */
-export function displayValue(field: FieldDefinition, row: Pick<CollectionRow, "values" | "links" | "files">, locale?: string): string {
+/** A person or contact chip's text: "A contact" for one the viewer cannot read (T640). */
+export function relationText(person: PersonSummary | undefined, type: "person" | "contact") {
+  if (!person) return type === "person" ? "Team member" : "A contact";
+  if (person.kind === "contact" && person.hidden) return "A contact";
+  return "name" in person ? person.name : "";
+}
+
+export function displayValue(field: FieldDefinition, row: Pick<CollectionRow, "values" | "links" | "files" | "people">, locale?: string): string {
   if (field.type === "file") {
     const count = row.files?.[field.id]?.length ?? 0;
     return count === 0 ? "" : count === 1 ? row.files![field.id]![0]!.name : `${count} files`;
@@ -117,6 +127,7 @@ export function displayValue(field: FieldDefinition, row: Pick<CollectionRow, "v
   }
   const value = row.values[field.id];
   if (value === undefined) return "";
+  if (field.type === "person" || field.type === "contact") return relationText(row.people?.[field.id], field.type);
   switch (field.type) {
     case "number":
       return typeof value === "number" ? formatNumber(field, value, locale) : "";
@@ -142,7 +153,7 @@ export function displayValue(field: FieldDefinition, row: Pick<CollectionRow, "v
 }
 
 /** Mobile card list: the primary field plus up to three more fields that have something to show. */
-export function cardFields(fields: FieldDefinition[], row: Pick<CollectionRow, "values" | "links" | "files">, count = 3) {
+export function cardFields(fields: FieldDefinition[], row: Pick<CollectionRow, "values" | "links" | "files" | "people">, count = 3) {
   return fields.slice(1).filter((field) => displayValue(field, row) !== "").slice(0, count);
 }
 
@@ -180,7 +191,9 @@ export const OPERATORS: Record<FieldType, string[]> = {
   select: ["is", "is_not", "in"],
   multi_select: ["has_any", "has_all"],
   note: ["empty", "not_empty"],
-  file: ["empty", "not_empty"]
+  file: ["empty", "not_empty"],
+  person: ["is", "is_not", "empty", "not_empty"],
+  contact: ["is", "is_not", "empty", "not_empty"]
 };
 
 export const OPERATOR_LABELS: Record<string, string> = {
@@ -189,7 +202,8 @@ export const OPERATOR_LABELS: Record<string, string> = {
   is: "is", is_not: "is not", in: "is any of", has_any: "has any of", has_all: "has all of"
 };
 
-export const SORTABLE_TYPES: FieldType[] = ["text", "url", "number", "date", "checkbox", "select"];
+// Contact fields do not sort: the order would hint at names a reader cannot see (D1202).
+export const SORTABLE_TYPES: FieldType[] = ["text", "url", "number", "date", "checkbox", "select", "person"];
 
 /** Operators that take no value. */
 export const valuelessOperator = (op: string) => op === "empty" || op === "not_empty";

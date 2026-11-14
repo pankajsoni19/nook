@@ -3,6 +3,8 @@ import type { CollectionRow, FieldDefinition, FieldValue } from "./collectionsAp
 import { displayValue, inputText, optionById, parseInput } from "./values";
 import { Select } from "../ui/Select";
 import { FileThumb, firstImage } from "./Attachments";
+import { PersonChip } from "../ui/people/People";
+import type { PersonSummary } from "../../shared/people";
 
 export type SaveValues = (values: Record<string, FieldValue | null>) => Promise<boolean>;
 
@@ -25,6 +27,12 @@ type CellProps = {
 export function CellEditor({ field, row, editable, onSave, onOpenPicker, variant = "table", labelId }: CellProps) {
   const value = row.values[field.id];
   const shown = displayValue(field, row);
+  if (field.type === "person" || field.type === "contact") {
+    const person = relationChip(field, row);
+    const content = person ? <PersonChip person={person} size="small" /> : <span className="cell-empty" aria-label={editable ? undefined : "Empty"}>{editable && variant === "panel" ? pickerPrompt(field) : "—"}</span>;
+    if (!editable) return <span className={`cell-readonly cell-relation cell-${field.type}`} title={shown || undefined}>{content}</span>;
+    return <button type="button" className={`cell-picker cell-relation cell-${field.type}`} aria-labelledby={labelId} aria-label={labelId ? undefined : `${field.name}: ${shown || "empty"}`} aria-haspopup="dialog" onClick={() => onOpenPicker(field)} title={shown || undefined}>{content}</button>;
+  }
   if (!editable) {
     if (field.type === "file") return <span className="cell-readonly cell-file" title={shown || undefined}><FileCellContent field={field} row={row} shown={shown} empty={<span className="cell-empty" aria-label="Empty">—</span>} /></span>;
     return <span className={`cell-readonly cell-${field.type}`} title={shown || undefined}>{field.type === "select" && typeof value === "string" ? <OptionChip field={field} id={value} /> : field.type === "multi_select" && Array.isArray(value) ? <OptionChips field={field} ids={value} /> : shown || <span className="cell-empty" aria-label="Empty">—</span>}</span>;
@@ -71,7 +79,14 @@ function FileCellContent({ field, row, shown, empty }: { field: FieldDefinition;
 /** The row panel's checkbox id, so the field's own label can toggle it too. */
 export const checkboxInputId = (labelId: string) => `${labelId}-input`;
 
-const pickerPrompt = (field: FieldDefinition) => field.type === "multi_select" ? "Choose options" : field.type === "note" ? "Link a note" : "Attach files";
+const pickerPrompt = (field: FieldDefinition) => field.type === "multi_select" ? "Choose options" : field.type === "note" ? "Link a note" : field.type === "person" ? "Choose a team member" : field.type === "contact" ? "Link a contact" : "Attach files";
+
+/** The chip a person or contact cell shows, or null when empty (a contact the viewer can't read is hidden, T640). */
+export function relationChip(field: FieldDefinition, row: Pick<CollectionRow, "values" | "people">): PersonSummary | null {
+  const id = row.values[field.id];
+  if (typeof id !== "string") return null;
+  return row.people?.[field.id] ?? (field.type === "person" ? { kind: "user", id, name: "Team member" } : { kind: "contact", id, hidden: true });
+}
 
 function TextCell({ field, value, onSave, variant, labelId }: { field: FieldDefinition; value: FieldValue | undefined; onSave: SaveValues; variant: "table" | "panel"; labelId?: string }) {
   const original = inputText(field, value);

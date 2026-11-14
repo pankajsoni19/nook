@@ -8,7 +8,8 @@ import { itemLevel } from "../access/workspaceItems";
 import { anchorBySql, registerItemKind } from "../keyResources";
 import { registerWorkKind, each } from "../links/adapters";
 import { companyPath, contactPath } from "./paths";
-import { readableContact, searchContacts } from "./contacts";
+import { contactSummaries, readableContact, searchContacts } from "./contacts";
+import { userSummaries } from "./summaries";
 import { PEOPLE_ALLOW, type PersonSummary } from "../../shared/people";
 import { WORK_KIND_ICONS } from "../../shared/workRefs";
 import { readableContainerSql } from "../access/workspaceItems";
@@ -79,5 +80,16 @@ export function registerPeopleRoutes(app: Hono<AppEnv>) {
       }
     }
     return c.json({ people });
+  });
+
+  /**
+   * Chips for ids a module already holds (D1206: Contacts custom person and contact fields):
+   * `GET /api/people/resolve?users=<ids>&contacts=<ids>`, up to 200 of each. Team members give their
+   * name (former members say so); a contact whose book the caller cannot read is `hidden` (T640).
+   */
+  app.get("/api/people/resolve", (c) => {
+    const user = c.get("user");
+    const ids = (name: string) => (c.req.query(name) ?? "").split(",").filter((id) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)).slice(0, 200);
+    return c.json({ people: [...userSummaries(ids("users")).values(), ...contactSummaries(ids("contacts"), user.id).values()] });
   });
 }

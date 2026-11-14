@@ -10,6 +10,7 @@ import {
   boardColumns, createCompany, createContact, createDeal, createFollowup, createList, createTask, errorCode, errorMessage, errorPayload, listBoardsForTask, listPipelines, logInteraction
 } from "./crmApi";
 import { todayLocal } from "./format";
+import { cachedPerson, relationName, rememberPerson } from "./relationNames";
 
 /**
  * The quick sheets of Contacts (§E.4: max 560 px on desktop, full screen on phones; Esc closes):
@@ -243,7 +244,10 @@ export function FilterSheet({ entity, book, onClose, onAdd }: { entity: CrmEntit
   const definition = custom.find((item) => item.id === field);
   const dateLike = ["last_interaction", "created", "updated", "expected_close", "next_step", "last_activity"].includes(field) || definition?.type === "date";
   const numeric = field === "value" || definition?.type === "number";
-  const ops: Array<CrmFilter["op"]> = dateLike || numeric ? ["gt", "lt", "empty", "not_empty"] : definition?.type === "select" || definition?.type === "checkbox" || field === "owner" ? ["eq", "neq", "empty", "not_empty"] : ["contains", "eq", "neq", "empty", "not_empty"];
+  const relation = definition?.type === "person" || definition?.type === "contact" ? definition.type : null;
+  const [picked, setPicked] = useState<PersonSummary[]>([]);
+  useEffect(() => { setPicked([]); setValue(""); }, [field]);
+  const ops: Array<CrmFilter["op"]> = dateLike || numeric ? ["gt", "lt", "empty", "not_empty"] : definition?.type === "select" || definition?.type === "checkbox" || field === "owner" || relation ? ["eq", "neq", "empty", "not_empty"] : ["contains", "eq", "neq", "empty", "not_empty"];
   useEffect(() => { if (!ops.includes(op)) setOp(ops[0]!); }, [field]); // eslint-disable-line react-hooks/exhaustive-deps
   const needsValue = op !== "empty" && op !== "not_empty";
   const add = () => {
@@ -255,7 +259,10 @@ export function FilterSheet({ entity, book, onClose, onAdd }: { entity: CrmEntit
   return <Sheet title="Add a filter" busy={false} error={null} onClose={onClose} onSubmit={add} submitLabel="Add filter" submitDisabled={needsValue && !value}>
     <div className="ui-field"><span>Field</span><Select label="Field" value={field} options={fields} onChange={setField} /></div>
     <div className="ui-field"><span>Condition</span><Select label="Condition" value={op} options={ops.map((item) => ({ value: item, label: OP_LABELS[item] }))} onChange={setOp} /></div>
-    {needsValue && (definition?.type === "select"
+    {needsValue && (relation
+      ? <PersonPicker label="Value" value={picked} allow={[relation === "person" ? "user" : "contact"]} bookId={relation === "contact" ? book?.id : undefined} multiple={false}
+        onChange={(people) => { setPicked(people); const next = people[0]; if (next) rememberPerson(next); setValue(next && "id" in next ? next.id : ""); }} />
+      : definition?.type === "select"
       ? <div className="ui-field"><span>Value</span><Select label="Value" value={value || null} options={(definition.options ?? []).map((option) => ({ value: option.id, label: option.label }))} onChange={setValue} /></div>
       : definition?.type === "checkbox" ? <div className="ui-field"><span>Value</span><Select label="Value" value={value || null} options={[{ value: "true", label: "Checked" }]} onChange={setValue} /></div>
       : field === "owner" ? <div className="ui-field"><span>Value</span><Select label="Owner" value={value || null} options={[{ value: "me", label: "Me" }]} onChange={setValue} /></div>
@@ -266,6 +273,8 @@ export function FilterSheet({ entity, book, onClose, onAdd }: { entity: CrmEntit
 export const filterLabel = (filter: CrmFilter, book: CrmBook | null, entity: CrmEntity) => {
   const custom = book?.fields[entity].find((field) => field.id === filter.field);
   const name = custom?.name ?? FIELD_LABELS[filter.field] ?? filter.field;
-  const value = custom?.type === "select" ? custom.options?.find((option) => option.id === filter.value)?.label : filter.value === "me" ? "me" : filter.value;
+  const value = custom?.type === "select" ? custom.options?.find((option) => option.id === filter.value)?.label
+    : (custom?.type === "person" || custom?.type === "contact") && typeof filter.value === "string" ? relationName(cachedPerson(filter.value)) ?? (custom.type === "person" ? "a team member" : "a contact")
+    : filter.value === "me" ? "me" : filter.value;
   return `${name} ${OP_LABELS[filter.op]}${value !== undefined ? ` ${String(value)}` : ""}`;
 };

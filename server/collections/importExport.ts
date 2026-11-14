@@ -3,6 +3,7 @@ import { POSITION_STEP } from "../tasks/boardOrder";
 import { CsvError, neutralizeFormula, parseCsv, restoreNeutralized, writeCsv } from "./csv";
 import { parseValue, validateValues, type CollectionSchema, type FieldDefinition, type FieldValue, type RowValues } from "./schema";
 import { indexRow } from "./search";
+import { pickablePersonByEmail, pickablePersonByName, readableContactIdByReference } from "../people/summaries";
 import { CollectionError, LIMITS, matchingRows, presentRows, requireEditableCollection, requireReadableCollection, schemaOf, valueContext, withCollectionLock } from "./service";
 
 /**
@@ -42,8 +43,14 @@ function importRateLimited(userId: string, time = Date.now()) {
 const TRUE_WORDS = new Set(["true", "yes", "y", "1", "x", "✓", "checked"]);
 const FALSE_WORDS = new Set(["false", "no", "n", "0", "", "unchecked"]);
 
-/** Converts one CSV cell to the input parseValue expects for the field; undefined means "leave empty". */
-function cellInput(field: FieldDefinition, raw: string): { ok: true; input: unknown } | { ok: false; error: string } {
+const uuidCell = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Converts one CSV cell to the input parseValue expects for the field; undefined means "leave empty".
+ * Person cells name a member by id, email, or exact unique name; contact cells a contact the importer
+ * can read by id, email, or exact unique name (D1203). parseValue then checks them like any write.
+ */
+function cellInput(field: FieldDefinition, raw: string, userId: string): { ok: true; input: unknown } | { ok: false; error: string } {
   const cell = raw.trim();
   if (cell === "") return { ok: true, input: undefined };
   switch (field.type) {
@@ -78,6 +85,16 @@ function cellInput(field: FieldDefinition, raw: string): { ok: true; input: unkn
     }
     case "note":
       return { ok: true, input: cell };
+    case "person": {
+      const text = restoreNeutralized(cell);
+      const id = uuidCell.test(text) ? text : text.includes("@") ? pickablePersonByEmail(text) : pickablePersonByName(text);
+      return id ? { ok: true, input: id } : { ok: false, error: `No team member “${text.slice(0, 60)}”` };
+    }
+    case "contact": {
+      const text = restoreNeutralized(cell);
+      const id = uuidCell.test(text) ? text : readableContactIdByReference(text, userId);
+      return id ? { ok: true, input: id } : { ok: false, error: `No contact “${text.slice(0, 60)}” you can read` };
+    }
     default:
       return { ok: false, error: "Files can't be imported" };
   }
@@ -150,7 +167,7 @@ export function importRows(userId: string, collectionId: string, input: ImportIn
       let rowOk = true;
       columns.forEach((field, column) => {
         if (!field) return;
-        const converted = cellInput(field, cells[column] ?? "");
+        const converted = cellInput(field, cells[column] ?? "", userId);
         if (!converted.ok) {
           record(rowNumber, column + 1, field.id, converted.error);
           rowOk = false;
@@ -217,7 +234,7 @@ function exportCell(field: FieldDefinition, value: FieldValue | undefined): stri
   }
 }
 
-/** The rows `POST /:c/query { viewId }` would return (all pages), as CSV. Note titles follow the reader's access. */
+/** The rows `POST /:c/query { viewId }` would return (all pages), as CSV. Note titles and contact names follow the reader's access. */
 export function exportRows(userId: string, collectionId: string, viewId?: string) {
   const collection = requireReadableCollection(collectionId, userId);
   const { schema, rows } = matchingRows(collection, viewId ? { viewId } : {});
@@ -236,6 +253,11 @@ export function exportRows(userId: string, collectionId: string, viewId?: string
         return link && "title" in link ? neutralizeFormula(link.title) : "";
       }
       if (field.type === "file") return neutralizeFormula((row.files[field.id] ?? []).map((file) => file.name).join("; "));
+      if (field.type === "person" || field.type === "contact") {
+        // A contact the reader cannot read exports empty, like a restricted note (T640).
+        const person = row.people[field.id];
+        return person && "name" in person && !(person.kind === "user" && person.former && person.name === "Former member") ? neutralizeFormula(person.name) : "";
+      }
       return exportCell(field, row.values[field.id]);
     }));
   }

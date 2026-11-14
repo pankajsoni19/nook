@@ -6,6 +6,7 @@ import { withAuditContext } from "../db";
 import { restoreItem } from "../bin";
 import { BIN_BUCKETS, BIN_DESCRIPTION, defineTool, issueDetails, McpToolError, restoreResult, type McpErrorCode, type McpKeyContext, type McpToolSpec } from "../mcpToolKit";
 import { keyMayRead } from "../keyReach";
+import { pickablePersonByEmail, pickablePersonByName, readableContactIdByReference } from "../people/summaries";
 import { collectionCreateSchema } from "./routes";
 import { COLLECTION_TEMPLATES } from "./templates";
 import { filterSpec, QUERY_LIMITS, type FilterSpec, type SortSpec } from "./query";
@@ -92,6 +93,15 @@ function optionId(field: FieldDefinition, value: unknown) {
   return (options.find((option) => option.label === value) ?? options.find((option) => option.label.toLowerCase() === value.toLowerCase()) ?? options.find((option) => option.id === value))?.id ?? value;
 }
 
+const uuidText = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** A person or contact value: an id, or an email or exact unique name resolved for the key's owner (D1204). */
+function relationId(field: FieldDefinition, value: unknown, userId: string) {
+  if (typeof value !== "string" || value === "" || uuidText.test(value)) return value;
+  if (field.type === "person") return (value.includes("@") ? pickablePersonByEmail(value) : pickablePersonByName(value)) ?? value;
+  return readableContactIdByReference(value, userId) ?? value;
+}
+
 function translateValue(field: FieldDefinition, value: unknown) {
   if (value === null) return null;
   if (field.type === "select") return optionId(field, value);
@@ -113,6 +123,13 @@ function translateValues(schema: CollectionSchema, values: Record<string, unknow
     else if (field.type === "file") fieldErrors[field.name] = "Attach files with attach_file_to_row";
     else {
       if (field.type === "note" && typeof value === "string" && !keyMayRead(key, { type: "note", id: value.toLowerCase() })) throw new McpToolError("NOT_FOUND", "Note not found");
+      if (field.type === "person" || field.type === "contact") {
+        const id = relationId(field, value, key.userId);
+        // A key may link only a contact it may read (crm:read within its reach, T642); otherwise NOT_FOUND, like a missing one.
+        if (field.type === "contact" && typeof id === "string" && id !== "" && !keyMayRead(key, { type: "contact", id: id.toLowerCase() })) throw new McpToolError("NOT_FOUND", "Contact not found");
+        translated[field.id] = id;
+        continue;
+      }
       translated[field.id] = translateValue(field, value);
     }
   }
@@ -123,10 +140,14 @@ function translateValues(schema: CollectionSchema, values: Record<string, unknow
 type FilterInput = { field: string; op: string; value?: unknown };
 type SortInput = { field: string; direction?: "asc" | "desc" };
 
-function translateFilters(schema: CollectionSchema, filters: FilterInput[] | undefined): FilterSpec[] | undefined {
+function translateFilters(schema: CollectionSchema, filters: FilterInput[] | undefined, key: McpKeyContext): FilterSpec[] | undefined {
   return filters?.map((filter) => {
     const field = requireField(schema, filter.field);
-    const value = filter.value === undefined ? undefined : field.type === "select" || field.type === "multi_select" ? translateValue(field, filter.value) : filter.value;
+    let value = filter.value === undefined ? undefined : field.type === "select" || field.type === "multi_select" ? translateValue(field, filter.value) : filter.value;
+    if ((field.type === "person" || field.type === "contact") && value !== undefined) {
+      value = relationId(field, value, key.userId);
+      if (field.type === "contact" && typeof value === "string" && !keyMayRead(key, { type: "contact", id: value.toLowerCase() })) throw new McpToolError("NOT_FOUND", "Contact not found");
+    }
     // The API's own filter shape bounds operators and value sizes before the query builder runs.
     const parsed = filterSpec.safeParse({ fieldId: field.id, op: filter.op, ...(value === undefined ? {} : { value }) });
     if (!parsed.success) throw new McpToolError("INVALID", `Invalid filter on “${field.name}”`, { details: issueDetails(parsed.error.issues) });
@@ -140,11 +161,13 @@ const translateSort = (schema: CollectionSchema, sort: SortInput[] | undefined):
 // ---------------------------------------------------------------------------
 // Output
 
-type McpValue = FieldValue | { noteId: string; title: string } | { restricted: true } | string[] | Array<{ id: string; name: string }>;
+type McpValue = FieldValue | { noteId: string; title: string } | { restricted: true } | string[] | Array<{ id: string; name: string }>
+  | { userId: string; name: string; former?: true } | { contactId: string; name: string };
 
 /**
  * A row as an agent sees it: values keyed by field name, labels for options, titles for notes, and
- * `{ id, name }` for files (never a content URL, D407). A note is `{ restricted: true }` when the user cannot read it (T59) or, given `key`, the
+ * `{ id, name }` for files (never a content URL, D407), `{ userId, name }` for team members and
+ * `{ contactId, name }` (or `{ restricted: true }`) for contacts (D1204). A note is `{ restricted: true }` when the user cannot read it (T59) or, given `key`, the
  * key may not (T203: no notes:read). Without `key` (a person's own proposal preview) only T59 applies.
  */
 export function presentRow(schema: CollectionSchema, row: RowSummary, key?: McpKeyContext) {
@@ -161,6 +184,13 @@ export function presentRow(schema: CollectionSchema, row: RowSummary, key?: McpK
     if (field.type === "note") {
       const link = row.links[field.id];
       values[field.name] = link && "title" in link && (!key || keyMayRead(key, { type: "note", id: link.id })) ? { noteId: link.id, title: link.title || "Untitled" } : { restricted: true };
+    } else if (field.type === "person") {
+      const person = row.people[field.id];
+      values[field.name] = person?.kind === "user" ? { userId: person.id, name: person.name, ...(person.former ? { former: true as const } : {}) } : { userId: String(value), name: "Former member", former: true };
+    } else if (field.type === "contact") {
+      // The owner must read the contact's book (T640) and, given `key`, the key must hold crm:read for it (T642).
+      const person = row.people[field.id];
+      values[field.name] = person?.kind === "contact" && !person.hidden && (!key || keyMayRead(key, { type: "contact", id: person.id })) ? { contactId: person.id, name: person.name } : { restricted: true };
     } else if (field.type === "select") {
       values[field.name] = field.options?.find((option) => option.id === value)?.label ?? String(value);
     } else if (field.type === "multi_select") {
@@ -197,7 +227,7 @@ const presentField = (field: FieldDefinition) => ({
 const uuid = z.string().uuid();
 const fieldRef = z.string().min(1).max(120).describe("A field name (or id) from list_collections");
 const valuesInput = z.record(z.string().max(120), z.unknown())
-  .describe("Values keyed by field name (or id). Text, url, and date (yyyy-mm-dd) are strings; number; checkbox true/false; select an option label; multi_select a list of labels; note a note id; null clears.");
+  .describe("Values keyed by field name (or id). Text, url, and date (yyyy-mm-dd) are strings; number; checkbox true/false; select an option label; multi_select a list of labels; note a note id; person a team member's id, email, or name; contact a contact's id, email, or name (needs crm:read); null clears.");
 
 export const collectionTools: McpToolSpec[] = [
   defineTool({
@@ -219,7 +249,7 @@ export const collectionTools: McpToolSpec[] = [
   defineTool({
     name: "query_rows",
     title: "Query rows",
-    description: "Rows of a collection, optionally filtered, sorted, and searched (q matches text and link fields). Filters are {field, op, value}; ops by type: text/url contains|equals|empty|not_empty, number/date eq|lt|lte|gt|gte|empty, checkbox is, select is|is_not|in, multi_select has_any|has_all, note/file empty|not_empty. Rows are keyed by field name. Pass nextCursor back for the next page.",
+    description: "Rows of a collection, optionally filtered, sorted, and searched (q matches text and link fields). Filters are {field, op, value}; ops by type: text/url contains|equals|empty|not_empty, number/date eq|lt|lte|gt|gte|empty, checkbox is, select is|is_not|in, multi_select has_any|has_all, note/file empty|not_empty, person/contact is|is_not (an id, email, or name)|empty|not_empty. Rows are keyed by field name. Pass nextCursor back for the next page.",
     scopes: ["collections:read"],
     access: { mode: "items", items: [{ arg: "collectionId", kind: "collection" }] },
     write: false,
@@ -237,7 +267,7 @@ export const collectionTools: McpToolSpec[] = [
         const collection = requireReadableCollection(collectionId.toLowerCase(), key.userId);
         schema = schemaOf(collection);
         const result = queryRows(key.userId, collection.id, {
-          filters: translateFilters(schema, filters as FilterInput[] | undefined),
+          filters: translateFilters(schema, filters as FilterInput[] | undefined, key),
           sort: translateSort(schema, sort as SortInput[] | undefined),
           ...(q ? { q } : {}),
           limit: limit ?? 20,
@@ -329,7 +359,7 @@ export const collectionTools: McpToolSpec[] = [
   defineTool({
     name: "create_collection",
     title: "Create a collection",
-    description: `Create a private collection the user owns, from exactly one of templateId (${COLLECTION_TEMPLATES.map((template) => template.id).join(", ")}) or fields (1 to 60 of { name, type: text|number|date|checkbox|select|multi_select|url|note|file, required?, options?: [{ label, color? }] for selects }). Nobody else sees it until the user shares it in Nook. At most 100 collections per user (LIMIT_REACHED).`,
+    description: `Create a private collection the user owns, from exactly one of templateId (${COLLECTION_TEMPLATES.map((template) => template.id).join(", ")}) or fields (1 to 60 of { name, type: text|number|date|checkbox|select|multi_select|url|note|file|person|contact, required?, options?: [{ label, color? }] for selects }). Nobody else sees it until the user shares it in Nook. At most 100 collections per user (LIMIT_REACHED).`,
     scopes: ["collections:write"],
     // templateId names a built-in template, not an item.
     access: { mode: "global", related: ["templateId"] },

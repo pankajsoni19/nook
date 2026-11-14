@@ -1,4 +1,7 @@
 import { readableNotePredicate } from "../access";
+import { contactSummaries, readableContact } from "../people/contacts";
+import { isPickablePerson, userSummaries } from "../people/summaries";
+import type { PersonSummary } from "../../shared/people";
 import { purgeAfterFrom } from "../bin";
 import { NO_FILTER, type SqlFilter } from "../keyResources";
 import { audit, db, now } from "../db";
@@ -429,6 +432,11 @@ export type RowSummary = {
   values: RowValues;
   /** Note fields resolved for this viewer: an unreadable note is `{ id, restricted: true }` (D58, T59). */
   links: Record<string, NoteLink>;
+  /**
+   * Person and contact fields resolved for this viewer (D1201): a team member's chip, or a contact's
+   * chip when the viewer can read its book, else `{ kind: "contact", id, hidden: true }` (T640).
+   */
+  people: Record<string, PersonSummary>;
   /** File fields: live documents linked to the row (D58); values are never stored for them. */
   files: Record<string, AttachmentSummary[]>;
   revision: number;
@@ -498,6 +506,10 @@ function presentValues(schema: CollectionSchema, rows: RowWithNames[], viewerId:
   const projected = rows.map((row) => ({ row, values: readValues(schema, JSON.parse(row.values_json)) }));
   const noteIds = noteFields.length ? projected.flatMap(({ values }) => noteFields.map((field) => values[field.id]).filter((id): id is string => typeof id === "string")) : [];
   const titles = noteIds.length ? resolveNotes(noteIds, viewerId) : new Map<string, string>();
+  const relationFields = schema.fields.filter((field) => field.type === "person" || field.type === "contact");
+  const idsOf = (type: "person" | "contact") => projected.flatMap(({ values }) => relationFields.filter((field) => field.type === type).map((field) => values[field.id]).filter((id): id is string => typeof id === "string"));
+  const users = relationFields.some((field) => field.type === "person") ? userSummaries(idsOf("person")) : new Map<string, PersonSummary>();
+  const contacts = relationFields.some((field) => field.type === "contact") ? contactSummaries(idsOf("contact"), viewerId) : new Map<string, PersonSummary>();
   return projected.map(({ row, values }) => {
     const links: Record<string, NoteLink> = {};
     for (const field of noteFields) {
@@ -506,6 +518,12 @@ function presentValues(schema: CollectionSchema, rows: RowWithNames[], viewerId:
       const title = titles.get(id);
       links[field.id] = title === undefined ? { id, restricted: true } : { id, title };
     }
+    const people: Record<string, PersonSummary> = {};
+    for (const field of relationFields) {
+      const id = values[field.id];
+      if (typeof id !== "string") continue;
+      people[field.id] = (field.type === "person" ? users.get(id) : contacts.get(id)) ?? (field.type === "person" ? { kind: "user", id, name: "Former member", former: true } : { kind: "contact", id, hidden: true });
+    }
     return {
       id: row.id,
       collection_id: row.collection_id,
@@ -513,6 +531,7 @@ function presentValues(schema: CollectionSchema, rows: RowWithNames[], viewerId:
       title: rowTitle(schema, values),
       values,
       links,
+      people,
       revision: row.revision,
       can_undo: row.prev_values_json !== null,
       created_by: row.created_by,
@@ -531,9 +550,15 @@ function rowDetail(rowId: string, schema: CollectionSchema, viewerId: string) {
   return row ? presentRows(schema, [row], viewerId)[0]! : null;
 }
 
-/** Note values may only link notes the writer can read now (D58). */
+/**
+ * Note values may only link notes the writer can read now (D58); person values name a team member
+ * the picker offers, and contact values a contact the writer can read now (D1200, T641). Missing and
+ * unreadable contacts are refused alike.
+ */
 export const valueContext = (userId: string): ValueContext => ({
-  canLinkNote: (id) => Boolean(db.query(`SELECT 1 FROM notes n WHERE n.id = $noteId AND n.deleted_at IS NULL AND ${readableNotePredicate}`).get({ noteId: id, userId }))
+  canLinkNote: (id) => Boolean(db.query(`SELECT 1 FROM notes n WHERE n.id = $noteId AND n.deleted_at IS NULL AND ${readableNotePredicate}`).get({ noteId: id, userId })),
+  canUsePerson: (id) => isPickablePerson(id),
+  canUseContact: (id) => readableContact(id, userId) !== null
 });
 
 function invalidValues(fieldErrors: Record<string, string>) {
@@ -635,8 +660,8 @@ export async function patchRow(userId: string, rowId: string, input: { values: u
 
 /**
  * An undo writes values, so it is held to the write rules the schema has now:
- * a field made required since must not come back empty, and a note link that
- * differs from the current value must be one the caller can read (D58).
+ * a field made required since must not come back empty, and a note, person, or contact value that
+ * differs from the current value must be one the caller could set now (D58, T641).
  */
 function undoValueErrors(schema: CollectionSchema, restored: RowValues, current: RowValues, userId: string) {
   const context = valueContext(userId);
@@ -645,6 +670,8 @@ function undoValueErrors(schema: CollectionSchema, restored: RowValues, current:
     const value = restored[field.id];
     if (field.required && value === undefined) fieldErrors[field.id] = "This field is required";
     else if (field.type === "note" && typeof value === "string" && value !== current[field.id] && !context.canLinkNote(value)) fieldErrors[field.id] = "You can't link this note";
+    else if (field.type === "person" && typeof value === "string" && value !== current[field.id] && !context.canUsePerson!(value)) fieldErrors[field.id] = "Choose a team member";
+    else if (field.type === "contact" && typeof value === "string" && value !== current[field.id] && !context.canUseContact!(value)) fieldErrors[field.id] = "You can't link this contact";
   }
   return Object.keys(fieldErrors).length ? fieldErrors : null;
 }

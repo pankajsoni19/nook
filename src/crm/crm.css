@@ -205,3 +205,7 @@
 .crm-inline-name { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .crm-inline-name input { min-height: 32px; width: min(240px, 60vw); border: 1px solid var(--field-border, #2f2f35); border-radius: 8px; padding: 0 9px; background: var(--field-bg, #0f0f11); color: #ededee; font: inherit; font-size: .82rem; }
 @media (max-width: 760px) { .crm-inline-name input { min-height: 44px; font-size: 1rem; } }
+
+/* A custom contact field uses the people picker (D1206); its label matches the other fields. */
+.crm-field-contact .ui-person-picker { margin: 0; }
+.crm-field-contact .ui-person-picker > label { color: #8d8d94; font-size: .72rem; font-weight: 600; text-transform: none; letter-spacing: 0; }

@@ -15,7 +15,15 @@ export const searchPeople = (q: string, allow: readonly PeopleAllow[], options: 
   return api<{ people: PersonSummary[] }>(`/people/search?${query}`, { signal: options.signal });
 };
 
-export const listLinks = (ref: WorkRef) => api<{ links: WorkLinkView[] }>(`/links?${new URLSearchParams({ kind: ref.kind, id: ref.id })}`);
+/** Chips for member and contact ids a module holds (D1206); unreadable contacts come back hidden. */
+export const resolvePeople = (ids: { users?: readonly string[]; contacts?: readonly string[] }) => {
+  const query = new URLSearchParams();
+  if (ids.users?.length) query.set("users", [...new Set(ids.users)].slice(0, 200).join(","));
+  if (ids.contacts?.length) query.set("contacts", [...new Set(ids.contacts)].slice(0, 200).join(","));
+  return api<{ people: PersonSummary[] }>(`/people/resolve?${query}`);
+};
+
+export const listLinks =(ref: WorkRef) => api<{ links: WorkLinkView[] }>(`/links?${new URLSearchParams({ kind: ref.kind, id: ref.id })}`);
 export const createLink = (a: WorkRef, b: WorkRef | { ref: string }, relation: LinkRelation) =>
   api<{ link: WorkLinkView }>("/links", { method: "POST", body: JSON.stringify({ a, b, relation }) });
 export const deleteLink = (linkId: string) => api<void>(`/links/${encodeURIComponent(linkId)}`, { method: "DELETE" });
