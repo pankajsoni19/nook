@@ -1,14 +1,13 @@
 import { useEffect, useId, useState } from "react";
 import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
 import { Select } from "../ui/Select";
-import { PersonPicker } from "../ui/people/People";
 import { useConfirm } from "../ui/useConfirm";
 import {
-  binBook, createPipeline, errorCode, errorMessage, errorPayload, getBookAccess, listPipelines, putBookAccess, saveFields, updateBook, updatePipeline, type BookAccess
+  binBook, createPipeline, errorCode, errorMessage, errorPayload, listPipelines, saveFields, updateBook, updatePipeline
 } from "./crmApi";
 import { COMMON_CURRENCIES } from "../../shared/money";
 import { CRM_FIELD_LABELS, CRM_FIELD_TYPES, type CrmBook, type CrmEntity, type CrmFieldDef, type CrmFieldType, type CrmPipeline, type StageKind } from "../../shared/crm";
-import type { PersonSummary } from "../../shared/people";
+import { WorkspaceAccess } from "../access/WorkspaceAccess";
 import "./crmPanels.css";
 
 /**
@@ -255,70 +254,12 @@ function PipelinesPanel({ book, disabled, flash }: { book: CrmBook; disabled: bo
   </section>;
 }
 
-const LEVEL_LABELS: Record<string, string> = { view: "Can view", comment: "Can comment", edit: "Can edit", manage: "Can manage" };
-
+/** Who has access to the book: the shared Access sheet over `/api/access/contact_book/:id` (D984, D1050). */
 function SharingPanel({ book, flash }: { book: CrmBook; flash: (message: string) => void }) {
   const id = useId();
-  const [access, setAccess] = useState<BookAccess | null>(null);
-  const [everyone, setEveryone] = useState(false);
-  const [everyoneLevel, setEveryoneLevel] = useState("view");
-  const [people, setPeople] = useState<Array<{ person: PersonSummary; level: string }>>([]);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const apply = (next: BookAccess) => {
-    setAccess(next);
-    setEveryone(next.audience === "all_users");
-    setEveryoneLevel(next.audienceLevel);
-    setPeople(next.people.map((person) => ({ person: { kind: "user", id: person.id, name: person.displayName, avatarUrl: person.avatarUrl ?? null }, level: person.level })));
-  };
-  useEffect(() => { getBookAccess(book.id).then(apply, (reason) => setError(errorMessage(reason, "Could not load who has access"))); }, [book.id]);
-
-  const save = async () => {
-    if (!access) return;
-    setBusy(true); setError(null);
-    try {
-      const chosen = people.filter((entry) => entry.person.kind === "user").map((entry) => ({ id: (entry.person as { id: string }).id, level: entry.level }));
-      const next = await putBookAccess(book.id, access.etag, everyone
-        ? { audience: "all_users", audienceLevel: everyoneLevel, people: [], groups: [] }
-        : { audience: chosen.length ? "selected" : "private", people: chosen, groups: [] });
-      apply(next);
-      flash("Access saved");
-    } catch (reason) {
-      setError(errorMessage(reason, "Could not save who has access"));
-      if (errorCode(reason) === "ACCESS_CHANGED") getBookAccess(book.id).then(apply, () => undefined);
-    } finally { setBusy(false); }
-  };
-
-  const levels = access?.levels ?? ["view", "comment", "edit", "manage"];
   return <section className="crm-panel" aria-labelledby={`${id}-title`}>
     <h2 id={`${id}-title`}>Who has access</h2>
-    {!access && !error && <p className="ui-panel-loading" role="status">Loading…</p>}
-    {access && <>
-      <p className="crm-panel-help">Owner: {access.owner.displayName}.</p>
-      <fieldset className="crm-radios">
-        <legend>Who can open {book.name}</legend>
-        <label><input type="radio" name={`${id}-aud`} checked={!everyone} onChange={() => setEveryone(false)} />Only me and people I add</label>
-        <label><input type="radio" name={`${id}-aud`} checked={everyone} onChange={() => setEveryone(true)} />Everyone in the workspace</label>
-      </fieldset>
-      {everyone
-        ? <div className="ui-field"><span id={`${id}-alevel`}>Everyone</span>
-          <Select labelledBy={`${id}-alevel`} value={everyoneLevel} onChange={setEveryoneLevel} options={(access.audienceLevels.length ? access.audienceLevels : ["view", "comment", "edit"]).map((level) => ({ value: level, label: LEVEL_LABELS[level] ?? level }))} /></div>
-        : <>
-          <PersonPicker label="Add people" allow={["user"]} value={[]} onChange={(added) => setPeople((list) => [...list, ...added.filter((person) => !list.some((entry) => entry.person.kind === person.kind && "id" in entry.person && "id" in person && entry.person.id === person.id)).map((person) => ({ person, level: "view" }))])} />
-          {people.length > 0 && <ul className="crm-rows" aria-label="People with access">
-            {people.map((entry, index) => {
-              const name = "name" in entry.person ? entry.person.name : "Person";
-              return <li key={"id" in entry.person ? entry.person.id : index} className="crm-row crm-person-row">
-                <span className="crm-person-name">{name}</span>
-                <Select label={`${name}'s access`} value={entry.level} onChange={(level) => setPeople((list) => list.map((item, i) => i === index ? { ...item, level } : item))} options={levels.map((level) => ({ value: level, label: LEVEL_LABELS[level] ?? level }))} />
-                <button type="button" className="icon-button" aria-label={`Remove ${name}`} onClick={() => setPeople((list) => list.filter((_, i) => i !== index))}><Trash2 /></button>
-              </li>;
-            })}
-          </ul>}
-        </>}
-      <div className="crm-panel-actions"><button type="button" className="action-button" onClick={() => { void save(); }} disabled={busy}>{busy ? "Saving…" : "Save access"}</button></div>
-    </>}
-    {error && <p className="ui-field-error" role="alert">{error}</p>}
+    <p className="crm-panel-help">Readers see every contact, company, and deal in {book.name}; editors change them; managers also change these settings.</p>
+    <WorkspaceAccess kind="contact_book" id={book.id} title={book.name} canManage onSaved={() => flash("Access saved")} />
   </section>;
 }

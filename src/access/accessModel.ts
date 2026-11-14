@@ -1,6 +1,6 @@
 import type { Option } from "../ui/Select";
 import { ROLE_LABELS, type Role } from "../team/teamRoles";
-import { LEVEL_LABELS, levelDescription, levelRank, type AccessKind, type Level } from "./accessLevels";
+import { isWorkspaceAccessKind, LEVEL_LABELS, levelDescription, levelRank, WORKSPACE_ACCESS, type AccessKind, type Level } from "./accessLevels";
 import type { AccessGroup, AccessPerson, AccessPutBody, Audience, ItemAccess, PickerGroup, PickerPerson } from "./accessApi";
 
 /**
@@ -19,14 +19,16 @@ export const draftFrom = (access: ItemAccess): Draft => ({
   groups: access.groups.map(({ id, name, memberCount, guestCount, selfAddedCount, level }) => ({ id, name, memberCount, guestCount, selfAddedCount, level }))
 });
 
-const KIND_NOUN: Record<AccessKind, string> = { note: "note", folder: "folder", document: "file", board: "board", task_view: "view", collection: "collection", calendar: "calendar", agent: "agent", chat: "chat", knowledge_base: "knowledge base", townhall_session: "townhall" };
+const KIND_NOUN: Record<Exclude<AccessKind, keyof typeof WORKSPACE_ACCESS>, string> = { note: "note", folder: "folder", document: "file", board: "board", task_view: "view", collection: "collection", calendar: "calendar", agent: "agent", chat: "chat", knowledge_base: "knowledge base" };
+const kindNoun = (kind: AccessKind) => isWorkspaceAccessKind(kind) ? WORKSPACE_ACCESS[kind].noun : KIND_NOUN[kind];
 
 /** The audience radios (§E). Managers never see them (D273); notes and files can inherit their folder. */
 export function audienceOptions(access: Pick<ItemAccess, "kind" | "inheritable">): Array<{ value: Audience; label: string; hint: string }> {
-  const noun = KIND_NOUN[access.kind];
+  const noun = kindNoun(access.kind);
+  const privateHint = isWorkspaceAccessKind(access.kind) ? WORKSPACE_ACCESS[access.kind].privateHint : undefined;
   return [
     ...(access.inheritable ? [{ value: "inherit" as const, label: "Use folder access", hint: `Whoever can open its folder can open this ${noun}` }] : []),
-    { value: "private", label: "Only me", hint: `Nobody else can open this ${noun}` },
+    { value: "private", label: "Only me", hint: privateHint ?? `Nobody else can open this ${noun}` },
     { value: "selected", label: "People and groups I choose", hint: "Add them below, each with what they can do" },
     { value: "all_users", label: "Everyone signed in", hint: "Everyone on this Nook except guests; never public" }
   ];
@@ -38,7 +40,8 @@ export function levelOptions(kind: AccessKind, levels: readonly Level[]): Option
 
 /** The level a new person or group starts at: today's default for the module, within what the caller may give. */
 export function defaultLevelFor(access: Pick<ItemAccess, "kind" | "levels" | "audienceLevel">): Level {
-  const wanted: Level = access.kind === "board" ? "edit"
+  const wanted: Level = isWorkspaceAccessKind(access.kind) ? WORKSPACE_ACCESS[access.kind].defaultLevel ?? "view"
+    : access.kind === "board" ? "edit"
     : (access.kind === "collection" || access.kind === "calendar") && access.audienceLevel === "edit" ? "edit" : "view";
   return access.levels.includes(wanted) ? wanted : access.levels[access.levels.length - 1] ?? "view";
 }
@@ -223,4 +226,22 @@ export function accessErrorMessage(code: unknown, fallback: string) {
     case "ROLE_READ_ONLY": return "Your team role is read-only.";
     default: return fallback;
   }
+}
+
+/**
+ * One line saying who can open a workspace container (D1050), for the module's settings beside the
+ * "Change who has access" button: "Everyone signed in · Can view", "Ana, Ben, and 1 group".
+ */
+export function accessSummary(access: Pick<ItemAccess, "kind" | "audience" | "audienceLevel" | "people" | "groups" | "owner">): string {
+  if (access.audience === "all_users") return `Everyone signed in · ${LEVEL_LABELS[access.audienceLevel ?? "view"]}`;
+  if (access.audience === "selected" && (access.people.length || access.groups.length)) {
+    const names = access.people.map((person) => person.displayName);
+    const shown = names.slice(0, 3);
+    const parts = [...shown, ...(names.length > shown.length ? [`${names.length - shown.length} more ${names.length - shown.length === 1 ? "person" : "people"}`] : []),
+      ...(access.groups.length ? [`${access.groups.length} ${access.groups.length === 1 ? "group" : "groups"}`] : [])];
+    const list = parts.length > 1 ? `${parts.slice(0, -1).join(", ")}${parts.length > 2 ? "," : ""} and ${parts[parts.length - 1]}` : parts[0]!;
+    return `${access.owner.displayName} and ${list}`;
+  }
+  const hint = isWorkspaceAccessKind(access.kind) ? WORKSPACE_ACCESS[access.kind].privateHint : undefined;
+  return hint ? hint.replace(/^Only you/, `Only ${access.owner.displayName}`).replace(/ can open this .*$/, "") : `Only ${access.owner.displayName}`;
 }

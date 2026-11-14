@@ -9,7 +9,8 @@ import type { CheckinDetail } from "../../shared/checkins";
 import type { PersonSummary } from "../../shared/people";
 import type { QuestionSet } from "../../shared/questions";
 import type { WorkspaceAppProps } from "../workspaceModules/types";
-import { deleteStandup, errorText, getStandup, getStandupAccess, publishStandupQuestions, putStandupAccess, readStandupQuestions, saveStandupQuestions, setMyStandup, setStandupParticipants, setStandupSubscription, updateStandup } from "./api";
+import { WorkspaceAccess } from "../access/WorkspaceAccess";
+import { deleteStandup, errorText, getStandup, publishStandupQuestions, readStandupQuestions, saveStandupQuestions, setMyStandup, setStandupParticipants, setStandupSubscription, updateStandup } from "./api";
 
 /**
  * A standup's settings (§D.4 UI): your own (time zone, pause, summaries) for everyone taking part, and
@@ -177,25 +178,12 @@ function Questions({ detail, flash, onChanged }: { detail: CheckinDetail; flash:
 }
 
 function Audience({ detail, flash }: { detail: CheckinDetail; flash: (message: string) => void }) {
-  const [state, setState] = useState<{ etag: string; audience: string } | null>(null);
   const manage = ["owner", "manage"].includes(detail.level);
-  useEffect(() => { if (manage) getStandupAccess(detail.id).then((access) => setState({ etag: access.etag, audience: access.audience })).catch(() => undefined); }, [detail.id, manage]);
-  if (!manage || !state) return null;
-  const everyone = state.audience === "all_users";
-  const setEveryone = async (on: boolean) => {
-    try {
-      await putStandupAccess(detail.id, on ? { audience: "all_users", audienceLevel: "view", people: [], groups: [] } : { audience: "private", people: [], groups: [] }, state.etag);
-      const fresh = await getStandupAccess(detail.id);
-      setState({ etag: fresh.etag, audience: fresh.audience });
-      flash(on ? "Everyone in the workspace can read it" : "Only participants and the owner can read it");
-    } catch (reason) { flash(errorText(reason, "Could not change who can read it")); }
-  };
+  if (!manage) return null;
+  // Taking part is reading (D938): the shared Access sheet adds readers besides the participants (D1050).
   return <section className="standup-panel" aria-labelledby="standup-audience">
     <h3 id="standup-audience">Who can read it</h3>
-    <div className="ui-segmented" role="group" aria-label="Who can read it">
-      <button type="button" aria-pressed={!everyone} onClick={() => void setEveryone(false)}>Participants</button>
-      <button type="button" aria-pressed={everyone} onClick={() => void setEveryone(true)}>Everyone in the workspace</button>
-    </div>
+    <WorkspaceAccess kind="checkin" id={detail.id} title={detail.name} canManage onSaved={() => flash("Access saved")} />
     <p className="standup-muted">{detail.anonymous ? "Anonymous answers are only ever shown without names, from 3 answers on." : detail.privateAnswers ? "Each person sees only their own answers; you see all of them." : "Readers see every answer, blockers, and mood."}</p>
   </section>;
 }

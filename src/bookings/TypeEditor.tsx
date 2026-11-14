@@ -9,6 +9,7 @@ import { emptyQuestionSet, type QuestionSet } from "../../shared/questions";
 import type { PersonSummary } from "../../shared/people";
 import { bookingsApi, durationLabel, timeLabel, viewerZone, type BookingType, type Schedule, type SlotDays } from "./api";
 import { LOCATION_ICONS } from "./BookingsApp";
+import { WorkspaceAccess } from "../access/WorkspaceAccess";
 
 /**
  * The booking type editor (§D.6 UI, §E.4 editors): sections General, When, Where, Hosts, Calendars,
@@ -230,6 +231,9 @@ export function TypeEditor({ typeRef, onBack, flash, readOnly, userId, onReplace
           <label className="bk-check"><input type="checkbox" checked={draft.verifyEmail} onChange={(event) => set("verifyEmail", event.target.checked)} /><span>Bookers confirm their email with a code first</span></label>
           <NumberField label="At most bookings an hour from the public page" value={draft.hourlyCap} min={1} max={500} onChange={(value) => set("hourlyCap", value ?? 20)} />
           {manage && <SecretLinks typeId={saved.id} flash={flash} />}
+          {/* Who in the workspace sees and edits the type and its bookings: the shared Access sheet (D1050). Booking it is not access (§B.9). */}
+          {manage && <div className="bk-access"><strong>Who in the workspace can see or edit it</strong>
+            <WorkspaceAccess kind="booking_type" id={saved.id} title={saved.title} canManage onSaved={() => flash("Access saved")} /></div>}
         </fieldset>
       </div>
       <SlotPreview type={saved} />

@@ -1,6 +1,7 @@
 import { api } from "../api";
 import type { Role } from "../team/teamRoles";
-import type { AccessKind, Level } from "./accessLevels";
+import { isWorkspaceAccessKind, type AccessKind, type Level } from "./accessLevels";
+import type { WorkspaceContainerKind } from "../../shared/workspaceModules";
 
 /** GET/PUT …/access (Wave 32, access plan §C.5, docs/plan/API_CONTRACTS.md § Access). */
 export type Audience = "private" | "selected" | "all_users" | "inherit";
@@ -46,7 +47,7 @@ export type AccessPutBody = {
 export type PickerPerson = { id: string; displayName: string; role?: Role; avatarUrl?: string | null; /** Wave 36: "service" for an integration (D287). */ kind?: "person" | "service" };
 export type PickerGroup = { id: string; name: string; memberCount: number; guestCount: number };
 
-const BASES: Record<AccessKind, string> = {
+const BASES: Record<Exclude<AccessKind, WorkspaceContainerKind>, string> = {
   note: "/notes",
   folder: "/folders",
   document: "/files",
@@ -56,12 +57,11 @@ const BASES: Record<AccessKind, string> = {
   calendar: "/calendars",
   agent: "/agents",
   chat: "/chats",
-  knowledge_base: "/knowledge",
-  townhall_session: "/access/townhall_session"
+  knowledge_base: "/knowledge"
 };
 
-// Workspace containers use the generic `/api/access/:kind/:id` (no trailing /access, D803).
-export const accessPath = (kind: AccessKind, id: string) => kind === "townhall_session" ? `${BASES[kind]}/${encodeURIComponent(id)}` : `${BASES[kind]}/${encodeURIComponent(id)}/access`;
+// Workspace containers use the generic `/api/access/:kind/:id` (no trailing /access, D803, D1050).
+export const accessPath = (kind: AccessKind, id: string) => isWorkspaceAccessKind(kind) ? `/access/${kind}/${encodeURIComponent(id)}` : `${BASES[kind]}/${encodeURIComponent(id)}/access`;
 
 export const getAccess = (kind: AccessKind, id: string) => api<ItemAccess>(accessPath(kind, id));
 

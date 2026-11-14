@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Copy, Eye, Globe2, Link2, ListOrdered, Plus, QrCode, RefreshCw, Send, Settings2, Share2, Trash2, Users, Workflow, X } from "lucide-react";
 import QRCode from "qrcode";
-import { ApiError, api } from "../api";
+import { ApiError } from "../api";
 import { QuestionSetEditor, type SaveState } from "../ui/questions/QuestionSetEditor";
 import { QuestionRenderer } from "../ui/questions/QuestionRenderer";
-import { PersonChip, PersonPicker } from "../ui/people/People";
+import { PersonPicker } from "../ui/people/People";
 import { notify } from "../ui/notify";
 import { embedMarkdown } from "../../shared/embeds";
 import { FORM_ACCENTS, type FormDetail } from "../../shared/forms";
@@ -13,6 +13,7 @@ import type { PersonSummary } from "../../shared/people";
 import { createPublicLink, discardDraft, getDraft, patchForm, publishForm, revokePublicLink, saveDraft } from "./formsApi";
 import { FormFrame, MissingForm, useFormDetail, type FormsNav } from "./FormsApp";
 import { ActionsPanel } from "./ActionsPanel";
+import { WorkspaceAccess } from "../access/WorkspaceAccess";
 import { SelectField, Toggle } from "./fields";
 
 /**
@@ -213,7 +214,6 @@ function SettingsPanel({ form, onSave }: { form: FormDetail; onSave: (body: Reco
   </div>;
 }
 
-type AccessView = { etag: string; audience: "private" | "selected" | "all_users"; audienceLevel: string; people: Array<{ id: string; displayName: string; level: string }>; groups: Array<{ id: string; name: string; level: string }>; yourLevel: string };
 
 function SharingPanel({ form, onSave, setForm }: { form: FormDetail; onSave: (body: Record<string, unknown>) => Promise<void>; setForm: (form: FormDetail) => void }) {
   const manager = form.level === "owner" || form.level === "manage";
@@ -268,44 +268,12 @@ function SharingPanel({ form, onSave, setForm }: { form: FormDetail; onSave: (bo
   </div>;
 }
 
-/** Who reads results and edits (the form's access, `/api/access/form/:id`, D842). */
+/** Who reads results and edits: the form's access through the shared Access sheet (`/api/access/form/:id`, D842, D1050). */
 function ResultsAccess({ form }: { form: FormDetail }) {
-  const [access, setAccess] = useState<AccessView | null>(null);
-  const [saving, setSaving] = useState(false);
-  const load = useCallback(() => api<AccessView>(`/access/form/${form.id}`).then(setAccess).catch(() => setAccess(null)), [form.id]);
-  useEffect(() => { void load(); }, [load]);
-  if (!access) return form.level === "owner" || form.level === "manage" ? <p className="ui-panel-loading">Loading access…</p> : null;
-  const save = async (next: Pick<AccessView, "audience" | "audienceLevel"> & { people: Array<{ id: string; level: string }>; groups: Array<{ id: string; level: string }> }) => {
-    setSaving(true);
-    try {
-      const saved = await api<AccessView>(`/access/form/${form.id}`, { method: "PUT", body: JSON.stringify({ audience: next.audience, audienceLevel: next.audienceLevel, people: next.audience === "selected" ? next.people : [], groups: next.audience === "selected" ? next.groups : [] }), headers: { "If-Match": access.etag } });
-      setAccess(saved);
-    } catch (error) { notify.error(errorText(error, "Could not save access")); void load(); }
-    finally { setSaving(false); }
-  };
-  const levels = [{ value: "view", label: "See results" }, { value: "comment", label: "See results and comment" }, { value: "edit", label: "Edit the form" }, ...(access.yourLevel === "owner" ? [{ value: "manage", label: "Manage" }] : [])];
-  const people: PersonSummary[] = [...access.people.map((person) => ({ kind: "user" as const, id: person.id, name: person.displayName })), ...access.groups.map((group) => ({ kind: "group" as const, id: group.id, name: group.name }))];
+  if (form.level !== "owner" && form.level !== "manage") return null;
   return <section className="forms-panel" aria-labelledby="forms-share-results">
     <header className="ui-panel-header"><h3 id="forms-share-results"><Eye aria-hidden="true" />Who sees results</h3></header>
     <p className="forms-muted">Answering is not access: people who answer never see other people's responses unless you add them here.</p>
-    <div className="ui-segmented" role="radiogroup" aria-label="Who sees results">
-      {([["private", "Only me"], ["selected", "People I choose"], ["all_users", "Everyone in the workspace"]] as const).map(([value, label]) =>
-        <button key={value} type="button" role="radio" aria-checked={access.audience === value} aria-pressed={access.audience === value} disabled={saving || (access.yourLevel !== "owner")}
-          onClick={() => { if (value === "selected") { setAccess({ ...access, audience: "selected" }); return; } void save({ audience: value, audienceLevel: access.audienceLevel, people: [], groups: [] }); }}>{label}</button>)}
-    </div>
-    {access.audience === "all_users" && <SelectField label="Everyone can" value={access.audienceLevel} onChange={(audienceLevel) => { void save({ audience: "all_users", audienceLevel, people: [], groups: [] }); }} options={levels.filter((level) => level.value !== "manage")} />}
-    {access.audience === "selected" && <>
-      <PersonPicker label="Add people or groups" allow={["user", "group"]} value={people} onChange={(next) => {
-        const peopleNext = next.filter((person) => person.kind === "user").map((person) => ({ id: (person as { id: string }).id, level: access.people.find((item) => item.id === (person as { id: string }).id)?.level ?? "view" }));
-        const groupsNext = next.filter((person) => person.kind === "group").map((person) => ({ id: (person as { id: string }).id, level: access.groups.find((item) => item.id === (person as { id: string }).id)?.level ?? "view" }));
-        if (peopleNext.length || groupsNext.length) void save({ audience: "selected", audienceLevel: access.audienceLevel, people: peopleNext, groups: groupsNext });
-      }} />
-      <ul className="forms-access-list">{[...access.people.map((person) => ({ key: person.id, kind: "user" as const, id: person.id, name: person.displayName, level: person.level })), ...access.groups.map((group) => ({ key: group.id, kind: "group" as const, id: group.id, name: group.name, level: group.level }))].map((entry) => <li key={entry.key}>
-        <PersonChip person={{ kind: entry.kind, id: entry.id, name: entry.name } as PersonSummary} />
-        <SelectField label={`${entry.name}'s access`} value={entry.level} options={levels} onChange={(level) => {
-          void save({ audience: "selected", audienceLevel: access.audienceLevel, people: access.people.map((person) => ({ id: person.id, level: entry.kind === "user" && person.id === entry.id ? level : person.level })), groups: access.groups.map((group) => ({ id: group.id, level: entry.kind === "group" && group.id === entry.id ? level : group.level })) });
-        }} />
-      </li>)}</ul>
-    </>}
+    <WorkspaceAccess kind="form" id={form.id} title={form.title} canManage onSaved={() => notify.success("Access saved")} />
   </section>;
 }

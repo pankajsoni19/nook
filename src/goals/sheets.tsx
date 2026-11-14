@@ -104,7 +104,8 @@ export function GoalEditor({ goal, defaults, me, onClose, onSaved }: {
   const [dueOn, setDueOn] = useState(goal?.dueOn ?? "");
   const [mode, setMode] = useState<ProgressMode>(goal?.progressMode ?? "key_results");
   const [cadence, setCadence] = useState<CheckinCadence>(goal?.cadence ?? "weekly");
-  const [audience, setAudience] = useState<string>(goal ? (goal.visibility === "all_users" ? `all_users:${goal.shareRole}` : "private") : "all_users:view");
+  // A new goal starts from a preset; an existing goal's sharing is the Access sheet (D1050).
+  const [audience, setAudience] = useState<string>("all_users:view");
   const [contributors, setContributors] = useState<PersonSummary[]>(goal?.contributors.map((person) => ({ kind: "user" as const, id: person.id, name: person.name })) ?? []);
   const [krs, setKrs] = useState<Array<{ title: string; target: string; metric: KrMetric }>>([]);
   const [busy, setBusy] = useState(false);
@@ -121,9 +122,8 @@ export function GoalEditor({ goal, defaults, me, onClose, onSaved }: {
     };
     try {
       if (goal) {
-        const sharing = owner ? { ownerId, visibility, ...(shareRole ? { shareRole } : {}) } : {};
-        const changedSharing = owner && (ownerId !== goal.owner.id || visibility !== (goal.visibility === "all_users" ? "all_users" : "private") || (shareRole && shareRole !== goal.shareRole));
-        onSaved((await updateGoal(goal.id, { ...common, ...(changedSharing ? sharing : {}), expectedRevision: goal.revision })).goal);
+        const changedOwner = owner && ownerId !== goal.owner.id;
+        onSaved((await updateGoal(goal.id, { ...common, ...(changedOwner ? { ownerId } : {}), expectedRevision: goal.revision })).goal);
       } else {
         const keyResults = krs.filter((kr) => kr.title.trim()).map((kr): KrInput => ({ title: kr.title.trim(), metric: kr.metric, ...(kr.metric === "boolean" ? {} : { targetValue: num(kr.target) ?? 100 }) }));
         onSaved((await createGoal({ ...common, ownerId, visibility, ...(shareRole ? { shareRole } : {}), keyResults })).goal);
@@ -163,12 +163,12 @@ export function GoalEditor({ goal, defaults, me, onClose, onSaved }: {
       ]} /></Field>
       <Field label="Check-in reminders"><Select label="Check-in reminders" value={cadence} onChange={(value) => setCadence(value as CheckinCadence)} options={CHECKIN_CADENCES.map((value) => ({ value, label: CADENCE_LABEL[value] }))} /></Field>
     </div>
-    <Field label="Who can open it" hint={owner ? undefined : "Only the owner or a manager changes this"}><Select label="Who can open it" value={audience} disabled={!owner} onChange={setAudience} options={[
+    {!goal && <Field label="Who can open it" hint="Later, Who has access on the goal adds people and groups"><Select label="Who can open it" value={audience} onChange={setAudience} options={[
       { value: "all_users:view", label: "Everyone signed in can view" },
       { value: "all_users:comment", label: "Everyone signed in can comment" },
       { value: "all_users:edit", label: "Everyone signed in can edit" },
       { value: "private", label: "Only the owner and contributors" }
-    ]} /></Field>
+    ]} /></Field>}
     {!goal && <fieldset className="goals-sheet-kr" style={{ margin: 0 }}>
       <legend className="goals-sheet-kr-head" style={{ padding: "0 4px" }}>Key results</legend>
       {krs.map((kr, index) => <div key={index} className="goals-inline-row">
