@@ -557,7 +557,7 @@ export const reportTools: McpToolSpec[] = [
   defineTool({
     name: "update_report_query",
     title: "Change a report's saved query",
-    description: "Replaces the SQL (and optionally the purpose) of one of a report's saved queries (the owner's reports). The new SQL goes through the guard and the whole report is checked again (every query runs; the blocks' columns must exist); a refusal changes nothing. The change is a new version. This never runs SQL that is not saved in the report.",
+    description: "Replaces the SQL (and optionally the purpose) of one of a report's saved queries (the owner's reports). The new SQL goes through the guard and the whole report is checked again (every query runs; the blocks' columns must exist); a refusal changes nothing. The change is a new version. On a This workspace report the query is a structured dataset query, so `sql` is its JSON (as get_report shows it). This never runs SQL that is not saved in the report.",
     scopes: ["reports:write"],
     access: { mode: "items", items: reportItem, related: ["queryKey"] },
     write: true,

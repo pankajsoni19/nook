@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { CalendarClock, CircleCheck, CircleX, Clock3, ExternalLink, ListFilter, LoaderCircle, MoreHorizontal, MousePointerClick, RefreshCw, ScanSearch, Trash2, TriangleAlert } from "lucide-react";
+import { CalendarClock, CircleCheck, CircleX, Clock3, ExternalLink, ListFilter, LoaderCircle, MoreHorizontal, MousePointerClick, PencilLine, RefreshCw, ScanSearch, Trash2, TriangleAlert } from "lucide-react";
 import { ModalDialog } from "../files/Dialog";
 import { Markdown, type RenderContext } from "../chat/markdown/render";
 import { notify } from "../ui/notify";
@@ -387,6 +387,8 @@ export function ReportView({ report, canWrite, generating = false, initial, read
   // D534: the owner's Add filter and Remove filter (not on a past version or in tests without a URL).
   const canAddFilter = Boolean(editing?.canEdit && editing.addFilter) && !readOnly && !initial;
   const removeBlock = (block: ReportBlock) => { void removal.remove({ kind: "block", block }); };
+  // D1220: Edit widget on a This workspace report's blocks (the owner, the current version).
+  const editWidget = editing?.canEdit && editing.editWidget && !readOnly && !initial ? editing.editWidget : undefined;
   const removeButton = (block: ReportBlock, className = "") => canRemove
     ? <RemoveButton label={blockLabel(block)} disabled={busy} className={className} onClick={() => removeBlock(block)} /> : null;
 
@@ -436,7 +438,8 @@ export function ReportView({ report, canWrite, generating = false, initial, read
   const card = (block: DataBlock) => <DataBlockCard key={block.id} block={block} view={results.get(block.queryKey)} hasQuery={queries.has(block.queryKey)} palette={palette}
     running={running} loaded={view !== null} lookup={lookup} readOnly={readOnly} pending={Boolean(pending?.some((key) => blockKeys(block).includes(key)))} filtered={withParams} notFilteredBy={notFilteredBy(block)}
     onInspect={() => setInspect({ blockId: block.id, tab: "query" })} onMenu={() => setMenuBlock(block.id)}
-    onRemove={canRemove ? () => removeBlock(block) : undefined} removeDisabled={busy} click={clickFor(block)} table={tableControl(block)} />;
+    onRemove={canRemove ? () => removeBlock(block) : undefined} removeDisabled={busy} click={clickFor(block)} table={tableControl(block)}
+    onEditWidget={editWidget ? () => editWidget(block.id) : undefined} />;
 
   if (!blocks.length) return null;
   return <section className={`report-view report-theme-${palette.mode}`} style={cssVars} aria-label="Report">
@@ -497,6 +500,7 @@ export function ReportView({ report, canWrite, generating = false, initial, read
     {menuTarget && isDataBlock(menuTarget) && <BlockMenu block={menuTarget} canWrite={canWrite} busy={busy}
       onClose={() => setMenuBlock(null)}
       onRemove={canRemove ? () => { setMenuBlock(null); removeBlock(menuTarget); } : undefined}
+      onEditWidget={editWidget ? () => { setMenuBlock(null); editWidget(menuTarget.id); } : undefined}
       onInspect={(tab) => { setMenuBlock(null); setInspect({ blockId: menuTarget.id, tab }); }}
       onRerun={() => { setMenuBlock(null); void startRefresh(menuTarget.queryKey); }}
       onFilterBy={clickFor(menuTarget) && results.get(menuTarget.queryKey)?.result ? () => { setMenuBlock(null); setFilterBy(menuTarget.id); } : undefined}
@@ -577,10 +581,12 @@ type CardProps = {
   click?: ClickState;
   /** D563: a table block's sort and contains box (the report page only). */
   table?: TableControl;
+  /** D1220: the owner's Edit widget on a This workspace report (a pencil after Inspect; a narrow KPI tile keeps it in ⋯ only). */
+  onEditWidget?: () => void;
 };
 
 /** One chart, KPI, or table: its title, stale/error badges, the inspect, remove, and menu buttons, and the body. */
-export function DataBlockCard({ block, view, hasQuery, palette, running, loaded, lookup, onInspect, onMenu, readOnly, pending = false, filtered = false, onRemove, removeDisabled = false, notFilteredBy = [], click, table }: CardProps) {
+export function DataBlockCard({ block, view, hasQuery, palette, running, loaded, lookup, onInspect, onMenu, readOnly, pending = false, filtered = false, onRemove, removeDisabled = false, notFilteredBy = [], click, table, onEditWidget }: CardProps) {
   const result = view?.result ?? null;
   const failed = view?.failed ?? null;
   const rerunning = pending || Boolean(running && (!running.queryKeys || running.queryKeys.includes(block.queryKey)));
@@ -596,6 +602,7 @@ export function DataBlockCard({ block, view, hasQuery, palette, running, loaded,
       </span>
       {!readOnly && <span className="report-block-buttons">
         <button type="button" className="icon-button report-block-button" onClick={onInspect} aria-label={`How was ${title} built`} title="How was this built"><ScanSearch /></button>
+        {onEditWidget && <button type="button" className="icon-button report-block-button report-block-edit" onClick={onEditWidget} aria-label={`Edit ${title}`} title="Edit widget"><PencilLine /></button>}
         {onRemove && <RemoveButton label={title} disabled={removeDisabled} onClick={onRemove} />}
         <button type="button" className="icon-button report-block-button" onClick={onMenu} aria-label={`More for ${title}`} aria-haspopup="dialog"><MoreHorizontal /></button>
       </span>}
@@ -727,7 +734,8 @@ export function MeterView({ model, label }: { model: MeterModel; label: string }
   </div>;
 }
 
-export function BlockMenu({ block, canWrite, busy, onClose, onInspect, onRerun, onRemove, onFilterBy, onClickSetup }: { block: DataBlock; canWrite: boolean; busy: boolean; onClose: () => void; onInspect: (tab: InspectTab) => void; onRerun: () => void; /** D525: the owner's Remove (asks first). */ onRemove?: () => void;
+export function BlockMenu({ block, canWrite, busy, onClose, onInspect, onRerun, onRemove, onFilterBy, onClickSetup, onEditWidget }: { block: DataBlock; canWrite: boolean; busy: boolean; onClose: () => void; onInspect: (tab: InspectTab) => void; onRerun: () => void; /** D525: the owner's Remove (asks first). */ onRemove?: () => void;
+  /** D1220: the owner's Edit widget (This workspace reports). */ onEditWidget?: () => void;
   /** D536: the keyboard's click (the block's values as a list), and the owner's "Clicking filters by…". */ onFilterBy?: () => void; onClickSetup?: () => void }) {
   useHistoryDialogGuard(true, onClose);
   const title = block.title ?? block.queryKey;
@@ -735,6 +743,7 @@ export function BlockMenu({ block, canWrite, busy, onClose, onInspect, onRerun, 
     <div className="report-menu-list" role="menu" aria-label={`Actions for ${title}`}>
       <button type="button" role="menuitem" onClick={() => onInspect("query")}><ScanSearch aria-hidden="true" />How was this built</button>
       <button type="button" role="menuitem" onClick={() => onInspect("data")}><ScanSearch aria-hidden="true" />View data</button>
+      {onEditWidget && <button type="button" role="menuitem" onClick={onEditWidget}><PencilLine aria-hidden="true" />Edit widget</button>}
       {canWrite && <button type="button" role="menuitem" onClick={onRerun} disabled={busy}><RefreshCw aria-hidden="true" />{busy ? "A run is in progress" : "Re-run this query"}</button>}
       {/* Wave 48: a comment on this block opens the Changes panel aimed at it (only for those who may comment). */}
       {onFilterBy && <button type="button" role="menuitem" onClick={onFilterBy}><ListFilter aria-hidden="true" />Filter by…</button>}

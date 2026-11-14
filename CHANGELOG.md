@@ -62,6 +62,8 @@ Release notes for Nook, newest first. Upgrade steps for each release are in [doc
 - **Embeds**: notes and card descriptions can embed a goal or a townhall session; `/` Goal, Townhall, and Booking link let you pick which one. Today's empty-section lines no longer split into narrow columns.
 - **Docs**: the docs site and docs/USING.md have "Using Nook" sections for Forms, Time, Goals, Standups, Contacts, Bookings, and Townhall, with screenshots, plus how the modules connect, the public pages and their admin switches in Settings → Workspace, and the modules' MCP tools.
 
+- **Reports on This workspace**: **Edit widget** (the pencil on a block, or its ⋯ menu) opens the widget builder on what the block shows; change the measures, grouping, time range, filters, or chart type, preview it, and save it in place as a new version with Undo. Widgets the builder cannot show open in the JSON editor instead.
+
 **Goals**
 
 - **Goals with key results**: company, team, and personal goals aligned in a tree, in periods (Q1 2027) or with their own dates; key results as numbers, percents, money, done/not done, or milestones, rising, falling, or staying within a bound, with weights. KPIs keep a number healthy without an end date.
