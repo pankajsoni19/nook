@@ -1358,6 +1358,10 @@ Threats: **T600** no SQL on the workspace source (a non-JSON or unknown-field qu
 
 Deferred: editing an existing widget in the builder (Inspect → Edit SQL shows and saves the JSON, checked like any edit); cross-dataset queries and joins; Add filter's column picker for datasets; excluding multi-select values; per-reader result caching (each read runs ≤12 SQLite aggregates, ≤1,000 rows each); money shown in major units (datasets return minor units; formats are left to the author).
 
+### D.10 Leftovers built
+
+- **Docs site "Using Nook" sections** (D1049's docs item; branch `docs/site-workspace-modules`, no code or decision ids): `site/index.html` has a section, nav entry, and Apps card per module (`#forms`, `#time`, `#goals`, `#standups`, `#contacts`, `#bookings`, `#townhall`; Standups and Contacts use the words people read, §G.1 Q7), plus `#connections` (the W3 wiring) and `#public-pages` (the public URLs and the Settings → Workspace switches), the modules' rows in the MCP permission table, and their URLs. `docs/USING.md` has the matching sections and a "Workspace module tools" list. `tests/docsSite.test.ts` now requires every module, workspace ones included. Screenshots (`docs/images/*-dark.png`, 1440 × 900) were taken from a seeded QA server.
+
 ---
 
 ## E. Design and UX guidelines

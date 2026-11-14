@@ -14,6 +14,7 @@ Release notes for Nook, newest first. Upgrade steps for each release are in [doc
 - **Sharing**: Goals, Standups, Forms (who sees results), Contacts books, Time projects, Bookings types, and Townhall sessions all use the same Access sheet as notes and boards; booking types can now be shared.
 - **Mail and reminders**: booking confirmations and new times attach a calendar file that updates in place; a finalized time poll emails outside voters the chosen time as a calendar file; Townhall reminders also arrive by email; goal check-in reminders arrive Monday 09:00 in each owner's time zone.
 - **Embeds**: notes and card descriptions can embed a goal or a townhall session; `/` Goal, Townhall, and Booking link let you pick which one. Today's empty-section lines no longer split into narrow columns.
+- **Docs**: the docs site and docs/USING.md have "Using Nook" sections for Forms, Time, Goals, Standups, Contacts, Bookings, and Townhall, with screenshots, plus how the modules connect, the public pages and their admin switches in Settings → Workspace, and the modules' MCP tools.
 
 **Goals**
 
