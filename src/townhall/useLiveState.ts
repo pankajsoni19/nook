@@ -4,7 +4,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
  * A session's live state (D1075): fetched once, then kept current by the server-sent event stream
  * (`event: state` carries the whole state for this viewer). When the stream cannot open or keeps
  * dropping (a proxy that buffers, an old browser), it falls back to polling every few seconds. A
- * `gone` event (access removed, binned, link revoked) ends it with `gone: true`.
+ * `gone` event (access removed, binned, link revoked) ends it with `gone: true`. A load refused with
+ * 429 (a busy room, D1103), or one that fails before any state arrived, is retried after the server's
+ * Retry-After (or a growing pause), so the page never sits on "Loading…".
  */
 export function useLiveState<T>(options: { load: () => Promise<T>; streamUrl: string | null; pollMs?: number }) {
   const { load, streamUrl, pollMs = 5000 } = options;
@@ -14,17 +16,32 @@ export function useLiveState<T>(options: { load: () => Promise<T>; streamUrl: st
   const [mode, setMode] = useState<"connecting" | "live" | "polling">("connecting");
   const loadRef = useRef(load);
   loadRef.current = load;
+  const loaded = useRef(false);
+  const retry = useRef<{ timer: number | null; attempts: number; alive: boolean }>({ timer: null, attempts: 0, alive: true });
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (): Promise<void> => {
     try {
       const next = await loadRef.current();
+      loaded.current = true;
+      retry.current.attempts = 0;
       setState(next);
       setError(null);
     } catch (reason) {
-      const status = (reason as { status?: number }).status;
-      if (status === 404) setGone(true);
+      const { status, retryAfter } = reason as { status?: number; retryAfter?: number };
+      if (status === 404) { setGone(true); setError(reason); return; }
       setError(reason);
+      if ((status === 429 || !loaded.current) && retry.current.alive && retry.current.timer === null) {
+        retry.current.attempts += 1;
+        const wait = retryAfter && retryAfter > 0 ? retryAfter * 1000 : Math.min(30_000, 1000 * 2 ** Math.min(retry.current.attempts, 5));
+        retry.current.timer = window.setTimeout(() => { retry.current.timer = null; void refresh(); }, Math.min(60_000, wait + Math.random() * 500));
+      }
     }
+  }, []);
+
+  useEffect(() => {
+    const handle = retry.current;
+    handle.alive = true;
+    return () => { handle.alive = false; if (handle.timer !== null) window.clearTimeout(handle.timer); handle.timer = null; };
   }, []);
 
   useEffect(() => { void refresh(); }, [refresh, streamUrl]);

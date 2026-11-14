@@ -6,7 +6,7 @@ import { LivePoll } from "../ui/live/LiveWidgets";
 import { appName } from "../appName";
 import type { FormDisplay, FormEnding, FormKind, PollResults, ResultsVisibility } from "../../shared/forms";
 import type { Answers, QuestionSet, SlotVote } from "../../shared/questions";
-import { HONEYPOT_FIELD, NONCE_FIELD } from "../../shared/publicPages";
+import { HONEYPOT_FIELD, MIN_FILL_MS, NONCE_FIELD } from "../../shared/publicPages";
 import { TimePollGrid } from "./PollViews";
 import "../ui/questions/questions.css";
 import "../ui/live/live.css";
@@ -85,14 +85,20 @@ export default function PublicFormPage({ path, search }: { path: string; search:
   const { form, set, meta } = loaded;
   const answeredHere = (() => { try { return localStorage.getItem(doneKey(token)) === "1"; } catch { return false; } })();
 
-  const submit = async (checked: Answers) => {
+  const submit = async (checked: Answers, retry?: { nonce: string }): Promise<void> => {
     setBusy(true);
     setErrors({});
     setMessage(null);
     const result = await post(`${api}/responses`, {
       answers: checked, hidden, browser, ...(name.trim() || email.trim() ? { respondent: { name: name.trim() || undefined, email: email.trim() || undefined } } : {}),
-      [NONCE_FIELD]: loaded.renderNonce, [HONEYPOT_FIELD]: honeypot.current?.value ?? ""
+      [NONCE_FIELD]: retry?.nonce ?? loaded.renderNonce, [HONEYPOT_FIELD]: honeypot.current?.value ?? ""
     }).catch(() => ({ status: 0, payload: {} as Record<string, unknown> }));
+    // Too fast (a poll tapped right after the page opened): wait out the minimum with the fresh nonce and send the same answers once more (D1110).
+    if (!retry && result.payload.code === "TOO_FAST" && typeof result.payload.renderNonce === "string") {
+      const nonce = result.payload.renderNonce;
+      await new Promise((resolve) => window.setTimeout(resolve, (form.kind === "poll" ? MIN_FILL_MS.poll : MIN_FILL_MS.form) + 250));
+      return submit(checked, { nonce });
+    }
     setBusy(false);
     if (result.status === 201) {
       try { localStorage.setItem(doneKey(token), "1"); } catch { /* private mode */ }
@@ -103,8 +109,9 @@ export default function PublicFormPage({ path, search }: { path: string; search:
     if (result.payload.errors && typeof result.payload.errors === "object") setErrors(result.payload.errors as Record<string, string>);
     const code = String(result.payload.code ?? "");
     setMessage(code === "TOO_FAST" ? "That was quick! Take a moment to check your answers, then send again." : code === "REPLAY" || code === "INVALID" ? "This page is out of date. Reload it and try again." : String(result.payload.error ?? "Could not send. Check your connection and try again."));
-    if (code === "TOO_FAST" || code === "REPLAY" || code === "INVALID") {
-      // A fresh nonce for the next try.
+    // Every refusal carries a fresh nonce (the server spent the one sent, D1105); adopt it for the next try.
+    if (typeof result.payload.renderNonce === "string") setLoaded({ ...loaded, renderNonce: result.payload.renderNonce });
+    else if (code === "TOO_FAST" || code === "REPLAY" || code === "INVALID") {
       fetch(api, { credentials: "omit" }).then((response) => response.ok ? response.json() : null).then((body: Loaded | null) => { if (body) setLoaded({ ...loaded, renderNonce: body.renderNonce }); }).catch(() => undefined);
     }
   };

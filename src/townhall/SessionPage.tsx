@@ -14,7 +14,7 @@ import { useConfirm } from "../ui/useConfirm";
 import { errorText, notify } from "../ui/notify";
 import { ApiError } from "../api";
 import type { WorkspaceAppProps } from "../workspaceModules/types";
-import { POLL_KIND_LABELS, type TownhallLiveState, type TownhallQuestionView, type TownhallRecap } from "../../shared/townhall";
+import { authorLabel, POLL_KIND_LABELS, type TownhallLiveState, type TownhallQuestionView, type TownhallRecap } from "../../shared/townhall";
 import * as townhall from "./api";
 import { useLiveState } from "./useLiveState";
 import { PollView } from "./PollView";
@@ -29,7 +29,7 @@ type Filter = "all" | "review" | "answered" | "starred" | "mine" | "hidden";
 type Sheet = { kind: "edit" } | { kind: "poll" } | { kind: "comments"; questionId: string } | { kind: "merge"; questionId: string } | { kind: "cards"; questionIds: string[] } | { kind: "share" } | { kind: "access" } | null;
 
 const toQa = (question: TownhallQuestionView): QaQuestion => ({
-  id: question.id, text: question.text, author: question.author, votes: question.votes, voted: question.voted, status: question.status, pinned: question.pinned,
+  id: question.id, text: question.text, author: authorLabel(question), votes: question.votes, voted: question.voted, status: question.status, pinned: question.pinned,
   createdAt: question.createdAt, mine: question.mine, starred: question.starred, commentCount: question.commentCount, mergedCount: question.mergedCount
 });
 
@@ -274,14 +274,14 @@ function RecapTab({ sessionId, host, revision, onCards, onOpenPath, recapNote }:
         : <ol className="th-recap-list">{open.map((question) => <li key={question.id}>
           {host && <input type="checkbox" aria-label={`Select: ${question.text}`} checked={picked.has(question.id)} onChange={() => toggle(question.id)} />}
           <span className="th-recap-votes ui-tabular">{question.votes} ▲</span>
-          <span className="th-recap-text">{question.text}<small>{question.author ?? "Anonymous"}</small></span>
+          <span className="th-recap-text">{question.text}<small>{authorLabel(question) ?? "Anonymous"}</small></span>
           {question.card && <button type="button" className="ui-text-button" onClick={() => onOpenPath(question.card!.href)}>Card</button>}
         </li>)}</ol>}
     </section>
     <section className="th-recap-section" aria-labelledby="th-answered-title">
       <header className="ui-panel-header"><h3 id="th-answered-title"><MessageCircleQuestion aria-hidden="true" />Answered<span className="ui-panel-count ui-tabular"> · {recap.answered.length}</span></h3></header>
       {recap.answered.length === 0 ? <EmptyState compact as="h4" icon={MessageCircleQuestion} title="None answered yet">Hosts mark questions answered during the session.</EmptyState>
-        : <ol className="th-recap-list">{recap.answered.map((question) => <li key={question.id}><span className="th-recap-votes ui-tabular">{question.votes} ▲</span><span className="th-recap-text">{question.text}<small>{question.author ?? "Anonymous"}</small></span></li>)}</ol>}
+        : <ol className="th-recap-list">{recap.answered.map((question) => <li key={question.id}><span className="th-recap-votes ui-tabular">{question.votes} ▲</span><span className="th-recap-text">{question.text}<small>{authorLabel(question) ?? "Anonymous"}</small></span></li>)}</ol>}
     </section>
     {recap.polls.length > 0 && <section className="th-recap-section" aria-labelledby="th-polls-title">
       <header className="ui-panel-header"><h3 id="th-polls-title"><BarChart3 aria-hidden="true" />Polls<span className="ui-panel-count ui-tabular"> · {recap.polls.length}</span></h3></header>

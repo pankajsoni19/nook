@@ -230,7 +230,7 @@ export const formsMcpTools: McpToolSpec[] = [
       const summary = formSummary(key.userId, formId);
       void summary;
       const row = formRow(formId)!;
-      const csv = exportCsv({ kind: "form", id: row.id }, {}, { identity: row.anonymous === 0 });
+      const csv = exportCsv({ kind: "form", id: row.id }, {}, { identity: row.anonymous === 0, dayOnly: row.anonymous === 1 });
       if (Buffer.byteLength(csv, "utf8") > 1_048_576) throw new McpToolError("TOO_LARGE", "The export is larger than 1 MiB; download it from the app");
       audit(key.userId, null, "forms.export", { formId: row.id, bytes: csv.length, keyId: key.keyId });
       return { csv };

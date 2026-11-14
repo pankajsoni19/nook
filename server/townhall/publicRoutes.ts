@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { AppEnv } from "../auth";
 import { config } from "../config";
 import { clientIp } from "../clientAddress";
-import { checkSubmission, consumePublicLink, issueRenderNonce, publicNotFound, readPublicJson, readPublicLink, type PublicRouter } from "../public";
+import { checkSubmission, consumePublicLink, issueRenderNonce, publicNotFound, readPublicJson, readPublicLink, refreshNonceOnRefusal, type PublicRouter } from "../public";
 import { randomToken, readSignedToken, signedToken } from "../public/secret";
 import { HONEYPOT_FIELD, NONCE_FIELD } from "../../shared/publicPages";
 import { TOWNHALL_LIMITS } from "../../shared/townhall";
@@ -26,6 +26,10 @@ import { liveStream, respondError } from "./routes";
  * counts a participant only once they act (ask, vote, withdraw) or stay: the live stream open
  * `ATTENDANCE_STAY_MS`, or a page load with a token at least that old. Loading the page alone counts
  * nobody.
+ *
+ * The page, its state, and its stream are room reads (D1103, T622): their own per-participant and
+ * per-address buckets, not the 120-a-minute page limit, so a room behind one NAT can load and follow.
+ * Every refusal of a question after the shared checks carries a fresh render nonce (D1105).
  */
 
 const opens = (itemId: string) => {
@@ -98,7 +102,7 @@ const withdrawSchema = z.object({ participant: participantSchema }).strict();
 const viewerOf = (row: SessionRow, participant: string | null, name?: string | null): Viewer | null => participant ? { kind: "public", participant, name: name?.trim() || null } : null;
 
 export function registerTownhallPublicRoutes(router: PublicRouter) {
-  router.page("/p/t/:token", (c) => session(c) !== null);
+  router.page("/p/t/:token", (c) => session(c) !== null, { room: true });
 
   router.get("/api/public/townhall/:token", (c) => {
     const row = session(c);
@@ -110,7 +114,7 @@ export function registerTownhallPublicRoutes(router: PublicRouter) {
     // A returning participant whose token is old enough has stayed; a first load counts nobody (D1088).
     if (existing && Date.now() - existing.issuedMs >= ATTENDANCE_STAY_MS) touchAttendance(row, viewer);
     return c.json({ ...liveState(row, viewer, "public"), participant: token, renderNonce: issueRenderNonce("townhall_session", row.id), meta: meta() });
-  });
+  }, { room: true });
 
   router.get("/api/public/townhall/:token/live", (c) => {
     const row = session(c);
@@ -127,7 +131,7 @@ export function registerTownhallPublicRoutes(router: PublicRouter) {
         return fresh ? liveState(fresh, { kind: "public", participant, name: null }, "public") : null;
       }
     });
-  });
+  }, { room: true });
 
   router.post("/api/public/townhall/:token/questions", async (c) => {
     const row = session(c);
@@ -135,20 +139,22 @@ export function registerTownhallPublicRoutes(router: PublicRouter) {
     const link = readPublicLink("townhall_session", c.req.param("token") ?? "")!;
     const body = await readPublicJson(c, askSchema);
     const participant = body ? participantOf(row.id, body.participant) : null;
-    if (!body || !participant) return c.json({ error: "Invalid request", code: "INVALID" }, 400);
-    const check = checkSubmission({ kind: "townhall_session", itemId: row.id, linkId: link.id, address: clientIp(c), body: body as Record<string, unknown>, minFillMs: 1500 });
-    if (!check.ok) {
-      if (check.retryAfter) c.header("Retry-After", String(check.retryAfter));
-      return check.status === 404 ? publicNotFound(c) : c.json({ error: check.outcome === "rate_limited" ? "Too many questions from here. Try again in a minute." : "Reload the page and try again", code: check.outcome.toUpperCase(), renderNonce: issueRenderNonce("townhall_session", row.id) }, check.status);
-    }
-    if (!consumePublicLink(link)) return c.json({ error: "This session is taking too many questions right now", code: "RATE_LIMITED" }, 429);
-    try {
-      const question = askQuestion(row.id, viewerOf(row, participant, body.name)!, { text: body.text, name: body.name ?? null }, row);
-      attend(row, participant);
-      return c.json({ question, renderNonce: issueRenderNonce("townhall_session", row.id) }, 201);
-    } catch (error) {
-      return respondError(c, error);
-    }
+    if (!body || !participant) return c.json({ error: "Invalid request", code: "INVALID", renderNonce: issueRenderNonce("townhall_session", row.id) }, 400);
+    return refreshNonceOnRefusal("townhall_session", row.id, () => {
+      const check = checkSubmission({ kind: "townhall_session", itemId: row.id, linkId: link.id, address: clientIp(c), body: body as Record<string, unknown>, minFillMs: 1500 });
+      if (!check.ok) {
+        if (check.retryAfter) c.header("Retry-After", String(check.retryAfter));
+        return check.status === 404 ? publicNotFound(c) : c.json({ error: check.outcome === "rate_limited" ? "Too many questions from here. Try again in a minute." : "Reload the page and try again", code: check.outcome.toUpperCase() }, check.status);
+      }
+      if (!consumePublicLink(link)) return c.json({ error: "This session is taking too many questions right now", code: "RATE_LIMITED" }, 429);
+      try {
+        const question = askQuestion(row.id, viewerOf(row, participant, body.name)!, { text: body.text, name: body.name ?? null }, row);
+        attend(row, participant);
+        return c.json({ question, renderNonce: issueRenderNonce("townhall_session", row.id) }, 201);
+      } catch (error) {
+        return respondError(c, error);
+      }
+    });
   });
 
   router.post("/api/public/townhall/:token/questions/:qid/vote", async (c) => {
