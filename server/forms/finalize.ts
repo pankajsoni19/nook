@@ -6,6 +6,7 @@ import { recordItemActivity } from "../activity/service";
 import { currentSet } from "../questions/service";
 import { isValidTimeZone, utcToZoned } from "../../shared/calendarRecurrence";
 import { formPath } from "../../shared/forms";
+import { keyedHash } from "../public/secret";
 import { FormError, formRowById, host, requireForm, syncSchedules, type FormRow } from "./service";
 
 /**
@@ -13,7 +14,7 @@ import { FormError, formRowById, host, requireForm, syncSchedules, type FormRow 
  * the poll) picks one proposed time; it becomes an event in a calendar they can write, the poll
  * closes, the event and the poll are linked (event `source` ← form), the workspace participants
  * (named voters and the people chosen) are notified, and outside voters who left an email get one
- * email with the time (§B.7 caps, a stop link; never more than once per address).
+ * email with the time and a calendar file of it (§B.7 caps, a stop link; never more than once per address; D1055).
  */
 
 /** "Tue 18 Nov 2026, 14:00–15:00 (Europe/Paris)" in a zone. */
@@ -52,6 +53,8 @@ export async function finalizeTimePoll(userId: string, ref: string, input: { slo
   const when = slotWords(slot.start, slot.end, tz);
   const guests = input.emailGuests === false ? [] : db.query(`SELECT DISTINCT lower(respondent_email) AS email FROM responses WHERE host_kind = 'form' AND host_id = ? AND status = 'submitted' AND respondent_email IS NOT NULL LIMIT 100`).all(row.id) as Array<{ email: string }>;
   let emailed = 0;
+  // The calendar file's UID (D1055): a keyed hash of the poll, so outside mail never carries its id.
+  const icsUid = keyedHash("forms-time-final", row.id).slice(0, 32);
   const finalized = db.transaction((): FormRow => {
     const timestamp = now();
     db.query("UPDATE forms SET finalized_slot_id = ?, finalized_event_id = ?, calendar_id = COALESCE(?, calendar_id), status = 'closed', closed_at = COALESCE(closed_at, ?), updated_at = ?, revision = revision + 1 WHERE id = ?")
@@ -63,7 +66,7 @@ export async function finalizeTimePoll(userId: string, ref: string, input: { slo
       userIds: invitees, module: "forms", topic: "forms.finalized", title: `Time set for “${row.title}”`.slice(0, 200), body: when.slice(0, 500),
       href: eventId ? `/calendar/event/${eventId}` : formPath(row.title, row.short_id), item: { kind: "form", id: row.id }, actor: userId, dedupeKey: `forms.finalized:${row.id}`
     });
-    for (const guest of guests) if (enqueueExternalMail({ to: guest.email, template: "forms.time_final", payload: { title: row.title, when }, itemRef: { kind: "form", id: row.id } })) emailed += 1;
+    for (const guest of guests) if (enqueueExternalMail({ to: guest.email, template: "forms.time_final", payload: { title: row.title, when, start: slot.start, end: slot.end, uid: icsUid }, itemRef: { kind: "form", id: row.id } })) emailed += 1;
     audit(userId, null, "forms.finalize", { formId: row.id, slotId: slot.id, eventId, invited: invitees.length, emailed });
     const next = formRowById(row.id)!;
     syncSchedules(next);
