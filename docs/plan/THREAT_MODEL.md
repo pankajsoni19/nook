@@ -710,6 +710,7 @@ Plan: `docs/plan/WORKSPACE_MODULES.md` §D.6 (decisions as built D1009–D1026).
 | T586 | Hostile or huge ICS | 2 MiB, 10 s, 5000 events and intervals, bounded recurrence expansion, malformed lines ignored | Mitigated |
 | T587 | Manage-page CSRF or replay | Signed single-use render nonce and honeypot on cancel/reschedule; no session on public routes | Mitigated |
 | T588 | A single-use secret link used twice | The use is counted in the booking's own transaction | Mitigated |
+| T589 | A secret booking link keeps booking a blocked owner or a switched-off profile | `byLink` requires an active owner and an enabled profile (one uniform 404); `hostPlans` gives a blocked owner no slots (D1029); `tests/bookingsAuditFixes.test.ts` | Mitigated |
 
 | T560 | **Contact details reach people without the book** (lane CRM) | Every Contacts read joins the reader's books (`readableContainerSql('contact_book')`, system books excluded) before LIMIT; search joins the live rows and the books; chips redact (T503); notifications go only to readers of the book (`notifyReaders`). `tests/crm.test.ts` (other user 404, viewer read-only). | Required (built) |
 | T561 | **CSV import abuse or formula injection** | CSV only, 5 MiB, 10,000 rows, 60 columns, the Collections parser's limits; export cells neutralized (`'=`), import cells restored. `tests/crm.test.ts`. | Required (built) |

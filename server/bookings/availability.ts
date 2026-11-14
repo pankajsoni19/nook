@@ -23,11 +23,15 @@ function hostSchedule(type: TypeRow, host: HostRow): ScheduleRow {
   return pick(host.schedule_id) ?? (host.user_id === type.owner_id ? pick(type.schedule_id) : null) ?? ensureDefaultSchedule(host.user_id);
 }
 
+/** A team member who can host: not blocked, and an admin or member (D1029). */
+export const ownerActive = (userId: string) => Boolean(db.query("SELECT 1 FROM users WHERE id = ? AND disabled_at IS NULL AND role IN ('admin','member')").get(userId));
+
 export function hostPlans(type: TypeRow): HostPlan[] {
   const hosts = hostsOf(type.id);
   const list = type.assignment === "single" ? hosts.filter((host) => host.user_id === type.owner_id) : hosts;
-  const live = list.filter((host) => db.query("SELECT 1 FROM users WHERE id = ? AND disabled_at IS NULL AND role IN ('admin','member')").get(host.user_id));
-  const fallback: HostRow[] = live.length ? live : type.assignment === "single" ? [{ type_id: type.id, user_id: type.owner_id, priority: 0, calendar_id: null, schedule_id: null }] : [];
+  const live = list.filter((host) => ownerActive(host.user_id));
+  // A single type falls back to its owner only while the owner can host; a blocked owner has no slots (D1029).
+  const fallback: HostRow[] = live.length ? live : type.assignment === "single" && ownerActive(type.owner_id) ? [{ type_id: type.id, user_id: type.owner_id, priority: 0, calendar_id: null, schedule_id: null }] : [];
   return fallback.map((host) => ({ userId: host.user_id, priority: host.priority, calendarId: host.calendar_id, schedule: scheduleInput(hostSchedule(type, host)) }));
 }
 

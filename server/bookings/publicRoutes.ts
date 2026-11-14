@@ -11,7 +11,7 @@ import { HONEYPOT_FIELD, MIN_FILL_MS, NONCE_FIELD, type PublicPageMeta } from ".
 import { formatWhen, LOCATION_LABELS, MAX_PUBLIC_SLOT_DAYS, slotsByDate, type PublicSlots, type PublicTypeSummary } from "../../shared/bookings";
 import { BookingError, bookingRow, durationsOf, parseJson, typeRow, userName, type ProfileRow, type TypeRow } from "./model";
 import { profileByHandle } from "./setup";
-import { availability } from "./availability";
+import { availability, ownerActive } from "./availability";
 import { bookingIcs, cancelBooking, createBooking, managePath, rescheduleBooking } from "./service";
 import { bookerSchema, sendError, windowFrom } from "./routes";
 
@@ -53,7 +53,11 @@ function byLink(c: Context<AppEnv>): Target | null {
   const link = readPublicLink("booking_type", c.req.param("token") ?? "", { opens: (found) => typeOpens(typeRow(found.itemId)) });
   if (!link) return null;
   const type = typeRow(link.itemId)!;
+  // A secret link pauses with its owner (D1029, T589): a blocked or removed owner, or a profile
+  // switched off, gets the same 404 as /p/book/<handle>. The link is kept, so an unblock resumes it.
+  if (!ownerActive(type.owner_id)) return null;
   const profile = db.query("SELECT * FROM booking_profiles WHERE user_id = ?").get(type.owner_id) as ProfileRow | null;
+  if (profile && profile.enabled !== 1) return null;
   return { type, profile, link, source: "secret_link" };
 }
 
