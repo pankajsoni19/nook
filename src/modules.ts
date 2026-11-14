@@ -86,7 +86,7 @@ export const moduleDef = (id: ModuleId) => byId.get(id)!;
 /** The modules Settings lists (planned ones are left out until their wave ships). */
 export const SETTINGS_MODULES = MODULES.filter((module) => !module.planned);
 
-const GUEST_HIDDEN_MODULES: readonly ModuleId[] = ["team", "inbox", "vault", "agents", "reports", "time", "crm", "bookings"];
+const GUEST_HIDDEN_MODULES: readonly ModuleId[] = ["team", "inbox", "vault", "agents", "reports", "crm", "bookings"];
 
 /**
  * The modules Settings lists for a role. Guests never see Team (Team plan §6.2, §11): they have no
@@ -95,7 +95,8 @@ const GUEST_HIDDEN_MODULES: readonly ModuleId[] = ["team", "inbox", "vault", "ag
 export function settingsModulesFor(role: string | undefined, unavailable: readonly ModuleId[] = []): readonly ModuleDef[] {
   // Guests have no inbox either (D152): they cannot hold keys or apply proposals; nor a vault (V-O3).
   // Nor analytics reports (Wave 45).
-  // Nor Time, Contacts, or Bookings (§B.9: guests answer forms and standups and read shared goals).
+  // Nor Contacts or Bookings (§G.1 Q8). Time is theirs once they are on a time project (D1192): the
+  // server's `features.time` says so, and `unavailable` drops it until then.
   const shown = role === "guest" ? SETTINGS_MODULES.filter((module) => !GUEST_HIDDEN_MODULES.includes(module.id)) : SETTINGS_MODULES;
   return unavailable.length ? shown.filter((module) => !unavailable.includes(module.id)) : shown;
 }
@@ -105,8 +106,17 @@ export function settingsModulesFor(role: string | undefined, unavailable: readon
  * for everyone but admins, and always for guests (`/api/auth/me` `features`). They are hidden like a
  * module that is turned off, but Settings has no switch for them and the hint says why.
  */
-export function unavailableModules(features: { vault?: boolean; agents?: boolean; reports?: boolean } | undefined): ModuleId[] {
-  return [...(features?.vault === false ? ["vault" as const] : []), ...(features?.agents === false ? ["agents" as const] : []), ...(features?.reports === false ? ["reports" as const] : [])];
+export function unavailableModules(features: { vault?: boolean; agents?: boolean; reports?: boolean; time?: boolean; crm?: boolean; bookings?: boolean } | undefined): ModuleId[] {
+  // D1192: guests get Time only on a time project they belong to, and never Contacts or Bookings.
+  const ids = ["vault", "agents", "reports", "time", "crm", "bookings"] as const;
+  return ids.filter((id) => features?.[id] === false);
+}
+
+/** Why an unavailable module does not open (the route gate's hint). */
+export function unavailableText(id: ModuleId): string {
+  if (id === "time") return "Time opens once someone adds you to a time project.";
+  if (id === "crm" || id === "bookings") return `${moduleDef(id).label} is not available to guests.`;
+  return `${moduleDef(id).label} is not available on this server.`;
 }
 
 /**

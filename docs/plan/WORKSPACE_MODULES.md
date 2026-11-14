@@ -882,7 +882,7 @@ Key decisions:
 - **D933** Answers are editable until the round closes (+ 24 h); edits keep history in item_activity.
 - **D934** Anonymous (pulse) check-ins store responses as `anonymous` with no user link; per-person participation is tracked separately in `checkin_round_participants` (who answered, not what) and results show only when ≥ 3 answered (T553).
 - **D935** Blockers: answers to a `blockers` question are scanned for work refs on save; each ref creates a `blocks` link and sets the card flag "Blocked" (with card activity) if the author can edit the card; otherwise only the link is recorded.
-- **D936** Prefill suggestions are computed on open from the participant's own card activity, time entries (W3), and calendar; nothing is posted without the participant's confirmation.
+- **D936** Prefill suggestions are computed on open from the participant's own card activity, time entries (W3), and calendar; nothing is posted without the participant's confirmation. **As built:** cards you moved to done, cards you logged time on, cards assigned to you that are doing or due, and last round's plan and blockers. **Deferred (D1194):** calendar events as suggestions are not built (TODO.md).
 
 **Tables:**
 
@@ -1437,6 +1437,16 @@ Deferred (editing an existing widget in the builder was built later: §D.10, D12
 | D1112 | **Townhall Invite QR** encodes the link beside it: the audience link once one exists ("Scan to join as audience"), else the team link, shown in the team section and labelled so. |
 
 Threats: **T620** anonymity of askers and respondents (D1100, D1101: no actor, id, or hash links an anonymous question or response to a person). **T621** impersonation by a typed public name (D1104). **T622** a room behind one address locking itself out of the live page (D1103). **T623** timing anonymous responses from timestamps, ordering, cursors, or narrow windows (D1102).
+
+#### Plan and docs gaps (branch `fix/audit2-gaps`)
+
+| # | Decision |
+|---|---|
+| D1190 | **Module links open what they name.** Today's Follow-ups "View all" goes to `/contacts/followups` (it was `/contacts?tab=followups`, which Contacts ignores and opened People). The time approval notification's `?tab=approvals` now survives Time's route parser and opens the project's Approvals view (Team via `?tab=team`); a non-manager falls back to Entries. Swept: every Today provider href and module notification href with a query (`/goals?view=mine`, forms `?response=`, townhall `?filter=`/`?q=`, `/time?entry=`, `/time/timesheet?week=`) already parsed. |
+| D1191 | **Private answers has a switch**: standup Settings → Who can read it → "Private answers" (owner and managers only), with copy saying who sees what in both states; anonymous standups show their own line instead. The server now refuses a change of `privateAnswers` from an editor below `manage` (an editor reads only their own answers while it is on, so turning it off would widen their reading). |
+| D1192 | **Guests and role-limited modules (§G.1 Q8)**: `/api/auth/me` `features` gains `time`, `crm`, `bookings` (`server/workspaceFeatures.ts`). Guests get Time (launcher, Today, Settings → Modules switch) once they hold any level on a live time project, and never Contacts or Bookings; those are hidden like the Vault without a key, and the route gate says why ("Time opens once someone adds you to a time project", "… is not available to guests"). Contacts' API now answers guests 404 like Bookings'. Members, viewers, and admins are unchanged. |
+| D1193 | **Every notification topic the seven modules emit has a settings row**: `crm.deal_lost` ("Deals lost"; "Deals won" no longer claims both), `checkins.nudge` ("Nudges"), and `forms.action` ("Responses sent to you"). `tests/audit2Gaps.test.tsx` sweeps the servers' `topic:` literals against the client modules' `notificationTopics`. |
+| D1194 | **Calendar suggestions for standup answers are deferred** (D936 as built uses cards and time entries only); listed in TODO.md. |
 
 ### D.10 Leftovers built
 

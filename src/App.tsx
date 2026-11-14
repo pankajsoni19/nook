@@ -138,7 +138,7 @@ import { useNoteSearch } from "./search/useNoteSearch";
 import { useWhiteboardSearch, WhiteboardSearchResults } from "./search/WhiteboardSearchResults";
 import { FileSearchResults, useFileSearch } from "./search/FileSearchResults";
 import { ModulesSettings } from "./ModulesSettings";
-import { hiddenEntryStep, hiddenModuleForApp, normalizeDisabledModules, recordPopDepth, isAppEnabled, isModuleEnabled, moduleOffHint, ModulesContext, parsePreferences, routeGateModules, unavailableModules, type ModuleId, moduleDef } from "./modules";
+import { hiddenEntryStep, hiddenModuleForApp, normalizeDisabledModules, recordPopDepth, isAppEnabled, isModuleEnabled, moduleOffHint, ModulesContext, parsePreferences, routeGateModules, unavailableModules, unavailableText, type ModuleId, moduleDef } from "./modules";
 import { usePreferences, type PreferencesStatus } from "./usePreferences";
 import { isWorkspaceModuleId, workspaceHomeRoute, workspaceModule } from "./workspaceModules";
 import { WorkspaceModuleHost } from "./workspaceModules/WorkspaceModuleHost";
@@ -149,7 +149,7 @@ type TotpState = { enabled: boolean; required: boolean; setupRequired: boolean }
 type SecurityForm = "setup" | "verify" | "view" | "regenerate" | "disable";
 // `preferences` comes with /api/auth/me only (not with sign-in); see usePreferences.
 // `notices` (Wave 35 review N2c) comes with /api/auth/me only.
-type SessionResponse = { user: User; csrfToken: string; totp: TotpState; preferences?: unknown; notices?: { googleReset?: GoogleResetNotice | null }; features?: { vault?: boolean; agents?: boolean; chatRoleOff?: boolean; reports?: boolean }; app?: { name?: string } };
+type SessionResponse = { user: User; csrfToken: string; totp: TotpState; preferences?: unknown; notices?: { googleReset?: GoogleResetNotice | null }; features?: { vault?: boolean; agents?: boolean; chatRoleOff?: boolean; reports?: boolean; time?: boolean; crm?: boolean; bookings?: boolean }; app?: { name?: string } };
 type ModulesSettingsProps = { disabledModules: readonly ModuleId[]; status: PreferencesStatus; onToggle: (id: ModuleId, enabled: boolean) => void; role?: Role; unavailable?: readonly ModuleId[] };
 type NoteSort = "updated-desc" | "updated-asc" | "created-desc" | "created-asc" | "title-asc" | "title-desc";
 
@@ -2310,7 +2310,7 @@ export function App() {
     void api("/auth/notices/google-reset/dismiss", { method: "POST", body: "{}" }).catch(() => undefined);
   };
   const toastStatus = <>{appConfirm.confirmElement}{resetNotice && <GoogleResetNoticeBanner notice={resetNotice} onDismiss={dismissResetNotice} />}{moduleHint && <div className="module-hint" role="status">
-    <p>{unavailable.includes(moduleHint) ? `${moduleDef(moduleHint).label} is not available on this server.` : moduleOffHint(moduleHint)}</p>
+    <p>{unavailable.includes(moduleHint) ? unavailableText(moduleHint) : moduleOffHint(moduleHint)}</p>
     {!unavailable.includes(moduleHint) && <button className="secondary-button" onClick={() => { setHighlightModule(moduleHint); setModuleHint(null); openSettings("modules"); }}>Turn on in Settings</button>}
     <button className="icon-button" onClick={() => setModuleHint(null)} aria-label="Dismiss"><X /></button>
   </div>}</>;

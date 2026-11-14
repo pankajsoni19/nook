@@ -54,6 +54,7 @@ export const module: WorkspaceClientModule = {
   notificationTopics: [
     { id: "forms.response", label: "New responses", description: "Responses to forms you own or edit (at most one email per 15 minutes)." },
     { id: "forms.vote", label: "New votes", description: "Votes on your polls and time polls." },
+    { id: "forms.action", label: "Responses sent to you", description: "A form's “Notify people” action names you." },
     { id: "forms.closed", label: "Poll closed", description: "A poll you voted on closed." },
     { id: "forms.finalized", label: "Time chosen", description: "The organizer picked a time on a time poll you voted on." },
     { id: "forms.closing", label: "Closing soon", description: "A day before one of your forms closes." }

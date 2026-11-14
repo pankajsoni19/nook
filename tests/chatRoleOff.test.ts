@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createUser, db, request, type Session } from "./support/harness";
 import { startFakeProvider } from "./support/fakeProvider";
 import { retireUsersAfterFile } from "./support/retireUsers";
-import { routeGateModules, unavailableModules, type ModuleId } from "../src/modules";
+import { routeGateModules, unavailableModules, unavailableText, type ModuleId } from "../src/modules";
 
 const { deleteProvider } = await import("../server/agents/providers");
 const { readAgentSettings, writeAgentSettings } = await import("../server/agents/settings");
@@ -134,7 +134,8 @@ describe("Chat is off for your role (client route gate)", () => {
     expect(app).toContain("hiddenModuleForApp(routeDisabled, activeApp)");
     expect(app).toContain("!isAppEnabled(routeDisabled, activeApp)");
     // "Not available on this server" stays for a module the server really does not offer.
-    expect(app).toContain("is not available on this server.");
+    expect(app).toContain("unavailable.includes(moduleHint) ? unavailableText(moduleHint)");
+    expect(unavailableText("vault")).toBe("Vault is not available on this server.");
     const chat = await Bun.file(new URL("../src/chat/ChatApp.tsx", import.meta.url)).text();
     expect(chat).toContain("if (!status?.enabled || !status.canChat) return;");
     expect(chat).toContain("if (accessLost(reason)) { if (liveRef.current) loseAccess(); else void loadStatus(); }");
