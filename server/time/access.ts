@@ -83,3 +83,7 @@ export function projectSettings(row: Pick<ProjectRow, "settings_json">): { priva
     return { privateEntries: false, requireDescription: false };
   }
 }
+
+/** Whether `userId` holds any level on a live time project: a guest sees Time only then (§G.1 Q8, D1192). */
+export const belongsToTimeProject = (userId: string): boolean =>
+  db.query(`SELECT 1 FROM time_projects p WHERE ${readableContainerSql("time_project", "p")} LIMIT 1`).get({ userId }) !== null;

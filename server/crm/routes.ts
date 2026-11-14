@@ -33,6 +33,8 @@ async function body(c: Context<AppEnv>, limit = 200_000): Promise<Record<string,
 }
 
 const wrap = (handler: Handler, status = 200) => async (c: Context<AppEnv>) => {
+  // Guests have no Contacts (§G.1 Q8, D1192), as they have no Bookings: every route answers them 404.
+  if (c.get("user").role === "guest") return c.json({ error: "Not found", code: "NOT_FOUND" }, 404);
   try {
     const result = await handler(c);
     if (result instanceof Response) return result;
