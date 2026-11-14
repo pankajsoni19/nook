@@ -169,11 +169,30 @@ export function resolveTarget(input: TargetInput, userId: string): WorkRef | nul
 
 /** The project linked to a card's board, when the person may log on it (D876). */
 export function defaultProjectFor(target: WorkRef | null, userId: string): ProjectRow | null {
+  if (target && (target.kind === "company" || target.kind === "contact" || target.kind === "deal" || target.kind === "booking")) return clientProjectFor(target, userId);
   if (!target || target.kind !== "card") return null;
   const card = readableCard(target.id, userId);
   if (!card) return null;
   const row = db.query("SELECT * FROM time_projects WHERE board_id = ? AND deleted_at IS NULL AND archived_at IS NULL").get(card.board.id) as ProjectRow | null;
   return row && canLogOn(row.id, userId) ? row : null;
+}
+
+/**
+ * A CRM record's client project (C15, D1057): the company it is (or belongs to: a contact's company,
+ * a deal's company, a booking's contact's company), then the first live project of that client the
+ * person may log on. The target was already checked readable; the project goes through canLogOn.
+ */
+function clientProjectFor(target: WorkRef, userId: string): ProjectRow | null {
+  const companySql: Record<string, string> = {
+    company: "SELECT id AS company_id FROM companies WHERE id = ?",
+    contact: "SELECT company_id FROM contacts WHERE id = ?",
+    deal: "SELECT company_id FROM deals WHERE id = ?",
+    booking: "SELECT c.company_id FROM bookings b JOIN contacts c ON c.id = b.contact_id WHERE b.id = ?"
+  };
+  const company = (db.query(companySql[target.kind]!).get(target.id) as { company_id: string | null } | null)?.company_id;
+  if (!company) return null;
+  const rows = db.query("SELECT * FROM time_projects WHERE company_id = ? AND deleted_at IS NULL AND archived_at IS NULL ORDER BY name COLLATE NOCASE LIMIT 20").all(company) as ProjectRow[];
+  return rows.find((row) => canLogOn(row.id, userId)) ?? null;
 }
 
 /** The rate on billable entries (D882): the person's rate on the project, else the project's. */

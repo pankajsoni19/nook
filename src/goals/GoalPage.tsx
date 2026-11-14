@@ -7,6 +7,7 @@ import { MoreMenu } from "../ui/MoreMenu";
 import { GoalHealthChip, HealthChip, ProgressBar, ProgressRing } from "../ui/progress/Progress";
 import { InsightChart } from "../ui/insights/Insights";
 import { ItemTimeline } from "../ui/activity/ItemTimeline";
+import { ItemSectionsOutlet } from "../ui/ItemSlotOutlet";
 import { LinkPicker, WorkRefChip } from "../ui/links/WorkLinks";
 import { useModuleShortcuts } from "../ui/moduleKeys";
 import { errorText } from "../ui/notify";
@@ -158,6 +159,7 @@ export default function GoalPage({ segment, navigate, onOpenPath, userId, displa
             {work === null ? <p className="ui-panel-loading" role="status">Loading…</p> : work.length === 0 ? <p className="goals-note">Link cards, boards, notes, or deals that move this goal.</p> :
               <ul className="goals-work">{work.map((link) => <li key={link.id}><WorkRefChip summary={link.other} onOpen={onOpenPath} onRemove={goal.canEdit && link.source === "work_links" ? () => { deleteLink(link.id).then(reload, (reason) => flash(errorText(reason, "Could not remove the link"))); } : undefined} /></li>)}</ul>}
           </section>
+          <ItemSectionsOutlet kind="goal" id={goal.id} readOnly={false} onOpen={onOpenPath} frameClassName="goals-panel" />
           <section className="goals-panel" aria-labelledby="goal-checkins">
             <header><h2 id="goal-checkins"><MessageSquareText aria-hidden="true" />Check-ins</h2></header>
             {checkins === null ? <p className="ui-panel-loading" role="status">Loading…</p> : checkins.length === 0

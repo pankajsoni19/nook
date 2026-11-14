@@ -215,3 +215,28 @@ export type PublicTypeSummary = {
   slug: string; title: string; description: string; durations: number[]; locationKind: LocationKind; color: string;
 };
 export type PublicSlots = { tz: string; durations: number[]; duration: number; days: Record<string, string[]> };
+
+const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * A public booking link prefilled for one person (C20, D1058): `?name=&email=` and nothing else, so a
+ * copied link never carries a contact id, a book, or any other field. The public page fills the two
+ * fields from it (the booker can still change them). An address that is not an email is left out.
+ */
+export function bookingPrefillUrl(origin: string, publicPath: string, person: { name: string; email?: string | null } | null): string {
+  const params = new URLSearchParams();
+  const name = person?.name.trim().slice(0, 120);
+  const email = person?.email?.trim();
+  if (name) params.set("name", name);
+  if (email && email.length <= 254 && EMAIL_SHAPE.test(email)) params.set("email", email);
+  const query = params.toString();
+  return `${origin}${publicPath}${query ? `?${query}` : ""}`;
+}
+
+/** The prefill a public booking page reads from its URL (D1058): trimmed, length-capped, email-shaped. */
+export function bookingPrefillFrom(search: string): { name: string; email: string } {
+  const params = new URLSearchParams(search);
+  const name = (params.get("name") ?? "").trim().slice(0, 120);
+  const email = (params.get("email") ?? "").trim();
+  return { name, email: email.length <= 254 && EMAIL_SHAPE.test(email) ? email : "" };
+}

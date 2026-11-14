@@ -11,6 +11,7 @@ import { MoneyInput } from "../ui/money/Money";
 import { PersonPicker } from "../ui/people/People";
 import { LinkedItemsPanel } from "../ui/links/WorkLinks";
 import { ItemTimeline } from "../ui/activity/ItemTimeline";
+import { ItemSectionsOutlet } from "../ui/ItemSlotOutlet";
 import { useModuleShortcuts } from "../ui/moduleKeys";
 import { useConfirm } from "../ui/useConfirm";
 import { notify } from "../ui/notify";
@@ -210,6 +211,7 @@ export function RecordPage({ kind, refId, books, canWriteRole, onOpen, onBack, o
           <h3><Contact aria-hidden="true" />People <span className="ui-panel-count">{(detail as CrmCompanyDetail).contacts.length}</span></h3>
           {(detail as CrmCompanyDetail).contacts.length === 0 ? <p className="crm-muted">No contacts at this company yet.</p> : <ul className="crm-people">{(detail as CrmCompanyDetail).contacts.map((contact) => <li key={contact.id}><button type="button" className="crm-list-row" onClick={() => onOpen(contact.href)}><Avatar className="crm-avatar" name={contact.displayName} url={null} /><span className="crm-list-text"><strong>{contact.displayName}</strong><small>{contact.jobTitle ?? contact.email ?? ""}</small></span></button></li>)}</ul>}
         </section>}
+        <ItemSectionsOutlet kind={kind} id={detail.id} readOnly={!canWriteRole} onOpen={onOpen} person={kind === "contact" ? { name: title, email } : null} />
         <LinkedItemsPanel item={{ kind, id: detail.id }} canEdit={canEdit} onOpen={onOpen} title="Linked work" />
         <ItemTimeline kind={kind} id={detail.id} canComment={canWriteRole && detail.canEdit} renderers={CRM_ACTIVITY_RENDERERS} title="Comments" refreshKey={String(tick)} />
       </section>
