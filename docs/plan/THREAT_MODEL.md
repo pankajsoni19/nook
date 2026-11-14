@@ -661,6 +661,18 @@ Plan: `docs/plan/WORKSPACE_MODULES.md` §D.3 (D900–D922).
 | T544 | **Titles leak through links, search, datasets, notifications** | The work kind adapters resolve a goal only for readers (null otherwise, T501); search and datasets AND `readableGoalSql`; notifications go only to people who can open the goal; activity payloads carry labels the item's readers may see, never check-in notes (T505). | Mitigated |
 | T545 | **Purge leaves orphans** (links, activity, comments, grants, schedules, search rows) | 097 triggers on `goals` and `key_results`; KRs, milestones, values, check-ins, contributors cascade. Test: Bin → purge → zero rows. | Mitigated |
 
+### Workspace wiring (W3-WIRE, D1040–D1059)
+
+Plan: `docs/plan/WORKSPACE_MODULES.md` §D.8.
+
+| ID | Threat | Mitigation | Status |
+| --- | --- | --- | --- |
+| T595 | **Automatic interactions leak titles** (Task done, Form response tell a book's readers about a card or form they cannot read) | Fixed plain-text titles and bodies; the card and response are only work links, which redact for non-readers (T501); written as someone who may edit the book, else nothing. Test: the Task done body never holds the card title. | Mitigated |
+| T596 | **Standup wiring oversteps** (check-ins on goals the person cannot edit; a Standups-only key writing goals; answers copied to a note with a wider audience) | Goal updates call Goals' `checkIn` as the person inside the answer's transaction (refusal fails the answer); `answer_checkin` with goal updates needs whole-module `goals:write`; only a standup editor who can edit the note sets it, and it is written as the owner who must still edit it; private-answer and anonymous standups add the summary line only; blocker cards never named. Tests in `tests/wiring.test.ts`. | Mitigated; a note's audience seeing named answers is the owner's choice |
+| T597 | **Card-change listeners act on a refused or rolled-back change** (an interaction or KR update for a move that never happened) | Delivered after the transaction; entries whose activity row is gone are dropped; listeners re-read state (Task done checks the card is in a done column now) and check access themselves. The shared Access sheet (D1050) needed no threat: `/api/access/:kind/:id` and its checks are unchanged. | Mitigated |
+| T598 | **Calendar-file injection or abuse through mail attachments** | TEXT escaped, control characters dropped, CRLF folding; UID sanitized; URL only when plain http(s); content type and file name allowlisted; ≤ 3 files, ≤ 256 KiB; built from re-read data at send time; no internal ids to outside addresses. | Mitigated |
+| T599 | **A prefilled booking link leaks a contact's details** | Name and email only, capped and checked; query strings never logged; `no-referrer`; copied by the person, never sent by Nook. | Mitigated |
+
 ### Townhall (lane TOWNHALL, migration 115)
 
 Details and decisions in [WORKSPACE_MODULES.md §D.7 Townhall](WORKSPACE_MODULES.md#d7-townhall-lane-townhall-module-townhall).

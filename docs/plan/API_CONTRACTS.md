@@ -3244,3 +3244,29 @@ All under the session, CSRF, and role guards; `:id` is a form's UUID, short id, 
 | GET | `/api/public/forms/:token/results`, POST `…/visit` | — | results when visible / 204 |
 
 **MCP** (`forms:read`/`forms:write`; REST v1 the same): `list_forms`, `search_forms`, `get_form`, `create_form`, `update_form`, `update_form_questions`, `set_form_status`, `duplicate_form`, `bin_form` (+ `bin:write`), `list_responses`, `get_response`, `drop_response`, `bulk_drop_responses` (≤ 100, all or nothing, `dryRun`), `get_form_summary`, `export_responses` (≤ 1 MiB), `submit_response`, `create_poll` (`embedIn: { kind: "note", id }` appends to the owner's note draft), `vote_poll`, `create_time_poll`, `finalize_time_poll`. Datasets `forms.responses`, `forms.answers`; Goals progress source `form_metric`; search scope `forms`; Today sections `formsResponses`, `pollsToVote`.
+
+## Workspace wiring (W3-WIRE, D1040–D1059)
+
+Plan: `docs/plan/WORKSPACE_MODULES.md` §D.8. JSON under `/api`, errors `{ error, code }`; unreadable is `404 NOT_FOUND`.
+
+| Method | Path | Body / query | Returns |
+| --- | --- | --- | --- |
+| GET | `/api/goals/checkin-targets` | — | `{ goals: [{ id, title, href, health, progress, keyResults: [{ id, title, metric, currentValue, targetValue, unit, manual }] }] }`: open goals you can edit and own, contribute to, or own a KR of (≤ 20, D1043) |
+| POST / PUT | `/api/checkin-rounds/:rid/answer` | adds `goalUpdates?: [{ goalId, values?: { <krId>: number \| boolean }, health?, confidence? }]` (≤ 10) | as before; 400 `NO_GOAL_QUESTION`, `ANONYMOUS`, `NOT_AVAILABLE`, or Goals' own error (403 `READ_ONLY`, 404, 400 `INVALID`) and nothing is saved (D1043) |
+| PATCH | `/api/checkins/:id` | `summary.noteId?: uuid \| null` | 400 `INVALID` when you cannot edit that note (D1044) |
+| GET | `/api/checkin-rounds/:rid/me` | — | adds `timeCards: WorkSummary[]` (cards you logged time on since your last answer; also in `doneCards`, D1046) |
+| POST | `/api/forms/:id/actions` | `{ kind: "create_deal", config: { bookId, pipelineId?, stageId?, title, valueQuestionId?, emailQuestionId?, nameQuestionId?, companyQuestionId? } }` | `201 { action }`; 400 `INVALID` for a book you cannot edit or a pipeline/stage of another book (D1045; no longer `NOT_AVAILABLE`) |
+| GET | `/api/forms/targets` | — | each book gains `pipelines: [{ id, name, stages: [{ id, name }] }]` (open stages) |
+| GET | `/api/bookings/for/:kind/:id` | kind = `contact` \| `company` \| `deal` | `{ items: Booking[], truncated }`; 404 unreadable record, 400 other kinds; guests 404 (D1058) |
+| GET / PUT | `/api/access/:kind/:id` | — | unchanged; the web Access sheet now uses it for all seven workspace containers (D1050) |
+| GET | `/api/public/bookings/manage/:token/ics` | — | unchanged path; the file's UID is stable across a reschedule chain, with SEQUENCE (D1054) |
+
+**Inbox proposal kinds** (`submit_proposals`; payload = the tool's arguments; module read scope + `inbox:write`; applied as the approver, D1047): `contact_create` (`create_contact`, target `bookId`), `contact_update` (`update_contact`, `contactId`), `deal_create` (`create_deal`, `bookId`), `deal_update` (`update_deal`, `dealId`), `interaction_log` (`log_interaction`, no target: whole-module keys only), `goal_checkin` (`check_in_goal`, `goalId`), `form_create` (`create_form`, no target), `townhall_question` (`ask_townhall_question`, `sessionId`). Chat agents are now offered those tools (as proposals unless their mode writes directly).
+
+**MCP**: `answer_checkin` takes `goalUpdates` (as above); with it the key needs `goals:write` on the whole module (`SCOPE_REQUIRED`).
+
+**Mail** (internal): a rendered mail may carry `attachments` (`text/calendar` `.ics`, ≤ 3, ≤ 256 KiB, D1053); booking confirmation and new-time mail attach `booking.ics`, a finalized time poll's outside voters get `invite.ics`; new template `townhall.reminder` (category `townhall`, D1055).
+
+**Client registries**: `registerBoardHeaderItem` / `boardHeaderItems` (board header, D1048), `registerItemSection` / `itemSections` (workspace item pages, D1056), the `/` embed picker (D1059).
+
+**Server hooks**: `onCardChange(listener)` (`server/tasks/cardEvents.ts`, D1040): batches of `{ activityId, cardId, boardId, actorId, kind, at }` after the change commits.

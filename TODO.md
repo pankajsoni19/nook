@@ -14,6 +14,13 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 
 - [ ] **Workspace modules** (plan: [docs/plan/WORKSPACE_MODULES.md](docs/plan/WORKSPACE_MODULES.md), branch `feat/workspace-modules`): Wave 1 foundations (W1-CORE, W1-UI; migrations 085–089), then lanes FORMS, TIME, GOALS, CHECKINS, CRM, BOOK in parallel (090–109), then W3-WIRE and W3-REPORTS (110–114). Waiting on the product owner's answers to the plan's open questions (§G) before Wave 1. Migrations 083–084 are reserved for the friendly-URLs lane.
 
+## Leftovers (lane W3-WIRE, D1049)
+
+- [ ] `scripts/workspaceAgentEval.ts` (scripted provider: log time from a summary, check in on a goal, update a deal, answer a standup, all as proposals) and its real-model run.
+- [ ] Collections editors for `person` and `contact` fields (D961, D968), so Contacts custom fields of those types can be created in the UI.
+- [ ] Team page "Book time with …" button; docs site "Using Nook" sections for Forms, Time, Goals, Standups, Contacts, Bookings, and Townhall (`tests/docsSite.test.ts`).
+- [ ] A time-entry change hook for the Goals `time` source (it refreshes on reads and the 5-minute sweep today); a card face goal badge (needs a batched read).
+
 ## Waiting on the operator
 
 - [ ] **Real-model check of chat agents on data sources** (lane AGENTSQL, D592): only the scripted provider has called the data tools. On a host with a working model, give an agent a data source (Settings → Report data sources → Chat agents may use this data source) and check that it searches before it queries, aggregates in SQL rather than paging raw rows, and summarizes instead of repeating the table.
