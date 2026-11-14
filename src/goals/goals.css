@@ -86,8 +86,9 @@
 /* Sheets. */
 .goals-sheet-body { display: grid; gap: 14px; padding: 4px 20px 16px; overflow-y: auto; }
 .goals-sheet-body .ui-field select, .goals-sheet-body .ui-field input[type="date"] { min-height: 38px; }
-.goals-grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.goals-grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+/* Top-aligned: a field with a hint (Start) is taller, and a stretched neighbour (Due) grew its input (UI9, D1149). */
+.goals-grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
+.goals-grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; align-items: start; }
 .goals-sheet-kr { display: grid; gap: 6px; border: 1px solid #29292d; border-radius: 10px; padding: 10px 12px; background: #111113; }
 .goals-sheet-kr-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #ececee; font-size: .85rem; font-weight: 600; }
 .goals-confidence { display: flex; align-items: center; gap: 10px; }

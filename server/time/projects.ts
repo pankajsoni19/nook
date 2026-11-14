@@ -222,6 +222,8 @@ export function updateProject(userId: string, ref: string, input: ProjectInput):
       budget_period = ?, settings_json = ?, archived_at = ?, updated_at = ?, revision = revision + 1 WHERE id = ?`).run(name, input.code !== undefined ? cleanCode(input.code) : row.code,
       input.color ? colorOf(input.color) : row.color, clientId, boardId, input.billableDefault === undefined ? row.billable_default : input.billableDefault ? 1 : 0,
       input.rateMinor !== undefined ? input.rateMinor : row.rate_minor, currency, budget.kind, budget.value, budget.period, JSON.stringify(settings), archivedAt, now(), row.id);
+    // A changed budget alerts afresh when usage next crosses 80% or 100% of it (D1142).
+    if (budget.kind !== row.budget_kind || budget.value !== row.budget_value || budget.period !== row.budget_period) db.query("UPDATE time_projects SET budget_alerted = NULL WHERE id = ?").run(row.id);
     if (input.rateMinor !== undefined && input.rateMinor !== row.rate_minor) audit(userId, null, "time.rate_change", { projectId: row.id });
     if (name !== row.name) recordItemActivity({ itemKind: "time_project", itemId: row.id, actorId: userId, kind: "time_project_changed", payload: { from: { label: row.name }, to: { label: name } } });
     audit(userId, null, "time.project_update", { projectId: row.id, fields: Object.keys(input).filter((key) => key !== "expectedRevision") });
@@ -276,12 +278,19 @@ export type ApprovalRow = { id: string; project_id: string; user_id: string; wee
 
 const weekEnd = (weekStart: string) => weekDays(weekStart)[6]!;
 
-function weekEntryIds(projectId: string, userId: string, weekStart: string, tz: string) {
-  const rows = db.query("SELECT id, started_at, tz FROM time_entries WHERE project_id = ? AND user_id = ? AND ended_at IS NOT NULL AND started_at >= ? AND started_at < ?")
-    .all(projectId, userId, new Date(Date.parse(`${weekStart}T00:00:00Z`) - 2 * 86_400_000).toISOString(), new Date(Date.parse(`${weekEnd(weekStart)}T00:00:00Z`) + 3 * 86_400_000).toISOString()) as Array<{ id: string; started_at: string; tz: string }>;
+/** A person's finished entries of a week on a project, by each entry's local day (the rule approval locks by). */
+function weekEntries(projectId: string, userId: string, weekStart: string, tz: string) {
+  const rows = db.query("SELECT id, started_at, tz, duration_s FROM time_entries WHERE project_id = ? AND user_id = ? AND ended_at IS NOT NULL AND started_at >= ? AND started_at < ?")
+    .all(projectId, userId, new Date(Date.parse(`${weekStart}T00:00:00Z`) - 2 * 86_400_000).toISOString(), new Date(Date.parse(`${weekEnd(weekStart)}T00:00:00Z`) + 3 * 86_400_000).toISOString()) as Array<{ id: string; started_at: string; tz: string; duration_s: number | null }>;
   const days = new Set(weekDays(weekStart));
-  return rows.filter((row) => days.has(localDate(row.started_at, row.tz || tz))).map((row) => row.id);
+  return rows.filter((row) => days.has(localDate(row.started_at, row.tz || tz)));
 }
+
+function weekEntryIds(projectId: string, userId: string, weekStart: string, tz: string) {
+  return weekEntries(projectId, userId, weekStart, tz).map((row) => row.id);
+}
+
+const userTz = (userId: string) => (db.query("SELECT tz FROM time_user_settings WHERE user_id = ?").get(userId) as { tz: string } | null)?.tz ?? "UTC";
 
 export function submitWeek(userId: string, projectRef: string, weekStart: string, note?: string | null) {
   const project = projectRow(projectRef);
@@ -311,8 +320,7 @@ export function decideWeek(managerId: string, approvalId: string, decision: "app
     if (!project || project.deleted_at !== null || projectLevel(project.id, managerId) === "none") throw notFound("Approval");
     if (!atLeast(projectLevel(project.id, managerId), "manage")) throw new TimeError(403, "READ_ONLY", "Only the project's managers approve weeks");
     const timestamp = now();
-    const tz = (db.query("SELECT tz FROM time_user_settings WHERE user_id = ?").get(approval.user_id) as { tz: string } | null)?.tz ?? "UTC";
-    const ids = weekEntryIds(project.id, approval.user_id, approval.week_start, tz);
+    const ids = weekEntryIds(project.id, approval.user_id, approval.week_start, userTz(approval.user_id));
     if (decision === "approve") {
       db.query("UPDATE time_approvals SET status = 'approved', note = COALESCE(?, note), decided_by = ?, decided_at = ?, updated_at = ? WHERE id = ?").run(note ?? null, managerId, timestamp, timestamp, approval.id);
       for (const id of ids) db.query("UPDATE time_entries SET locked_at = ?, locked_by = ?, updated_at = ?, revision = revision + 1 WHERE id = ? AND locked_at IS NULL").run(timestamp, managerId, timestamp, id);
@@ -338,11 +346,12 @@ export function listApprovals(userId: string, options: { projectId?: string; min
   const where = options.mine ? ["a.user_id = $userId"] : [readableContainerSql("time_project", "p", { minLevel: "manage" })];
   if (options.projectId) { where.push("a.project_id = $projectId"); params.projectId = projectRow(options.projectId)?.id ?? "-"; }
   if (options.status) { where.push("a.status = $status"); params.status = options.status; }
-  const rows = db.query(`SELECT a.*, p.name AS project_name, u.display_name AS user_name,
-      (SELECT COALESCE(SUM(e.duration_s), 0) FROM time_entries e WHERE e.project_id = a.project_id AND e.user_id = a.user_id AND e.started_at >= a.week_start AND e.started_at < date(a.week_start, '+7 days')) AS seconds
+  const rows = db.query(`SELECT a.*, p.name AS project_name, u.display_name AS user_name
     FROM time_approvals a JOIN time_projects p ON p.id = a.project_id LEFT JOIN users u ON u.id = a.user_id
-    WHERE ${where.join(" AND ")} ORDER BY (a.status = 'submitted') DESC, a.week_start DESC LIMIT 200`).all(params) as Array<ApprovalRow & { project_name: string; user_name: string | null; seconds: number }>;
-  return rows.map((row) => ({ id: row.id, project: { id: row.project_id, name: row.project_name }, user: { id: row.user_id, name: row.user_name ?? "Former member" }, weekStart: row.week_start, status: row.status, note: row.note, seconds: row.seconds, decidedAt: row.decided_at }));
+    WHERE ${where.join(" AND ")} ORDER BY (a.status = 'submitted') DESC, a.week_start DESC LIMIT 200`).all(params) as Array<ApprovalRow & { project_name: string; user_name: string | null }>;
+  // The week's total counts the entries approving would lock: each entry's local day, not UTC bounds (TG7, D1146).
+  const seconds = (row: ApprovalRow) => weekEntries(row.project_id, row.user_id, row.week_start, userTz(row.user_id)).reduce((sum, entry) => sum + (entry.duration_s ?? 0), 0);
+  return rows.map((row) => ({ id: row.id, project: { id: row.project_id, name: row.project_name }, user: { id: row.user_id, name: row.user_name ?? "Former member" }, weekStart: row.week_start, status: row.status, note: row.note, seconds: seconds(row), decidedAt: row.decided_at }));
 }
 
 export { canLogOn };

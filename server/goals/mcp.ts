@@ -3,7 +3,7 @@ import { BIN_BUCKETS, BIN_DESCRIPTION, defineTool, McpToolError, notFound, type 
 import { keyFilter } from "../keyResources";
 import { linksOf } from "../links/service";
 import {
-  addKeyResult, checkIn, closeGoal, createGoal, createPeriod, deleteGoal, getGoal, GoalError, listCheckins, listGoals, listPeriods,
+  addKeyResult, checkIn, closeGoal, createGoal, createPeriod, currentPeriodId, deleteGoal, getGoal, GoalError, listCheckins, listGoals, listPeriods,
   progressSources, requireGoal, updateGoal, updateKeyResult
 } from "./service";
 import { checkinSchema, closeSchema, goalInputSchema, goalPatchSchema, krInputSchema, krPatchSchema, periodSchema } from "./schemas";
@@ -75,13 +75,14 @@ export const goalTools = [
   defineTool({
     name: "create_goal",
     title: "Create a goal",
-    description: "Create a goal (objective or KPI) owned by the user unless ownerId is given, optionally aligned to a parent goal, in a period, with key results. A key result's `source` makes it update itself: `{ kind: \"tasks\", config: { scope: \"board\", id: <boardId>, measure: \"cards\" } }` counts done cards of a board (scopes: board, view, filter with `query`, sprint, epic, tag). list_goal_sources lists every source.",
+    description: "Create a goal (objective or KPI) owned by the user unless ownerId is given, optionally aligned to a parent goal, in a period (the current period when periodId is left out; null for none), with key results. A key result's `source` makes it update itself: `{ kind: \"tasks\", config: { scope: \"board\", id: <boardId>, measure: \"cards\" } }` counts done cards of a board (scopes: board, view, filter with `query`, sprint, epic, tag). list_goal_sources lists every source.",
     scopes: ["goals:write"],
     access: { mode: "global", related: ["parentId", "periodId", "teamId", "ownerId", "contributorIds", "keyResults"] },
     write: true,
     annotations: { idempotentHint: false },
     inputSchema: goalInputSchema,
-    handler: (args, key) => run(() => createGoal(key.userId, args as never))
+    // Left out, the period is the current one, as in the web app's New goal sheet (D1148).
+    handler: (args, key) => run(() => createGoal(key.userId, (args.periodId === undefined ? { ...args, periodId: currentPeriodId() } : args) as never))
   }),
   defineTool({
     name: "update_goal",
@@ -146,8 +147,8 @@ export const goalTools = [
     access: { mode: "items", items: [{ arg: "goalId", kind: "goal" }], related: ["carryOver"] },
     write: true,
     inputSchema: closeSchema.extend({ goalId }).strict(),
-    handler: ({ goalId: id, ...input }, key) => run(() => {
-      const result = closeGoal(key.userId, id, input as never);
+    handler: ({ goalId: id, ...input }, key) => run(async () => {
+      const result = await closeGoal(key.userId, id, input as never);
       return { state: result.goal.state, finalProgress: result.goal.finalProgress, carriedOver: result.carriedOver };
     })
   }),

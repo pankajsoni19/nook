@@ -242,7 +242,13 @@ export function recomputeGoal(goalId: string, seen = new Set<string>()): void {
     let progress: number;
     if (goal.progress_mode === "key_results" && krs.length) progress = weightedProgress(krs);
     else {
-      const children = db.query("SELECT state, progress, final_progress FROM goals WHERE parent_id = ? AND deleted_at IS NULL AND state <> 'dropped'").all(goalId) as Array<{ state: GoalState; progress: number; final_progress: number | null }>;
+      // A goal carried over counts once (TG3, D1145): its copy in the next period continues it under the
+      // same parent, so the closed original drops out while that copy is live (it counts again if the
+      // copy goes to the Bin or moves to another parent).
+      const children = db.query(`SELECT c.state, c.progress, c.final_progress FROM goals c WHERE c.parent_id = ? AND c.deleted_at IS NULL AND c.state <> 'dropped'
+        AND NOT (c.state = 'carried_over' AND EXISTS (SELECT 1 FROM work_links wl JOIN goals copy ON copy.id = wl.a_id
+          WHERE wl.a_kind = 'goal' AND wl.b_kind = 'goal' AND wl.b_id = c.id AND wl.relation = 'source' AND copy.deleted_at IS NULL AND copy.parent_id = c.parent_id))`)
+        .all(goalId) as Array<{ state: GoalState; progress: number; final_progress: number | null }>;
       progress = children.length ? weightedProgress(children.map((child) => ({ progress: isClosed(child.state) && child.final_progress !== null ? child.final_progress : child.progress }))) : goal.progress_mode === "children" ? 0 : weightedProgress(krs);
     }
     if (Math.abs(progress - goal.progress) > 1e-9) db.query("UPDATE goals SET progress = ?, updated_at = ? WHERE id = ?").run(progress, now(), goalId);
@@ -933,8 +939,13 @@ export function listCheckins(userId: string, ref: string, page: { cursor?: strin
 // ---------------------------------------------------------------------------------------------------
 // Closing (D905).
 
-export function closeGoal(userId: string, ref: string, input: { state: "achieved" | "missed" | "dropped" | "carried_over"; carryOver?: { periodId: string } | null }) {
-  const { goal } = requireGoal(ref, userId, "edit");
+export async function closeGoal(userId: string, ref: string, input: { state: "achieved" | "missed" | "dropped" | "carried_over"; carryOver?: { periodId: string } | null }, options: { refreshed?: boolean } = {}) {
+  const checked = requireGoal(ref, userId, "edit");
+  if (isClosed(checked.goal.state)) throw invalid("This goal is already closed");
+  // The snapshot is of fresh numbers (TG6, D1146): auto key results are recomputed first, whatever the
+  // debounce, so the final progress is not the value of the last page view or sweep.
+  if (!options.refreshed) await refreshGoalSources(checked.goal.id, { force: true });
+  const goal = goalRow(checked.goal.id)!;
   if (isClosed(goal.state)) throw invalid("This goal is already closed");
   const carry = input.state === "carried_over" || !!input.carryOver;
   const target = carry ? checkPeriod(input.carryOver?.periodId) : null;
@@ -993,16 +1004,20 @@ export function reopenGoal(userId: string, ref: string) {
  * 70% or more (the OKR convention), else carried over to `carryOverTo` when given, else missed — and the
  * period is archived. Goals the actor cannot edit stay as they are and are counted.
  */
-export function closePeriod(userId: string, periodId: string, input: { carryOverTo?: string | null } = {}) {
+export async function closePeriod(userId: string, periodId: string, input: { carryOverTo?: string | null } = {}) {
   requireWriter(userId);
   const period = checkPeriod(periodId)!;
   if (input.carryOverTo) { if (input.carryOverTo === periodId) throw invalid("Carry over to another period"); checkPeriod(input.carryOverTo); }
   const goals = db.query(`SELECT g.* FROM goals g WHERE g.period_id = $period AND g.state IN ('draft','active') AND ${readableGoalSql("g")} ORDER BY g.created_at LIMIT 500`).all({ period: period.id, userId }) as GoalRow[];
   const counts = { achieved: 0, missed: 0, carried_over: 0, skipped: 0 };
-  for (const goal of goals) {
-    if (!atLeast(goalLevel(goal.id, userId), "edit")) { counts.skipped += 1; continue; }
+  for (const listed of goals) {
+    if (!atLeast(goalLevel(listed.id, userId), "edit")) { counts.skipped += 1; continue; }
+    // Scored on fresh numbers (TG6, D1146): refresh the auto key results, then read the progress.
+    await refreshGoalSources(listed.id, { force: true });
+    const goal = goalRow(listed.id);
+    if (!goal || isClosed(goal.state)) { counts.skipped += 1; continue; }
     const state = goal.progress >= 0.7 ? "achieved" : input.carryOverTo ? "carried_over" : "missed";
-    closeGoal(userId, goal.id, { state, carryOver: state === "carried_over" ? { periodId: input.carryOverTo! } : null });
+    await closeGoal(userId, goal.id, { state, carryOver: state === "carried_over" ? { periodId: input.carryOverTo! } : null }, { refreshed: true });
     counts[state] += 1;
   }
   db.transaction(() => {
@@ -1024,6 +1039,13 @@ export function listPeriods(userId: string, options: { includeArchived?: boolean
     ${options.includeArchived ? "" : "WHERE p.archived_at IS NULL"} ORDER BY p.starts_on DESC, p.name LIMIT 200`).all({ userId }) as Array<PeriodRow & { goal_count: number }>;
   const admin = userRole(userId) === "admin";
   return rows.map((row) => ({ id: row.id, name: row.name, startsOn: row.starts_on, endsOn: row.ends_on, archived: row.archived_at !== null, current: row.starts_on <= day && day <= row.ends_on, goalCount: row.goal_count, canEdit: canWriteContent(userId) && (admin || row.created_by === userId) }));
+}
+
+/** The open period containing today (the latest-starting one when periods overlap), for new goals (D1148). */
+export function currentPeriodId(nowMs?: number): string | null {
+  const day = today(nowMs);
+  const row = db.query("SELECT id FROM goal_periods WHERE archived_at IS NULL AND starts_on <= ? AND ends_on >= ? ORDER BY starts_on DESC, ends_on, name LIMIT 1").get(day, day) as { id: string } | null;
+  return row?.id ?? null;
 }
 
 function checkPeriodInput(input: { name?: string; startsOn?: string; endsOn?: string }) {
