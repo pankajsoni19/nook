@@ -48,6 +48,12 @@ export const summaryOptions = (row: Pick<CheckinRow, "summary_json">) => {
   return { notifyParticipants: parsed.notifyParticipants !== false, email: parsed.email === true, noteId: typeof parsed.noteId === "string" ? parsed.noteId : null };
 };
 
+/** Who chose the summary note (D956): the digest writes as them; older rows fall back to the owner. */
+export const summaryNoteSetter = (row: Pick<CheckinRow, "summary_json" | "owner_id">) => {
+  const parsed = JSON.parse(row.summary_json) as { noteSetBy?: unknown };
+  return typeof parsed.noteSetBy === "string" ? parsed.noteSetBy : row.owner_id;
+};
+
 export const checkinHref = (row: Pick<CheckinRow, "name" | "short_id">) => `/standups/${slugSegment(row.name, row.short_id)}`;
 
 /** A standup by id or short id, live or binned. */

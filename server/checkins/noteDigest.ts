@@ -6,7 +6,8 @@ import { checksum, storage, withNoteLock } from "../storage";
 import { publishDraftLocked, writeDraftLocked } from "../noteDrafts";
 import { recordItemActivity } from "../activity/service";
 import { notify } from "../notify";
-import { checkinHref, checkinRow, roundRow, summaryOptions, type CheckinRow } from "./store";
+import { checkinHref, checkinLevel, checkinRow, roundRow, summaryNoteSetter, summaryOptions, type CheckinRow } from "./store";
+import { LEVEL_RANK } from "../access/levels";
 import { roundSummary } from "./views";
 import { dateLabel } from "./rounds";
 
@@ -15,10 +16,11 @@ const slog = logger("checkins");
 /**
  * Standup digest → note (docs/plan/WORKSPACE_MODULES.md §C C23, D1044). A standup's summary options may
  * name a note (`summary.noteId`, set by someone who can manage the standup and edit the note). When a
- * round closes, the round is appended to that note as the standup's owner, who must still be able to
- * edit it: with no unpublished draft the appended text is published as the next version; when someone
- * has a draft open, it is appended to that draft instead (nobody's unsaved text is published), and the
- * owner is told. What goes in: the date, the one-line summary, and, for named standups whose answers
+ * round closes, the round is appended to that note as the person who chose it (D956; the owner for
+ * older settings), who must still be able to edit the note and the standup, or they are told it was
+ * not added: with no unpublished draft the appended text is published as the next version (inside the
+ * lock, D955); when someone has a draft open, it is appended to that draft instead (nobody's unsaved
+ * text is published), and the person is told. What goes in: the date, the one-line summary, and, for named standups whose answers
  * are not private, each person's answers as plain text. Anonymous and private-answer standups append
  * the summary line only; blockers are counted, never named (card titles stay with card readers, T596).
  * Once per round (the `summary_posted` activity entry); a failure is logged and never undoes the close.
@@ -53,10 +55,12 @@ export async function appendRoundToNote(checkinId: string, roundId: string): Pro
   if (!row || row.deleted_at !== null || !round || round.status !== "closed") return "skipped";
   const { noteId } = summaryOptions(row);
   if (!noteId || alreadyPosted(row.id, round.id)) return "skipped";
-  const actor = row.owner_id;
-  const outcome = await withNoteLock(noteId, async (): Promise<"published" | "drafted" | "skipped"> => {
+  // D956: written as the person who chose the note, who must still edit both the note and the standup.
+  const actor = summaryNoteSetter(row);
+  const outcome = await withNoteLock(noteId, async (): Promise<"published" | "drafted" | "skipped" | "denied"> => {
+    if (alreadyPosted(row.id, round.id)) return "skipped";
     const note = editableNote(noteId, actor);
-    if (!note || alreadyPosted(row.id, round.id)) return "skipped";
+    if (!note || LEVEL_RANK[checkinLevel(row, actor)] < LEVEL_RANK.edit) return "denied";
     let text = "";
     const hasDraft = note.draft_revision !== null;
     if (hasDraft) {
@@ -86,6 +90,11 @@ export async function appendRoundToNote(checkinId: string, roundId: string): Pro
   });
   if (outcome === "drafted") {
     db.transaction(() => notify({ userIds: [actor], module: "checkins", topic: "checkins.summary", title: `${row.name} was added to the note's draft`, body: "Someone has unpublished changes there, so it waits in the draft.", href: checkinHref(row), item: { kind: "checkin", id: row.id }, dedupeKey: `checkin-note:${row.id}` }))();
+  } else if (outcome === "denied") {
+    // Never silent (D956): the person who chose the note hears that this round did not reach it.
+    db.transaction(() => notify({ userIds: [actor], module: "checkins", topic: "checkins.summary", title: `${row.name} could not be added to its note`, body: "You can no longer edit the note or the standup. Choose another note in the standup's settings.", href: checkinHref(row), item: { kind: "checkin", id: row.id }, dedupeKey: `checkin-note:${row.id}` }))();
+    audit(actor, noteId, "checkins.summary_note_denied", { checkinId: row.id, roundId: round.id });
+    return "skipped";
   }
   return outcome;
 }

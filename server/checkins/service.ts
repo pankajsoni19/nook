@@ -141,12 +141,15 @@ export function updateCheckin(userId: string, ref: string, patch: CheckinPatch, 
     const deadline = patch.deadlineMinutes ?? row.deadline_minutes;
     const reminder = patch.reminderMinutesBefore === undefined ? row.reminder_minutes_before : patch.reminderMinutesBefore;
     checkTimes(deadline, reminder);
-    const summary = { ...JSON.parse(row.summary_json) as Record<string, unknown>, ...(patch.summary ?? {}) };
+    const summary: Record<string, unknown> = { ...JSON.parse(row.summary_json) as Record<string, unknown>, ...(patch.summary ?? {}) };
     // C23 (D1044): a summary note must be one the person setting it can edit.
     if (typeof patch.summary?.noteId === "string" && patch.summary.noteId !== summaryOptions(row).noteId && !editableNote(patch.summary.noteId.toLowerCase(), userId)) {
       throw new CheckinError(400, "INVALID", "Choose a note you can edit");
     }
     if (typeof summary.noteId === "string") summary.noteId = summary.noteId.toLowerCase();
+    // D956: the digest writes the note as the person who chose it (they were checked above), not as the owner.
+    if (typeof patch.summary?.noteId === "string" && patch.summary.noteId.toLowerCase() !== summaryOptions(row).noteId) summary.noteSetBy = userId;
+    if (patch.summary?.noteId === null) delete summary.noteSetBy;
     const { tz, ...stored } = schedule;
     db.query(`UPDATE checkins SET name = ?, description_md = ?, schedule_json = ?, tz = ?, deadline_minutes = ?, reminder_minutes_before = ?, status = ?, private_answers = ?,
         summary_json = ?, revision = revision + 1, updated_at = ? WHERE id = ?`).run(name, description, JSON.stringify(stored), tz, deadline, reminder, patch.status ?? row.status,

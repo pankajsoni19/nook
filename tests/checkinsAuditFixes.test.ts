@@ -9,7 +9,7 @@ const { editableNote } = await import("../server/access");
 
 /**
  * Check-ins audit fixes (§D.4): the note digest publishes only its own text, inside the note lock
- * (D955).
+ * (D955), and writes as the person who chose the note, telling them when it cannot (D956).
  */
 
 type Json = Record<string, any>;
@@ -61,5 +61,36 @@ describe("the digest publishes only its own text (D955)", () => {
     // The editor's text is still their draft.
     expect(current.draft_revision).not.toBeNull();
     expect(await storage.readDraft(note.id)).toContain("UNSAVED EDITOR TEXT");
+  });
+});
+
+describe("the digest writes as the person who chose the note (D956)", () => {
+  const grantEdit = (checkinId: string, userId: string) => db.query("INSERT INTO item_members (item_kind, item_id, user_id, level, added_by, created_at) VALUES ('checkin', ?, ?, 'edit', NULL, ?)").run(checkinId, userId, new Date().toISOString());
+
+  test("an editor's own note (the owner can't edit it) gets the round, authored by them", async () => {
+    const { checkinId, roundId } = await closedRound(owner, "Editor's standup", [owner.userId, member.userId]);
+    grantEdit(checkinId, member.userId);
+    const note = await createDraftNote(member.userId, null, "# Member log\n");
+    await publishDraft(member.userId, note.id, 1);
+    expect(editableNote(note.id, owner.userId)).toBeNull();
+    expect((await api(member, "PATCH", `/checkins/${checkinId}`, { summary: { noteId: note.id } })).status).toBe(200);
+    // The setter is stored but never shown.
+    expect((await api(owner, "GET", `/checkins/${checkinId}`)).body.checkin.summary).toEqual({ notifyParticipants: true, email: false, noteId: note.id });
+    expect(await appendRoundToNote(checkinId, roundId)).toBe("published");
+    expect(db.query("SELECT author_id FROM note_versions WHERE note_id = ? AND version_number = 2").get(note.id)).toEqual({ author_id: member.userId });
+    expect((await readPublishedMarkdown(note.id, 2)).markdown).toContain("## Editor's standup");
+  });
+
+  test("when the person who chose it can no longer edit the standup, nothing is written and they are told", async () => {
+    const { checkinId, roundId } = await closedRound(owner, "Revoked standup", [owner.userId, member.userId]);
+    grantEdit(checkinId, member.userId);
+    const note = await createDraftNote(member.userId, null, "# Revoked log\n");
+    await publishDraft(member.userId, note.id, 1);
+    expect((await api(member, "PATCH", `/checkins/${checkinId}`, { summary: { noteId: note.id } })).status).toBe(200);
+    db.query("DELETE FROM item_members WHERE item_kind = 'checkin' AND item_id = ? AND user_id = ?").run(checkinId, member.userId);
+    expect(await appendRoundToNote(checkinId, roundId)).toBe("skipped");
+    expect((db.query("SELECT current_version FROM notes WHERE id = ?").get(note.id) as { current_version: number }).current_version).toBe(1);
+    const told = db.query("SELECT title FROM notifications WHERE user_id = ? AND topic = 'checkins.summary' AND item_id = ?").get(member.userId, checkinId) as { title: string } | null;
+    expect(told?.title).toBe("Revoked standup could not be added to its note");
   });
 });
