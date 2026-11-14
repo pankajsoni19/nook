@@ -4,13 +4,16 @@ import { api } from "../api";
 import { InsightChart, KpiRow, KpiTile } from "../ui/insights/Insights";
 import { EmptyState } from "../ui/EmptyState";
 import { errorText } from "../ui/notify";
-import { HEALTH_LABEL, type Health } from "../ui/tone";
+import { HEALTH_LABEL, HEALTH_TONE, HEALTHS, type Health, type Tone } from "../ui/tone";
 
 /**
  * Goals → Insights (§B.10, §E.4): preset structured queries over the module's datasets
  * (`goals.key_results`, `goals.checkins`), scoped by the server to goals the viewer can open, for the
  * chosen period. KPI tiles, then charts (each with its table fallback).
  */
+
+/** Each health slice in its health colour (D1181), keyed by the label the chart shows. */
+const HEALTH_TONES: Record<string, Tone> = Object.fromEntries(HEALTHS.map((health) => [HEALTH_LABEL[health], HEALTH_TONE[health]]));
 
 type Result = { columns: Array<{ name: string }>; rows: Array<Array<string | number | null>> };
 const query = (body: Record<string, unknown>) => api<Result>("/datasets/query", { method: "POST", body: JSON.stringify({ tz: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC", ...body }) });
@@ -52,7 +55,7 @@ export default function GoalInsights({ periodName }: { periodName: string | null
       <KpiTile label="Check-ins, last 30 days" value={data.checkins30} />
     </KpiRow>
     <div className="goals-grid-2">
-      <InsightChart title="Goals by health" kind="pie" categories={data.health.map((row) => row[0])} series={[{ name: "Goals", values: data.health.map((row) => row[1]) }]} />
+      <InsightChart title="Goals by health" kind="pie" tones={HEALTH_TONES} categories={data.health.map((row) => row[0])} series={[{ name: "Goals", values: data.health.map((row) => row[1]) }]} />
       <InsightChart title="Check-ins per week" kind="bar" categories={data.weekly.map((row) => row[0])} series={[{ name: "Check-ins", values: data.weekly.map((row) => row[1]) }]} />
     </div>
     <div className="goals-grid-2">
