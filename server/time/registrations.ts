@@ -9,7 +9,7 @@ import { page, type TodayProvider } from "../today/registry";
 import { NO_FILTER } from "../keyResources";
 import { notify } from "../notify";
 import { McpToolError, type McpKeyContext } from "../mcpToolKit";
-import type { DatasetDef } from "../datasets/registry";
+import type { DatasetColumnDef, DatasetDef } from "../datasets/registry";
 import type { SearchScopeDef } from "../searchRegistry";
 import type { ScheduleHandler } from "../schedules/service";
 import type { ProgressSource } from "../goalsProgress";
@@ -18,7 +18,7 @@ import { formatDuration } from "../../shared/duration";
 import { addDays, zonedToUtc } from "../../shared/calendarRecurrence";
 import { WORK_KIND_ICONS } from "../../shared/workRefs";
 import { localDate } from "../../shared/time";
-import { atLeast, moneyVisibleSql, PROJECT_JOIN, projectLevel, projectRow, visibleEntrySql } from "./access";
+import { atLeast, HIDDEN_PROJECT_LABEL, hiddenProjectSql, moneyVisibleSql, PROJECT_JOIN, projectLevel, projectRow, visibleEntrySql } from "./access";
 import { entrySeconds, entryView, projectHref, runningEntry, type EntryRow } from "./service";
 import { todayTotals } from "./reports";
 import { timeTools } from "./mcpTools";
@@ -173,6 +173,14 @@ export const searchScope: SearchScopeDef = {
 // ---------------------------------------------------------------------------
 // Dataset `time.entries` (§B.10): money columns null where the viewer may not see money (T530)
 
+/**
+ * A column whose SQL is built when a query runs: the access predicate needs the `time_project` container
+ * registered, which happens after this module loads (built at load, it read as "0": every project hidden).
+ */
+const queryTimeColumn = (column: Omit<DatasetColumnDef, "sql">, sql: () => string): DatasetColumnDef =>
+  Object.defineProperty({ ...column }, "sql", { get: sql, enumerable: true }) as DatasetColumnDef;
+const HIDDEN_LABEL_SQL = `'${HIDDEN_PROJECT_LABEL.replace("'", "''")}'`;
+
 export const timeDataset: DatasetDef = {
   id: "time.entries", module: "time", label: "Time entries",
   description: "Finished time entries you can see: person, project, client, work item, day, seconds, billable, and amounts where you may see money.",
@@ -183,9 +191,10 @@ export const timeDataset: DatasetDef = {
   columns: [
     { name: "person", sql: "COALESCE(u.display_name, 'Former member')", type: "string", label: "Person", dimension: true },
     { name: "person_id", sql: "e.user_id", type: "string", label: "Person id", dimension: true, measures: ["count_distinct"] },
-    { name: "project", sql: "COALESCE(CASE WHEN p.deleted_at IS NULL THEN p.name END, 'No project')", type: "string", label: "Project", dimension: true },
-    { name: "project_id", sql: "e.project_id", type: "string", label: "Project id", dimension: true },
-    { name: "client", sql: "COALESCE(co.name, 'No client')", type: "string", label: "Client", dimension: true },
+    // A project the viewer cannot open (a card reader's view of someone's entry) shows no name, id, or client (TG4, D1143).
+    queryTimeColumn({ name: "project", type: "string", label: "Project", dimension: true }, () => `CASE WHEN ${hiddenProjectSql()} THEN ${HIDDEN_LABEL_SQL} ELSE COALESCE(CASE WHEN p.deleted_at IS NULL THEN p.name END, 'No project') END`),
+    queryTimeColumn({ name: "project_id", type: "string", label: "Project id", dimension: true }, () => `CASE WHEN ${hiddenProjectSql()} THEN NULL ELSE e.project_id END`),
+    queryTimeColumn({ name: "client", type: "string", label: "Client", dimension: true }, () => `CASE WHEN ${hiddenProjectSql()} THEN 'No client' ELSE COALESCE(co.name, 'No client') END`),
     { name: "target_kind", sql: "e.target_kind", type: "string", label: "Work item kind", dimension: true },
     { name: "target_id", sql: "e.target_id", type: "string", label: "Work item", dimension: true, measures: ["count_distinct"] },
     { name: "billable", sql: "e.billable", type: "bool", label: "Billable", dimension: true },

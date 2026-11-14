@@ -65,7 +65,15 @@ export const timeTools: McpToolSpec[] = [
       description: z.string().max(500).optional(), projectId: z.string().max(64).optional(), target: ref.optional(), billable: z.boolean().optional(),
       tags: z.array(z.string().max(40)).max(5).optional(), startedAt: z.string().max(40).optional().describe("Start in the past (ISO instant, within 24 hours)"), tz
     }),
-    handler: (args, key) => run(() => startTimer(actorOf(key), args))
+    handler: (args, key) => run(() => {
+      // Starting stops the running timer: a key that could not stop it (stop_timer's reach check) cannot
+      // stop it this way either (TG5, D1144).
+      const row = runningEntry(key.userId);
+      if (row && !(row.project_id ? reachCovers(keyReach(key, "time:write"), [{ kind: "time_project", id: row.project_id }]) : keyReach(key, "time:write") === "all")) {
+        throw new McpToolError("READ_ONLY", "A timer is running on a project this key cannot reach; stop it in Nook first", { reason: "TIMER_OUT_OF_REACH" });
+      }
+      return startTimer(actorOf(key), args);
+    })
   }),
   defineTool({
     name: "stop_timer", title: "Stop the timer",
@@ -216,10 +224,9 @@ export const timeTools: McpToolSpec[] = [
     scopes: ["time:read"], access: { mode: "derived" }, write: false,
     inputSchema: z.object({ target: ref }),
     handler: ({ target }, key) => run(() => {
-      const result = timeForTarget(key.userId, target);
+      // A key over chosen projects sees totals of those projects only, like its entries (D1147).
       const reach = keyReach(key, "time:read");
-      if (reach !== "all") result.entries = result.entries.filter((entry) => entry.project && reachCovers(reach, [{ kind: "time_project", id: entry.project.id }]));
-      return result;
+      return timeForTarget(key.userId, target, reach === "all" ? undefined : (projectId) => projectId !== null && reachCovers(reach, [{ kind: "time_project", id: projectId }]));
     })
   }),
   defineTool({

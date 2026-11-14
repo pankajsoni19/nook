@@ -15,7 +15,7 @@ import {
   DESCRIPTION_MAX, isTimeTargetKind, localDate, MAX_ENTRY_SECONDS, MAX_TAGS, PROJECT_COLORS, TAG_MAX, weekStartOf,
   type ProjectColor, type TimeEntry, type TimeSource
 } from "../../shared/time";
-import { atLeast, canLogOn, moneyVisibleSql, PROJECT_JOIN, projectLevel, projectRow, projectSettings, roleOf, visibleEntrySql, type ProjectRow } from "./access";
+import { atLeast, canLogOn, hiddenProjectSql, HIDDEN_PROJECT_LABEL, moneyVisibleSql, PROJECT_JOIN, projectLevel, projectRow, projectSettings, roleOf, visibleEntrySql, type ProjectRow } from "./access";
 
 /**
  * Time entries and the timer (lane TIME, docs/plan/WORKSPACE_MODULES.md §D.2). Every write goes
@@ -54,9 +54,16 @@ export type EntryRow = {
 
 type EntryViewRow = EntryRow & {
   user_name: string | null; project_name: string | null; project_color: string | null; client_name: string | null; money_ok: number; manager: number; project_deleted: string | null;
+  project_hidden: number;
 };
 
-export const entrySelect = () => `SELECT e.*, u.display_name AS user_name, p.name AS project_name, p.color AS project_color, p.deleted_at AS project_deleted, co.name AS client_name,
+// The project's name, color, and client only for viewers who can open it (TG4, D1143); a hidden project
+// reads as HIDDEN_PROJECT_LABEL in the sheet, the card's Time section, summaries, and the CSV.
+export const entrySelect = () => `SELECT e.*, u.display_name AS user_name,
+    CASE WHEN ${hiddenProjectSql()} THEN 1 ELSE 0 END AS project_hidden,
+    CASE WHEN ${hiddenProjectSql()} THEN '${HIDDEN_PROJECT_LABEL.replace("'", "''")}' ELSE p.name END AS project_name,
+    CASE WHEN ${hiddenProjectSql()} THEN 'slate' ELSE p.color END AS project_color, p.deleted_at AS project_deleted,
+    CASE WHEN ${hiddenProjectSql()} THEN NULL ELSE co.name END AS client_name,
     CASE WHEN ${moneyVisibleSql()} THEN 1 ELSE 0 END AS money_ok,
     CASE WHEN p.id IS NOT NULL AND ${readableContainerSql("time_project", "p", { minLevel: "manage" })} THEN 1 ELSE 0 END AS manager
   FROM ${PROJECT_JOIN} LEFT JOIN users u ON u.id = e.user_id LEFT JOIN companies co ON co.id = p.company_id`;
@@ -266,6 +273,11 @@ function checkBudget(projectId: string | null, actorId: string) {
   const threshold = ratio >= 1 ? 100 : ratio >= 0.8 ? 80 : 0;
   if (!threshold) return;
   const period = budgetPeriodStart(project)?.slice(0, 7) ?? "total";
+  // Once per crossing (TG2, D1142): the dedupe key only folds unread repeats, so after the managers
+  // read the alert every later write sent it (and a push) again. The project remembers what it sent.
+  const [sentPeriod, sentThreshold] = (project.budget_alerted ?? "").split(":");
+  if (sentPeriod === period && Number(sentThreshold) >= threshold) return;
+  db.query("UPDATE time_projects SET budget_alerted = ? WHERE id = ?").run(`${period}:${threshold}`, project.id);
   notify({
     userIds: managersOf(project), module: "time", topic: "time.budget", includeActor: true,
     title: threshold === 100 ? `${project.name} is over its budget` : `${project.name} has used 80% of its budget`,
