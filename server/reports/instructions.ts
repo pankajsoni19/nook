@@ -20,6 +20,7 @@ import { logger } from "../log";
 import { promoteSuggestion } from "./querySuggest";
 import { parseFilterRequest } from "./filterChecks";
 import type { FilterRequest } from "../../shared/reportsEdit";
+import { reportSourceSql } from "./workspaceSource";
 
 const slog = logger("reports");
 
@@ -235,7 +236,7 @@ function rejectStale(row: InstructionRow, reason: string): boolean {
 
 /** Every proposal of a report that is out of date is rejected (the kick and the sweep run this). */
 export function rejectStaleProposals(reportId: string): number {
-  const report = db.query("SELECT spec_json, datasource_id FROM reports WHERE id = ?").get(reportId) as { spec_json: string; datasource_id: string | null } | null;
+  const report = db.query(`SELECT spec_json, ${reportSourceSql("reports")} AS datasource_id FROM reports WHERE id = ?`).get(reportId) as { spec_json: string; datasource_id: string | null } | null;
   if (!report) return 0;
   let count = 0;
   for (const row of db.query("SELECT * FROM report_instructions WHERE report_id = ? AND status = 'proposed'").all(reportId) as InstructionRow[]) {

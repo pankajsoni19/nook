@@ -2,10 +2,11 @@ import type { Context, Hono } from "hono";
 import { z, ZodError } from "zod";
 import type { AppEnv } from "../auth";
 import { parseJson, uuid } from "../validation";
+import { WORKSPACE_SOURCE_ID } from "../../shared/reportsWorkspace";
 import { DATASOURCE_AGENT_USES, REPORT_LIMITS, REPORT_PAGE_SIZE, REPORT_STATUSES } from "../../shared/reports";
 import { CONSOLE_PARAM_LIMITS } from "../../shared/reportParams";
 import { roleHasReports } from "./access";
-import { createDatasource, datasourceChoices, datasourceRow, datasourceSummary, deleteDatasource, listDatasources, previewAllowlist, SCHEMA_FIELDS, testConnection, updateDatasource } from "./datasources";
+import { createDatasource, datasourceChoicesFor, datasourceRow, datasourceSummary, deleteDatasource, listDatasources, previewAllowlist, SCHEMA_FIELDS, testConnection, updateDatasource } from "./datasources";
 import { asReportError, ReportError } from "./errors";
 import { startSchemaSync, syncSchema } from "./schemaCatalog";
 import { describeTablesTool, listTablesTool, searchSchemaTool } from "./schemaTools";
@@ -16,6 +17,7 @@ import { registerGenerateRoutes } from "./generateRoutes";
 import { registerReportViewRoutes } from "./viewRoutes";
 import { registerReportEditRoutes } from "./editRoutes";
 import { registerQueryEditRoutes } from "./queryEditRoutes";
+import { registerWorkspaceReportRoutes } from "./workspaceRoutes";
 import { registerReportFolderRoutes } from "./folderRoutes";
 import { registerReportListRoutes } from "./listRoutes";
 import { ownerReview } from "./ownerReview";
@@ -47,9 +49,11 @@ const datasourceCreate = z.object({
 const datasourcePatch = datasourceCreate.partial().extend({ expectedRevision: z.number().int().min(1), removePassword: z.boolean().optional() }).strict();
 const previewSchema = z.object({ allowlist }).strict();
 const fromChatSchema = z.object({ chatId: uuid, resultId: uuid, title: line(REPORT_LIMITS.title), folderId: uuid.nullish() }).strict();
-const reportCreate = z.object({ title: line(REPORT_LIMITS.title), datasourceId: uuid, folderId: uuid.nullish() }).strict();
+/** W3-REPORTS (D1060): a data source is a ClickHouse source id or `workspace` (This workspace). */
+const sourceId = z.union([uuid, z.literal(WORKSPACE_SOURCE_ID)]);
+const reportCreate = z.object({ title: line(REPORT_LIMITS.title), datasourceId: sourceId, folderId: uuid.nullish() }).strict();
 const duplicateSchema = z.object({ title: line(REPORT_LIMITS.title).optional(), folderId: uuid.nullish() }).strict();
-const reportPatch = z.object({ title: line(REPORT_LIMITS.title).optional(), datasourceId: uuid.optional(), expectedRevision: z.number().int().min(1) }).strict();
+const reportPatch = z.object({ title: line(REPORT_LIMITS.title).optional(), datasourceId: sourceId.optional(), expectedRevision: z.number().int().min(1) }).strict();
 /** D490: `params` are the values of the statement's `{name:Type}` placeholders, by name (bound as `param_<name>`). */
 const consoleSchema = z.object({
   sql: z.string().min(1).max(REPORT_LIMITS.sqlChars),
@@ -70,7 +74,7 @@ const listSchema = z.object({
   q: z.string().max(200).optional(),
   owner: z.union([z.literal("me"), uuid]).optional(),
   status: z.string().max(80).transform((value) => value.split(",").filter(Boolean)).pipe(z.array(z.enum(REPORT_STATUSES)).max(REPORT_STATUSES.length)).optional(),
-  datasource: uuid.optional(),
+  datasource: z.union([uuid, z.literal(WORKSPACE_SOURCE_ID)]).optional(),
   scheduled: flag.optional(),
   favorites: flag.optional(),
   shared: flag.optional(),
@@ -122,6 +126,8 @@ const adminOnly = (handler: Handler): Handler => (c) => {
 };
 
 export function registerReportRoutes(app: Hono<AppEnv>) {
+  // W3-REPORTS (D1067): before `/api/reports/:reportId`, so `workspace` is never read as a report id.
+  registerWorkspaceReportRoutes(app);
   // --- Admin: Settings → Report owners (D500): reports nobody can manage, or the admin cannot open; pages by cursor (D505) ---
   app.get("/api/reports/admin/owner-review", handle(adminOnly((c) => {
     const query = ownerReviewSchema.parse(c.req.query());
@@ -170,7 +176,7 @@ export function registerReportRoutes(app: Hono<AppEnv>) {
   registerReportFolderRoutes(app);
   // Phase 3 (D550): report lists (literal /api/reports/lists paths, before /api/reports/:reportId).
   registerReportListRoutes(app);
-  app.get("/api/reports/datasources", handle(() => ({ datasources: datasourceChoices() })));
+  app.get("/api/reports/datasources", handle((c) => ({ datasources: datasourceChoicesFor(c.get("user").id) })));
   app.get("/api/reports", handle((c) => listReportsPage(c.get("user").id, listQuery(c))));
   app.post("/api/reports", handle(async (c) => {
     const input = await parseJson(c.req.raw, reportCreate);

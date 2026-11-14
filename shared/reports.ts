@@ -662,7 +662,8 @@ export type DatasourceSummary = {
 };
 
 /** What a report author sees when picking a data source. */
-export type DatasourceChoice = { id: string; name: string; database: string };
+/** W3-REPORTS (D1060): `kind` is `workspace` for "This workspace" (id `workspace`); absent for ClickHouse sources. */
+export type DatasourceChoice = { id: string; name: string; database: string; kind?: "clickhouse" | "workspace" };
 
 export type ConnectionTest = {
   ok: boolean;

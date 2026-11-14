@@ -45,8 +45,8 @@ describe("migration 064 report_docs", () => {
     const r1Doc = (db.query("SELECT id FROM report_docs WHERE report_id = 'r1'").get() as { id: string }).id;
     expect(db.query("SELECT id, doc_id FROM report_doc_snapshots ORDER BY id").all()).toEqual([{ id: "s-new", doc_id: r1Doc }, { id: "s-old", doc_id: r1Doc }]);
     // Old reports keep every column as it was (the one-doc columns mirror the first doc).
-    // 083 (friendly URLs) adds short_id after; every other column is as it was.
-    expect((db.query("SELECT * FROM reports ORDER BY id").all() as Array<Record<string, unknown>>).map(({ short_id: _shortId, ...rest }) => rest)).toEqual(before as Array<Record<string, unknown>>);
+    // 083 (friendly URLs) adds short_id and 113 (W3-REPORTS) source after; every other column is as it was.
+    expect((db.query("SELECT * FROM reports ORDER BY id").all() as Array<Record<string, unknown>>).map(({ short_id: _shortId, source: _source, ...rest }) => rest)).toEqual(before as Array<Record<string, unknown>>);
     expect(db.query("SELECT doc_snapshot_id, docs_json FROM report_runs WHERE id = 'run1'").get()).toEqual({ doc_snapshot_id: "s-new", docs_json: null });
 
     // The new columns' rules.

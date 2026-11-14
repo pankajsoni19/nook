@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
-import { CalendarClock, ChevronLeft, Copy, Crown, CircleStop, Cpu, Database, FileSearch, FileTerminal, FileText, GitCommitVertical, History, Link2, ListFilter, ListPlus, LoaderCircle, MessageSquarePlus, MessageSquare, Pencil, Play, RefreshCw, Share2, Sparkles, TableProperties, Trash2, TriangleAlert, Settings2, Ruler } from "lucide-react";
+import { CalendarClock, ChevronLeft, Copy, Crown, CircleStop, Cpu, Database, FileSearch, FileTerminal, FileText, GitCommitVertical, History, Link2, ListFilter, ListPlus, LoaderCircle, MessageSquarePlus, MessageSquare, Pencil, Play, Plus, RefreshCw, Share2, Sparkles, TableProperties, Trash2, TriangleAlert, Settings2, Ruler } from "lucide-react";
 import { AccountActions } from "../AppShell";
 import { appName } from "../appName";
 import { notifyBinned } from "../bin/binUndo";
@@ -34,6 +34,8 @@ import { DuplicateSheet, duplicateMessages } from "./DuplicateSheet";
 import { requestFilterRemoval } from "./reportEditApi";
 import { placeholderInput, placeholdersIn, placeholderValue } from "../../shared/reportParams";
 import type { ReportParamsSearch } from "../router";
+import { isWorkspaceSource } from "../../shared/reportsWorkspace";
+import { WorkspaceWidgetSheet } from "./WorkspaceWidgetSheet";
 
 type PageProps = {
   reportId: string;
@@ -126,6 +128,8 @@ export function ReportPage({ reportId, displayName, flash, onBack, onSettings, o
   useLayerOpener("reports.metrics", () => setMetricsOpen(true));
   // D534: Add filter (the owner), a sheet with its own layer.
   const [addFilterOpen, setAddFilterOpen] = useState(false);
+  // W3-REPORTS (D1067): Add widget, the structured-query builder of a report on This workspace.
+  const [widgetOpen, setWidgetOpen] = useState(false);
   useLayerOpener("reports.add-filter", () => setAddFilterOpen(true));
   useLayerOpener("reports.duplicate", () => setDuplicating(true));
   // The header's actions that live in the viewer and the generation part (reportCommands.tsx).
@@ -169,8 +173,8 @@ export function ReportPage({ reportId, displayName, flash, onBack, onSettings, o
   const hasBlocks = Boolean(report?.spec.blocks.length);
   const editing = useMemo<ReportEditing>(() => ({
     canEdit: ownerWrite, canSuggest: canWrite && !report?.isOwner && Boolean(rights?.canComment) && rights?.level === "comment", onChanged: reloadReport, openChanges,
-    ...(ownerWrite && hasBlocks ? { addFilter: () => setAddFilterOpen(true), removeFilter: (paramId: string) => { void removeFilter(paramId); } } : {})
-  }), [canWrite, hasBlocks, openChanges, ownerWrite, reloadReport, removeFilter, report?.isOwner, rights?.canComment, rights?.level]);
+    ...(ownerWrite && hasBlocks ? { ...(isWorkspaceSource(report?.datasourceId) ? {} : { addFilter: () => setAddFilterOpen(true) }), removeFilter: (paramId: string) => { void removeFilter(paramId); } } : {})
+  }), [canWrite, hasBlocks, openChanges, ownerWrite, reloadReport, removeFilter, report?.datasourceId, report?.isOwner, rights?.canComment, rights?.level]);
   useEffect(() => { if (report) document.title = `${report.title} · Reports · ${appName()}`; }, [report]);
   useEffect(() => { saveDraft(reportId, sql); }, [reportId, sql]);
 
@@ -309,6 +313,7 @@ export function ReportPage({ reportId, displayName, flash, onBack, onSettings, o
         <p className="report-facts">
           <span className={`reports-status reports-status-${report.status}`}>{STATUS_LABELS[report.status]}</span>
           <span><Database aria-hidden="true" />{report.datasourceName ?? "No data source"}</span>
+          {isWorkspaceSource(report.datasourceId) && <span className="report-live-note" title="Each reader sees the numbers their own access allows, computed when they open the report">Live · your access</span>}
         </p>
         {/* The header: Refresh all first; Changes, Share, and Schedule beside it (on a phone only Changes);
             everything else in the overflow menu, Move to Bin last. Owner-only actions are hidden from readers. */}
@@ -316,6 +321,7 @@ export function ReportPage({ reportId, displayName, flash, onBack, onSettings, o
           {ownerWrite && commands.refreshAll && <button type="button" className="primary-button" onClick={commands.refreshAll.run} disabled={commands.refreshAll.disabled} aria-busy={commands.refreshAll.busy || undefined}>
             {commands.refreshAll.busy ? <LoaderCircle className="spin" aria-hidden="true" /> : <RefreshCw aria-hidden="true" />}Refresh all
           </button>}
+          {ownerWrite && isWorkspaceSource(report.datasourceId) && report.spec.blocks.length > 0 && <button type="button" className="secondary-button" onClick={() => setWidgetOpen(true)}><Plus aria-hidden="true" />Add widget</button>}
           <button type="button" className="secondary-button" onClick={() => openChanges(null)}><MessageSquare aria-hidden="true" />Changes</button>
           {report.isOwner && <button type="button" className="secondary-button report-wide-only" onClick={() => openRuns(null)}><History aria-hidden="true" />Runs</button>}
           <button type="button" className="secondary-button report-wide-only" onClick={() => setVersionsOpen(true)}><GitCommitVertical aria-hidden="true" />Versions</button>
@@ -341,6 +347,16 @@ export function ReportPage({ reportId, displayName, flash, onBack, onSettings, o
         </ReportCommentContext.Provider>
       </ReportCommandsContext.Provider>
 
+      {/* W3-REPORTS: an empty report on This workspace starts from Add widget (no SQL), or the AI. */}
+      {isWorkspaceSource(report.datasourceId) && report.isOwner && report.spec.blocks.length === 0 && <section className="report-workspace-empty" aria-labelledby={`${consoleId}-workspace`}>
+        <h2 id={`${consoleId}-workspace`}>Build from this workspace's data</h2>
+        <p>Forms, Time, Goals, Standups, Contacts, Bookings, Townhall, and Tasks: pick a dataset, what to measure, and how to group it. Everyone who opens the report sees the numbers their own access allows.</p>
+        {ownerWrite && <div className="report-empty-actions">
+          <button type="button" className="primary-button" onClick={() => setWidgetOpen(true)}><Plus aria-hidden="true" />Add widget</button>
+          <button type="button" className="secondary-button" onClick={generateFromDoc}><FileText aria-hidden="true" />Generate from a doc</button>
+          <button type="button" className="secondary-button" onClick={() => { composerFocus.current = true; openChanges(null); }}><MessageSquarePlus aria-hidden="true" />Ask for a chart</button>
+        </div>}
+      </section>}
       {/* Item 4: an empty report keeps its console on the page (the only thing there), under two ways to get charts. */}
       {consoleOnPage(report) && <>
         {ownerWrite && <div className="report-empty-actions">
@@ -359,6 +375,7 @@ export function ReportPage({ reportId, displayName, flash, onBack, onSettings, o
       {versionsOpen && report && <VersionsSheet report={report} canRestore={ownerWrite} onClose={() => setVersionsOpen(false)} reopen={() => setVersionsOpen(true)} layerKey="reports.versions" memory={versionsMemory.current}
         onRestored={() => { setVersionsOpen(false); reloadReport(); }} />}
     </ReportRunsContext.Provider>
+    {widgetOpen && report && <ReportParamsContext.Provider value={paramsContext}><WorkspaceWidgetSheet report={report} onClose={() => setWidgetOpen(false)} reopen={() => setWidgetOpen(true)} onChanged={reloadReport} /></ReportParamsContext.Provider>}
     {addFilterOpen && report && <AddFilterSheet reportId={report.id} onClose={() => setAddFilterOpen(false)} reopen={() => setAddFilterOpen(true)} onRequested={() => { setAddFilterOpen(false); openChanges(null); }} />}
     {metricsOpen && report && <MetricsSheet reportId={report.id} title={report.title} canEdit={ownerWrite} onClose={() => setMetricsOpen(false)} reopen={() => setMetricsOpen(true)} />}
     {runsAt && report && <RunsSheet key={runsAt.runId ?? ""} reportId={report.id} title={report.title} focusRunId={runsAt.runId} onClose={() => setRunsAt(null)} reopen={() => setRunsAt(lastRuns.current)} />}
@@ -391,8 +408,9 @@ export function consolePlaceholders(sql: string): Array<{ name: string; type: st
 }
 
 /** Item 4: the owner's console sits on the page of an empty report; with blocks it is a panel (⋯, Inspect). Readers never get one. */
-export const consoleOnPage = (report: Pick<ReportDetail, "isOwner" | "spec">) => report.isOwner && report.spec.blocks.length === 0;
-export const consoleInPanel = (report: Pick<ReportDetail, "isOwner" | "spec">) => report.isOwner && report.spec.blocks.length > 0;
+// W3-REPORTS (D1067): a report on This workspace has no SQL console; Add widget builds its queries.
+export const consoleOnPage = (report: Pick<ReportDetail, "isOwner" | "spec"> & { datasourceId?: string | null }) => report.isOwner && !isWorkspaceSource(report.datasourceId) && report.spec.blocks.length === 0;
+export const consoleInPanel = (report: Pick<ReportDetail, "isOwner" | "spec"> & { datasourceId?: string | null }) => report.isOwner && !isWorkspaceSource(report.datasourceId) && report.spec.blocks.length > 0;
 
 /**
  * The overflow menu's items: on a phone Runs, Versions, Share, and Schedule first (the header hides them there), then

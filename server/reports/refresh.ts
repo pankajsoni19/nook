@@ -9,6 +9,7 @@ import { datasourceRow, usableDatasource, type DatasourceRow } from "./datasourc
 import { asReportError, ReportError } from "./errors";
 import { killQuery, runGuarded } from "./runner";
 import { parseSpec } from "./service";
+import { isWorkspaceReport, liveResults } from "./workspaceSource";
 import { currentLogContext, logger, shortId, withLogContext } from "../log";
 
 const slog = logger("reports");
@@ -128,6 +129,12 @@ export function reportResults(reportId: string, userId: string): ReportResultsVi
   abandonExpiredReportRuns(Date.now(), reportId);
   const running = runningRun(reportId);
   const spec = parseSpec(report.spec_json);
+  // W3-REPORTS (D1061, T601): a workspace report's numbers are each reader's own, computed now with
+  // their access and the default parameter values; nothing stored (or computed for someone else) is shown.
+  if (isWorkspaceReport(report)) {
+    const zone = reportTimeZone(reportId);
+    return { results: liveResults(spec, userId, defaultBound(spec, reportToday(reportId)), zone), running: running ? runView(running) : null, live: true, ...(spec.parameters.length ? { timeZone: zone, reach: reachOf(spec.parameters, spec.queries) } : {}) };
+  }
   // D489: the zone the report's date presets resolve in (the control bar names it).
   return { results: queryResults(reportId, spec), running: running ? runView(running) : null, ...(spec.parameters.length ? { timeZone: reportTimeZone(reportId), reach: reachOf(spec.parameters, spec.queries) } : {}) };
 }
@@ -243,7 +250,7 @@ async function runQuery(run: RunRow, report: ReportRow, query: ReportQuery, user
     let outcome;
     for (;;) {
       try {
-        outcome = await runGuarded(state.datasource, query.sql, { classes: ["select"], maxRows, queryId, userId, signal: state.controller.signal, params: state.params ?? [] });
+        outcome = await runGuarded(state.datasource, query.sql, { classes: ["select"], maxRows, queryId, userId, signal: state.controller.signal, params: state.params ?? [], timeZone: reportTimeZone(report.id) });
         break;
       } catch (error) {
         // The person's two query slots are busy (their console, another report): wait for one.

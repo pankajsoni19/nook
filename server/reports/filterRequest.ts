@@ -277,7 +277,7 @@ export async function filterColumns(reportId: string, userId: string): Promise<F
 async function readColumns(reportId: string, userId: string): Promise<{ view: FilterColumnsView; catalog: Map<string, Map<string, string>> }> {
   const report = ownedReport(reportId, userId);
   const spec = parseSpec(report.spec_json);
-  const datasource = usableDatasource(report.datasource_id);
+  const datasource = filterSource(report.datasource_id);
   const patterns = allowlistOf(datasource);
   const queries = usedQueries(spec);
   const readers = new Map<string, string[]>();
@@ -313,7 +313,7 @@ async function findColumn(reportId: string, userId: string, table: string, colum
   const found = view.columns.find((item) => item.table === table && item.column === column);
   if (!found) throw new ReportError(400, "INVALID", "Pick a text, number, or date column of a table this report's queries read");
   const report = ownedReport(reportId, userId);
-  return { found, spec: parseSpec(report.spec_json), datasource: usableDatasource(report.datasource_id), columns: view.columns, catalog: catalog.get(table) ?? new Map() };
+  return { found, spec: parseSpec(report.spec_json), datasource: filterSource(report.datasource_id), columns: view.columns, catalog: catalog.get(table) ?? new Map() };
 }
 
 /** D562, D673: the filters a new list on the column can follow, and why the others cannot. */
@@ -530,5 +530,15 @@ export async function requestRemoveFilter(actor: Actor, reportId: string, paramI
   const instruction = await addInstruction(actor, reportId, { text: `Remove the filter ${param.label}`, request: { kind: "remove_filter", id: param.id, label: param.label, ...(type !== "multi_select" ? { type } : {}) } });
   audit(actor.userId, null, "reports.filter.request", { reportId, instructionId: instruction.id, kind: "remove_filter", type, paramId, ...(actor.keyId ? { via: "mcp", keyId: actor.keyId } : {}) });
   return instruction;
+}
+
+/**
+ * W3-REPORTS (D1064): Add filter reads a warehouse table's columns and has the edit agent change SQL;
+ * a workspace report adds its date filter in Add widget (or asks for a filter in Changes).
+ */
+function filterSource(id: string | null): DatasourceRow {
+  const row = usableDatasource(id);
+  if (row.kind === "workspace") throw new ReportError(409, "INVALID", "Add filter reads warehouse tables; on This workspace, use the report's date filter in Add widget, or ask for a filter in Changes");
+  return row;
 }
 
