@@ -297,9 +297,12 @@ export async function refreshAutoKrs(rows: readonly KrRow[], options: { force?: 
       if (value) {
         const target = value.target !== undefined && fresh.metric !== "percent" && fresh.metric !== "boolean" && fresh.metric !== "milestones" ? value.target : fresh.target_value;
         const start = value.target !== undefined && fresh.metric !== "percent" ? 0 : fresh.start_value;
-        const differs = fresh.current_value !== value.value || fresh.target_value !== target || fresh.start_value !== start;
+        // A percent KR fed by a count and its target stores the share (D924): compare what is stored
+        // with what would be stored, never the stored % with the raw count (every refresh was a change).
+        const current = fresh.metric === "percent" && value.target ? Math.round((value.value / value.target) * 10_000) / 100 : value.value;
+        const differs = fresh.current_value !== current || fresh.target_value !== target || fresh.start_value !== start;
         db.query("UPDATE key_results SET current_value = ?, target_value = ?, start_value = ?, source_error = ?, auto_updated_at = ? WHERE id = ?")
-          .run(fresh.metric === "percent" && value.target ? Math.round((value.value / value.target) * 10_000) / 100 : value.value, target, start, error, timestamp, kr.id);
+          .run(current, target, start, error, timestamp, kr.id);
         const progress = storeKrProgress(kr.id);
         if (differs) {
           const stored = db.query("SELECT current_value FROM key_results WHERE id = ?").get(kr.id) as { current_value: number };
