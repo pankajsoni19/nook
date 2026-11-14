@@ -77,6 +77,12 @@ function recordBin(type: "contact" | "company" | "deal", table: string, titleCol
         if (!row || (row.owner_id !== userId && !(row.deleted_by === userId && ["edit", "manage", "owner"].includes(levelOnBook(row.book_id, userId))))) return { status: "not_found" };
         if (row.book_deleted) return { status: "parent_in_bin", message: "Restore its contact book first" };
         if (row.deleted_at === null) return { status: "already_restored", folderId: row.book_id, folderName: row.book_name };
+        // A live company may have taken the binned one's domain meanwhile (one per book, D1165).
+        if (type === "company") {
+          const taken = db.query(`SELECT live.name, binned.domain FROM companies binned JOIN companies live ON live.book_id = binned.book_id AND live.domain = binned.domain AND live.deleted_at IS NULL AND live.id <> binned.id
+            WHERE binned.id = ? AND binned.domain IS NOT NULL`).get(id) as { name: string; domain: string } | null;
+          if (taken) return { status: "name_taken", message: `${taken.name} in ${row.book_name} already has the domain ${taken.domain}. Change its domain, then restore this company.` };
+        }
         db.transaction(() => {
           db.query(`UPDATE ${table} SET deleted_at = NULL, deleted_by = NULL, purge_after = NULL, updated_at = ? WHERE id = ?`).run(now(), id);
           audit(userId, null, `crm.${type}_restore`, { bookId: row.book_id, id });
@@ -320,7 +326,7 @@ export const crmDatasets: DatasetDef[] = [
 
 // ----------------------------------------------------------------------------- goal progress sources (C9)
 
-const progressConfig = z.object({ pipelineId: z.string().uuid().optional(), bookId: z.string().uuid().optional(), ownerId: z.string().uuid().optional() });
+const progressConfig = z.object({ pipelineId: z.string().uuid().optional(), bookId: z.string().uuid().optional(), ownerId: z.string().uuid().optional(), currency: z.string().regex(/^[A-Z]{3}$/).optional() });
 type ProgressConfig = z.infer<typeof progressConfig>;
 
 function progressSql(config: ProgressConfig, ownerId: string) {
@@ -335,6 +341,19 @@ const describeScope = (config: ProgressConfig) => {
   const pipeline = config.pipelineId ? (db.query("SELECT name FROM pipelines WHERE id = ?").get(config.pipelineId) as { name: string } | null)?.name : null;
   return pipeline ? ` in ${pipeline}` : config.bookId ? " in a contact book" : "";
 };
+/**
+ * The one currency a value source adds up (D1166, like the board, D972: no conversion): the config's,
+ * else the pipeline's (else its book's), else the book's, else the workspace default.
+ */
+function progressCurrency(config: ProgressConfig): string {
+  if (config.currency) return config.currency;
+  if (config.pipelineId) {
+    const row = db.query("SELECT p.currency, b.settings_json FROM pipelines p JOIN contact_books b ON b.id = p.book_id WHERE p.id = ?").get(config.pipelineId) as { currency: string | null; settings_json: string } | null;
+    if (row) return row.currency ?? bookCurrency(row);
+  }
+  const book = config.bookId ? db.query("SELECT settings_json FROM contact_books WHERE id = ?").get(config.bookId) as { settings_json: string } | null : null;
+  return bookCurrency(book ?? { settings_json: "{}" });
+}
 const periodBounds = (period: { start: string; end: string } | null) => period ? { from: `${period.start}T00:00:00.000Z`, to: new Date(Date.parse(`${period.end}T00:00:00Z`) + 86_400_000).toISOString() } : null;
 
 export const crmProgressSources: Array<{ kind: string; source: Omit<ProgressSource<ProgressConfig>, "kind"> }> = [
@@ -346,8 +365,9 @@ export const crmProgressSources: Array<{ kind: string; source: Omit<ProgressSour
         const { where, params } = progressSql(config, context.ownerId);
         const bounds = periodBounds(context.period);
         if (bounds) { where.push("d.closed_at >= $from AND d.closed_at < $to"); Object.assign(params, bounds); }
-        const row = db.query(`SELECT COALESCE(SUM(d.value_minor), 0) AS value, MIN(d.currency) AS currency FROM deals d JOIN contact_books b ON b.id = d.book_id WHERE d.status = 'won' AND ${where.join(" AND ")}`).get(params) as { value: number; currency: string | null };
-        return { value: row.value, detail: row.currency ?? undefined };
+        const currency = progressCurrency(config);
+        const row = db.query(`SELECT COALESCE(SUM(d.value_minor), 0) AS value FROM deals d JOIN contact_books b ON b.id = d.book_id WHERE d.status = 'won' AND d.currency = $currency AND ${where.join(" AND ")}`).get({ ...params, currency }) as { value: number };
+        return { value: row.value, detail: currency };
       }
     }
   },
@@ -369,8 +389,9 @@ export const crmProgressSources: Array<{ kind: string; source: Omit<ProgressSour
       describe: (config) => `Value of open deals${describeScope(config)}`,
       compute: (config, context) => {
         const { where, params } = progressSql(config, context.ownerId);
-        const row = db.query(`SELECT COALESCE(SUM(d.value_minor), 0) AS value, MIN(d.currency) AS currency FROM deals d JOIN contact_books b ON b.id = d.book_id WHERE d.status = 'open' AND ${where.join(" AND ")}`).get(params) as { value: number; currency: string | null };
-        return { value: row.value, detail: row.currency ?? undefined };
+        const currency = progressCurrency(config);
+        const row = db.query(`SELECT COALESCE(SUM(d.value_minor), 0) AS value FROM deals d JOIN contact_books b ON b.id = d.book_id WHERE d.status = 'open' AND d.currency = $currency AND ${where.join(" AND ")}`).get({ ...params, currency }) as { value: number };
+        return { value: row.value, detail: currency };
       }
     }
   }

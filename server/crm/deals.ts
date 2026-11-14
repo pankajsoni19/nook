@@ -107,7 +107,20 @@ export function updatePipeline(ref: string, userId: string, input: { name?: unkn
           const to = input.moveDealsTo && ids.includes(input.moveDealsTo) ? input.moveDealsTo : null;
           if (!to) throw new CrmError(409, "STAGE_IN_USE", `“${stage.name}” has ${used} ${used === 1 ? "deal" : "deals"}; choose where they go`, { stageId: stage.id, deals: used });
           const target = stages[ids.indexOf(to)]!;
-          db.query("UPDATE deals SET stage_id = ?, status = ?, stage_entered_at = ?, updated_at = ? WHERE stage_id = ?").run(to, target.kind, now(), now(), stage.id);
+          // Each deal moves as a stage change would move it (D1163): status and closed stamp, lost
+          // reason, the stage history row (velocity, funnel), and the deal's timeline.
+          const timestamp = now();
+          const deals = db.query("SELECT id, value_minor, deleted_at FROM deals WHERE stage_id = ? ORDER BY position, id").all(stage.id) as Array<{ id: string; value_minor: number | null; deleted_at: string | null }>;
+          for (const deal of deals) {
+            // A closed deal that stays closed the same way keeps its close date (a won deal's revenue month).
+            db.query(`UPDATE deals SET closed_at = CASE WHEN $kind = 'open' THEN NULL WHEN status = $kind THEN COALESCE(closed_at, $ts) ELSE $ts END,
+                lost_reason = CASE WHEN $kind = 'lost' THEN lost_reason ELSE NULL END, stage_id = $to, status = $kind, stage_entered_at = $ts, last_activity_at = $ts,
+                rot_notified_at = NULL, position = $position, updated_at = $ts, revision = revision + 1 WHERE id = $id`)
+              .run({ kind: target.kind, ts: timestamp, to, position: positionAtEnd(to), id: deal.id });
+            if (deal.deleted_at) continue;
+            db.query("INSERT INTO deal_stage_changes (id, deal_id, from_stage_id, to_stage_id, value_minor, actor_id, at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(Bun.randomUUIDv7(), deal.id, stage.id, to, deal.value_minor, userId, timestamp);
+            recordItemChange({ itemKind: "deal", itemId: deal.id, container: { kind: "contact_book", id: book.id }, actorId: userId, kind: "crm_stage", from: { id: stage.id, label: stage.name }, to: { id: to, label: target.name } });
+          }
         }
         db.query("DELETE FROM pipeline_stages WHERE id = ?").run(stage.id);
       }
@@ -316,6 +329,21 @@ function positionAt(stageId: string, dealId: string, toIndex: number) {
 }
 
 /**
+ * The index among all of a stage's other deals for a drop between two neighbours (D1167): a board
+ * filtered by owner or search shows only some deals, so the client names the card it lands after
+ * (`afterId`, above it) and before (`beforeId`, below it) instead of an index among what it shows.
+ * Null when neither neighbour is a deal of the stage (an empty column, or both moved meanwhile).
+ */
+function indexBetween(stageId: string, dealId: string, afterId: unknown, beforeId: unknown): number | null {
+  const ids = (db.query("SELECT id FROM deals WHERE stage_id = ? AND id <> ? AND deleted_at IS NULL ORDER BY position, id").all(stageId, dealId) as Array<{ id: string }>).map((row) => row.id);
+  const find = (value: unknown) => typeof value === "string" ? ids.indexOf(value.toLowerCase()) : -1;
+  const after = find(afterId);
+  if (after >= 0) return after + 1;
+  const before = find(beforeId);
+  return before >= 0 ? before : null;
+}
+
+/**
  * The currency a new deal in `book` gets when none is given (D986): the pipeline's (the one named, else
  * the book's first, as createDeal picks it), else the book's. Callers that turn a typed amount into
  * minor units use it, so the digits match the currency the deal is saved in.
@@ -370,7 +398,7 @@ const bookOfRef = (ref: string) => {
 };
 
 /** Updates a deal (edit on its book). A stage change (by id or name) records the move; `position` is the index in the stage (the board). */
-export function updateDeal(ref: string, userId: string, patch: DealInput & { position?: number; expectedRevision?: number }): CrmDeal {
+export function updateDeal(ref: string, userId: string, patch: DealInput & { position?: number; afterId?: string | null; beforeId?: string | null; expectedRevision?: number }): CrmDeal {
   return db.transaction(() => {
     const row = readDealRow(ref, userId);
     const book = requireBook(row.book_id, userId, "edit");
@@ -401,7 +429,11 @@ export function updateDeal(ref: string, userId: string, patch: DealInput & { pos
       if (stage.kind !== "lost") set("lost_reason", null);
     }
     const targetStage = moved?.id ?? row.stage_id;
-    if (patch.position !== undefined) {
+    const neighbourIndex = patch.afterId !== undefined || patch.beforeId !== undefined ? indexBetween(targetStage, row.id, patch.afterId, patch.beforeId) : undefined;
+    if (neighbourIndex !== undefined) {
+      if (neighbourIndex !== null) set("position", positionAt(targetStage, row.id, neighbourIndex));
+      else if (moved) set("position", positionAtEnd(targetStage));
+    } else if (patch.position !== undefined) {
       if (typeof patch.position !== "number" || !Number.isFinite(patch.position) || patch.position < 0) throw invalid("A position is an index of at least 0");
       set("position", positionAt(targetStage, row.id, patch.position));
     } else if (moved) set("position", positionAtEnd(targetStage));

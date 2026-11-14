@@ -156,7 +156,8 @@
 .crm-mini-stage { color: var(--muted); font-size: .74rem; }
 
 /* Sheets */
-.crm-sheet { width: min(560px, calc(100vw - 32px)); }
+/* Phones keep the full-screen sheet; the width applies from tablet up (like collections.css). */
+@media (min-width: 761px) { .crm-sheet { width: min(560px, calc(100vw - 32px)); } }
 .crm-sheet-form { display: contents; }
 .crm-sheet-body { display: grid; gap: 14px; padding: 4px 20px 16px; overflow-y: auto; }
 .crm-sheet-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }

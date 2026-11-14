@@ -70,7 +70,7 @@ function DueStrip({ items, onOpenPath }: { items: DueRound[]; onOpenPath: (path:
   </section>;
 }
 
-function StandupRow({ item, onOpen }: { item: CheckinSummary; onOpen: () => void }) {
+export function StandupRow({ item, onOpen }: { item: CheckinSummary; onOpen: () => void }) {
   const last = item.lastRound;
   const rate = last && last.participants ? last.answered / last.participants : 0;
   return <li>
@@ -83,7 +83,9 @@ function StandupRow({ item, onOpen }: { item: CheckinSummary; onOpen: () => void
         <Faces people={item.participants} label={`${item.participantCount} participant${item.participantCount === 1 ? "" : "s"}`} max={4} />
         {item.streak ? <span className="standup-streak" title="Your streak: rounds answered in a row"><Flame aria-hidden="true" /><span className="ui-tabular">{item.streak}</span><span className="ui-visually-hidden"> in a row</span></span> : null}
         {last ? <ProgressRing value={rate} size={34} stroke={4} label={`Last round ${dateText(last.date)}: ${last.answered} of ${last.participants} answered`} valueText={`${last.answered}/${last.participants}`} tone={rate >= 0.8 ? "success" : rate >= 0.5 ? "warning" : "neutral"} />
-          : <span className="standup-muted standup-no-round">No rounds yet</span>}
+          : <span className="standup-muted standup-no-round">{item.nextOpensAt && item.status === "active"
+            ? `First round ${new Date(item.nextOpensAt).toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}`
+            : "No rounds yet"}</span>}
       </span>
     </button>
   </li>;

@@ -18,6 +18,9 @@ import type { QuestionSet, ResponseSummary } from "../../shared/questions";
 import { CheckinError, checkinHref, checkinLevel, checkinRow, notFound, roundRow, scheduleOf, summaryOptions, type CheckinRow, type ParticipantRow, type RoundRow, type RoundParticipantRow } from "./store";
 import { runGoalUpdaters, type StandupGoalUpdate } from "./goalUpdates";
 import { queueRoundNote } from "./noteDigest";
+import { logger } from "../log";
+
+const clog = logger("checkins");
 
 /**
  * Rounds (docs/plan/WORKSPACE_MODULES.md §D.4, D930–D937): when they open, remind, and close, and
@@ -39,7 +42,9 @@ const MINUTE = 60_000;
 const DAY = 86_400_000;
 const iso = (ms: number) => new Date(ms).toISOString();
 
-export const participantsOf = (checkinId: string) => db.query("SELECT * FROM checkin_participants WHERE checkin_id = ? ORDER BY joined_at, user_id").all(checkinId) as ParticipantRow[];
+/** The standup's participants who can still take part: blocked (disabled) people are left out of rounds, counts, and lists (D1161). */
+export const participantsOf = (checkinId: string) => db.query(`SELECT p.* FROM checkin_participants p JOIN users u ON u.id = p.user_id AND u.disabled_at IS NULL
+  WHERE p.checkin_id = ? ORDER BY p.joined_at, p.user_id`).all(checkinId) as ParticipantRow[];
 
 /** The zone a participant's round opens in. */
 export const zoneOf = (row: CheckinRow, participant: Pick<ParticipantRow, "tz">) => scheduleOf(row).zoneMode === "each" ? participant.tz ?? row.tz : row.tz;
@@ -164,6 +169,7 @@ export function nextEventMs(row: CheckinRow, nowMs: number): number | null {
  * updated, so the dispatcher's own advance after a handler never overwrites it.
  */
 export function rearm(row: CheckinRow, nowMs = Date.now()) {
+  ensureWatchdog();
   cancelSchedules({ kind: "checkin", id: row.id }, DRIVE_PURPOSE);
   const next = nextEventMs(row, nowMs);
   if (next === null) return null;
@@ -309,6 +315,51 @@ export function driveCheckin(checkinId: string, nowMs: number) {
   }
   rearm(checkinRow(row.id)!, nowMs);
   return { opened, closed };
+}
+
+export const WATCHDOG_PURPOSE = "checkins.watchdog";
+const WATCHDOG_MINUTES = 15;
+let watchdogEnsured = false;
+
+/**
+ * The module's safety net (D1160): the drive schedule is a `{ once }` rule re-armed by its own
+ * handler, so a handler that throws (its transaction, re-arm included, rolls back) or a crash after
+ * the dispatcher recorded the fire row (that occurrence never runs again, T504) would leave it with
+ * no next fire, and the standup would stop. One recurring schedule for the whole module (created on
+ * first use, like goals.sweep) drives every standup that has something to come but no armed drive.
+ */
+export function ensureWatchdog() {
+  if (watchdogEnsured) return;
+  if (!db.query("SELECT 1 FROM schedules WHERE owner_kind = 'checkins_module' AND owner_id = 'watchdog' AND purpose = ?").get(WATCHDOG_PURPOSE)) {
+    upsertSchedule({ kind: "checkins_module", id: "watchdog" }, WATCHDOG_PURPOSE, { everyMinutes: WATCHDOG_MINUTES });
+  }
+  watchdogEnsured = true;
+}
+export const resetWatchdogForTests = () => { watchdogEnsured = false; };
+
+/** Standups that should have an armed drive schedule and do not. */
+export function strandedCheckins(): string[] {
+  return (db.query(`SELECT c.id FROM checkins c WHERE c.deleted_at IS NULL
+      AND ((c.status = 'active' AND EXISTS (SELECT 1 FROM checkin_participants p JOIN users u ON u.id = p.user_id AND u.disabled_at IS NULL WHERE p.checkin_id = c.id))
+        OR EXISTS (SELECT 1 FROM checkin_rounds r WHERE r.checkin_id = c.id AND r.status = 'open'))
+      AND NOT EXISTS (SELECT 1 FROM schedules s WHERE s.owner_kind = 'checkin' AND s.owner_id = c.id AND s.purpose = ? AND s.enabled = 1 AND s.next_fire_at IS NOT NULL)
+    ORDER BY c.id LIMIT 500`).all(DRIVE_PURPOSE) as Array<{ id: string }>).map((row) => row.id);
+}
+
+/** The watchdog handler: drives (and so re-arms) each stranded standup in its own transaction; one that fails never stops the rest. */
+export function driveStranded(nowMs = Date.now()) {
+  let driven = 0;
+  let failed = 0;
+  for (const id of strandedCheckins()) {
+    try {
+      db.transaction(() => driveCheckin(id, nowMs))();
+      driven += 1;
+    } catch (error) {
+      failed += 1;
+      clog.error(`Standup drive failed: checkin=${id}`, error);
+    }
+  }
+  return { driven, failed };
 }
 
 /** "Start a round now" (D940): today's date in the standup's zone, open for everyone at once. */

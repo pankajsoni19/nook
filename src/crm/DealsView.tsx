@@ -55,6 +55,11 @@ export function DealsView({ book, q, pipelineId, layout, canWrite, onPipeline, o
     // Optimistic: move the card in place, then reload the totals from the server.
     const deal = items.find((item) => item.id === move.itemId);
     if (!deal) return;
+    // The board may be filtered (Mine, search): name the visible neighbours of the drop, not an index
+    // among the cards shown, so the server places it among all the stage's deals (D1167).
+    const visible = (board.columns.find((column) => column.stage.id === move.toColumnId)?.deals ?? []).filter((item) => item.id !== move.itemId);
+    const afterId = visible[move.toIndex - 1]?.id ?? null;
+    const beforeId = visible[move.toIndex]?.id ?? null;
     setBoard({ ...board, columns: board.columns.map((column) => {
       const rest = column.deals.filter((item) => item.id !== move.itemId);
       if (column.stage.id !== move.toColumnId) return { ...column, deals: rest };
@@ -62,7 +67,7 @@ export function DealsView({ book, q, pipelineId, layout, canWrite, onPipeline, o
       return { ...column, deals: [...rest.slice(0, move.toIndex), moved, ...rest.slice(move.toIndex)] };
     }) });
     try {
-      await updateDeal(move.itemId, { stageId: move.toColumnId, position: move.toIndex, ...(lostReason !== undefined ? { lostReason: lostReason || null } : {}) });
+      await updateDeal(move.itemId, { stageId: move.toColumnId, afterId, beforeId, ...(lostReason !== undefined ? { lostReason: lostReason || null } : {}) });
       const stage = board.columns.find((column) => column.stage.id === move.toColumnId)?.stage;
       if (stage && stage.kind !== "open" && deal.stageId !== stage.id) notify.success(`“${deal.title}” ${stage.kind === "won" ? "won" : "marked lost"}`);
     } catch (reason) { notify.error(errorMessage(reason, "Could not move the deal")); }
