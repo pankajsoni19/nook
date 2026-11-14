@@ -93,7 +93,7 @@ import { carriedTasksState } from "./tasksNavigation";
 import { CalendarApp } from "./calendar/CalendarApp";
 import { NotificationsApp } from "./notifications/NotificationsApp";
 import { publishedElsewhere, usePublishWatch } from "./editor/publishWatch";
-import { NotificationsContext } from "./notifications/notificationsApi";
+import { inAppOpenPath, NotificationsContext } from "./notifications/notificationsApi";
 import { NotificationSettings } from "./notifications/NotificationSettings";
 import { forgetThisDevice } from "./notifications/pushClient";
 import { appName, setAppName } from "./appName";
@@ -371,6 +371,8 @@ type SettingsPageProps = {
   /** "Turn on in Settings" (Q5): the module row Settings → Modules scrolls to and highlights once. */
   highlightModule?: ModuleId | null;
   onHighlightDone?: () => void;
+  /** D1260: set to the hub's leave guard while it is on screen, so an in-app "Open" from it asks first. */
+  leaveGuardRef?: { current: ((leave: () => void) => void) | null };
 };
 
 /** The hub route on the URL: an account section, the list, the Bin, or a Team section. */
@@ -386,7 +388,7 @@ function hubRouteFromLocation(): Route {
  * sections are the ones the dialog had; Team (for the roles that see it) is TeamSection in the hub,
  * and the Bin (Wave 38, /settings/bin) is BinSection.
  */
-function SettingsPage({ session, modules, googleResult = null, navigate, flash, onHome, onSignOut, onSecurityChanged, teamModuleEnabled, binModuleEnabled, onBinRestored, highlightModule = null, onHighlightDone }: SettingsPageProps) {
+function SettingsPage({ session, modules, googleResult = null, navigate, flash, onHome, onSignOut, onSecurityChanged, teamModuleEnabled, binModuleEnabled, onBinRestored, highlightModule = null, onHighlightDone, leaveGuardRef }: SettingsPageProps) {
   const setupRequired = session.totp.setupRequired;
   const [locationRoute, setLocationRoute] = useState<Route>(hubRouteFromLocation);
   // Two-factor setup first: Security is the only screen, whatever the URL says.
@@ -490,6 +492,11 @@ function SettingsPage({ session, modules, googleResult = null, navigate, flash, 
     if (beforeLeaveRef.current?.(keyGuarded)) return;
     keyGuarded();
   }, [ask]);
+  useEffect(() => {
+    if (!leaveGuardRef) return;
+    leaveGuardRef.current = guardLeave;
+    return () => { if (leaveGuardRef.current === guardLeave) leaveGuardRef.current = null; };
+  }, [guardLeave, leaveGuardRef]);
   // Browser Back or Forward with a key on screen: undone, then asked; leaving repeats the move.
   useLeaveGuard(pending && !confirmOpen, (direction) => {
     void ask(confirmFor(leaveGuardAction(routeFromLocation(window.location), routeRef.current))).then((confirmed) => {
@@ -1913,14 +1920,33 @@ export function App() {
     setActiveApp("notes");
   }
 
-  // Wave 24 (D208): a whiteboard card in a note or a card description opens its board as a new
-  // entry, so Back returns to where it was. Leaving Notes saves the note first, as any app switch does.
-  async function openContentPath(path: string) {
+  // The Inbox opens a proposal's target as a new entry: a note through the Notes loader, anything else by its route.
+  function openInboxPath(path: string) {
     const route = parseRoute(path);
-    // A board, or the Bin (QA L6: the owner's card for a binned board offers "Open Bin").
-    if (!(route.app === "whiteboards" && route.boardId) && route.app !== "bin") return;
-    if (activeApp === "notes" && !await leaveNotes()) return;
-    openNotificationPath(path);
+    // A friendly note URL this tab has not named yet (D773) is found in the loaded list by its short id.
+    const pendingNote = route.app === "notes" && route.pending?.kind === "note" ? route.pending.ref : null;
+    const noteId = route.app === "notes" ? route.noteId ?? (pendingNote ? notes.find((item) => item.short_id === pendingNote)?.id ?? null : null) : null;
+    if (noteId) openLinkedNote(noteId);
+    else if (pendingNote) notify.warning("Note not found");
+    else openNotificationPath(path);
+  }
+
+  // Wave 24 (D208): a whiteboard card in a note or a card description opens its board as a new
+  // entry, so Back returns to where it was. D1260: any in-app path does (a goal, form, or townhall
+  // embed's Open, Bookings' "Open in Bookings"), checked as a notification href is. Leaving Notes
+  // saves the note first, as any app switch does; the Settings hub asks first about a key shown once;
+  // a module that is off goes through the route gate (Home and its hint, D92).
+  const hubLeaveGuardRef = useRef<((leave: () => void) => void) | null>(null);
+  async function openContentPath(href: string) {
+    const path = inAppOpenPath(href);
+    if (!path || !session) return;
+    const open = async () => {
+      if (activeApp === "notes" && !await leaveNotes()) return;
+      openInboxPath(path);
+    };
+    const guard = hubLeaveGuardRef.current;
+    if (guard) guard(() => { void open(); });
+    else await open();
   }
   // Lane FTS: a file found by search opens in Files as a new entry, so Back returns to the search.
   async function openFileHit(documentId: string) {
@@ -2321,16 +2347,6 @@ export function App() {
   // Notifications off (D92): no provider, so every bell renders nothing and stops polling.
   const notificationsContext = isModuleEnabled(disabledModules, "notifications") ? { openList: () => { void openApp("notifications"); }, openPath: openNotificationPath } : null;
   const inboxNav = { role: session.user.role, openInbox: () => { void openApp("inbox"); }, onInbox: shownApp === "inbox" };
-  // The Inbox opens a proposal's target as a new entry: a note through the Notes loader, anything else by its route.
-  const openInboxPath = (path: string) => {
-    const route = parseRoute(path);
-    // A friendly note URL this tab has not named yet (D773) is found in the loaded list by its short id.
-    const pendingNote = route.app === "notes" && route.pending?.kind === "note" ? route.pending.ref : null;
-    const noteId = route.app === "notes" ? route.noteId ?? (pendingNote ? notes.find((item) => item.short_id === pendingNote)?.id ?? null : null) : null;
-    if (noteId) openLinkedNote(noteId);
-    else if (pendingNote) notify.warning("Note not found");
-    else openNotificationPath(path);
-  };
 
   // Wave 37: the Settings hub, one element for its account, Bin (Wave 38), and Team routes (moving
   // between them never remounts it). Its moves keep the app's section in step with the URL.
@@ -2349,6 +2365,7 @@ export function App() {
     onBinRestored={(item) => { if (item.type === "note") void loadNavigation().catch(() => undefined); }}
     highlightModule={highlightModule}
     onHighlightDone={() => setHighlightModule(null)}
+    leaveGuardRef={hubLeaveGuardRef}
   />;
 
   // While two-factor setup is required, Settings → Security is the only screen.

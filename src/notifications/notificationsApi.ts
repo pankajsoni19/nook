@@ -40,6 +40,16 @@ export function safeNotificationPath(href: unknown) {
   return path;
 }
 
+/**
+ * D1260: the in-app path an embed's "Open" (a goal, form, townhall, whiteboard card) or a sheet's
+ * "Open in …" asks for through the nook:open-path event, checked as a notification's href is; null
+ * for anything the router would not open as written (the event is then ignored).
+ */
+export function inAppOpenPath(href: unknown): string | null {
+  const path = safeNotificationPath(href);
+  return path === "/notifications" && (typeof href !== "string" || href.toLowerCase() !== "/notifications") ? null : path;
+}
+
 /** "Just now", "5 min ago", "3 h ago", "2 days ago". */
 export function notificationAge(createdAt: string, nowMs = Date.now()) {
   const minutes = Math.max(0, Math.floor((nowMs - Date.parse(createdAt)) / 60_000));
