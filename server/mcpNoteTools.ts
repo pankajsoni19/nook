@@ -1,3 +1,4 @@
+import { notePath } from "./friendlyPaths";
 import * as z from "zod/v4";
 import { ownedNote } from "./access";
 import { restoreItem } from "./bin";
@@ -18,7 +19,7 @@ import { folderSchema } from "./validation";
  */
 
 const uuid = z.string().uuid();
-const noteUrl = (noteId: string) => `${config.appOrigin}/notes/${noteId}`;
+const noteUrl = (noteId: string) => `${config.appOrigin}${notePath(noteId)}`;
 const viaKey = <T>(key: McpKeyContext, operation: () => T) => withAuditContext({ via: "mcp", keyId: key.keyId }, operation);
 
 /** Who can read the note now: its own sharing when it overrides its folder, else its folder's. */

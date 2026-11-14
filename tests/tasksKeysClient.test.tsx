@@ -17,7 +17,7 @@ const noop = () => undefined;
 
 test("/tasks/MYT-12 is a short-link route in upper case; Back from it is the board list; board ids still win", () => {
   const route = parseRoute("/tasks/myt-12");
-  expect(route).toEqual({ app: "tasks", boardId: null, cardId: null, cardKey: "MYT-12" });
+  expect(route).toEqual({ app: "tasks", boardId: null, cardId: null, pending: { kind: "card", ref: "MYT-12", url: "/tasks/MYT-12" } });
   expect(formatRoute(route)).toBe("/tasks/MYT-12");
   expect(parseRoute("/tasks/MYT-012")).toEqual({ app: "tasks", boardId: null, cardId: null });
   expect(parseRoute("/tasks/MYT-12/extra")).toEqual({ app: "tasks", boardId: null, cardId: null });
@@ -42,10 +42,10 @@ test("Copy link copies the short link when the key is known, the permalink other
   await copyCardLink(board, card, notify, async (text) => { copied = text; return true; }, null);
   expect(copied).toBe(`https://nook.example/tasks/${board}/card/${card}`);
   await copyCardKey("MYT-12", notify, async (text) => { copied = text; return true; });
-  expect([copied, calls.at(-1)]).toEqual(["MYT-12", ["success", "Copied MYT-12"]]);
+  expect([copied, calls.at(-1)]).toEqual(["https://nook.example/tasks/MYT-12", ["success", "Copied link to MYT-12"]]);
   if (saved === undefined) delete host.window;
   else host.window = saved;
-  expect(renderToStaticMarkup(<CardKeyButton cardKey="MYT-12" notify={notifier} />)).toContain('aria-label="MYT-12: copy the card&#x27;s key"');
+  expect(renderToStaticMarkup(<CardKeyButton cardKey="MYT-12" notify={notifier} />)).toContain('aria-label="MYT-12: copy a link to this card"');
   expect(renderToStaticMarkup(<CopyCardLinkButton boardId={board} cardId={card} cardKey="MYT-12" notify={notifier} />)).toContain("Copy link");
 });
 

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createUser, db, request, type Session } from "./support/harness";
+const { boardPath, cardPath, collectionPath, collectionRowPath, documentPath, notePath, reportPath, sprintsPath, whiteboardPath } = await import("../server/friendlyPaths");
 
 const mail = await import("../server/mail");
 const { runMailDispatch } = await import("../server/mail/dispatcher");
@@ -68,7 +69,7 @@ describe("Shared with you", () => {
     await runMailDispatch({ nowMs: later() });
     const firstMail = mailFor(first)[0]!;
     expect(firstMail.subject).toBe("Priya Share shared 2 items with you");
-    expect(firstMail.text).toContain(`/tasks/${boardId}`);
+    expect(firstMail.text).toContain(boardPath(boardId));
     expect(firstMail.text).toContain("/calendar");
     expect(mailFor(second)[0]!.subject).toBe("Priya Share shared ‘Launch’ with you");
     // Other files expect no calendar shared with everyone.
@@ -97,7 +98,7 @@ describe("Tasks", () => {
     await runMailDispatch({ nowMs: later() });
     const [message] = mailFor(member);
     expect(message!.subject).toBe("Priya Tasks assigned you 2 cards on Launch");
-    expect(message!.text).toContain(`/tasks/${boardId}/card/${cards[0]}`);
+    expect(message!.text).toContain(cardPath(boardId, cards[0]!));
     expect(message!.text).toContain("/tasks/my");
   });
 
@@ -129,7 +130,7 @@ describe("Tasks", () => {
     expect(message!.subject).toBe("2 new comments on ‘Discuss’");
     expect(message!.text).toContain("Looks good, see the doc");
     expect(message!.html).not.toContain("<script>");
-    expect(message!.text).toContain(`/tasks/${boardId}/card/${card.id}`);
+    expect(message!.text).toContain(cardPath(boardId, card.id));
     expect(message!.headers!["List-Unsubscribe"]).toContain("/api/mail/unsubscribe?t=");
   });
 });

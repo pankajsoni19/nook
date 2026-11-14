@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createUser, db, request, type Session } from "./support/harness";
+const { boardPath, cardPath, collectionPath, collectionRowPath, documentPath, notePath, reportPath, sprintsPath, whiteboardPath } = await import("../server/friendlyPaths");
 
 const mail = await import("../server/mail");
 const { runMailDispatch } = await import("../server/mail/dispatcher");
@@ -116,7 +117,7 @@ describe("digest delivery", () => {
     await runMailDispatch({ nowMs: next + 1000 });
     const message = sent.find((item) => item.to === user.email)!;
     expect(message.subject).toStartWith("Your day in Nook: ");
-    expect(message.text).toContain(`/tasks/${board.body.board.id}/card/${card.id}`);
+    expect(message.text).toContain(cardPath(board.body.board.id, card.id));
     expect(message.text).toContain(`/calendar/event/${event.id}`);
     expect(message.headers?.["List-Unsubscribe"]).toContain("/api/mail/unsubscribe?t=");
     expect(Date.parse(readEmailPrefs(user.userId).nextDigestAt!)).toBe(nextDigestAt({ digest: "daily", digestLocalTime: "08:00", tz: "Asia/Kolkata" }, next + 1000)!);
@@ -155,7 +156,7 @@ describe("digest delivery", () => {
     expect(message.text).toContain("Kept board");
     expect(message.text).toContain("from Digest Sharer");
     expect(message.text).not.toContain("Revoked board");
-    expect(message.text).toContain(`/tasks/${kept.id}`);
+    expect(message.text).toContain(boardPath(kept.id));
   });
 
   test("the digest never lands in quiet hours: the saved time moves to their end", async () => {

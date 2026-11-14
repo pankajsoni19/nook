@@ -4,7 +4,7 @@ import { ACCESS_KINDS, type AccessKind, type Level } from "./levels";
 import { vaultTitleFor } from "../vault/access";
 import { sharedTitleFor } from "../agents/sharing";
 import { deviceLabelFromCode } from "../deviceLabels";
-import { paths } from "../mail/links";
+import { idPaths, paths } from "../mail/links";
 import { mayChatNow } from "../agents/status";
 import { userRole } from "../team/userRole";
 import { describeKeyAdditions } from "../keyGrants";
@@ -112,18 +112,18 @@ const ITEM_LISTS: Record<AccessKind, () => string> = {
   note: paths.notesList, folder: paths.notesList, document: paths.filesList, board: paths.boards, task_view: paths.boards, collection: paths.collections, calendar: paths.calendar
 };
 
-/** One item of an access kind, as the recipient may open it: the item, or its module's list. */
+/** One item of an access kind, as the recipient may open it: the item (by id, T68), or its module's list. */
 function itemPath(kind: AccessKind, id: string, recipientId: string) {
   const item = presentItem(kind, id, recipientId);
   const list = ITEM_LISTS[kind]();
   if (!item || item.titleHidden) return list;
   switch (kind) {
-    case "note": return built(() => paths.note(id), list);
+    case "note": return built(() => idPaths.note(id), list);
     case "folder": return built(() => paths.noteFolder(id), list);
-    case "document": return built(() => paths.file(id), list);
-    case "board": return built(() => paths.board(id), list);
+    case "document": return built(() => idPaths.file(id), list);
+    case "board": return built(() => idPaths.board(id), list);
     case "task_view": return built(() => paths.taskView(id), list);
-    case "collection": return built(() => paths.collection(id), list);
+    case "collection": return built(() => idPaths.collection(id), list);
     // Calendars have no page of their own: the calendar opens with every calendar the reader has.
     case "calendar": return list;
   }

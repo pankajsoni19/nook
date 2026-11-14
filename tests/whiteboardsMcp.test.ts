@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { createUser, db, request, type Session } from "./support/harness";
+const { boardPath, cardPath, collectionPath, collectionRowPath, documentPath, notePath, reportPath, sprintsPath, whiteboardPath } = await import("../server/friendlyPaths");
 
 const { createApiKey } = await import("../server/apiKeys");
 const { invokeMcpToolForTests, loadLiveKey, mcpToolSpecs, toolVisible } = await import("../server/mcpTools");
@@ -65,7 +66,7 @@ describe("whiteboards MCP", () => {
     const listed = await call(reader, "list_whiteboards");
     const listedBoard = listed.value.whiteboards.find((item: Json) => item.id === board.id);
     expect(listedBoard).toMatchObject({ id: board.id, name: "Retro", revision: 2, elementCount: 1 });
-    expect(listedBoard.url).toEndWith(`/whiteboards/${board.id}`);
+    expect(listedBoard.url).toEndWith(whiteboardPath(board.id));
     const searched = await call(reader, "list_whiteboards", { query: "shipping" });
     expect(searched.value.whiteboards.map((item: Json) => item.id)).toEqual([board.id]);
     const read = await call(reader, "read_whiteboard", { id: board.id });

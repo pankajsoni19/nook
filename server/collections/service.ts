@@ -122,6 +122,8 @@ export const schemaOf = (collection: Pick<CollectionRecord, "schema_json">) => p
 // Collections
 
 export type CollectionSummary = {
+  /** Friendly URLs (D777). */
+  short_id?: string | null;
   id: string;
   name: string;
   icon: string;
@@ -142,7 +144,7 @@ export type CollectionSummary = {
 export type CollectionDetail = CollectionSummary & { fields: FieldDefinition[]; schema_version: number };
 
 const summarySelect = `
-  SELECT c.id, c.name, c.icon, c.owner_id, u.display_name AS owner_name,
+  SELECT c.id, c.short_id, c.name, c.icon, c.owner_id, u.display_name AS owner_name,
          CASE WHEN c.owner_id = $userId THEN 1 ELSE 0 END AS is_owner,
          c.visibility, c.share_role, c.schema_json, c.schema_version, c.template_id,
          (SELECT COUNT(*) FROM collection_rows r WHERE r.collection_id = c.id AND r.deleted_at IS NULL) AS row_count,

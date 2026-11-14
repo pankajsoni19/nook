@@ -1,3 +1,4 @@
+import { notePath } from "./friendlyPaths";
 import { createHash } from "node:crypto";
 import type { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
@@ -304,7 +305,7 @@ const noteReadTools: McpToolSpec[] = [
 
 // --------------------------------------------------------- notes:write-draft
 
-const noteUrl = (noteId: string) => `${config.appOrigin}/notes/${noteId}`;
+const noteUrl = (noteId: string) => `${config.appOrigin}${notePath(noteId)}`;
 
 function assertMarkdownSize(markdown: string) {
   if (Buffer.byteLength(markdown, "utf8") > config.maxMarkdownBytes) {

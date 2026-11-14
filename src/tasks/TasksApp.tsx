@@ -15,8 +15,8 @@ import { DEFAULT_BOARD_QUERY, withBoardQuery, type BoardQuery, type BoardViewId 
 import type { TaskQuery } from "../../shared/taskQuery";
 import type { TaskView } from "./home/homeApi";
 import { boardLayoutOf, boardViewFilter, homeLayoutOf } from "./views/boardViewModel";
-import { lookupCardKey } from "./tasksApi";
-import { ApiError } from "../api";
+import { resolveLocation } from "../friendlyLinks";
+import { onRouteNames } from "../routeNames";
 import "../bin/bin.css";
 import "../files/files.css";
 import "./tasks.css";
@@ -197,21 +197,30 @@ export function TasksApp({ userId, displayName, navigate, onHome, onSettings, on
     go(tasksRoute(), true);
   }, [notify, go]);
 
-  // A short link, /tasks/MYT-12 (lane KEYS, D713): the card's own URL replaces the entry, so Back
-  // never lands on the short link again. A key this person cannot read is "Card not found" (T460).
-  const cardKey = route.cardKey ?? null;
+  // A board code or card key this tab has no name for yet (/tasks/MYT, /tasks/MYT-12, D713, D781):
+  // resolve it, then read the location again and replace the entry with the canonical URL (an old
+  // key or code becomes the current one). One this person cannot read is "not found" (T460, T490).
+  const pending = route.pending ?? null;
+  const pendingKey = pending ? `${pending.kind}:${pending.ref}` : null;
   useEffect(() => {
-    if (!cardKey) return;
+    if (!pending) return;
     let live = true;
-    lookupCardKey(cardKey).then((found) => {
-      if (live) go(tasksRoute(found.boardId, found.cardId), true);
-    }, (reason) => {
+    resolveLocation().then((resolved) => {
       if (!live) return;
-      notify.warning(reason instanceof ApiError && (reason.status === 404 || reason.status === 400) ? `Card ${cardKey} not found` : "Could not open that card");
+      if (resolved === "missing" || resolved.app !== "tasks" || resolved.pending) {
+        notify.warning(pending.kind === "card" ? `Card ${pending.ref} not found` : "Board not found");
+        go(tasksRoute(), true);
+      } else go(resolved, true);
+    }, () => {
+      if (!live) return;
+      notify.warning(pending.kind === "card" ? "Could not open that card" : "Could not open that board");
       go(tasksRoute(), true);
     });
     return () => { live = false; };
-  }, [cardKey, go, notify]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed by the link, not the route object
+  }, [pendingKey, go, notify]);
+  // The address bar may be canonicalized in place (routeNames.ts): keep this visit's entry log on it.
+  useEffect(() => onRouteNames(() => noteEntry(false)), [noteEntry]);
   // The open card moved to another board (D716), or an old link named the wrong board: follow it there.
   const followCard = useCallback((boardId: string, cardId: string) => go(tasksRoute(boardId, cardId), true), [go]);
 
@@ -222,8 +231,8 @@ export function TasksApp({ userId, displayName, navigate, onHome, onSettings, on
       <AccountActions displayName={displayName} onSettings={onSettings} onSignOut={onSignOut} />
     </header>
     <ReadOnlyBanner />
-    {cardKey && !route.boardId
-      ? <p className="bin-loading" role="status">Opening {cardKey}…</p>
+    {pending && !route.boardId
+      ? <p className="bin-loading" role="status">Opening {pending.kind === "card" ? pending.ref : "the board"}…</p>
       : route.boardId
       ? <BoardView key={route.boardId} userId={userId} boardId={route.boardId} openCardId={route.cardId} openCardFull={route.full === true} onExpandCard={expandCard} onCollapseCard={collapseCard} onOpenCard={openCard} onCloseCard={closeCard} onBack={back} onMissing={onMissing} notify={notify} onBoardDeleted={() => go(tasksRoute(), true)} onOpenBoard={(boardId) => go(tasksRoute(boardId))}
         onCardElsewhere={followCard}

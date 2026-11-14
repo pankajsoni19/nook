@@ -1,3 +1,4 @@
+import { boardPath, cardPath, collectionPath, collectionRowPath, notePath } from "../friendlyPaths";
 import * as z from "zod/v4";
 import { ownedNote, readableNote } from "../access";
 import { readableEvent, editableCalendar, readableCalendar } from "../calendar/access";
@@ -84,11 +85,11 @@ type KindDef = {
 
 const cardHref = (cardId: unknown) => {
   const row = db.query("SELECT board_id FROM cards WHERE id = ?").get(lower(cardId)) as { board_id: string } | null;
-  return row ? `/tasks/${row.board_id}/card/${lower(cardId)}` : null;
+  return row ? cardPath(row.board_id, lower(cardId)) : null;
 };
 const rowHref = (rowId: unknown) => {
   const row = db.query("SELECT collection_id FROM collection_rows WHERE id = ?").get(lower(rowId)) as { collection_id: string } | null;
-  return row ? `/collections/${row.collection_id}/row/${lower(rowId)}` : null;
+  return row ? collectionRowPath(row.collection_id, lower(rowId)) : null;
 };
 
 const tool = (name: string): McpToolSpec => {
@@ -174,7 +175,7 @@ const commentOnCard = tool("comment_on_card");
 
 function cardRef(result: unknown): ProposalRef {
   const card = (result as { card: { id: string; board_id: string } }).card;
-  return { type: "card", id: card.id, href: `/tasks/${card.board_id}/card/${card.id}` };
+  return { type: "card", id: card.id, href: cardPath(card.board_id, card.id) };
 }
 
 const tasksKinds = {
@@ -210,7 +211,7 @@ const tasksKinds = {
       return column ? `${board.name} › ${column.name}` : board.name;
     },
     digest: (payload) => `New card${payload.dueOn ? `, due ${String(payload.dueOn)}` : ""}`,
-    targetHref: (proposal) => `/tasks/${lower(proposal.payload.boardId)}`
+    targetHref: (proposal) => boardPath(lower(proposal.payload.boardId))
   },
   card_update: {
     scope: "tasks:read",
@@ -255,7 +256,7 @@ const tasksKinds = {
     apply: async (approverId, proposal) => {
       const result = await commentOnCard.handler(parsed(commentOnCard, proposal.payload), approverKey(approverId, proposal)) as { comment: { card_id: string } };
       const boardId = (db.query("SELECT board_id FROM cards WHERE id = ?").get(result.comment.card_id) as { board_id: string }).board_id;
-      return { type: "card", id: result.comment.card_id, href: `/tasks/${boardId}/card/${result.comment.card_id}` };
+      return { type: "card", id: result.comment.card_id, href: cardPath(boardId, result.comment.card_id) };
     },
     preview: (viewerId, proposal) => {
       const found = readableCard(lower(proposal.payload.cardId), viewerId);
@@ -339,7 +340,7 @@ const updateRowTool = tool("update_row");
 const rowRef = (result: unknown): ProposalRef => {
   const rowId = (result as { rowId: string }).rowId;
   const row = db.query("SELECT collection_id FROM collection_rows WHERE id = ?").get(rowId) as { collection_id: string };
-  return { type: "row", id: rowId, href: `/collections/${row.collection_id}/row/${rowId}` };
+  return { type: "row", id: rowId, href: collectionRowPath(row.collection_id, rowId) };
 };
 
 /** Proposed values keyed by the field's current name where the reference is a field id. */
@@ -374,7 +375,7 @@ const collectionKinds = {
     },
     targetLabel: (viewerId, proposal) => readableCollection(lower(proposal.payload.collectionId), viewerId)?.name ?? null,
     digest: (payload) => `New row, ${Object.keys(payload.values as object).length} value${Object.keys(payload.values as object).length === 1 ? "" : "s"}`,
-    targetHref: (proposal) => `/collections/${lower(proposal.payload.collectionId)}`
+    targetHref: (proposal) => collectionPath(lower(proposal.payload.collectionId))
   },
   row_update: {
     scope: "collections:read",
@@ -502,7 +503,7 @@ const noteKinds = {
       return note && note.owner_id === viewerId && note.deleted_at === null ? note.title || "Untitled" : null;
     },
     digest: (payload) => draftPayload(payload).created ? "New note" : "Draft changes",
-    targetHref: (proposal) => `/notes/${lower(draftPayload(proposal.payload).noteId)}`
+    targetHref: (proposal) => notePath(lower(draftPayload(proposal.payload).noteId))
   }
 } satisfies Record<string, KindDef>;
 

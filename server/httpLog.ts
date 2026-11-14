@@ -25,8 +25,17 @@ export const noteRequestError = (request: Request, error: unknown) => { errors.s
 export const newRequestId = () => Buffer.from(crypto.getRandomValues(new Uint8Array(6))).toString("hex");
 
 const ID_SEGMENT = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|\d+|[0-9a-f]{16,}|(?=[A-Za-z0-9_-]*\d)[A-Za-z0-9_-]{16,}|[A-Za-z0-9_-]{32,})$/i;
-/** A raw path with ids (UUIDs, numbers, long tokens) replaced by :id. */
+/**
+ * A raw path with ids (UUIDs, numbers, long tokens) replaced by :id. An app page (anything outside
+ * /api and /mcp) keeps only its first segment: friendly URLs carry titles, folder names, board codes,
+ * and card keys (/notes/engineering/release-checklist-3f9x2ab01k), which the log never holds (T491).
+ */
 export function templatePath(path: string) {
+  if (!/^\/(api|mcp)(\/|$)/.test(path)) {
+    const [first, ...rest] = path.split("/").filter(Boolean);
+    if (first === undefined) return "/";
+    return `/${ID_SEGMENT.test(first) ? ":id" : first.slice(0, 40)}${rest.length ? "/:path" : ""}`;
+  }
   return path.split("/").map((segment) => ID_SEGMENT.test(segment) ? ":id" : segment).join("/").slice(0, 160);
 }
 

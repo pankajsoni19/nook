@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { createUser, db, request, type Session } from "./support/harness";
+const { boardPath, cardPath, collectionPath, collectionRowPath, documentPath, notePath, reportPath, sprintsPath, whiteboardPath } = await import("../server/friendlyPaths");
 import { api, auditRows, call, errorCode, makeKey, ok, toolNames } from "./support/mcpClient";
 
 const { resetMcpLimits, consumeMcpLimits } = await import("../server/mcpRateLimit");
@@ -71,7 +72,7 @@ describe("publish_note_draft (D173)", () => {
     const published = await ok(key, "publish_note_draft", { noteId: created.noteId, revision: created.revision });
     expect(published).toMatchObject({ noteId: created.noteId, version: 1, audience: "private" });
     expect(typeof published.publishedAt).toBe("string");
-    expect(published.url).toContain(`/notes/${created.noteId}`);
+    expect(published.url).toContain(notePath(created.noteId));
     expect(noteRow(created.noteId)).toMatchObject({ current_version: 1, draft_revision: null, draft_mcp_key_id: null });
     const search = await api(owner, "GET", `/search?q=zebrafinch`);
     expect(search.status).toBe(200);

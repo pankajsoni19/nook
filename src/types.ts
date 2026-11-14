@@ -16,6 +16,8 @@ export type Folder = {
 };
 export type NoteSummary = {
   id: string;
+  /** Friendly URLs (D777): the short id of /notes/<folder>/<title>-<shortid>. */
+  short_id?: string;
   owner_id: string;
   folder_id: string | null;
   title: string;
@@ -53,6 +55,8 @@ export type Visibility = "private" | "selected" | "all_users";
 export type PreviewKind = "image" | "pdf" | "text" | "audio" | "video" | "none";
 export type DocumentSummary = {
   id: string;
+  /** Friendly URLs (D777). */
+  short_id?: string;
   owner_id: string;
   owner_name: string;
   is_owner: 0 | 1;

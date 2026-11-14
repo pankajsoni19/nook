@@ -2739,6 +2739,19 @@ Migration **061** (`report_favorites`, the `reports_status` and `reports_live_re
 
 Audited as `reports.report.star` and `reports.report.unstar` (only when the star changes). MCP: `list_reports` takes `ownerId` (`me` or an id), `statuses`, `datasourceId`, `scheduled`, `favorites`, `shared`, `folderId` (or `unfiled`) with `subtree`, `cursor`, and `limit` ≤ 100, and answers `{ reports: [{ …, owner, favorite }], nextCursor }`; `list_report_folders` adds `counts.favorites` and `owners`. `star_report` and `unstar_report` (`reports:write`, counted in `report_write`, audited with the key; never offered to agents). URLs: `/reports/favorites`, and the list's filters in the query: `?owner=&status=&datasource=&schedule=on|off`.
 
+## Friendly URLs: GET /api/links/:kind/:ref (lane URLS, D770–D789, migration 083)
+
+docs/plan/FRIENDLY_URLS.md. Session only (like every `/api` route).
+
+| Method and path | Who | Response | Errors |
+| --- | --- | --- | --- |
+| `GET /api/links/:kind/:ref` | anyone who can read the item now | `{ id, title }` for `note`, `file`, `whiteboard`, `collection`, `report`; `{ id, code }` for `board` (the board's current code); `Cache-Control: no-store` | 404 `{"error":"Not found"}` for an unknown, binned, unreadable, or malformed ref or kind, identical in every case (T490) |
+
+- **`ref`**: a short id (`3f9x2ab01k`), a whole URL segment ending in one (`release-checklist-3f9x2ab01k`, any slug, any case), or for `board` a board code, current or former (D714). At most 200 characters of `[A-Za-z0-9._~%-]`.
+- **Kinds** check with each module's own read rule: notes `readableNote`; files `readableDocumentSummary` (never a whiteboard); whiteboards `readableWhiteboard`; collections `readableCollection`; reports `readableReport`; boards `readableBoard`. Card keys use `GET /api/tasks/keys/:key` (D713).
+- **`short_id`** (migration 083) is returned on: `GET /api/notes` rows (`short_id`), every document summary (`/api/files`, `/api/files/:id`, whiteboard summaries: `short_id`), collection summaries and details (`short_id`), and report summaries and details (`shortId`). Ten characters, lowercase base36, first a digit; never changes.
+- **Links the server writes** (D780): mail `/tasks/<KEY>`, `/tasks/<CODE>`, `/tasks/<CODE>/sprints`, `/notes/<slug>-<shortid>`, `/files/…`, `/whiteboards/…`, `/collections/…`; Inbox `targetHref` and applied `ref.href` the same; MCP tool `url` fields for notes, whiteboards, collections (and rows: `/collections/<slug>-<shortid>/row/<rowId>`), and reports. The bell's access notices stay id-only (T68). Every builder falls back to the UUID path for a row without a code or short id; every UUID path still opens.
+
 ## Analytics reports: report organization phase 2 (owners and the shared folder tree)
 
 Migration **062** (`report_owners`; `report_folders` rebuilt without `owner_id`, with `created_by`). D481–D483, T389–T391. Supersedes Lane I's "the owner's private folders" above: folders are one tree for the whole workspace, they only group, and permissions live on each report.

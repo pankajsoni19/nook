@@ -83,7 +83,8 @@ import {
   type BoardDetail,
   type BoardSummary,
   type CardDetail,
-  type CardSummary
+  type CardSummary,
+  nameBoardCards
 } from "./tasksApi";
 import { cardKey } from "../../shared/boardKeys";
 import { useHistoryDialogGuard } from "./useHistoryDialogGuard";
@@ -1202,5 +1203,6 @@ export function BoardView({ userId, boardId, openCardId, openCardFull = false, o
 
 /** Each card's key from the board's code (D710), after the code changed in Board settings (D714). */
 function withBoardKeys(detail: BoardDetail): BoardDetail {
+  nameBoardCards(detail.board.id, detail.board.code, detail.cards);
   return { ...detail, cards: detail.cards.map((card) => ({ ...card, key: cardKey(detail.board.code, card.number) })) };
 }

@@ -93,6 +93,7 @@ import { passwordResetAvailable, registerPasswordChangeRoute, registerPasswordRe
 import { warnIfNoActiveAdmin } from "./team/service";
 import { GUEST_SHARE_DISABLED, legacyGuestShareBlocked, legacyShareLevels, writeDirectShares } from "./access/shares";
 import { registerItemAccessRoutes } from "./access/itemAccess";
+import { registerLinkRoutes } from "./friendlyLinks";
 import { hashInviteToken, InviteError, inviteForRegistration, previewInvite } from "./team/invites";
 import { can, mcpScopesForRole } from "./team/roles";
 import { ROLE_READ_ONLY_BODY, roleWriteGate } from "./team/writeGate";
@@ -699,7 +700,7 @@ app.get("/api/notes", (c) => {
   const folderId = c.req.query("folderId");
   if (folderId) uuid.parse(folderId);
   const rows = db.query(`
-    SELECT n.id, n.owner_id,
+    SELECT n.id, n.short_id, n.owner_id,
            ${visibleNoteFolderIdExpression} AS folder_id,
            n.title,
            CASE WHEN n.sharing_override = 0 THEN COALESCE(f.visibility, 'private') ELSE n.visibility END AS visibility,
@@ -985,6 +986,8 @@ registerTeamRoutes(app);
 registerInboxRoutes(app);
 // The Access sheet's GET/PUT …/access for the seven shareable kinds (Wave 32, access plan §C.5).
 registerItemAccessRoutes(app);
+// Friendly URLs (D775): GET /api/links/:kind/:ref resolves a short id or board code the caller can read.
+registerLinkRoutes(app);
 
 app.onError((error, c) => {
   if (error instanceof HTTPException) return c.json({ error: error.message }, error.status);

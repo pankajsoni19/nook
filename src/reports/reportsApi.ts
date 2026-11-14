@@ -1,3 +1,4 @@
+import { nameItems } from "../routeNames";
 import { api, ApiError } from "../api";
 import type { CatalogTable, ConnectionTest, DatasourceAgentUse, DatasourceChoice, DatasourceSummary, QueryOutcome, ReportDetail, ReportDuplicate, ReportFolder, ReportFolderTree, ReportListChoice, ReportListFilter, ReportListPage, ReportListSharing, ReportListSummary, ReportListVisibility, ReportSummary, SchemaSearchHit, SchemaSyncResult } from "../../shared/reports";
 import type { DocInput, DocServerChoice, DocState, GenerateStarted, GenerationRun } from "../../shared/reportsGenerate";
@@ -25,13 +26,13 @@ export function reportListSearch(query: ReportListQuery) {
   const text = params.toString().replace(/%2C/g, ",");
   return text ? `?${text}` : "";
 }
-export const listReports = (query: ReportListQuery = {}) => api<ReportListPage>(`/reports${reportListSearch(query)}`);
+export const listReports = (query: ReportListQuery = {}) => api<ReportListPage>(`/reports${reportListSearch(query)}`).then((page) => { nameItems("report", page.reports); return page; });
 /** D486: the caller's own star on a report they can open. */
 export const starReport = (id: string, favorite: boolean) => api<{ favorite: boolean }>(`/reports/${id}/favorite`, { method: favorite ? "PUT" : "DELETE", body: "{}" });
-export const getReport = (id: string) => api<{ report: ReportDetail }>(`/reports/${id}`);
+export const getReport = (id: string) => api<{ report: ReportDetail }>(`/reports/${id}`).then((result) => { nameItems("report", [result.report]); return result; });
 /** AGENTSQL (D598): a report from a chat's query result: the query, a table, and a fitting chart. */
 export const createReportFromChat = (input: { chatId: string; resultId: string; title: string; folderId?: string | null }) => api<{ report: ReportDetail; chart: boolean }>("/reports/from-chat", json("POST", input.folderId ? input : { chatId: input.chatId, resultId: input.resultId, title: input.title }));
-export const createReport = (title: string, datasourceId: string, folderId: string | null = null) => api<{ report: ReportDetail }>("/reports", json("POST", folderId ? { title, datasourceId, folderId } : { title, datasourceId }));
+export const createReport = (title: string, datasourceId: string, folderId: string | null = null) => api<{ report: ReportDetail }>("/reports", json("POST", folderId ? { title, datasourceId, folderId } : { title, datasourceId })).then((result) => { nameItems("report", [result.report]); return result; });
 
 // Lane I: the owner's report folders (the Reports home's left nav).
 export const listFolders = () => api<ReportFolderTree>("/reports/folders");
@@ -50,7 +51,7 @@ export const moveInList = (listId: string, reportId: string, place: { beforeId?:
 export const listChoices = (reportId: string) => api<{ lists: ReportListChoice[] }>(`/reports/${reportId}/lists`);
 export const getListSharing = (id: string) => api<{ sharing: ReportListSharing }>(`/reports/lists/${id}/sharing`);
 export const saveListSharing = (id: string, input: { visibility: ReportListVisibility; shares: Array<{ kind: "user" | "group"; id: string; level: "view" | "edit" }> }) => api<{ sharing: ReportListSharing }>(`/reports/lists/${id}/sharing`, json("PUT", input));
-export const updateReport = (id: string, patch: { title?: string; datasourceId?: string; expectedRevision: number }) => api<{ report: ReportDetail }>(`/reports/${id}`, json("PATCH", patch));
+export const updateReport = (id: string, patch: { title?: string; datasourceId?: string; expectedRevision: number }) => api<{ report: ReportDetail }>(`/reports/${id}`, json("PATCH", patch)).then((result) => { nameItems("report", [result.report]); return result; });
 export const duplicateReport = (id: string, body: { title?: string; folderId?: string | null }) => api<ReportDuplicate>(`/reports/${id}/duplicate`, json("POST", body));
 export const deleteReport = (id: string) => api<{ ok: true; purgeAfter: string }>(`/reports/${id}`, { method: "DELETE", body: "{}" });
 export const datasourceChoices = () => api<{ datasources: DatasourceChoice[] }>("/reports/datasources");

@@ -1,3 +1,4 @@
+import { nameItems } from "../routeNames";
 import { api, ApiError } from "../api";
 import type { ItemLevel } from "../access/accessLevels";
 
@@ -69,13 +70,13 @@ export type QueryRequest = { viewId?: string; sort?: SortSpec[]; filters?: Filte
 
 const json = (method: string, body: unknown): RequestInit => ({ method, body: JSON.stringify(body) });
 
-export const listCollections = () => api<{ collections: CollectionSummary[] }>("/collections");
+export const listCollections = () => api<{ collections: CollectionSummary[] }>("/collections").then((result) => { nameItems("collection", result.collections); return result; });
 export const listTemplates = () => api<{ templates: Template[] }>("/collections/templates");
 export const createCollection = (body: { name: string; templateId?: string; fields?: FieldInput[]; icon?: string }) =>
-  api<{ collection: CollectionDetail }>("/collections", json("POST", body));
+  api<{ collection: CollectionDetail }>("/collections", json("POST", body)).then((result) => { nameItems("collection", [result.collection]); return result; });
 export const getCollection = (collectionId: string) =>
-  api<{ collection: CollectionDetail; role: CollectionRole; views: CollectionView[] }>(`/collections/${collectionId}`);
-export const renameCollection = (collectionId: string, name: string) => api<{ collection: CollectionDetail }>(`/collections/${collectionId}`, json("PATCH", { name }));
+  api<{ collection: CollectionDetail; role: CollectionRole; views: CollectionView[] }>(`/collections/${collectionId}`).then((result) => { nameItems("collection", [result.collection]); return result; });
+export const renameCollection = (collectionId: string, name: string) => api<{ collection: CollectionDetail }>(`/collections/${collectionId}`, json("PATCH", { name })).then((result) => { nameItems("collection", [result.collection]); return result; });
 export const deleteCollection = (collectionId: string) => api<{ ok: true; purgeAfter: string }>(`/collections/${collectionId}`, json("DELETE", {}));
 export const saveSchema = (collectionId: string, fields: FieldInput[], schemaVersion: number) =>
   api<{ collection: CollectionDetail }>(`/collections/${collectionId}/schema`, json("PUT", { fields, schemaVersion }));

@@ -66,8 +66,9 @@ describe("migration 046 attachments", () => {
     // Every existing folder is ordinary (system_kind NULL), including one that happens to be named "Attachments" and is shared.
     expect(db.query("SELECT id, system_kind FROM folders ORDER BY id").all()).toEqual([{ id: "f1", system_kind: null }, { id: "f2", system_kind: null }]);
     expect((db.query("SELECT * FROM folders ORDER BY id").all() as Array<Record<string, unknown>>).map(({ system_kind: _skip, ...rest }) => rest)).toEqual(before.folders as Array<Record<string, unknown>>);
-    expect(db.query("SELECT * FROM documents ORDER BY id").all()).toEqual(before.documents);
-    expect(db.query("SELECT * FROM notes ORDER BY id").all()).toEqual(before.notes);
+    // 083 (friendly URLs) adds short_id after; every other column is as it was.
+    expect((db.query("SELECT * FROM documents ORDER BY id").all() as Array<Record<string, unknown>>).map(({ short_id: _shortId, ...rest }) => rest)).toEqual(before.documents as Array<Record<string, unknown>>);
+    expect((db.query("SELECT * FROM notes ORDER BY id").all() as Array<Record<string, unknown>>).map(({ short_id: _shortId, ...rest }) => rest)).toEqual(before.notes as Array<Record<string, unknown>>);
     // The ordinary shared folder keeps working as before.
     db.query("UPDATE folders SET name = 'Renamed', visibility = 'selected' WHERE id = 'f2'").run();
     db.query("INSERT INTO folder_shares (folder_id, user_id, created_at) VALUES ('f2', 'u1', ?)").run(at);

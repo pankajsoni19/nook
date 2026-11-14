@@ -377,6 +377,8 @@ export type RunStatus = typeof RUN_STATUSES[number];
 
 export type ReportSummary = {
   id: string;
+  /** Friendly URLs (D777): the short id of /reports/<title-slug>-<shortid>. */
+  shortId?: string;
   title: string;
   datasourceId: string | null;
   datasourceName: string | null;

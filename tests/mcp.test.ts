@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { createUser, db, origin, request, type Session } from "./support/harness";
+const { boardPath, cardPath, collectionPath, collectionRowPath, documentPath, notePath, reportPath, sprintsPath, whiteboardPath } = await import("../server/friendlyPaths");
 
 const { createMcpApiKey } = await import("../server/mcp");
 const { setKeyScopesForTests } = await import("../server/apiKeys");
@@ -294,7 +295,7 @@ describe("MCP draft-only note writes", () => {
     const created = await callTool(key, "create_note", { markdown: "# Agent plan\n\nFeed the axolotl." });
     expect(created.isError).toBe(false);
     const noteId = created.value.noteId as string;
-    expect(created.value).toMatchObject({ revision: 1, title: "Agent plan", url: `${origin}/notes/${noteId}` });
+    expect(created.value).toMatchObject({ revision: 1, title: "Agent plan", url: `${origin}${notePath(noteId)}` });
     expect(versionCount(noteId)).toBe(0);
     expect(db.query("SELECT current_version, draft_mcp_key_id FROM notes WHERE id = ?").get(noteId)).toEqual({ current_version: 0, draft_mcp_key_id: key.id });
     expect(auditRows(noteId, "mcp.note_create")).toEqual([{ via: "mcp", keyId: key.id }]);

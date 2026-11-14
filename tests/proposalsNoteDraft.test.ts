@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { createUser, db, origin, request, type Session } from "./support/harness";
+const { boardPath, cardPath, collectionPath, collectionRowPath, documentPath, notePath, reportPath, sprintsPath, whiteboardPath } = await import("../server/friendlyPaths");
 
 const { createMcpApiKey } = await import("../server/mcp");
 const { resetMcpLimits } = await import("../server/mcpRateLimit");
@@ -66,7 +67,7 @@ describe("note_draft proposals", () => {
     expect(detail.body.proposal.preview).toEqual({ markdown: { published: "# Weekly\n\nOld line", base: "# Weekly\n\nOld line", baseKind: "published", draft: "# Weekly\n\nNew line", draftChanged: false } });
 
     const approved = await api(owner, "POST", `/inbox/proposals/${item.proposalId}/approve`, {});
-    expect(approved.body).toMatchObject({ status: "applied", ref: { type: "note", id: noteId, href: `/notes/${noteId}` } });
+    expect(approved.body).toMatchObject({ status: "applied", ref: { type: "note", id: noteId, href: notePath(noteId) } });
     const after = await api(owner, "GET", `/notes/${noteId}`);
     expect(after.body.note.current_version).toBe(2);
     expect(after.body.note.hasDraft).toBe(false);
