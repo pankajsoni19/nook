@@ -90,10 +90,13 @@ test.skipIf(!sitePresent)("old index.html#whats-new-x-y-z links redirect to rele
 
 test.skipIf(!sitePresent)("every module a person can turn on has a section and a nav entry on index.html", () => {
   const { "index.html": index } = pages();
-  const section: Partial<Record<ModuleId, string>> = { notes: "editor", agents: "chat" };
-  // Workspace modules get their sections when Wave 3 finalizes the docs (docs/plan/WORKSPACE_MODULES.md §F.3).
-  const missing = MODULE_IDS.filter((id) => !(WORKSPACE_MODULE_IDS as readonly string[]).includes(id)).map((id) => section[id] ?? id).filter((id) => !index.html.includes(`<section id="${id}"`) || !index.nav.includes(`#${id}`));
+  // A module whose section id differs from its module id; the workspace modules use the words people read (§G.1 Q7).
+  const section: Partial<Record<ModuleId, string>> = { notes: "editor", agents: "chat", checkins: "standups", crm: "contacts" };
+  const missing = MODULE_IDS.map((id) => section[id] ?? id).filter((id) => !index.html.includes(`<section id="${id}"`) || !index.nav.includes(`#${id}`));
   expect(missing).toEqual([]);
+  // Every workspace module also has a card under Apps, and the wiring and public pages have their own sections.
+  for (const id of WORKSPACE_MODULE_IDS) expect(index.html).toContain(`<h3><a href="#${section[id] ?? id}">`);
+  for (const id of ["connections", "public-pages"]) expect(index.nav).toContain(`#${id}`);
   // Knowledge and the provider setup behind Chat, Knowledge, and Reports.
   for (const id of ["knowledge", "ai-providers", "vault-key"]) expect(index.nav).toContain(`#${id}`);
 });

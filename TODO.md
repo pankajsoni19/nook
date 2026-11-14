@@ -17,7 +17,7 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 ## Leftovers (lane W3-WIRE, D1049)
 
 - [ ] `scripts/workspaceAgentEval.ts` (scripted provider: log time from a summary, check in on a goal, update a deal, answer a standup, all as proposals) and its real-model run.
-- [ ] Team page "Book time with …" button; docs site "Using Nook" sections for Forms, Time, Goals, Standups, Contacts, Bookings, and Townhall (`tests/docsSite.test.ts`).
+- [ ] Team page "Book time with …" button.
 - [ ] A time-entry change hook for the Goals `time` source (it refreshes on reads and the 5-minute sweep today); a card face goal badge (needs a batched read).
 
 ## Waiting on the operator

@@ -1443,6 +1443,8 @@ Threats: **T620** anonymity of askers and respondents (D1100, D1101: no actor, i
 | D1205 | Helpers live in `server/people/summaries.ts` (`userSummaries`, `isPickablePerson`, `pickablePersonByEmail`, `pickablePersonByName`, `readableContactIdByReference`); `server/crm` is unchanged. |
 | D1206 | Contacts custom fields: `GET /api/people/resolve?users=&contacts=` (≤ 200 each) names the ids a record holds; tables and record pages show names (cached per session, `src/crm/relationNames.ts`); a contact field's editor searches the whole book with `PersonPicker` instead of the first 100 contacts; the filter sheet offers is / is not with a picker. CRM MCP tools still take and return ids. |
 
+- **Docs site "Using Nook" sections** (D1049's docs item; branch `docs/site-workspace-modules`, no code or decision ids): `site/index.html` has a section, nav entry, and Apps card per module (`#forms`, `#time`, `#goals`, `#standups`, `#contacts`, `#bookings`, `#townhall`; Standups and Contacts use the words people read, §G.1 Q7), plus `#connections` (the W3 wiring) and `#public-pages` (the public URLs and the Settings → Workspace switches), the modules' rows in the MCP permission table, and their URLs. `docs/USING.md` has the matching sections and a "Workspace module tools" list. `tests/docsSite.test.ts` now requires every module, workspace ones included. Screenshots (`docs/images/*-dark.png`, 1440 × 900) were taken from a seeded QA server.
+
 ## E. Design and UX guidelines
 
 Nook is dark-only with a warm amber accent (`--yellow #f6c453`, focus `--field-focus`), panels `#111113`/`#18181b`, borders `#29292d`, muted `#929299`, 8–10 px radii, `.84rem` controls, sheets on phones, and lucide icons. New modules must be indistinguishable in craft from Tasks and Reports.
