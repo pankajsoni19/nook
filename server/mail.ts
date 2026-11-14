@@ -14,6 +14,8 @@
  * - Logs name the purpose, a hashed recipient, and the provider's message id (or error name and
  *   HTTP status). Never the address, the subject, the body (links can be credentials), or the
  *   API key. The Resend SDK's own error logging is silenced (see `quietResend`).
+ * - Optional text attachments (calendar invitations, D1053), checked by `attachmentProblem` before
+ *   any limit is taken; every transport gets them (Resend as files, the file transport in its JSON).
  * - Tests install a transport with `setMailTransportForTests`; MAIL_TRANSPORT=file (development only)
  *   writes each message to MAIL_FILE_PATH instead of sending it.
  */
@@ -25,7 +27,32 @@ import { logger } from "./log";
 
 const slog = logger("mail");
 
-export type MailMessage = { to: string; subject: string; text: string; html?: string; headers?: Record<string, string> };
+/**
+ * A file sent with a message (D1053): text content only (calendar invitations, ICS), at most
+ * MAIL_ATTACHMENT_LIMITS.count per message and MAIL_ATTACHMENT_LIMITS.bytes in all, a plain file name,
+ * and a content type from a short allowlist (`text/calendar` with an optional charset and method).
+ * Templates render it at send time from data re-read then, so the outbox payload never stores it.
+ */
+export type MailAttachment = { filename: string; contentType: string; content: string };
+export const MAIL_ATTACHMENT_LIMITS = { count: 3, bytes: 256 * 1024 } as const;
+const ATTACHMENT_TYPE = /^text\/calendar(; ?charset=utf-8)?(; ?method=(PUBLISH|REQUEST|CANCEL))?$/i;
+const ATTACHMENT_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,59}\.ics$/;
+
+/** Why a message's attachments are refused (T598), or null when they are fine (or absent). */
+export function attachmentProblem(attachments: readonly MailAttachment[] | undefined): string | null {
+  if (!attachments?.length) return null;
+  if (attachments.length > MAIL_ATTACHMENT_LIMITS.count) return "too_many";
+  let bytes = 0;
+  for (const attachment of attachments) {
+    if (!ATTACHMENT_NAME.test(attachment.filename)) return "bad_name";
+    if (!ATTACHMENT_TYPE.test(attachment.contentType)) return "bad_type";
+    if (typeof attachment.content !== "string" || !attachment.content) return "empty";
+    bytes += new TextEncoder().encode(attachment.content).byteLength;
+  }
+  return bytes > MAIL_ATTACHMENT_LIMITS.bytes ? "too_large" : null;
+}
+
+export type MailMessage = { to: string; subject: string; text: string; html?: string; headers?: Record<string, string>; attachments?: MailAttachment[] };
 export type MailSendRequest = MailMessage & { from: string; idempotencyKey: string };
 /** Delivers one message or throws. `signal` aborts at the timeout. */
 export type MailTransport = (message: MailSendRequest, signal: AbortSignal) => Promise<{ id: string }>;
@@ -79,7 +106,8 @@ export function resendTransport(apiKey: string, baseUrl?: string): MailTransport
       subject: message.subject,
       text: message.text,
       ...(message.html ? { html: message.html } : {}),
-      ...(message.headers ? { headers: message.headers } : {})
+      ...(message.headers ? { headers: message.headers } : {}),
+      ...(message.attachments?.length ? { attachments: message.attachments.map((file) => ({ filename: file.filename, content: Buffer.from(file.content, "utf8"), contentType: file.contentType })) } : {})
     }, options);
     // The provider's error name is logged, so only a short identifier survives.
     if (error || !data) throw new MailProviderError(String(error?.name ?? "unknown_error").replace(/[^A-Za-z0-9_]/g, "").slice(0, 40) || "unknown_error", error?.statusCode ?? null);
@@ -199,6 +227,11 @@ export type SendOptions = {
 /** Sends one message. Never throws: the outcome says whether it was sent. */
 export async function sendMail(message: MailMessage, options: SendOptions): Promise<MailOutcome> {
   if (!mailEnabled()) return { sent: false, reason: "not_configured" };
+  const refused = attachmentProblem(message.attachments);
+  if (refused) {
+    slog.error(`Mail not sent: purpose=${options.purpose} reason=attachment_${refused}`);
+    return { sent: false, reason: "failed", code: `attachment_${refused}`, retryable: false };
+  }
   const address = message.to.trim();
   const handle = recipientHash(address);
   if (!withinLimits(options.senderId, address, options.recipient ?? "address", Date.now())) {

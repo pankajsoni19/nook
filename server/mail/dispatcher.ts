@@ -154,7 +154,7 @@ async function handle(row: Row, nowMs: number): Promise<keyof TickCounts> {
   });
   // RFC 8058 one-click unsubscribe, on activity, reminders, and digest mail (never security or account, B.2).
   const headers = token ? { "List-Unsubscribe": `<${appLink(paths.unsubscribeApi(token))}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" } : undefined;
-  const outcome = await sendMail({ to: user.email, subject: rendered.subject, text: rendered.text, html: rendered.html, headers }, {
+  const outcome = await sendMail({ to: user.email, subject: rendered.subject, text: rendered.text, html: rendered.html, headers, ...(rendered.attachments?.length ? { attachments: rendered.attachments } : {}) }, {
     purpose: template,
     senderId: null,
     recipient: "user",
@@ -210,7 +210,7 @@ async function handleRegistered(row: Row, template: RegisteredMailTemplate, nowM
     if ("skip" in resolved) return skip(row, resolved.skip, nowMs);
     const stopHref = item?.kind && item.id ? appLink(`/api/public/mail-stop/${externalStopToken(address, item.kind, item.id)}`) : undefined;
     const rendered = template.render({ ...(resolved.data as object), stopHref } as never, { instanceName: config.mail.instanceName, tz: typeof payload.tz === "string" ? payload.tz : "UTC" });
-    const outcome = await sendMail({ to: address, subject: rendered.subject, text: rendered.text, html: rendered.html }, { purpose: row.template, senderId: null, recipient: "address", idempotencyKey: row.idempotency_key });
+    const outcome = await sendMail({ to: address, subject: rendered.subject, text: rendered.text, html: rendered.html, ...(rendered.attachments?.length ? { attachments: rendered.attachments } : {}) }, { purpose: row.template, senderId: null, recipient: "address", idempotencyKey: row.idempotency_key });
     return finishOutcome(row, outcome, nowMs);
   }
   if (!template.resolve) {
@@ -247,7 +247,7 @@ async function handleRegistered(row: Row, template: RegisteredMailTemplate, nowM
   const token = switchable ? await createUnsubscribeToken(user.id, row.category!) : null;
   const rendered = template.render(resolved.data, { instanceName: config.mail.instanceName, tz: prefs.tz, unsubscribeHref: token ? appLink(paths.unsubscribePage(token)) : undefined });
   const headers = token ? { "List-Unsubscribe": `<${appLink(paths.unsubscribeApi(token))}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" } : undefined;
-  const outcome = await sendMail({ to: user.email, subject: rendered.subject, text: rendered.text, html: rendered.html, headers }, { purpose: row.template, senderId: null, recipient: "user", idempotencyKey: row.idempotency_key });
+  const outcome = await sendMail({ to: user.email, subject: rendered.subject, text: rendered.text, html: rendered.html, headers, ...(rendered.attachments?.length ? { attachments: rendered.attachments } : {}) }, { purpose: row.template, senderId: null, recipient: "user", idempotencyKey: row.idempotency_key });
   return finishOutcome(row, outcome, nowMs);
 }
 
