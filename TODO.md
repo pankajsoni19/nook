@@ -10,6 +10,10 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 - Migrations: **001–123, 155, 160** are released and immutable (v0.48.0); earlier: **001–078** (045, 054, 067, 070, 071, 072, 075 unused; 054 reserved for Messages). New ids continue after 160; parallel lanes take id blocks (160–164 is one), so check `server/migrations/` and `server/migrations/workspace/index.ts` before picking one.
 - Development lands on `main` through pull requests, each after its gates pass.
 
+## In progress
+
+- [ ] New-version notice (operator request, 2026-11-18): when new code is live, show a floating "New version available · Reload" so people reload to get it.
+
 ## Leftovers (test fixes, v0.48.1)
 
 - [ ] Audit the ~80 `changes === 1` / `!== 1` checks in `server/`: in Bun 1.4.2 `.run().changes` also counts rows removed by `ON DELETE CASCADE` and triggers, so any such check on a table with children or FTS/search triggers wrongly reports not-found or conflict. Use `RETURNING id` (done for `removeFeed` and `cancelSchedules`).
