@@ -2,7 +2,7 @@
 
 Release notes for Nook, newest first. Upgrade steps for each release are in [docs/OPERATIONS.md](docs/OPERATIONS.md#upgrades).
 
-## Unreleased
+## v0.49.0 — 2026-11-18
 
 - **"A new version of Nook is available."** When a new build goes live while you have Nook open, a notice with **Reload** and **Later** appears at the bottom of the window, above the toasts and, on a phone, above the bottom bar. Nothing reloads by itself. Reload saves an open note first and asks before cancelling uploads or leaving unsaved settings, as switching apps does. Later hides the notice for that version for the rest of the session. ⌘K offers **Reload to update** while an update is waiting.
 - The tab checks for a new build when it regains focus, comes back online, every 10 minutes while it is visible, and when a page part fails to load. Every API response now carries `X-Nook-Build`, and `GET /api/build` returns the build the server is serving. Development builds never show the notice.

@@ -6,13 +6,15 @@ Only open work lives here. Remove an item once it is done. Shipped work is in [C
 - Contracts: [API](docs/plan/API_CONTRACTS.md) · [Threat model](docs/plan/THREAT_MODEL.md) · [Test plan](docs/plan/TEST_PLAN.md).
 
 **Current state (2026-11-17).**
-- **v0.48.1** (2026-11-17, fixes) on **v0.48.0**: PRs #3–#12 (workspace modules, left sidebar, ⌘K search everywhere, @mentions, Tasks keys/timeline/priority, friendly URLs). Every merged PR from now on gets a GitHub release.
+- **v0.49.0** (2026-11-18): the new-version notice. Before it, **v0.48.1** (fixes) on **v0.48.0**: PRs #3–#12 (workspace modules, left sidebar, ⌘K search everywhere, @mentions, Tasks keys/timeline/priority, friendly URLs). Every merged PR from now on gets a GitHub release.
 - Migrations: **001–123, 155, 160** are released and immutable (v0.48.0); earlier: **001–078** (045, 054, 067, 070, 071, 072, 075 unused; 054 reserved for Messages). New ids continue after 160; parallel lanes take id blocks (160–164 is one), so check `server/migrations/` and `server/migrations/workspace/index.ts` before picking one.
 - Development lands on `main` through pull requests, each after its gates pass.
 
-## In progress
+## Leftovers (update notice, v0.49.0)
 
-- [ ] New-version notice (operator request, 2026-11-18): when new code is live, show a floating "New version available · Reload" so people reload to get it.
+- [ ] `chatApi.ts` and `vaultApi.ts` use their own `fetch` and don't read `X-Nook-Build` (focus and the 10-minute check still cover them).
+- [ ] A chunk failure in a lazy app can reach the root error boundary before a leave confirm is answered (the crash card has its own Reload).
+- [ ] ⌘K "Reload to update" by Enter did nothing once in QA (likely browser-pane focus); not reproduced.
 
 ## Leftovers (test fixes, v0.48.1)
 
