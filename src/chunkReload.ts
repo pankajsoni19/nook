@@ -8,6 +8,14 @@
  * RELOAD_GUARD_MS. When sessionStorage is unavailable (private modes, blocked storage), the reload
  * carries a `?reloaded=1` marker instead, and a page that already has it never reloads again; the
  * marker is removed from the address bar once the app has loaded (`clearReloadMarker`).
+ *
+ * Update notice (src/update/): every chunk failure is reported to `onChunkLoadFailure` listeners (the
+ * build watch asks the server at once, and shows the notice even after Later). While the signed-in
+ * frame is on screen it registers a guarded reload (`setGuardedReload`): the one reload this file
+ * allows then goes through the same leave path as the notice's Reload button (the Settings hub's and
+ * the page's confirms, Notes saving the open note, the before-reload hooks). When a confirm is
+ * declined, nothing reloads and the notice stays up. Without the frame (sign-in, public pages) the
+ * reload stays silent, after the before-reload hooks, as before.
  */
 
 export const RELOAD_GUARD_KEY = "mynotes:chunk-reload-at";
@@ -68,9 +76,27 @@ export function runBeforeReload(wait = (ms: number) => new Promise<void>((resolv
   return Promise.race([Promise.all(hooks).then(() => undefined), wait(BEFORE_RELOAD_MS)]);
 }
 
+/** Who hears that a chunk failed (the build watch). */
+const failureListeners = new Set<() => void>();
+export function onChunkLoadFailure(listener: () => void) {
+  failureListeners.add(listener);
+  return () => { failureListeners.delete(listener); };
+}
+
+/** The signed-in frame's guarded reload: runs the leave guards, then `go`. */
+type GuardedReload = (go: () => void) => void;
+let guardedReload: GuardedReload | null = null;
+export function setGuardedReload(handler: GuardedReload) {
+  guardedReload = handler;
+  return () => { if (guardedReload === handler) guardedReload = null; };
+}
+
 /** Installs the listener (main.tsx). `event.preventDefault()` keeps Vite from rethrowing while the page reloads. */
 export function installChunkReload(target: Target = window as unknown as Target) {
   target.addEventListener("vite:preloadError", (event) => {
+    for (const listener of [...failureListeners]) {
+      try { listener(); } catch { /* a listener's failure is its own */ }
+    }
     // One reload per page, whatever storage says (several chunks can fail at once).
     if (reloading) { event.preventDefault(); return; }
     let storage: Storage | null = null;
@@ -83,7 +109,8 @@ export function installChunkReload(target: Target = window as unknown as Target)
       if (decision === "reload") target.location.reload();
       else target.location.replace(withReloadMarker(target.location.href, true));
     };
-    if (beforeReload.size === 0) go();
+    if (guardedReload) guardedReload(go);
+    else if (beforeReload.size === 0) go();
     else void runBeforeReload().then(go);
   });
 }
@@ -92,6 +119,8 @@ export function installChunkReload(target: Target = window as unknown as Target)
 export function resetChunkReloadForTests() {
   reloading = false;
   beforeReload.clear();
+  failureListeners.clear();
+  guardedReload = null;
 }
 
 /** After the app mounted: drop the marker from the address bar without a new history entry. */

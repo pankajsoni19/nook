@@ -2352,6 +2352,8 @@ export function App() {
     }}
     shortcuts={{ module: shownModule ? { label: shownModule.label, shortcuts: shownModule.shortcuts } : null, notes: shownApp === "notes", time: isModuleEnabled(disabledModules, "time") }}
     customize={{ apps: customizeApps, onShown: (id, shown) => { const owner = moduleOfApp(id); if (owner) modulePreferences.setModuleEnabled(owner, shown); } }}
+    // Reload to update (src/update): Notes saves the open note and asks about uploads first, as openApp does.
+    onBeforeReload={async () => activeApp !== "notes" || await leaveNotes()}
   >{page}</AppFrame>;
 
   // Wave 37: the Settings hub, one element for its account, Bin (Wave 38), and Team routes (moving

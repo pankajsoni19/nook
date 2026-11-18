@@ -3364,3 +3364,8 @@ Plan: `docs/plan/MENTIONS.md`. A mention is `@[Name](user:<uuid>)` in any commen
   - `GET /api/checkins/:id/export.csv` (readers of the standup; 404 otherwise): Date, Person, Status, Submitted, then one column per question. Named standups: a row per participant per round; anonymous: a row per answer, "Anonymous", the day only; rounds under the anonymity threshold are left out; the newest 100 rounds. Audit `checkins.export`.
   - `GET /api/bookings/export.csv?view=upcoming|past|cancelled|pending&status=&from=&to=&type=` (bookings the caller can read; guests 404): Start (UTC), End (UTC), Minutes, Type, Host, Co-hosts, Booker, Booker email, Guests, Status, Location, Booker time zone, Source, Booked at. Audit `bookings.export`.
   - `GET /api/tasks/boards/:boardId/export.csv?archived=1` (readers of the board; 404 otherwise): Key, Title, Column, Done, Priority, Assignees, Tags, Start, Due, Due time, Estimate, Parent, Sprint, Subitems done, Comments, Description (start), Created, Updated, Done at, Archived at. Audit `tasks.export`.
+
+## Build id and the update notice
+
+- **`X-Nook-Build`** on every `/api/*` response: the build id of the `dist/index.html` the server serves (`<version>-<12 hex>`, written by the production build as `<meta name="nook-build">`), or `development` outside production or without the meta. Clients compare it with their own page's meta. A different real id means a new build is live.
+- **`GET /api/build`** → `200 { build: string }`, the same value. It is public (no session, like `/api/about`), `Cache-Control: no-store`, and logged at debug level as a polled route. The signed-in app asks it on focus, on visibility, on `online`, every 10 minutes while visible, and after a chunk failed to load.

@@ -88,6 +88,8 @@ describe("CSV exports (D1387)", () => {
     const type = (await api(owner, "POST", "/bookings/types", { title: "Export call", minNotice: 0 })).body.type;
     const start = new Date(Date.now() + 3 * 86_400_000);
     start.setUTCHours(10, 0, 0, 0);
+    // The default availability is weekdays: three days from a Wednesday or later lands on a weekend.
+    while (start.getUTCDay() === 0 || start.getUTCDay() === 6) start.setUTCDate(start.getUTCDate() + 1);
     createBooking({ type: typeRow(type.id)!, start: start.toISOString(), durationMin: 30, booker: { name: "@Ada", email: "ada@example.org", tz: "UTC" }, source: "internal", actorId: owner.userId });
     const file = await csv(owner, "/bookings/export.csv?view=upcoming");
     expect(file.lines[0]).toStartWith("Start (UTC),End (UTC),Minutes,Type,Host");

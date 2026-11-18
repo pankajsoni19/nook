@@ -1,3 +1,5 @@
+import { noteResponseBuild } from "./update/buildWatch";
+
 let csrfToken = "";
 
 export function setCsrfToken(token: string) {
@@ -61,6 +63,8 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
     throw error;
   }
   noteRequestOutcome(response.status < 500);
+  // Update notice: the build the server serves (X-Nook-Build) costs nothing to read here.
+  noteResponseBuild(response);
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     const message = typeof payload?.error === "string" ? payload.error : `Request failed (${response.status})`;

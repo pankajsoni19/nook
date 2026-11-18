@@ -1,4 +1,4 @@
-import { Keyboard, PanelLeft, Search, SlidersHorizontal, type LucideIcon } from "lucide-react";
+import { Keyboard, PanelLeft, RefreshCw, Search, SlidersHorizontal, type LucideIcon } from "lucide-react";
 import type { QuickActionDef } from "../workspaceModules/types";
 import type { NavItem, NavRecent, NavTree } from "./navModel";
 
@@ -20,7 +20,7 @@ const BROWSE_ORDER: readonly PaletteGroupId[] = ["recent", "actions", "apps", "c
 /** Recent items listed before anything is typed (all of them match a query). */
 export const PALETTE_BROWSE_RECENT = 6;
 
-export type PaletteCommand = "shortcuts" | "customize" | "toggleSidebar";
+export type PaletteCommand = "shortcuts" | "customize" | "toggleSidebar" | "reloadUpdate";
 
 export type PaletteAction =
   | { kind: "nav"; item: NavItem }
@@ -82,12 +82,14 @@ export type PaletteSources = {
   toggleShortcut?: string;
   /** Customize sidebar is offered. */
   canCustomize?: boolean;
+  /** A new build is waiting (src/update): "Reload to update" is offered, even after the notice's Later. */
+  updateWaiting?: boolean;
 };
 
 export const PALETTE_RECENT_NOTES = 5;
 
 /** Every entry, before filtering, in the order shown when nothing is typed. */
-export function paletteEntries({ tree, recentNotes = [], recentItems = [], quickActions = [], moduleLabels = {}, canToggleSidebar = false, toggleShortcut, canCustomize = false }: PaletteSources): PaletteEntry[] {
+export function paletteEntries({ tree, recentNotes = [], recentItems = [], quickActions = [], moduleLabels = {}, canToggleSidebar = false, toggleShortcut, canCustomize = false, updateWaiting = false }: PaletteSources): PaletteEntry[] {
   const entries: PaletteEntry[] = [];
   const recents: PaletteEntry[] = [];
   const top = [...tree.primary, ...tree.pinned, ...tree.apps, tree.settings];
@@ -107,6 +109,7 @@ export function paletteEntries({ tree, recentNotes = [], recentItems = [], quick
   if (notesIcon) for (const note of recentNotes.slice(0, PALETTE_RECENT_NOTES)) recents.push({ id: `note:${note.id}`, group: "recent", label: note.name || "Untitled", context: "Notes", icon: notesIcon, hint: "Notes", browse: true, item: { kind: "note", id: note.id }, action: { kind: "path", href: note.href } });
   entries.push(...uniqueEntries([...opened, ...recents]));
   for (const action of quickActions) entries.push({ id: `quick:${action.module}:${action.id}`, group: "actions", label: action.label, context: moduleLabels[action.module], icon: action.icon, browse: true, action: { kind: "quick", action } });
+  if (updateWaiting) entries.push({ id: "command:reload-update", group: "commands", label: "Reload to update", icon: RefreshCw, browse: true, keywords: "new version update refresh release", action: { kind: "command", command: "reloadUpdate" } });
   entries.push({ id: "command:shortcuts", group: "commands", label: "Keyboard shortcuts", icon: Keyboard, hint: "?", browse: true, keywords: "help keys", action: { kind: "command", command: "shortcuts" } });
   if (canCustomize) entries.push({ id: "command:customize", group: "commands", label: "Customize sidebar", icon: SlidersHorizontal, browse: true, keywords: "pin reorder order hide apps", action: { kind: "command", command: "customize" } });
   if (canToggleSidebar) entries.push({ id: "command:toggle", group: "commands", label: "Collapse or expand the sidebar", icon: PanelLeft, hint: toggleShortcut, browse: false, keywords: "rail narrow wide", action: { kind: "command", command: "toggleSidebar" } });

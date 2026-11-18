@@ -66,7 +66,8 @@ export const POLLED_ROUTES: readonly string[] = [
   "/api/notifications", //                      NotificationBell.tsx: the unread count every 60 s
   "/api/reports/:reportId/runs/:runId", //      reports/ReportView.tsx: a running refresh, every second
   "/api/reports/:reportId/instructions", //     reports/ChangesPanel.tsx: an edit in progress, every 1.5 s
-  "/api/knowledge/:kbId" //                     chat/KnowledgeSettings.tsx: sources being indexed
+  "/api/knowledge/:kbId", //                    chat/KnowledgeSettings.tsx: sources being indexed
+  "/api/build" //                               update/buildWatch.ts: focus, online, every 10 minutes
 ];
 const polled = new Set(POLLED_ROUTES);
 /** A successful answer to a polled GET route (debug, not info). */

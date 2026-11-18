@@ -1,6 +1,7 @@
 import { cpSync, createReadStream, existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, extname, join, normalize } from "node:path";
+import { createHash } from "node:crypto";
 import { brotliCompressSync, constants, gzipSync } from "node:zlib";
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
@@ -182,6 +183,55 @@ function cssOrder(): Plugin {
   };
 }
 
+/** The meta a production index.html carries its build id in (src/update/buildWatch.ts, server/buildId.ts). */
+export const BUILD_META = "nook-build";
+
+/**
+ * A build's id: the package version and a short SHA-256 of every output file but index.html (names
+ * and contents), so the same sources give the same id, and any change to what a browser would load
+ * gives a new one. GIT_SHA is not part of it: the Docker image builds the client before GIT_SHA is set.
+ */
+export function buildIdOf(version: string, files: ReadonlyArray<{ name: string; content: string | Uint8Array }>) {
+  const hash = createHash("sha256");
+  for (const file of [...files].sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)) {
+    hash.update(file.name);
+    hash.update("\0");
+    hash.update(file.content);
+    hash.update("\0");
+  }
+  return `${version.replace(/[^A-Za-z0-9.-]/g, "-")}-${hash.digest("hex").slice(0, 12)}`;
+}
+
+const BUILD_META_TAG = /\s*<meta name="nook-build"[^>]*>/g;
+
+/** index.html with the build-id meta added before </head> (once). */
+export function withBuildMeta(html: string, id: string) {
+  if (!/^[A-Za-z0-9._-]{1,64}$/.test(id)) throw new Error(`Not a build id: ${id}`);
+  const without = html.replace(BUILD_META_TAG, "");
+  if (!without.includes("</head>")) throw new Error("index.html has no </head>");
+  return without.replace("</head>", `  <meta name="${BUILD_META}" content="${id}" />\n  </head>`);
+}
+
+/**
+ * Update notice: writes the build id into the production index.html. The server reports the id of
+ * the index.html it serves (X-Nook-Build, GET /api/build); a page whose own id differs offers Reload.
+ * Development has no meta, so it never offers it.
+ */
+function buildIdentity(): Plugin {
+  return {
+    name: "nook-build-identity",
+    apply: "build",
+    enforce: "post",
+    generateBundle(_options, bundle) {
+      const html = bundle["index.html"];
+      if (!html || html.type !== "asset") return;
+      const files = Object.values(bundle).filter((item) => item.fileName !== "index.html").map((item) => ({ name: item.fileName, content: item.type === "chunk" ? item.code : item.source }));
+      const { version } = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")) as { version: string };
+      html.source = withBuildMeta(String(html.source), buildIdOf(version, files));
+    }
+  };
+}
+
 /** Kept in step with COMPRESSIBLE in server/staticFiles.ts: images, fonts, and wasm are left alone. */
 const COMPRESSIBLE = new Set([".html", ".js", ".mjs", ".css", ".json", ".map", ".webmanifest", ".svg", ".txt", ".xml"]);
 
@@ -217,7 +267,7 @@ export default defineConfig({
   // Order matters: the Excalidraw patches run while modules are transformed, the fonts are copied
   // when the bundle is written, and precompress runs last (closeBundle), so the .br and .gz twins
   // are made from the patched chunks. Fonts (woff2) are already compressed and are left alone.
-  plugins: [react(), tailwindcss(), excalidrawFonts(), sonnerStaticStyles(), cssOrder(), precompress()],
+  plugins: [react(), tailwindcss(), excalidrawFonts(), sonnerStaticStyles(), cssOrder(), buildIdentity(), precompress()],
   // Sonner is served from source in development too, so its stylesheet is not injected at runtime.
   optimizeDeps: { exclude: ["sonner"] },
   server: {

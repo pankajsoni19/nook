@@ -19,6 +19,10 @@ import { CustomizeSidebar, ShortcutSheet, type CustomizeApp } from "./ShellSheet
 import { shortcutGroups, type ShortcutContext } from "./shortcuts";
 import { moveApp, updateAppsLayout, type AppsLayout } from "./sidebarPrefs";
 import { useSidebarState } from "./useSidebarState";
+import { onChunkLoadFailure, runBeforeReload, setGuardedReload } from "../chunkReload";
+import { buildWatch } from "../update/buildWatch";
+import { guardedReload, reloadPage } from "../update/reload";
+import { UpdateNotice, useUpdateState } from "../update/UpdateNotice";
 import "./sidebar.css";
 
 export type AppFrameProps = {
@@ -42,6 +46,11 @@ export type AppFrameProps = {
   shortcuts?: Omit<ShortcutContext, "mac" | "notesSearch">;
   /** Phase 4 (D1294): every app the Customize sheet lists, and the Show switch (Settings → Modules). */
   customize?: { apps: readonly CustomizeApp[]; onShown: (id: string, shown: boolean) => void };
+  /**
+   * App's own leave before a reload to update (src/update): Notes saves the open note and asks about
+   * uploads, as openApp does; false stops the reload. Asked after the frame's guards.
+   */
+  onBeforeReload?: () => Promise<boolean>;
   children: ReactNode;
 };
 
@@ -79,7 +88,7 @@ const pageModalOpen = () => typeof document !== "undefined" && document.querySel
  * the page header's ☰ opens. A whiteboard canvas covers the frame (sidebar.css); a full-page task
  * card holds the rail through `useShellRail` (D1279).
  */
-export function AppFrame({ tree, displayName, avatarUrl, onNavigate, onAccount, onSignOut, guard, layout, palette, shortcuts, customize, children }: AppFrameProps) {
+export function AppFrame({ tree, displayName, avatarUrl, onNavigate, onAccount, onSignOut, guard, layout, palette, shortcuts, customize, onBeforeReload, children }: AppFrameProps) {
   // A full-page task card holds the rail (D1279); phones keep the drawer.
   const [railHolds, setRailHolds] = useState(0);
   const sidebar = useSidebarState(railHolds > 0);
@@ -107,6 +116,25 @@ export function AppFrame({ tree, displayName, avatarUrl, onNavigate, onAccount, 
     const app = guardRef.current;
     if (app) app(page); else page();
   }, [closeDrawer]);
+
+  // Update notice (src/update): the signed-in frame watches for a new build, and every reload to it
+  // (the notice, ⌘K, a chunk that failed to load) takes the same leave path as a sidebar move.
+  const update = useUpdateState();
+  const beforeReloadRef = useRef(onBeforeReload);
+  beforeReloadRef.current = onBeforeReload;
+  const reloadWith = useCallback((go: () => void) => guardedReload({
+    guard: guarded,
+    leave: () => beforeReloadRef.current?.() ?? true,
+    beforeReload: runBeforeReload,
+    go
+  }), [guarded]);
+  useEffect(() => {
+    const stopWatch = buildWatch.start(window);
+    const stopChunks = onChunkLoadFailure(() => { void buildWatch.chunkFailed(); });
+    const stopReload = setGuardedReload((go) => { void reloadWith(go); });
+    return () => { stopWatch(); stopChunks(); stopReload(); };
+  }, [reloadWith]);
+  const reloadToUpdate = () => { void reloadWith(reloadPage); };
 
   // Phase 4: the ⌘K palette (D1293), the "?" sheet (D1296), and Customize sidebar (D1294). Closing one
   // without going anywhere puts focus back where it was.
@@ -170,8 +198,9 @@ export function AppFrame({ tree, displayName, avatarUrl, onNavigate, onAccount, 
     searchNotes: tree.notesSearch,
     canToggleSidebar: mode !== "drawer" && !railForced,
     toggleShortcut: toggleShortcutLabel(),
-    canCustomize: Boolean(customize)
-  }) : [], [paletteOpen, tree, palette, recentItems, mode, railForced, customize]);
+    canCustomize: Boolean(customize),
+    updateWaiting: update.waiting !== null
+  }) : [], [paletteOpen, tree, palette, recentItems, mode, railForced, customize, update.waiting]);
   // D1340: search across the apps this person's sidebar shows, drawn by each scope's renderer.
   const searchAll = palette?.searchAll;
   const paletteSearch = useMemo(() => {
@@ -186,6 +215,7 @@ export function AppFrame({ tree, displayName, avatarUrl, onNavigate, onAccount, 
     setPaletteOpen(false);
     if (action.kind === "command") {
       if (action.command === "toggleSidebar") { restoreFocus(); toggleRef.current(); }
+      else if (action.command === "reloadUpdate") { restoreFocus(); reloadToUpdate(); }
       else openSheet(action.command);
       return;
     }
@@ -267,6 +297,7 @@ export function AppFrame({ tree, displayName, avatarUrl, onNavigate, onAccount, 
       </div>}
       {paletteOpen && <CommandPalette entries={entries} searchNotes={tree.notesSearch} search={paletteSearch} onRun={runEntry} onClose={closePalette} />}
       {sheet === "shortcuts" && <ShortcutSheet groups={shortcutGroups({ mac, notesSearch: tree.notesSearch, ...shortcuts })} onClose={closeSheet} />}
+      <UpdateNotice state={update} onReload={reloadToUpdate} onLater={() => buildWatch.later()} />
       {sheet === "customize" && customize && <CustomizeSidebar apps={customize.apps} layout={layout ?? {}} onLayout={updateAppsLayout} onShown={customize.onShown} onClose={closeSheet} />}
     </div>
   </ShellContext.Provider>;

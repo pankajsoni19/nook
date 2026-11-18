@@ -1,0 +1,19 @@
+/*
+ * The update notice (UpdateNotice.tsx): bottom centre, above the toast stack (ui/toasts.css
+ * --toast-offset-bottom, which already clears the phone's bottom bar and safe area), so a toast never
+ * covers it. --update-notice-bottom is the toasts' offset plus one collapsed toast stack.
+ */
+:root { --update-notice-bottom: calc(var(--toast-offset-bottom) + 72px); }
+
+.update-notice { position: fixed; z-index: 70; left: 50%; bottom: var(--update-notice-bottom); transform: translateX(-50%); width: max-content; max-width: calc(100vw - 32px); display: flex; align-items: center; gap: 12px; padding: 8px 8px 8px 14px; border: 1px solid #39393e; border-radius: 14px; background: var(--panel-hover, #202024); color: #f5f5f4; font-size: .86rem; box-shadow: 0 16px 50px rgb(0 0 0 / 50%); }
+.update-notice p { margin: 0; font-weight: 500; line-height: 1.35; }
+.update-notice-icon { flex: none; width: 16px; height: 16px; color: var(--yellow); }
+.update-notice-actions { display: flex; flex: none; gap: 6px; }
+.update-notice .action-button { min-height: 36px; padding: 0 14px; }
+
+@media (max-width: 760px) {
+  .update-notice { width: calc(100vw - 32px); flex-wrap: wrap; padding: 10px 10px 10px 14px; }
+  .update-notice p { flex: 1 1 0; min-width: 0; }
+  .update-notice-actions { flex: 1 1 100%; justify-content: flex-end; }
+  .update-notice .action-button { min-height: 44px; }
+}

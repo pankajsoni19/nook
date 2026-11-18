@@ -2,6 +2,7 @@ import { Hono, type Context } from "hono";
 import { installProcessHooks, log, logger, logSettings } from "./log";
 import { noteRequestError, requestLog } from "./httpLog";
 import { distRoot, serveStaticFile } from "./staticFiles";
+import { BUILD_HEADER, currentBuildId } from "./buildId";
 import { HTTPException } from "hono/http-exception";
 import { secureHeaders } from "hono/secure-headers";
 import { ZodError } from "zod";
@@ -193,10 +194,20 @@ app.use("*", (c, next) => isContentRequest(c.req.method, c.req.path) || isVaultE
 
 app.use("/api/*", async (c, next) => {
   c.header("Cache-Control", "no-store");
+  // Update notice (server/buildId.ts): the build this server serves, on every API response, so an
+  // open tab learns of a release from the requests it already makes.
+  const build = currentBuildId();
+  c.header(BUILD_HEADER, build);
   await next();
+  try {
+    if (!c.res.headers.has(BUILD_HEADER)) c.res.headers.set(BUILD_HEADER, build);
+  } catch { /* a response with immutable headers keeps its own */ }
 });
 
 app.get("/api/health", (c) => c.json({ status: "ok" }));
+// Update notice: the build this server serves, for a tab coming back to focus. Public (it names a
+// build, nothing else) and never cached (the /api/* no-store above).
+app.get("/api/build", (c) => c.json({ build: currentBuildId() }));
 // hasUsers and openRegistration let the login screen offer "Create the first account" only on a
 // fresh instance (QA note 13): a yes/no, never a count.
 app.get("/api/about", (c) => c.json({
@@ -377,7 +388,7 @@ app.get("/api/auth/me", (c) => {
 });
 
 app.use("/api/*", async (c, next) => {
-  if (["/api/health", "/api/about", "/api/auth/login", "/api/auth/register", "/api/auth/invite"].includes(c.req.path)) return next();
+  if (["/api/health", "/api/about", "/api/build", "/api/auth/login", "/api/auth/register", "/api/auth/invite"].includes(c.req.path)) return next();
   // Calendar feeds carry their own token (D66); only GET or HEAD of the exact feed pattern skips the session.
   if (isFeedRequest(c.req.method, c.req.path)) return next();
   return requireAuth(c, next);
@@ -392,7 +403,7 @@ const totpSetupPaths = new Set([
   "/api/auth/totp/enable"
 ]);
 app.use("/api/*", async (c, next) => {
-  if (["/api/health", "/api/about", "/api/auth/login", "/api/auth/register", "/api/auth/invite"].includes(c.req.path)) return next();
+  if (["/api/health", "/api/about", "/api/build", "/api/auth/login", "/api/auth/register", "/api/auth/invite"].includes(c.req.path)) return next();
   // A feed token was created from a gated session and is read-only (T70).
   if (isFeedRequest(c.req.method, c.req.path)) return next();
   if (config.totpPolicy === "required" && !c.get("user").totp_enabled_at && !totpSetupPaths.has(c.req.path)) {

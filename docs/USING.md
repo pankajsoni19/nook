@@ -63,6 +63,8 @@ The sidebar on the left of every app holds, from the top: **Search**, **Home**, 
 
 **Recent.** With nothing typed, the palette starts with what you opened lately, newest first: notes, cards, boards, events, files, whiteboards, collections, reports, goals, forms, contacts, deals, and the other items with a page of their own. The list is kept in this browser for you alone (up to twelve items, no titles stored), and it is checked each time the palette opens, so an item that was renamed shows its new name and one that was deleted or unshared drops out.
 
+**A new version.** When your team updates Nook while you have it open, a small notice says **A new version of Nook is available**. It appears at the bottom of the window, or above the bottom bar on a phone. Nothing reloads on its own. Choose **Reload** when it suits you: an open note is saved first, and Nook asks before cancelling uploads or leaving unsaved settings, as it does when you switch apps. **Later** hides the notice for this version until you close the tab. **Reload to update** stays in the palette while an update is waiting.
+
 **Keyboard shortcuts.** Press `?` (outside a text field), or choose **Keyboard shortcuts** in the account menu or the palette, to see them all: the palette, the sidebar toggle, `Alt+T` for the timer, `/` to search the page, `n` for new, `j`/`k` to move through a list, and the shortcuts of the app you are in.
 
 ## Today

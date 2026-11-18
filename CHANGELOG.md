@@ -2,6 +2,13 @@
 
 Release notes for Nook, newest first. Upgrade steps for each release are in [docs/OPERATIONS.md](docs/OPERATIONS.md#upgrades).
 
+## Unreleased
+
+- **"A new version of Nook is available."** When a new build goes live while you have Nook open, a notice with **Reload** and **Later** appears at the bottom of the window, above the toasts and, on a phone, above the bottom bar. Nothing reloads by itself. Reload saves an open note first and asks before cancelling uploads or leaving unsaved settings, as switching apps does. Later hides the notice for that version for the rest of the session. ⌘K offers **Reload to update** while an update is waiting.
+- The tab checks for a new build when it regains focus, comes back online, every 10 minutes while it is visible, and when a page part fails to load. Every API response now carries `X-Nook-Build`, and `GET /api/build` returns the build the server is serving. Development builds never show the notice.
+- When a page part from an old release is missing, the one automatic reload now saves the open note and asks the same questions first. If you decline, it shows the notice instead of reloading.
+- No migration and no new settings.
+
 ## v0.48.1 — 2026-11-17
 
 - **Removing an outside calendar feed in Bookings** no longer says "Calendar not found": the feed was removed, but its busy times were counted as extra deleted rows.
